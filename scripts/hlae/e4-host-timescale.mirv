@@ -1,0 +1,16 @@
+// e4-host-timescale.mirv
+// Goal: check whether host_timescale 2 produces a clean recording.
+// Identical to e1 except for the host_timescale wrap around the
+// record window.
+
+mirv_cmd add tick 50    "demo_gototick 22086"
+mirv_cmd add tick 100   "spec_player_by_accountid 188721128"
+
+// Speed up just for the record window.
+mirv_cmd add tick 22080 "host_timescale 2"
+mirv_cmd add tick 22086 "mirv_streams record start"
+mirv_cmd add tick 22406 "mirv_streams record end"
+mirv_cmd add tick 22410 "host_timescale 1"
+
+mirv_cmd add tick 22500 "disconnect"
+mirv_cmd add tick 22600 "quit"
