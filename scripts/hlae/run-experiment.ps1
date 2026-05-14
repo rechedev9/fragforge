@@ -73,10 +73,15 @@ Write-Host "Mirv script: $MirvPath"
 Write-Host "Output dir : $OutDir"
 Write-Host ""
 
-# Verify the HLAE hook DLL is next to HLAE.exe.
-$HookDll = Join-Path (Split-Path -Parent $HlaeExe) 'AfxHookSource2.dll'
+# Locate the HLAE Source-2 hook DLL. Older HLAE releases shipped it next to
+# HLAE.exe; HLAE 2.x ships it in the x64\ subfolder. Accept either layout.
+$HlaeDir = Split-Path -Parent $HlaeExe
+$HookDll = Join-Path $HlaeDir 'AfxHookSource2.dll'
 if (-not (Test-Path $HookDll)) {
-    throw "AfxHookSource2.dll not found next to HLAE.exe at $HookDll"
+    $HookDll = Join-Path $HlaeDir 'x64\AfxHookSource2.dll'
+    if (-not (Test-Path $HookDll)) {
+        throw "AfxHookSource2.dll not found next to HLAE.exe or under '$HlaeDir\x64\'."
+    }
 }
 
 # Build the full command line as a single string with Windows-canonical

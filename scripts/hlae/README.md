@@ -11,7 +11,7 @@ code is written for `zv-recorder`.
 | Software | Verify with                                                                                |
 |----------|--------------------------------------------------------------------------------------------|
 | CS2      | `Get-Item "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe"` |
-| HLAE     | `HLAE.exe` and `AfxHookSource2.dll` present in the same folder. Use a Source-2-capable release (2024+). |
+| HLAE     | `HLAE.exe` present, plus `AfxHookSource2.dll` either next to `HLAE.exe` (older releases) or under `x64\` (HLAE 2.x). Use a Source-2-capable release (2024+). |
 | FFmpeg   | `ffprobe -version`                                                                         |
 | Demo     | `lavked-vs-tnc-m2-nuke.dem` copied to a local Windows path.                                |
 
