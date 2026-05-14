@@ -2,6 +2,7 @@ package job
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,22 +54,33 @@ func TestJobMarshalsToExpectedShape(t *testing.T) {
 		t.Fatalf("Marshal error = %v", err)
 	}
 	out := string(b)
-	if !contains(out, `"status":"queued"`) {
+	if !strings.Contains(out, `"status":"queued"`) {
 		t.Errorf("status not rendered as string: %s", out)
 	}
-	if !contains(out, `"id":"11111111-1111-1111-1111-111111111111"`) {
+	if !strings.Contains(out, `"id":"11111111-1111-1111-1111-111111111111"`) {
 		t.Errorf("id not rendered as UUID string: %s", out)
 	}
 }
 
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || indexOf(s, sub) >= 0)
-}
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
+func TestStatusJSONRoundTrip(t *testing.T) {
+	for _, s := range []Status{StatusQueued, StatusParsing, StatusParsed, StatusFailed} {
+		b, err := json.Marshal(s)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", s, err)
+		}
+		var got Status
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatalf("unmarshal %s: %v", b, err)
+		}
+		if got != s {
+			t.Errorf("round-trip: got %v, want %v", got, s)
 		}
 	}
-	return -1
+}
+
+func TestStatusUnmarshalRejectsUnknown(t *testing.T) {
+	var s Status
+	if err := json.Unmarshal([]byte(`"bogus"`), &s); err == nil {
+		t.Error("Unmarshal(\"bogus\") error = nil, want error")
+	}
 }
