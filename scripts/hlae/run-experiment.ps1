@@ -89,11 +89,18 @@ if (-not (Test-Path $HookDll)) {
 # double quote). Native-exe launch via Start-Process -ArgumentList @() does
 # NOT escape inner quotes reliably on PowerShell 5.1, so we assemble the
 # string ourselves and feed it to ProcessStartInfo.
-$Cs2CmdLine        = '+playdemo "' + $Demo + '" +mirv_script_load "' + $MirvPath + '"'
+# -insecure is required by AfxHookSource2 — without it the hook shows
+# "Please add -insecure to launch options, AfxHookSource2 will refuse
+# to work without it!" and bails.
+$Cs2CmdLine        = '-insecure +playdemo "' + $Demo + '" +mirv_script_load "' + $MirvPath + '"'
 $Cs2CmdLineEscaped = $Cs2CmdLine -replace '"', '\"'
 
+# Use -customLoader (generic DLL-injection launcher) instead of
+# -csgoLauncher: the latter is CS:GO-specific and fails on cs2.exe with
+# HLAE error 2002 / Win32Error 123 (ERROR_INVALID_NAME). The HLAE wiki
+# recommends -customLoader for Source-2 games.
 $HlaeArgString =
-    '-csgoLauncher -noGui -autoStart' +
+    '-customLoader -noGui -autoStart' +
     ' -hookDllPath "' + $HookDll + '"' +
     ' -programPath "' + $Cs2Exe + '"' +
     ' -cmdLine "' + $Cs2CmdLineEscaped + '"'
