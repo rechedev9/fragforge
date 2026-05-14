@@ -46,6 +46,12 @@ r_frame_rate   =
 
 > _...write here..._
 
+**Screenshots (paths, not committed):**
+
+- First frame: _e.g. `~/zv-findings/e1-first-frame.png`_
+- Frame at the kill: _path_
+- Last frame: _path_
+
 **Decision for `zv-recorder`:**
 
 > _e.g. offset is ±1 tick → keep pre_roll = 3 s default._

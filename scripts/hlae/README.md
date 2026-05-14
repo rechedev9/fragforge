@@ -37,7 +37,9 @@ The runner:
 5. Waits for CS2 to exit (triggered by the `quit` command in the script).
 6. Prints wall-clock time and the contents of the output directory.
 
-Run the four experiments in order (`e1` → `e4`).
+**Run order:** start with **E3** to confirm which `mirv_streams add` syntax actually works in this HLAE version. Then, before running E1, E2, or E4, copy the working `mirv_streams add ffmpeg main "..."` (or `mirv_streams add tga main`) line from your edited `e3-output-format.mirv` into each of the other three `.mirv` files, scheduled at tick 25 (i.e. `mirv_cmd add tick 25 "mirv_streams add ..."`). E1/E2/E4 only call `mirv_streams record start`; they assume the stream is already configured.
+
+Recommended order: **E3 → E1 → E2 → E4**.
 
 ## What to look at after each run
 
@@ -73,4 +75,6 @@ ffprobe -v error -show_entries format=duration,nb_streams `
 | CS2 launches but the demo never starts        | The HLAE version may be too old for the demo protocol. Update.  |
 | `mirv_cmd: unknown command`                   | The `.mirv` syntax is wrong for this HLAE version. Note the error in the findings doc and stop — the spec will be updated before proceeding. |
 | `mirv_streams add ffmpeg`: empty output (E3)  | Switch to C2 in `e3-output-format.mirv` (comment C1, uncomment C2), rerun. |
-| Output `.mp4` is 0 bytes                      | Likely `mirv_streams record start` never fired; check the tick numbers. |
+| E1/E2/E4 produce no output at all              | You probably skipped configuring a stream. E3 discovers the working `mirv_streams add` syntax — run E3 first, then paste the working line into the other `.mirv` files at tick 25 before running them. |
+| E3 ran but OutDir looks empty                  | `e3-out.mp4` uses a relative path and is written to CS2's working directory, not `OutDir`. Search the CS2 install folder (e.g. `C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\bin\win64\` and parent folders) for `e3-out.mp4`. Once found, document its absolute path in the findings. The follow-up `zv-recorder` spec will fix this by passing an absolute output path. |
+| Output `.mp4` is 0 bytes                      | `mirv_streams record start` never fired. Check the tick numbers and confirm a stream is configured before the record window. |

@@ -187,6 +187,8 @@ zackvideo/
         └── 07-hlae-prototype-results.md.template ← plantilla para findings
 ```
 
+El README operativo final está en [`scripts/hlae/README.md`](../../scripts/hlae/README.md).
+
 ### Esqueleto del runner PowerShell
 
 `run-experiment.ps1` acepta:
