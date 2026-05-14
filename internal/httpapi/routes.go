@@ -6,5 +6,6 @@ import "github.com/go-chi/chi/v5"
 func Routes(h *Handlers) chi.Router {
 	r := chi.NewRouter()
 	r.Post("/api/jobs", h.CreateJob)
+	r.Get("/api/jobs/{id}", h.GetJob)
 	return r
 }

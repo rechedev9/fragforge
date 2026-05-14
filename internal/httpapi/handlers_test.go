@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
@@ -153,3 +154,68 @@ func TestPostJobsRejectsInvalidSteamID(t *testing.T) {
 // keep imports needed by later tasks (Tasks 8, 9, 10 will reuse killplan + rules)
 var _ = killplan.SchemaVersion
 var _ = rules.Default
+
+func TestGetJobReturnsJob(t *testing.T) {
+	repo := newFakeRepo()
+	j := job.Job{
+		ID:            uuid.New(),
+		Status:        job.StatusQueued,
+		DemoPath:      "demos/x.dem",
+		DemoSHA256:    "abc",
+		TargetSteamID: "76561198000000000",
+		Rules:         rules.Default(),
+	}
+	repo.jobs[j.ID] = j
+
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}", h.GetJob)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String(), nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rw.Code)
+	}
+	var got struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(rw.Body.Bytes(), &got)
+	if got.ID != j.ID.String() {
+		t.Errorf("id = %q, want %q", got.ID, j.ID.String())
+	}
+	if got.Status != "queued" {
+		t.Errorf("status = %q, want queued", got.Status)
+	}
+}
+
+func TestGetJobReturns404WhenMissing(t *testing.T) {
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{})
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}", h.GetJob)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+uuid.New().String(), nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rw.Code)
+	}
+}
+
+func TestGetJobReturns400OnInvalidUUID(t *testing.T) {
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{})
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}", h.GetJob)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/not-a-uuid", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rw.Code)
+	}
+}

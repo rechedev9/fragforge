@@ -7,11 +7,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
@@ -137,6 +139,26 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 		"id":     j.ID,
 		"status": j.Status,
 	})
+}
+
+// GetJob handles GET /api/jobs/{id}.
+func (h *Handlers) GetJob(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
+	j, err := h.repo.Get(r.Context(), id)
+	if errors.Is(err, job.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, j)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
