@@ -81,19 +81,19 @@ if (-not (Test-Path $HookDll)) {
 
 $CmdLine = "+playdemo `"$Demo`" +mirv_script_load `"$MirvPath`""
 
-$Args = @(
+$HlaeArgs = @(
     '-csgoLauncher',
     '-noGui',
     '-autoStart',
     '-hookDllPath',  "`"$HookDll`"",
     '-programPath',  "`"$Cs2Exe`"",
-    '-cmdLine',      "`"$CmdLine`""
+    '-cmdLine',      $CmdLine
 )
 
 # Track wall-clock time (needed for E4).
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 Write-Host "Launching HLAE..."
-$proc = Start-Process -FilePath $HlaeExe -ArgumentList $Args -Wait -PassThru -NoNewWindow
+$proc = Start-Process -FilePath $HlaeExe -ArgumentList $HlaeArgs -Wait -PassThru -NoNewWindow
 $sw.Stop()
 
 Write-Host ""
@@ -101,4 +101,4 @@ Write-Host "HLAE exited with code $($proc.ExitCode)"
 Write-Host "Wall-clock duration: $([math]::Round($sw.Elapsed.TotalSeconds, 2)) s"
 Write-Host ""
 Write-Host "Output directory contents:"
-Get-ChildItem -Path $OutDir -Recurse | Format-Table FullName, Length
+Get-ChildItem -Path $OutDir -Recurse -File | Format-Table FullName, Length -AutoSize
