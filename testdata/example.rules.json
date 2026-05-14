@@ -1,0 +1,11 @@
+{
+  "weapons": ["awp", "deagle", "ak47", "m4a1", "m4a1_silencer", "usp_silencer", "glock", "hkp2000"],
+  "min_kills_in_window": 1,
+  "window_seconds": 8,
+  "pre_roll_seconds": 3,
+  "post_roll_seconds": 5,
+  "include_headshot_only": false,
+  "exclude_team_kills": true,
+  "min_round": 1,
+  "max_round": 0
+}

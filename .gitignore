@@ -1,0 +1,11 @@
+/bin/
+
+# Local demos and goldens (per testdata/README.md)
+/testdata/*.dem
+/testdata/*.expected.json
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
