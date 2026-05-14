@@ -1,0 +1,75 @@
+// Package storage abstracts where the orchestrator keeps demo files and
+// other artifacts. V1 ships a Local filesystem implementation; future
+// slices can add an S3/MinIO backend behind the same interface.
+package storage
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Storage is the minimal contract for reading and writing artifact blobs.
+type Storage interface {
+	Put(key string, r io.Reader) error
+	Open(key string) (io.ReadCloser, error)
+}
+
+// Local implements Storage backed by the local filesystem under a root dir.
+type Local struct {
+	root string
+}
+
+// NewLocal returns a Local rooted at the given absolute or relative path.
+// The root directory is created if it does not exist.
+func NewLocal(root string) (*Local, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return nil, err
+	}
+	return &Local{root: abs}, nil
+}
+
+// Put writes r's contents to the file at key inside the storage root.
+func (l *Local) Put(key string, r io.Reader) error {
+	path, err := l.resolve(key)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, r)
+	return err
+}
+
+// Open returns a ReadCloser for the file at key.
+func (l *Local) Open(key string) (io.ReadCloser, error) {
+	path, err := l.resolve(key)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(path)
+}
+
+func (l *Local) resolve(key string) (string, error) {
+	if strings.Contains(key, "..") || strings.HasPrefix(key, "/") {
+		return "", fmt.Errorf("storage: invalid key %q", key)
+	}
+	abs := filepath.Join(l.root, filepath.FromSlash(key))
+	if !strings.HasPrefix(abs, l.root+string(os.PathSeparator)) && abs != l.root {
+		return "", errors.New("storage: key escapes root")
+	}
+	return abs, nil
+}
