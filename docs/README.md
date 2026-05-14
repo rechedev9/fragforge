@@ -33,4 +33,7 @@ Decisiones ya tomadas:
 - **Cola:** Redis + Asynq.
 
 Specs activos:
-- [`specs/2026-05-14-demo-parser-slice.md`](./specs/2026-05-14-demo-parser-slice.md) — `zv-parser`, primer binario implementable. Esperando aprobación.
+- [`specs/2026-05-14-demo-parser-slice.md`](./specs/2026-05-14-demo-parser-slice.md) — `zv-parser` (implementado).
+- [`specs/2026-05-14-orchestrator-slice-plan.md`](./specs/2026-05-14-orchestrator-slice-plan.md) — `zv-orchestrator` (implementado).
+- [`specs/2026-05-14-hlae-prototype.md`](./specs/2026-05-14-hlae-prototype.md) — HLAE prototype sub-slice (pendiente de ejecutar en Windows).
+- [`specs/2026-05-14-hlae-prototype-plan.md`](./specs/2026-05-14-hlae-prototype-plan.md) — plan ejecutable del prototipo HLAE.
