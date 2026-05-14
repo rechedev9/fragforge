@@ -1,0 +1,150 @@
+// Package httpapi exposes the orchestrator's HTTP endpoints.
+package httpapi
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+
+	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
+
+	"github.com/reche/zackvideo/internal/job"
+	"github.com/reche/zackvideo/internal/rules"
+	"github.com/reche/zackvideo/internal/storage"
+	"github.com/reche/zackvideo/internal/tasks"
+)
+
+const maxDemoBytes = 500 << 20 // 500 MiB
+
+// JobRepository is the subset of *job.Repository used by handlers.
+type JobRepository interface {
+	Create(ctx context.Context, j *job.Job) error
+	Get(ctx context.Context, id uuid.UUID) (job.Job, error)
+}
+
+// Enqueuer is the subset of *asynq.Client used by handlers.
+type Enqueuer interface {
+	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
+}
+
+// Handlers bundles the dependencies needed by every endpoint.
+type Handlers struct {
+	repo    JobRepository
+	storage storage.Storage
+	queue   Enqueuer
+}
+
+// NewHandlers constructs an HTTP handler set.
+func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer) *Handlers {
+	return &Handlers{repo: repo, storage: store, queue: queue}
+}
+
+// createJobConfig is the JSON document sent in the "config" multipart field.
+type createJobConfig struct {
+	TargetSteamID string       `json:"target_steamid"`
+	Rules         *rules.Rules `json:"rules,omitempty"`
+}
+
+// CreateJob handles POST /api/jobs.
+func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(maxDemoBytes); err != nil {
+		writeError(w, http.StatusBadRequest, "parsing multipart form: "+err.Error())
+		return
+	}
+	file, _, err := r.FormFile("demo")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing demo file: "+err.Error())
+		return
+	}
+	defer file.Close()
+
+	var cfg createJobConfig
+	if raw := r.FormValue("config"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid config JSON: "+err.Error())
+			return
+		}
+	}
+	if cfg.TargetSteamID == "" {
+		writeError(w, http.StatusBadRequest, "target_steamid is required")
+		return
+	}
+	if _, err := strconv.ParseUint(cfg.TargetSteamID, 10, 64); err != nil {
+		writeError(w, http.StatusBadRequest, "target_steamid must be a 64-bit unsigned integer")
+		return
+	}
+
+	effectiveRules := rules.Default()
+	if cfg.Rules != nil {
+		effectiveRules = *cfg.Rules
+		if err := effectiveRules.Validate(); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
+			return
+		}
+	}
+
+	// Buffer upload so we can both hash and store it. Memory cap is the same as the multipart cap.
+	buf, err := io.ReadAll(io.LimitReader(file, maxDemoBytes+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "reading demo: "+err.Error())
+		return
+	}
+	if int64(len(buf)) > maxDemoBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "demo exceeds size limit")
+		return
+	}
+
+	sum := sha256.Sum256(buf)
+	sha := hex.EncodeToString(sum[:])
+
+	j := &job.Job{
+		ID:            uuid.New(),
+		Status:        job.StatusQueued,
+		DemoSHA256:    sha,
+		TargetSteamID: cfg.TargetSteamID,
+		Rules:         effectiveRules,
+	}
+	key := fmt.Sprintf("demos/%s.dem", j.ID)
+	j.DemoPath = key
+
+	if err := h.storage.Put(key, bytes.NewReader(buf)); err != nil {
+		writeError(w, http.StatusInternalServerError, "storing demo: "+err.Error())
+		return
+	}
+	if err := h.repo.Create(r.Context(), j); err != nil {
+		writeError(w, http.StatusInternalServerError, "creating job: "+err.Error())
+		return
+	}
+
+	task, err := tasks.NewParseDemoTask(j.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "building task: "+err.Error())
+		return
+	}
+	if _, err := h.queue.Enqueue(task); err != nil {
+		writeError(w, http.StatusInternalServerError, "enqueueing task: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":     j.ID,
+		"status": j.Status,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
