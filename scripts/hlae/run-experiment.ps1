@@ -73,27 +73,37 @@ Write-Host "Mirv script: $MirvPath"
 Write-Host "Output dir : $OutDir"
 Write-Host ""
 
-# Build HLAE arguments.
+# Verify the HLAE hook DLL is next to HLAE.exe.
 $HookDll = Join-Path (Split-Path -Parent $HlaeExe) 'AfxHookSource2.dll'
 if (-not (Test-Path $HookDll)) {
     throw "AfxHookSource2.dll not found next to HLAE.exe at $HookDll"
 }
 
-$CmdLine = "+playdemo `"$Demo`" +mirv_script_load `"$MirvPath`""
+# Build the full command line as a single string with Windows-canonical
+# quoting (CommandLineToArgvW rules: inside a quoted token, \" is a literal
+# double quote). Native-exe launch via Start-Process -ArgumentList @() does
+# NOT escape inner quotes reliably on PowerShell 5.1, so we assemble the
+# string ourselves and feed it to ProcessStartInfo.
+$Cs2CmdLine        = '+playdemo "' + $Demo + '" +mirv_script_load "' + $MirvPath + '"'
+$Cs2CmdLineEscaped = $Cs2CmdLine -replace '"', '\"'
 
-$HlaeArgs = @(
-    '-csgoLauncher',
-    '-noGui',
-    '-autoStart',
-    '-hookDllPath',  "`"$HookDll`"",
-    '-programPath',  "`"$Cs2Exe`"",
-    '-cmdLine',      $CmdLine
-)
+$HlaeArgString =
+    '-csgoLauncher -noGui -autoStart' +
+    ' -hookDllPath "' + $HookDll + '"' +
+    ' -programPath "' + $Cs2Exe + '"' +
+    ' -cmdLine "' + $Cs2CmdLineEscaped + '"'
 
-# Track wall-clock time (needed for E4).
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
 Write-Host "Launching HLAE..."
-$proc = Start-Process -FilePath $HlaeExe -ArgumentList $HlaeArgs -Wait -PassThru -NoNewWindow
+Write-Host "Args: $HlaeArgString"
+
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName        = $HlaeExe
+$psi.Arguments       = $HlaeArgString
+$psi.UseShellExecute = $false
+
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$proc = [System.Diagnostics.Process]::Start($psi)
+$proc.WaitForExit()
 $sw.Stop()
 
 Write-Host ""
