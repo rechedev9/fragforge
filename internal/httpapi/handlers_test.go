@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -217,5 +218,46 @@ func TestGetJobReturns400OnInvalidUUID(t *testing.T) {
 
 	if rw.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rw.Code)
+	}
+}
+
+func TestGetPlanReturns409WhenJobNotParsed(t *testing.T) {
+	repo := newFakeRepo()
+	j := job.Job{ID: uuid.New(), Status: job.StatusQueued, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}/plan", h.GetPlan)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/plan", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 (not yet ready)", rw.Code)
+	}
+}
+
+func TestGetPlanReturnsPlanWhenReady(t *testing.T) {
+	repo := newFakeRepo()
+	plan := killplan.NewPlan()
+	plan.Demo.Map = "de_inferno"
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}/plan", h.GetPlan)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/plan", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rw.Code)
+	}
+	if !strings.Contains(rw.Body.String(), "de_inferno") {
+		t.Errorf("body does not include map: %s", rw.Body.String())
 	}
 }

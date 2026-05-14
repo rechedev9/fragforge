@@ -7,5 +7,6 @@ func Routes(h *Handlers) chi.Router {
 	r := chi.NewRouter()
 	r.Post("/api/jobs", h.CreateJob)
 	r.Get("/api/jobs/{id}", h.GetJob)
+	r.Get("/api/jobs/{id}/plan", h.GetPlan)
 	return r
 }

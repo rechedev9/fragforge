@@ -161,6 +161,30 @@ func (h *Handlers) GetJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, j)
 }
 
+// GetPlan handles GET /api/jobs/{id}/plan.
+func (h *Handlers) GetPlan(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
+	j, err := h.repo.Get(r.Context(), id)
+	if errors.Is(err, job.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if j.KillPlan == nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job not ready (status=%s)", j.Status))
+		return
+	}
+	writeJSON(w, http.StatusOK, j.KillPlan)
+}
+
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
