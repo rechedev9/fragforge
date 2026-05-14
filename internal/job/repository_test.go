@@ -126,3 +126,64 @@ func TestRepositorySetKillPlanPersists(t *testing.T) {
 		t.Errorf("marshaled plan does not contain map name: %s", string(b))
 	}
 }
+
+func TestRepositoryUpdateStatusOnMissingReturnsNotFound(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+
+	err := repo.UpdateStatus(context.Background(), uuid.New(), StatusParsing, "")
+	if err != ErrNotFound {
+		t.Errorf("UpdateStatus(missing) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRepositorySetKillPlanOnMissingReturnsNotFound(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+
+	err := repo.SetKillPlan(context.Background(), uuid.New(), killplan.NewPlan())
+	if err != ErrNotFound {
+		t.Errorf("SetKillPlan(missing) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRepositoryFailureReasonRoundTrip(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+
+	j := Job{
+		ID:            uuid.New(),
+		Status:        StatusQueued,
+		DemoPath:      "/tmp/x.dem",
+		DemoSHA256:    "abc",
+		TargetSteamID: "1",
+		Rules:         rules.Default(),
+	}
+	if err := repo.Create(context.Background(), &j); err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+
+	// Set failure reason and read it back.
+	if err := repo.UpdateStatus(context.Background(), j.ID, StatusFailed, "boom"); err != nil {
+		t.Fatalf("UpdateStatus failed = %v", err)
+	}
+	got, err := repo.Get(context.Background(), j.ID)
+	if err != nil {
+		t.Fatalf("Get error = %v", err)
+	}
+	if got.Status != StatusFailed {
+		t.Errorf("Status = %v, want StatusFailed", got.Status)
+	}
+	if got.FailureReason != "boom" {
+		t.Errorf("FailureReason = %q, want %q", got.FailureReason, "boom")
+	}
+
+	// Clear it (empty string → NULLIF → NULL → "" via COALESCE on read).
+	if err := repo.UpdateStatus(context.Background(), j.ID, StatusParsing, ""); err != nil {
+		t.Fatalf("UpdateStatus clear = %v", err)
+	}
+	got, _ = repo.Get(context.Background(), j.ID)
+	if got.FailureReason != "" {
+		t.Errorf("FailureReason after clear = %q, want empty", got.FailureReason)
+	}
+}

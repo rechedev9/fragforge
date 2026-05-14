@@ -91,12 +91,18 @@ func (r *Repository) Get(ctx context.Context, id uuid.UUID) (Job, error) {
 
 // UpdateStatus moves the job to a new status. failureReason is set when status=failed.
 func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status Status, failureReason string) error {
-	_, err := r.pool.Exec(ctx,
+	tag, err := r.pool.Exec(ctx,
 		`UPDATE jobs SET status = $2, failure_reason = NULLIF($3,''), updated_at = NOW()
 		 WHERE id = $1`,
 		id, status.String(), failureReason,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SetKillPlan persists the kill plan JSONB.
@@ -105,9 +111,15 @@ func (r *Repository) SetKillPlan(ctx context.Context, id uuid.UUID, plan killpla
 	if err != nil {
 		return fmt.Errorf("marshal plan: %w", err)
 	}
-	_, err = r.pool.Exec(ctx,
+	tag, err := r.pool.Exec(ctx,
 		`UPDATE jobs SET kill_plan = $2, updated_at = NOW() WHERE id = $1`,
 		id, planJSON,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
