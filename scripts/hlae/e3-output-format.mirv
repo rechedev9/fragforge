@@ -1,0 +1,19 @@
+// e3-output-format.mirv
+// Goal: determine the real output format produced by mirv_streams.
+//
+// Two configs are tried in order. C1 first; if HLAE rejects it,
+// comment out C1 and uncomment C2, then re-run the experiment.
+
+// ---------- C1: H.264 directly via embedded FFmpeg ----------
+mirv_cmd add tick 25    "mirv_streams add ffmpeg main \"-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -r 60 -s 1920x1080 -y e3-out.mp4\""
+
+// ---------- C2: raw TGA frames (uncomment if C1 fails) ----------
+// mirv_cmd add tick 25  "mirv_streams add tga main"
+
+mirv_cmd add tick 50    "demo_gototick 31746"
+mirv_cmd add tick 100   "spec_player_by_accountid 188721128"
+mirv_cmd add tick 31746 "mirv_streams record start"
+mirv_cmd add tick 32258 "mirv_streams record end"
+
+mirv_cmd add tick 32400 "disconnect"
+mirv_cmd add tick 32500 "quit"
