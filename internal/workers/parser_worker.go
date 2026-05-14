@@ -86,18 +86,17 @@ func (w *ParserWorker) parse(_ context.Context, j job.Job) (killplan.Plan, error
 		return killplan.Plan{}, fmt.Errorf("temp file: %w", err)
 	}
 	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
 	if _, err := io.Copy(tmp, rc); err != nil {
-		tmp.Close()
 		return killplan.Plan{}, fmt.Errorf("write temp demo: %w", err)
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		tmp.Close()
 		return killplan.Plan{}, err
 	}
 
 	p := demoinfocs.NewParser(tmp)
 	defer p.Close()
-	defer tmp.Close()
 
 	meta := parser.PlanMeta{
 		DemoPath: j.DemoPath,

@@ -2,7 +2,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,7 +22,10 @@ import (
 	"github.com/reche/zackvideo/internal/tasks"
 )
 
-const maxDemoBytes = 500 << 20 // 500 MiB
+const (
+	maxDemoBytes        = 500 << 20 // 500 MiB hard cap
+	multipartMemBudget  = 32 << 20  // 32 MiB in-memory; spill beyond
+)
 
 // JobRepository is the subset of *job.Repository used by handlers.
 type JobRepository interface {
@@ -56,7 +58,9 @@ type createJobConfig struct {
 
 // CreateJob handles POST /api/jobs.
 func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(maxDemoBytes); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxDemoBytes)
+
+	if err := r.ParseMultipartForm(multipartMemBudget); err != nil {
 		writeError(w, http.StatusBadRequest, "parsing multipart form: "+err.Error())
 		return
 	}
@@ -92,34 +96,24 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Buffer upload so we can both hash and store it. Memory cap is the same as the multipart cap.
-	buf, err := io.ReadAll(io.LimitReader(file, maxDemoBytes+1))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "reading demo: "+err.Error())
-		return
-	}
-	if int64(len(buf)) > maxDemoBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, "demo exceeds size limit")
-		return
-	}
-
-	sum := sha256.Sum256(buf)
-	sha := hex.EncodeToString(sum[:])
-
 	j := &job.Job{
 		ID:            uuid.New(),
 		Status:        job.StatusQueued,
-		DemoSHA256:    sha,
 		TargetSteamID: cfg.TargetSteamID,
 		Rules:         effectiveRules,
 	}
 	key := fmt.Sprintf("demos/%s.dem", j.ID)
 	j.DemoPath = key
 
-	if err := h.storage.Put(key, bytes.NewReader(buf)); err != nil {
+	// Stream upload to storage while hashing in one pass.
+	h256 := sha256.New()
+	tee := io.TeeReader(file, h256)
+	if err := h.storage.Put(key, tee); err != nil {
 		writeError(w, http.StatusInternalServerError, "storing demo: "+err.Error())
 		return
 	}
+	j.DemoSHA256 = hex.EncodeToString(h256.Sum(nil))
+
 	if err := h.repo.Create(r.Context(), j); err != nil {
 		writeError(w, http.StatusInternalServerError, "creating job: "+err.Error())
 		return

@@ -1,4 +1,6 @@
 /bin/
+/data/
+/.env
 
 # Local demos and goldens (per testdata/README.md)
 /testdata/*.dem
