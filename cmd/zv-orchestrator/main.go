@@ -54,6 +54,27 @@ func main() {
 	asynqSrv := asynq.NewServer(redisOpt, asynq.Config{Concurrency: cfg.WorkerConcurrency})
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeParseDemo, worker.HandleParseDemo)
+	if cfg.recordWorkerEnabled() {
+		recordWorker := workers.NewRecordWorker(repo, store, workers.RecordWorkerConfig{
+			WorkDir:      cfg.MediaWorkDir,
+			RecorderPath: cfg.RecorderPath,
+			HLAEPath:     cfg.HLAEPath,
+			CS2Path:      cfg.CS2Path,
+			Timeout:      cfg.RecordTimeout,
+		})
+		mux.HandleFunc(tasks.TypeRecordDemo, recordWorker.HandleRecordDemo)
+		log.Printf("asynq: record worker enabled")
+	}
+	if cfg.composeWorkerEnabled() {
+		composeWorker := workers.NewComposeWorker(repo, store, workers.ComposeWorkerConfig{
+			WorkDir:      cfg.MediaWorkDir,
+			ComposerPath: cfg.ComposerPath,
+			FFmpegPath:   cfg.FFmpegPath,
+			Timeout:      cfg.ComposeTimeout,
+		})
+		mux.HandleFunc(tasks.TypeComposeFinal, composeWorker.HandleComposeFinal)
+		log.Printf("asynq: compose worker enabled")
+	}
 
 	// Start HTTP
 	go func() {
