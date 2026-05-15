@@ -3,7 +3,7 @@ package storage
 import (
 	"bytes"
 	"io"
-	"strings"
+	"os"
 	"testing"
 )
 
@@ -33,7 +33,7 @@ func TestLocalPutAndOpenRoundTrip(t *testing.T) {
 func TestLocalOpenMissingReturnsErrNotExist(t *testing.T) {
 	store, _ := NewLocal(t.TempDir())
 	_, err := store.Open("nope.dem")
-	if err == nil || !strings.Contains(err.Error(), "no such file") {
+	if !os.IsNotExist(err) {
 		t.Errorf("expected file-not-found error, got %v", err)
 	}
 }
