@@ -134,6 +134,39 @@ func TestRecordWorkerFailsWithoutKillPlan(t *testing.T) {
 	}
 }
 
+func TestRecordWorkerSkipsWhenOutputsAlreadyExist(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	id := uuid.New()
+	plan := minimalKillPlan()
+	repo.jobs[id] = &job.Job{
+		ID:       id,
+		Status:   job.StatusParsed,
+		DemoPath: "demos/test.dem",
+		Rules:    rules.Default(),
+		KillPlan: &plan,
+	}
+	putJSON(t, store, artifacts.RecordingResultKey(id), recordingResultWithSegment("", "stale-local.mp4"))
+	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
+
+	runner := &fakeRunner{fn: func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("runner should not be called when recording outputs already exist")
+		return nil, nil
+	}}
+	w := NewRecordWorker(repo, store, RecordWorkerConfig{})
+	w.runner = runner
+
+	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+		t.Fatalf("HandleRecordDemo error = %v", err)
+	}
+	if repo.jobs[id].Status != job.StatusRecorded {
+		t.Fatalf("Status = %s, want recorded", repo.jobs[id].Status)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %d, want 0", len(runner.calls))
+	}
+}
+
 func TestComposeWorkerLocalizesSegmentsAndStoresFinal(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()
@@ -228,6 +261,32 @@ func TestComposeWorkerMarksFailedOnResultError(t *testing.T) {
 	}
 	if _, ok := store.files[artifacts.CompositionResultKey(id)]; !ok {
 		t.Fatalf("storage missing failed composition result")
+	}
+}
+
+func TestComposeWorkerSkipsWhenOutputsAlreadyExist(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	id := uuid.New()
+	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default()}
+	putJSON(t, store, artifacts.CompositionResultKey(id), composition.Result{Output: "final.mp4"})
+	_ = store.Put(artifacts.FinalMP4Key(id), bytes.NewReader([]byte("final")))
+
+	runner := &fakeRunner{fn: func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("runner should not be called when composition outputs already exist")
+		return nil, nil
+	}}
+	w := NewComposeWorker(repo, store, ComposeWorkerConfig{})
+	w.runner = runner
+
+	if err := w.HandleComposeFinal(context.Background(), composeTask(t, id)); err != nil {
+		t.Fatalf("HandleComposeFinal error = %v", err)
+	}
+	if repo.jobs[id].Status != job.StatusComposed {
+		t.Fatalf("Status = %s, want composed", repo.jobs[id].Status)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %d, want 0", len(runner.calls))
 	}
 }
 

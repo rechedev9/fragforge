@@ -16,6 +16,7 @@ import (
 type Storage interface {
 	Put(key string, r io.Reader) error
 	Open(key string) (io.ReadCloser, error)
+	Exists(key string) (bool, error)
 }
 
 // Local implements Storage backed by the local filesystem under a root dir.
@@ -61,6 +62,21 @@ func (l *Local) Open(key string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	return os.Open(path)
+}
+
+// Exists reports whether key exists inside the storage root.
+func (l *Local) Exists(key string) (bool, error) {
+	path, err := l.resolve(key)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (l *Local) resolve(key string) (string, error) {

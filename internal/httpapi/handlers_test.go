@@ -65,6 +65,10 @@ func (f *fakeStorage) Open(key string) (io.ReadCloser, error) {
 	}
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
+func (f *fakeStorage) Exists(key string) (bool, error) {
+	_, ok := f.puts[key]
+	return ok, nil
+}
 
 // fakeQueue captures enqueued tasks.
 type fakeQueue struct {

@@ -104,12 +104,20 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 }
 
 func (w *RecordWorker) record(ctx context.Context, j job.Job) error {
+	if j.KillPlan == nil {
+		return fmt.Errorf("job %s has no kill plan", j.ID)
+	}
+	ready, err := recordingOutputsReady(w.storage, j.ID)
+	if err != nil {
+		return err
+	}
+	if ready {
+		return nil
+	}
+
 	cfg := w.cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		return err
-	}
-	if j.KillPlan == nil {
-		return fmt.Errorf("job %s has no kill plan", j.ID)
 	}
 
 	workDir, cleanup, err := prepareStageDir(cfg.WorkDir, j.ID, "record")
@@ -221,6 +229,14 @@ func (w *ComposeWorker) HandleComposeFinal(ctx context.Context, t *asynq.Task) e
 }
 
 func (w *ComposeWorker) compose(ctx context.Context, j job.Job) error {
+	ready, err := compositionOutputsReady(w.storage, j.ID)
+	if err != nil {
+		return err
+	}
+	if ready {
+		return nil
+	}
+
 	cfg := w.cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		return err
@@ -388,7 +404,7 @@ func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultP
 	return nil
 }
 
-func readStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.RecordingResult, error) {
+func decodeStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.RecordingResult, error) {
 	rc, err := store.Open(artifacts.RecordingResultKey(id))
 	if err != nil {
 		return recording.RecordingResult{}, fmt.Errorf("open recording result: %w", err)
@@ -399,10 +415,67 @@ func readStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.R
 	if err := json.NewDecoder(rc).Decode(&result); err != nil {
 		return recording.RecordingResult{}, fmt.Errorf("decode recording result: %w", err)
 	}
+	return result, nil
+}
+
+func readStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.RecordingResult, error) {
+	result, err := decodeStoredRecordingResult(store, id)
+	if err != nil {
+		return recording.RecordingResult{}, err
+	}
 	if result.Error != "" {
 		return recording.RecordingResult{}, fmt.Errorf("recording result error: %s", result.Error)
 	}
 	return result, nil
+}
+
+func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, error) {
+	exists, err := store.Exists(artifacts.RecordingResultKey(id))
+	if err != nil || !exists {
+		return false, err
+	}
+	result, err := decodeStoredRecordingResult(store, id)
+	if err != nil || result.Error != "" {
+		return false, err
+	}
+	segments := 0
+	for _, artifact := range result.Artifacts {
+		if artifact.Role != "segment" || artifact.Type != "video" || artifact.SegmentID == "" {
+			continue
+		}
+		key, err := artifacts.SegmentClipKey(id, artifact.SegmentID)
+		if err != nil {
+			return false, err
+		}
+		exists, err := store.Exists(key)
+		if err != nil || !exists {
+			return false, err
+		}
+		segments++
+	}
+	return segments > 0, nil
+}
+
+func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, error) {
+	resultExists, err := store.Exists(artifacts.CompositionResultKey(id))
+	if err != nil || !resultExists {
+		return false, err
+	}
+	finalExists, err := store.Exists(artifacts.FinalMP4Key(id))
+	if err != nil || !finalExists {
+		return false, err
+	}
+
+	rc, err := store.Open(artifacts.CompositionResultKey(id))
+	if err != nil {
+		return false, fmt.Errorf("open composition result: %w", err)
+	}
+	defer rc.Close()
+	var result composition.Result
+	if err := json.NewDecoder(rc).Decode(&result); err != nil {
+		return false, fmt.Errorf("decode composition result: %w", err)
+	}
+	return result.Error == "", nil
 }
 
 func localizeSegmentClips(store storage.Storage, id uuid.UUID, workDir string, result *recording.RecordingResult) error {

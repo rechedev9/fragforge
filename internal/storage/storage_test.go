@@ -28,6 +28,13 @@ func TestLocalPutAndOpenRoundTrip(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Errorf("Open returned %q, want %q", got, want)
 	}
+	exists, err := store.Exists("demos/abc.dem")
+	if err != nil {
+		t.Fatalf("Exists error = %v", err)
+	}
+	if !exists {
+		t.Fatal("Exists = false, want true")
+	}
 }
 
 func TestLocalOpenMissingReturnsErrNotExist(t *testing.T) {
@@ -35,6 +42,13 @@ func TestLocalOpenMissingReturnsErrNotExist(t *testing.T) {
 	_, err := store.Open("nope.dem")
 	if !os.IsNotExist(err) {
 		t.Errorf("expected file-not-found error, got %v", err)
+	}
+	exists, err := store.Exists("nope.dem")
+	if err != nil {
+		t.Fatalf("Exists(missing) error = %v", err)
+	}
+	if exists {
+		t.Fatal("Exists(missing) = true, want false")
 	}
 }
 
