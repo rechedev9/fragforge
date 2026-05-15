@@ -100,4 +100,3 @@ Result:
 
 - Add cleanup policy for raw takes after final delivery.
 - Add effects/music/overlays between segment mux and final concat.
-- Add idempotency checks so media workers can safely skip already uploaded artifacts on retry.
