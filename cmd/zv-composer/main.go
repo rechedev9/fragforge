@@ -1,0 +1,110 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/reche/zackvideo/internal/composition"
+	"github.com/reche/zackvideo/internal/recording"
+)
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	var (
+		recordingResultPath = flag.String("recording-result", "", "path to recording-result.json")
+		outPath             = flag.String("out", "", "final mp4 output path")
+		ffmpegPath          = flag.String("ffmpeg", "", "path to ffmpeg.exe; defaults to PATH")
+		timeout             = flag.Duration("timeout", 20*time.Minute, "maximum duration for FFmpeg composition")
+		dryRun              = flag.Bool("dry-run", false, "write composition-result.json without running FFmpeg")
+	)
+	flag.Parse()
+
+	if *recordingResultPath == "" || *outPath == "" {
+		return fmt.Errorf("--recording-result and --out are required")
+	}
+
+	absRecordingResult, err := filepath.Abs(*recordingResultPath)
+	if err != nil {
+		return fmt.Errorf("resolve recording result path: %w", err)
+	}
+	absOut, err := filepath.Abs(*outPath)
+	if err != nil {
+		return fmt.Errorf("resolve output path: %w", err)
+	}
+
+	recordingResult, err := readRecordingResult(absRecordingResult)
+	if err != nil {
+		return err
+	}
+	clips, warnings := composition.SegmentClipsFromRecording(recordingResult)
+	result := composition.Result{
+		RecordingResult: absRecordingResult,
+		Output:          absOut,
+		Clips:           clips,
+		Warnings:        warnings,
+	}
+
+	resultPath := filepath.Join(filepath.Dir(absOut), "composition-result.json")
+	if *dryRun {
+		return writeResult(resultPath, result)
+	}
+	if len(warnings) > 0 {
+		result.Error = "recording result has missing or duplicate segment clips"
+		_ = writeResult(resultPath, result)
+		return errors.New(result.Error)
+	}
+
+	ffmpeg := *ffmpegPath
+	if ffmpeg == "" {
+		ffmpeg = recording.FindFFmpeg()
+	}
+	if ffmpeg == "" {
+		result.Error = "ffmpeg not found"
+		_ = writeResult(resultPath, result)
+		return errors.New(result.Error)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	if err := composition.ComposeConcat(ctx, ffmpeg, clips, absOut, filepath.Dir(absOut)); err != nil {
+		result.Error = err.Error()
+		_ = writeResult(resultPath, result)
+		return err
+	}
+	return writeResult(resultPath, result)
+}
+
+func readRecordingResult(path string) (recording.RecordingResult, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return recording.RecordingResult{}, err
+	}
+	var result recording.RecordingResult
+	if err := json.Unmarshal(b, &result); err != nil {
+		return recording.RecordingResult{}, err
+	}
+	return result, nil
+}
+
+func writeResult(path string, result composition.Result) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}

@@ -4,6 +4,7 @@ build:
 	go build -o bin/zv-parser ./cmd/zv-parser
 	go build -o bin/zv-orchestrator ./cmd/zv-orchestrator
 	go build -o bin/zv-recorder ./cmd/zv-recorder
+	go build -o bin/zv-composer ./cmd/zv-composer
 
 test:
 	go test ./... -count=1
