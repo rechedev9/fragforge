@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
+	"github.com/reche/zackvideo/internal/artifacts"
 	"github.com/reche/zackvideo/internal/job"
 	"github.com/reche/zackvideo/internal/rules"
 	"github.com/reche/zackvideo/internal/storage"
@@ -177,6 +178,29 @@ func (h *Handlers) GetPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, j.KillPlan)
+}
+
+// GetFinal handles GET /api/jobs/{id}/final.
+func (h *Handlers) GetFinal(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	if j.Status != job.StatusComposed && j.Status != job.StatusDone {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job final is not ready (status=%s)", j.Status))
+		return
+	}
+	rc, err := h.storage.Open(artifacts.FinalMP4Key(j.ID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "final artifact not found")
+		return
+	}
+	defer rc.Close()
+
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-final.mp4"`, j.ID))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, rc)
 }
 
 // StartRecording handles POST /api/jobs/{id}/record.

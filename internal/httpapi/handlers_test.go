@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
+	"github.com/reche/zackvideo/internal/artifacts"
 	"github.com/reche/zackvideo/internal/job"
 	"github.com/reche/zackvideo/internal/killplan"
 	"github.com/reche/zackvideo/internal/rules"
@@ -347,5 +348,64 @@ func TestStartCompositionRejectsWrongStatus(t *testing.T) {
 	}
 	if len(queue.enqueued) != 0 {
 		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
+	}
+}
+
+func TestGetFinalStreamsFinalArtifactWhenComposed(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	j := job.Job{ID: uuid.New(), Status: job.StatusComposed, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	_ = store.Put(artifacts.FinalMP4Key(j.ID), bytes.NewReader([]byte("mp4-bytes")))
+	h := NewHandlers(repo, store, &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}/final", h.GetFinal)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/final", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	if got := rw.Header().Get("Content-Type"); got != "video/mp4" {
+		t.Fatalf("Content-Type = %q, want video/mp4", got)
+	}
+	if rw.Body.String() != "mp4-bytes" {
+		t.Fatalf("body = %q, want mp4-bytes", rw.Body.String())
+	}
+}
+
+func TestGetFinalReturns409BeforeComposed(t *testing.T) {
+	repo := newFakeRepo()
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}/final", h.GetFinal)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/final", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rw.Code)
+	}
+}
+
+func TestGetFinalReturns404WhenArtifactMissing(t *testing.T) {
+	repo := newFakeRepo()
+	j := job.Job{ID: uuid.New(), Status: job.StatusComposed, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}/final", h.GetFinal)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/final", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rw.Code)
 	}
 }
