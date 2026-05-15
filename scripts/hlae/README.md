@@ -3,8 +3,8 @@
 This directory contains the artifacts for the HLAE prototype sub-slice
 (see [`../../docs/specs/2026-05-14-hlae-prototype.md`](../../docs/specs/2026-05-14-hlae-prototype.md)).
 
-The four experiments validate the open HLAE questions before any Go
-code is written for `zv-recorder`.
+The four experiments validate the open HLAE questions before `zv-recorder`
+is wired into the orchestrator.
 
 ## Prerequisites (on the Windows PC)
 
@@ -12,7 +12,7 @@ code is written for `zv-recorder`.
 |----------|--------------------------------------------------------------------------------------------|
 | CS2      | `Get-Item "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe"` |
 | HLAE     | `HLAE.exe` present, plus `AfxHookSource2.dll` either next to `HLAE.exe` (older releases) or under `x64\` (HLAE 2.x). Use a Source-2-capable release (2024+). |
-| FFmpeg   | `ffprobe -version`                                                                         |
+| FFmpeg   | `ffprobe -version`; HLAE also needs `C:\HLAE\ffmpeg\bin\ffmpeg.exe` or `C:\HLAE\ffmpeg\ffmpeg.ini`. |
 | Demo     | `lavked-vs-tnc-m2-nuke.dem` copied to a local Windows path.                                |
 
 If anything is missing, install it before continuing.
@@ -30,14 +30,15 @@ From a PowerShell prompt **inside this directory**:
 
 The runner:
 
-1. Resolves the `.mirv` script for the experiment.
+1. Resolves the `.js` script for the experiment.
 2. Validates paths.
 3. Creates an output directory (default `$env:TEMP\zv-hlae\<experiment>\`).
-4. Launches HLAE → CS2 with the `.mirv` preloaded.
-5. Waits for CS2 to exit (triggered by the `quit` command in the script).
-6. Prints wall-clock time and the contents of the output directory.
+4. Renders a per-run JS script into `OutDir`.
+5. Launches HLAE → CS2 with that JavaScript preloaded via `mirv_script_load`.
+6. Waits for the matching `cs2.exe` process to exit.
+7. Prints wall-clock time and the contents of the output directory.
 
-**Run order:** start with **E3** to confirm which `mirv_streams add` syntax actually works in this HLAE version. Then, before running E1, E2, or E4, copy the working `mirv_streams add ffmpeg main "..."` (or `mirv_streams add tga main`) line from your edited `e3-output-format.mirv` into each of the other three `.mirv` files, scheduled at tick 25 (i.e. `mirv_cmd add tick 25 "mirv_streams add ..."`). E1/E2/E4 only call `mirv_streams record start`; they assume the stream is already configured.
+**Run order:** start with **E3** if changing HLAE versions, because it validates the recording output format. The old `.mirv` carrier was removed: HLAE 2.x loads JavaScript, so the experiments are now `e1`-`e4` `.js` files using `mirv.events.clientFrameStageNotify`, `mirv.getDemoTick()`, and `mirv.exec(...)`.
 
 Recommended order: **E3 → E1 → E2 → E4**.
 
@@ -45,10 +46,10 @@ Recommended order: **E3 → E1 → E2 → E4**.
 
 | Experiment | Files to inspect                          | Tool                      |
 |------------|-------------------------------------------|---------------------------|
-| e1         | Single `.mp4` (or TGA seq) in OutDir      | VLC + `ffprobe`           |
-| e2         | Three `.mp4` files                        | VLC + `ffprobe` on each   |
-| e3         | Whatever C1 produces; if nothing, edit the .mirv to use C2 and rerun | `ls`, `ffprobe`           |
-| e4         | Single `.mp4`, compare with e1            | `ffprobe`, side-by-side   |
+| e1         | `e1-rec\take0000\video.mp4` and `audio.wav` | VLC + `ffprobe`           |
+| e2         | Three `takeNNNN` folders, each with `video.mp4` and `audio.wav` | VLC + `ffprobe` on each   |
+| e3         | `e3-rec\take0000\video.mp4` and `audio.wav` | `ls`, `ffprobe`           |
+| e4         | `e4-rec\take0000\video.mp4`, compare with e1 | `ffprobe`, side-by-side   |
 
 `ffprobe` cheat sheet:
 
@@ -73,8 +74,10 @@ ffprobe -v error -show_entries format=duration,nb_streams `
 |-----------------------------------------------|-----------------------------------------------------------------|
 | `AfxHookSource2.dll not found`                | Put it next to `HLAE.exe` (it ships in the HLAE release).        |
 | CS2 launches but the demo never starts        | The HLAE version may be too old for the demo protocol. Update.  |
-| `mirv_cmd: unknown command`                   | The `.mirv` syntax is wrong for this HLAE version. Note the error in the findings doc and stop — the spec will be updated before proceeding. |
-| `mirv_streams add ffmpeg`: empty output (E3)  | Switch to C2 in `e3-output-format.mirv` (comment C1, uncomment C2), rerun. |
-| E1/E2/E4 produce no output at all              | You probably skipped configuring a stream. E3 discovers the working `mirv_streams add` syntax — run E3 first, then paste the working line into the other `.mirv` files at tick 25 before running them. |
-| E3 ran but OutDir looks empty                  | `e3-out.mp4` uses a relative path and is written to CS2's working directory, not `OutDir`. Search the CS2 install folder (e.g. `C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\bin\win64\` and parent folders) for `e3-out.mp4`. Once found, document its absolute path in the findings. The follow-up `zv-recorder` spec will fix this by passing an absolute output path. |
+| Script loads but no scheduled actions fire     | Confirm the rendered `*.rendered.js` exists in `OutDir` and contains `mirv.events.clientFrameStageNotify`. |
+| `Failed writing image for screen recording`    | Configure HLAE FFmpeg: create `C:\HLAE\ffmpeg\ffmpeg.ini` with `[Ffmpeg]` and `Path=<absolute ffmpeg.exe>`. The runner does this automatically when possible. |
+| Output is 1280x960 or another unexpected size  | Pass `-Width 1920 -Height 1080`; HLAE captures the active CS2 viewport. |
+| Recording starts from free camera              | Keep the 2-second seek lead before `record start`; camera changes need time after `demo_gototick`. |
+| Demo transport bar appears in the clip         | Ensure `demoui` runs after the seek and shortly before `record start`, not only at script setup. |
+| E3 ran but OutDir looks empty                  | Inspect `OutDir\e3.rendered.js`; HLAE writes under `<record name>\takeNNNN\`. |
 | Output `.mp4` is 0 bytes                      | `mirv_streams record start` never fired. Check the tick numbers and confirm a stream is configured before the record window. |

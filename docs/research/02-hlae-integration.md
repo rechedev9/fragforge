@@ -13,11 +13,11 @@ Half-Life Advanced Effects es un inyector / hook para Source y Source 2 (CS:GO /
 
 | Comando                | Para qué nos sirve                                              |
 |------------------------|-----------------------------------------------------------------|
-| `mirv_streams`         | Inicia / detiene grabación; salida directa a FFmpeg, formatos crudos. **Core de la grabación.** |
+| `mirv_streams`         | Inicia / detiene grabación; en CS2 usamos `record screen enabled/settings`. **Core de la grabación.** |
 | `mirv_campath`         | Cámara cinemática programable (puntos clave + interpolación).   |
 | `mirv_input`           | Override del input del juego para mover cámara manual / programada. |
-| `mirv_cmd`             | Programar comandos a ejecutar en un tick / tiempo específico.   |
-| `mirv_script_load`     | Cargar un fichero de script (Lua-like) al intérprete interno.   |
+| `mirv_cmd`             | Comando histórico para programar comandos; no es el carrier usado en HLAE 2.x. |
+| `mirv_script_load`     | Cargar un fichero JavaScript (Boa JS) al intérprete interno de HLAE 2.x. |
 | `mirv_script_exec`     | Ejecutar código directamente en el intérprete.                  |
 | `mirv_skip`            | Saltar en el demo con más precisión que `demo_gototick`.        |
 | `mirv_listentothis`    | Frontend de `tv_listen_voice_indices*` para audio del jugador específico (útil para demos FaceIT). |
@@ -36,40 +36,64 @@ HLAE no expone una API externa (no hay WebSocket / RPC). El mecanismo oficial:
    HLAE.exe -csgoLauncher -noGui -autoStart `
             -hookDllPath ".\AfxHookSource2.dll" `
             -programPath "C:\Path\To\cs2.exe" `
-            -cmdLine "+playdemo replay.dem +mirv_script_load script.mirv"
+            -cmdLine "+playdemo replay.dem +mirv_script_load script.js"
    ```
-2. El script `.mirv` (sintaxis tipo Lua, intérprete propio) define la coreografía completa del segmento.
+2. El script `.js` (Boa JavaScript en HLAE 2.x) define la coreografía completa del segmento.
 3. Cuando el script termina, ejecuta `disconnect; quit` para cerrar CS2.
 
 ## Esqueleto de script por segmento
 
-```
-// programar el seek y el inicio de grabación en el primer frame
-mirv_cmd add tick 100 "demo_gototick 102340"
-mirv_cmd add tick 102200 "spec_player_by_accountid 12345678"
-mirv_cmd add tick 102300 "mirv_streams record start"
-mirv_cmd add tick 103350 "mirv_streams record end"
-mirv_cmd add tick 103500 "disconnect"
-mirv_cmd add tick 103600 "quit"
+```js
+"use strict";
+{
+    const id = "zackvideo/generated-recorder";
+    const schedule = [
+        { tick: 100, key: "seek", cmd: "demo_gototick 102172" },
+        { tick: 102236, key: "camera", cmd: "spec_mode 1; spec_player_by_accountid 12345678" },
+        { tick: 102294, key: "hide-demoui", cmd: "demoui" },
+        { tick: 102300, key: "record-start", cmd: "mirv_streams record start" },
+        { tick: 103350, key: "record-end", cmd: "mirv_streams record end" },
+        { tick: 103500, key: "disconnect", cmd: "disconnect" },
+        { tick: 103600, key: "quit", cmd: "quit" }
+    ];
+    const fired = {};
+    mirv.events.clientFrameStageNotify.on(id, (e) => {
+        if (e.isBefore) return;
+        const tick = mirv.getDemoTick();
+        for (const item of schedule) {
+            if (!fired[item.key] && tick >= item.tick) {
+                fired[item.key] = true;
+                mirv.exec(item.cmd);
+            }
+        }
+    });
+    globalThis[id] = {
+        unregister: () => mirv.events.clientFrameStageNotify.off(id)
+    };
+}
 ```
 
-(La sintaxis exacta de `mirv_cmd` se valida contra https://doc.hlae.site/commands/AfxHookSource/mirv_cmd — la página de CS2 reutiliza el mismo concepto pero los detalles de "tick" vs "time" hay que verificarlos en el primer prototipo.)
+La condición es `tick >= item.tick`, no igualdad estricta, porque el callback se ejecuta por frame y puede saltar el tick exacto.
 
 ## Output de `mirv_streams`
 
-`mirv_streams` puede:
-- Escribir frames raw a una pipe que alimenta FFmpeg en otro proceso.
-- O escribir directamente archivos (TGA / EXR para vídeo de calidad cinematográfica).
+`mirv_streams` en CS2 queda validado con la ruta de screen recording:
 
-Para zackvideo V1: pipe a FFmpeg → mp4 H.264 (`libx264 -preset slow -crf 18`), 1080p60. Suficiente para luego post-procesar sin pérdida visible.
+```text
+mirv_streams record fps 60
+mirv_streams record screen enabled 1
+mirv_streams record screen settings afxFfmpegYuv420p
+```
+
+Para zackvideo V1: HLAE produce `takeNNNN/video.mp4` H.264 y `takeNNNN/audio.wav` por separado. La composición/mux final se hace después con FFmpeg.
 
 ## Puntos abiertos a validar en prototipo
 
-1. **Exactitud del seek**: `demo_gototick` no siempre es frame-exact en CS2; puede haber ±1 tick. Solución: empezar a grabar 1–2s antes y cortar en post.
-2. **`host_timescale` + `mirv_streams`**: hay que ver si la grabación queda limpia a 2× / 4× o si introduce artifacts. Si funciona, reducimos drásticamente el tiempo wall-clock por job.
-3. **Múltiples segmentos en una sola sesión de CS2**: validar que se puede `mirv_streams record start/end` varias veces sin reiniciar el proceso. Si sí, ahorra cargar mapa N veces.
-4. **POV vs free-cam**: para clips de jugador, fijar cámara al jugador objetivo con `spec_player_by_accountid` es lo simple. Para clips "cinemáticos" usamos `mirv_campath` con puntos calculados a partir de la trayectoria del jugador del kill plan.
+1. **Seek/camera lead**: buscar al menos 2 segundos antes de `record start`; fijar POV 1 segundo antes. Sin ese lead, camera y `record start` compiten en el mismo frame.
+2. **`host_timescale` + `mirv_streams`**: validado como limpio a 2x en clip corto, pero sin mejora wall-clock material; default V1 queda en 1x.
+3. **Múltiples segmentos en una sola sesión de CS2**: validado. Una sesión puede producir varios `takeNNNN`.
+4. **POV vs free-cam**: usar `spec_mode 1; spec_player_by_accountid <id>` después del seek lead. Para clips cinemáticos futuros usamos `mirv_campath`.
 
-## Lenguaje de scripts: Lua
+## Lenguaje de scripts: JavaScript para HLAE
 
-HLAE expone un intérprete tipo Lua. Esto encaja con la preferencia del usuario por Lua para scripting. Los scripts se cargan con `mirv_script_load <path>`. Los podemos generar dinámicamente desde el Recording Driver con templating.
+HLAE 2.x expone Boa JavaScript para `mirv_script_load`. El Recording Driver debe generar JS desde datos tipados, no mantener scripts escritos a mano. Las reglas de efectos pueden seguir siendo Lua en una capa posterior; el carrier HLAE es JS.

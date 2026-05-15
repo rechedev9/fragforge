@@ -65,7 +65,7 @@ Si algo falta, el primer paso del Spec es instalarlo. Las rutas se parametrizan 
 
 **Procedimiento:**
 
-1. Generar un `.mirv` que:
+1. Generar un `.js` de HLAE 2.x que:
    - Hace seek a tick `22086`.
    - Fija cámara al jugador con `spec_player_by_accountid 188721128`.
    - Inicia grabación 2 segundos antes de la primera kill (en tick `22086`).
@@ -100,7 +100,7 @@ Si algo falta, el primer paso del Spec es instalarlo. Las rutas se parametrizan 
 
 **Procedimiento:**
 
-1. Generar un `.mirv` que:
+1. Generar un `.js` de HLAE 2.x que:
    - Seek a `22086` → grabar hasta `22868` → cerrar fichero.
    - Seek a `31746` → grabar hasta `32258` → cerrar fichero.
    - Seek a `34586` → grabar hasta `35098` → cerrar fichero.
@@ -126,13 +126,14 @@ Si algo falta, el primer paso del Spec es instalarlo. Las rutas se parametrizan 
 
 **Procedimiento:**
 
-1. Generar un `.mirv` que graba el rango `31746 → 32258` (~8 s).
+1. Generar un `.js` de HLAE 2.x que graba el rango `31746 → 32258` (~8 s).
 
-2. Configurar `mirv_streams` con dos configuraciones candidatas, probadas en orden:
-   - **C1 (preferida):** `mirv_streams add ffmpeg main "-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -r 60 -s 1920x1080 -y <out>.mp4"`. Si HLAE soporta el pipe a FFmpeg directamente, esto es 1 fichero final.
-   - **C2 (fallback):** `mirv_streams add tga main` → genera secuencia de frames TGA. Si C1 falla, queda este camino y FFmpeg se invoca por separado tras la grabación.
+2. Configurar `mirv_streams` con la ruta validada para Source 2:
+   - `mirv_streams record fps 60`
+   - `mirv_streams record screen enabled 1`
+   - `mirv_streams record screen settings afxFfmpegYuv420p`
 
-   La sintaxis exacta del comando se valida en este experimento; si la documentada arriba no es la real, se actualiza el spec.
+   HLAE produce `takeNNNN/video.mp4` y `takeNNNN/audio.wav`. FFmpeg debe estar configurado para HLAE con `C:\HLAE\ffmpeg\ffmpeg.ini` o `C:\HLAE\ffmpeg\bin\ffmpeg.exe`.
 
 3. Inspeccionar el output:
    - ¿Es 1 fichero o muchos?
@@ -154,7 +155,7 @@ Si algo falta, el primer paso del Spec es instalarlo. Las rutas se parametrizan 
 
 **Procedimiento:**
 
-1. `.mirv` idéntico al E1 pero con `host_timescale 2` antes de `mirv_streams record start` y `host_timescale 1` después de `mirv_streams record end`.
+1. `.js` idéntico al E1 pero con `host_timescale 2` antes de `mirv_streams record start` y `host_timescale 1` después de `mirv_streams record end`.
 
 2. Comparar el `.mp4` resultante con el de E1:
    - Duración del vídeo (debería seguir siendo ~5 s, igual que E1, porque `host_timescale` afecta al wall-clock pero el motor sigue procesando el mismo número de ticks).
@@ -176,10 +177,10 @@ zackvideo/
 │   └── hlae/
 │       ├── README.md                  ← guía paso a paso para el usuario
 │       ├── run-experiment.ps1         ← runner PowerShell
-│       ├── e1-seek-accuracy.mirv
-│       ├── e2-multi-segment.mirv
-│       ├── e3-output-format.mirv
-│       └── e4-host-timescale.mirv
+│       ├── e1-seek-accuracy.js
+│       ├── e2-multi-segment.js
+│       ├── e3-output-format.js
+│       └── e4-host-timescale.js
 └── docs/
     ├── specs/
     │   └── 2026-05-14-hlae-prototype.md          ← este documento
@@ -202,27 +203,38 @@ El README operativo final está en [`scripts/hlae/README.md`](../../scripts/hlae
   [-OutDir "<dir>"]
 ```
 
-Defaults razonables para `Cs2Exe` y `HlaeExe`. Crea `OutDir` (por defecto `$env:TEMP\zv-hlae\<experiment>\`), lanza HLAE con el `.mirv` correspondiente, espera a que el proceso termine, lista los ficheros generados.
+Defaults razonables para `Cs2Exe` y `HlaeExe`. Crea `OutDir` (por defecto `$env:TEMP\zv-hlae\<experiment>\`), renderiza el `.js` correspondiente con el output dir absoluto, lanza HLAE con ese script, espera a que CS2 termine y lista los ficheros generados.
 
-### Estructura de cada `.mirv`
+### Estructura de cada `.js`
 
-Listas planas de `mirv_cmd add tick N "<command>"`. Sintaxis exacta a confirmar en el primer experimento; el spec asume la documentada en [`research/02-hlae-integration.md`](../research/02-hlae-integration.md). Si en el primer intento la sintaxis no funciona, se actualiza el spec.
+Cada script usa el runtime JavaScript de HLAE 2.x:
+
+- `mirv.events.clientFrameStageNotify.on(id, callback)` para observar frames.
+- `mirv.getDemoTick()` para leer el tick actual.
+- `mirv.exec("<command>")` para mandar comandos de consola.
+- Una tabla `schedule` con `{ tick, key, cmd }`.
+- Un mapa `fired` para que cada comando sea one-shot.
+
+La condición de disparo es `tick >= target`, no `tick == target`, porque el callback puede saltarse el tick exacto.
 
 Convenciones compartidas por los cuatro experimentos:
 
-- `spec_player_by_accountid 188721128` se ejecuta antes de cada `mirv_streams record start` para asegurar que la cámara está fijada al jugador objetivo.
-- El comando final de cada `.mirv` es siempre `quit`, programado unos ticks después del último `record end`.
-- Los ticks programados antes de `tick_start` del segmento (e.g. `tick 50` para `demo_gototick`) son arbitrarios — solo necesitan ser tempranos.
+- `spec_mode 1; spec_player_by_accountid 188721128` se ejecuta después del seek y antes de cada `mirv_streams record start` para asegurar POV del jugador objetivo.
+- El comando final de cada `.js` es siempre `quit`, programado unos ticks después del último `record end`.
+- `demo_gototick` debe apuntar a un tick anterior a `tick_start` (validado: 2 segundos de lead) para dar tiempo a aplicar cámara y ocultar la demo UI antes de grabar.
 
-Ejemplo conceptual para `e1-seek-accuracy.mirv`:
+Ejemplo conceptual para `e1-seek-accuracy.js`:
 
-```
-mirv_cmd add tick 50    "demo_gototick 22086"
-mirv_cmd add tick 100   "spec_player_by_accountid 188721128"
-mirv_cmd add tick 22086 "mirv_streams record start"
-mirv_cmd add tick 22406 "mirv_streams record end"
-mirv_cmd add tick 22500 "disconnect"
-mirv_cmd add tick 22600 "quit"
+```js
+const schedule = [
+  { tick: 50, key: "seek-seg-001", cmd: "demo_gototick 21958" },
+  { tick: 22022, key: "camera-target", cmd: "spec_mode 1; spec_player_by_accountid 188721128" },
+  { tick: 22080, key: "hide-demoui", cmd: "demoui" },
+  { tick: 22086, key: "record-start-seg-001", cmd: "mirv_streams record start" },
+  { tick: 22406, key: "record-end-seg-001", cmd: "mirv_streams record end" },
+  { tick: 22500, key: "disconnect", cmd: "disconnect" },
+  { tick: 22600, key: "quit", cmd: "quit" }
+];
 ```
 
 ### Plantilla de findings
@@ -258,7 +270,7 @@ Con eso, el Spec 2 (`zv-recorder` CLI) se puede diseñar con datos reales en lug
 | Caso                                            | Mitigación                                            |
 |-------------------------------------------------|-------------------------------------------------------|
 | HLAE no se inyecta (versión incompatible)       | Documentar versión exacta y rebajar si hace falta.    |
-| Sintaxis `mirv_cmd add tick` no es la real      | Actualizar este spec y los `.mirv` antes de seguir.   |
+| Sintaxis del carrier HLAE cambia                | Actualizar este spec y los `.js` antes de seguir.     |
 | CS2 crashea durante el seek                     | Logear stack trace, reducir velocidad de seek.        |
 | `mirv_streams` no produce nada                  | Probar config alternativa con frames raw + FFmpeg.    |
 | El PC del usuario no rinde a 60 fps             | Bajar a 30 fps el primer experimento, anotar.         |
