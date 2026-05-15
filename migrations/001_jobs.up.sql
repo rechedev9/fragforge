@@ -1,5 +1,13 @@
 CREATE TYPE job_status AS ENUM (
-    'queued', 'parsing', 'parsed', 'failed'
+    'queued',
+    'parsing',
+    'parsed',
+    'recording',
+    'recorded',
+    'composing',
+    'composed',
+    'done',
+    'failed'
 );
 
 CREATE TABLE jobs (

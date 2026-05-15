@@ -94,6 +94,50 @@ func TestRepositoryUpdateStatusPersists(t *testing.T) {
 	}
 }
 
+func TestRepositoryEveryStatusPersists(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+
+	j := Job{
+		ID:            uuid.New(),
+		Status:        StatusQueued,
+		DemoPath:      "/tmp/demo.dem",
+		DemoSHA256:    "abc",
+		TargetSteamID: "1",
+		Rules:         rules.Default(),
+	}
+	if err := repo.Create(context.Background(), &j); err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+
+	for _, status := range []Status{
+		StatusQueued,
+		StatusParsing,
+		StatusParsed,
+		StatusRecording,
+		StatusRecorded,
+		StatusComposing,
+		StatusComposed,
+		StatusDone,
+		StatusFailed,
+	} {
+		reason := ""
+		if status == StatusFailed {
+			reason = "boom"
+		}
+		if err := repo.UpdateStatus(context.Background(), j.ID, status, reason); err != nil {
+			t.Fatalf("UpdateStatus(%s) error = %v", status, err)
+		}
+		got, err := repo.Get(context.Background(), j.ID)
+		if err != nil {
+			t.Fatalf("Get after %s error = %v", status, err)
+		}
+		if got.Status != status {
+			t.Fatalf("Status after %s = %s, want %s", status, got.Status, status)
+		}
+	}
+}
+
 func TestRepositorySetKillPlanPersists(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
