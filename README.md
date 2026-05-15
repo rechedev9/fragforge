@@ -5,8 +5,11 @@ Pipeline for generating CS2 highlight clips from `.dem` files. See [`docs/README
 ## Status
 
 - ✅ `zv-parser` CLI: demo → kill plan JSON
-- ✅ `zv-orchestrator` HTTP API + Asynq parser worker
-- ⏳ Recording driver (HLAE control), composer, mixer, encoder, frontend
+- ✅ `zv-recorder` local HLAE/CS2 recording CLI
+- ✅ `zv-composer` local concat composer
+- ✅ `zv-pipeline` local recorder → composer runner
+- ✅ `zv-orchestrator` HTTP API + Asynq parser/media workers
+- ⏳ Effects, music sync, overlays, cleanup policy, frontend
 
 ## Quick start (local development)
 
@@ -25,8 +28,13 @@ export ZV_DATA_DIR="./data"
 # Optional:
 # export ZV_HTTP_ADDR=":8080"
 # export ZV_WORKER_CONCURRENCY="2"
+# export ZV_RECORDER_PATH="/path/to/zv-recorder"
+# export ZV_HLAE_PATH="/path/to/HLAE.exe"
+# export ZV_CS2_PATH="/path/to/cs2.exe"
+# export ZV_COMPOSER_PATH="/path/to/zv-composer"
+# export ZV_FFMPEG_PATH="/path/to/ffmpeg"
 
-# 3. Build both binaries
+# 3. Build binaries
 make build
 
 # 4. Run the orchestrator
@@ -47,6 +55,9 @@ In another terminal:
 | POST   | `/api/jobs`                | Multipart upload: `demo` file + `config` JSON (`{"target_steamid":"..."}`). Returns `201 {id, status}`. |
 | GET    | `/api/jobs/{id}`           | Job metadata and status.                   |
 | GET    | `/api/jobs/{id}/plan`      | Kill plan JSON (200) or 409 if not ready.  |
+| POST   | `/api/jobs/{id}/record`    | Enqueue recording after parse approval.    |
+| POST   | `/api/jobs/{id}/compose`   | Enqueue final composition after recording. |
+| GET    | `/api/jobs/{id}/final`     | Stream the composed MP4 when ready.         |
 
 ## Standalone CLI
 

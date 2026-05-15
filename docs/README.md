@@ -21,7 +21,7 @@ Pipeline para generar highlight reels automáticos de CS2 a partir de archivos `
 
 ## Estado
 
-Fase: **diseño**. Aún no hay implementación.
+Fase: **foundation local + orquestador inicial implementados**.
 
 Decisiones ya tomadas:
 - **Parser de demos:** [`demoinfocs-golang`](https://github.com/markus-wa/demoinfocs-golang).
@@ -35,8 +35,8 @@ Decisiones ya tomadas:
 Specs activos:
 - [`specs/2026-05-14-demo-parser-slice.md`](./specs/2026-05-14-demo-parser-slice.md) — `zv-parser` (implementado).
 - [`specs/2026-05-14-orchestrator-slice-plan.md`](./specs/2026-05-14-orchestrator-slice-plan.md) — `zv-orchestrator` (implementado).
-- [`specs/2026-05-14-hlae-prototype.md`](./specs/2026-05-14-hlae-prototype.md) — HLAE prototype sub-slice (pendiente de ejecutar en Windows).
+- [`specs/2026-05-14-hlae-prototype.md`](./specs/2026-05-14-hlae-prototype.md) — HLAE prototype sub-slice (validado en Windows).
 - [`specs/2026-05-14-hlae-prototype-plan.md`](./specs/2026-05-14-hlae-prototype-plan.md) — plan ejecutable del prototipo HLAE.
-- [`specs/2026-05-15-recorder-low-level-plan.md`](./specs/2026-05-15-recorder-low-level-plan.md) — contrato local de `zv-recorder` + generador JS HLAE.
-- [`specs/2026-05-15-composer-minimal-plan.md`](./specs/2026-05-15-composer-minimal-plan.md) — `zv-composer` local: concatena segmentos grabados en `final.mp4`.
-- [`specs/2026-05-15-local-pipeline-plan.md`](./specs/2026-05-15-local-pipeline-plan.md) — `zv-pipeline` local: encadena recorder + composer en un solo comando.
+- [`specs/2026-05-15-recorder-low-level-plan.md`](./specs/2026-05-15-recorder-low-level-plan.md) — contrato local de `zv-recorder` + generador JS HLAE (implementado).
+- [`specs/2026-05-15-composer-minimal-plan.md`](./specs/2026-05-15-composer-minimal-plan.md) — `zv-composer` local: concatena segmentos grabados en `final.mp4` (implementado).
+- [`specs/2026-05-15-local-pipeline-plan.md`](./specs/2026-05-15-local-pipeline-plan.md) — `zv-pipeline` local y primeros workers media del orquestador.

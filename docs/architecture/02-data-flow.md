@@ -29,26 +29,27 @@ Demo Parser  --(kill plan)---> Orquestador
 ```
 Orquestador --(job: record, kill plan)--> Recording Driver (Windows worker)
 RecordingDrv --(GET .dem)----------------> Object Storage
-RecordingDrv --(lanza CS2 + HLAE + Lua script)
+RecordingDrv --(lanza CS2 + HLAE + JavaScript mirv script)
 HLAE         --(mirv_streams record)-----> archivo .mp4 / .mkv local
-RecordingDrv --(PUT raw clip por segmento)-> Object Storage
+RecordingDrv --(PUT clip por segmento)--> Object Storage
 RecordingDrv --(progress events)----------> Orquestador
 ```
 
-- El driver genera, por cada segmento del kill plan, un script Lua con timestamps absolutos (ticks de inicio/fin) y lo carga con `mirv_script_load`.
+- El driver genera un script JavaScript HLAE 2.x con timestamps absolutos (ticks de inicio/fin) y lo carga con `mirv_script_load`.
 - Una sesión de CS2 procesa toda la demo de corrido: ahorra el coste de cargar el mapa/demo varias veces.
-- Si el clip cubre múltiples segmentos cercanos, se graban en un solo archivo con marcadores; si están separados, se hacen sub-clips.
+- La foundation actual graba cada segmento como take HLAE, muxea video+audio en `segments/{segment_id}.mp4`, y sube esos clips como contrato durable.
 
 ## 4. Composición de efectos
 
 ```
 Orquestador --(job: compose, per-segment)--> Effects Composer
 Composer    --(GET raw clip + metadata)----> Object Storage
-Composer    --(lua rules)-------------------> aplica zoom, flash, slow-mo, color grade
+Composer    --(rules/effects config)--------> aplica zoom, flash, slow-mo, color grade
 Composer    --(PUT composed clip)----------> Object Storage
 ```
 
 - Los efectos se aplican **por segmento**, no sobre el clip final concatenado. Razón: el FFmpeg filtergraph es más simple y reusa fácilmente caché de segmentos individuales si el usuario re-renderiza con otra música.
+- La foundation actual solo concatena segmentos en `final.mp4`; efectos, overlays y música quedan como siguientes slices.
 
 ## 5. Mezcla de música + corte al beat
 

@@ -80,9 +80,24 @@ Result:
 | Final duration | 78.922132 s |
 | Final size | 184056031 bytes |
 
+## Orchestrator Integration Added
+
+- `internal/artifacts` defines durable storage keys:
+  - `jobs/{id}/recording/recording-result.json`
+  - `jobs/{id}/recording/recording.js`
+  - `jobs/{id}/recording/segments/{segment_id}.mp4`
+  - `jobs/{id}/composition/composition-result.json`
+  - `jobs/{id}/composition/final.mp4`
+- `record:demo` worker materializes the demo + kill plan, runs `zv-recorder`, uploads the recording result, script, and segment MP4s, then marks the job `recorded`.
+- `compose:final` worker localizes stored segment MP4s, runs `zv-composer`, uploads `composition-result.json` and `final.mp4`, then marks the job `composed`.
+- `zv-orchestrator` registers media workers only when the relevant env vars are set, so API/parser-only development still works without HLAE.
+- HTTP gates:
+  - `POST /api/jobs/{id}/record`
+  - `POST /api/jobs/{id}/compose`
+  - `GET /api/jobs/{id}/final`
+
 ## Remaining Work
 
-- Add worker implementations for `record:demo` and `compose:final`.
-- Decide durable storage layout for recording/composition artifacts.
 - Add cleanup policy for raw takes after final delivery.
 - Add effects/music/overlays between segment mux and final concat.
+- Add idempotency checks so media workers can safely skip already uploaded artifacts on retry.
