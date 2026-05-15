@@ -42,6 +42,10 @@ func FindFFmpeg() string {
 	return path
 }
 
+func ProbeArtifact(ctx context.Context, ffprobePath string, artifact *RecordingArtifact) {
+	probeArtifact(ctx, ffprobePath, artifact)
+}
+
 func discoverMediaFiles(root string) []RecordingArtifact {
 	var artifacts []RecordingArtifact
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -200,6 +204,7 @@ func applyProbeOutput(artifact *RecordingArtifact, out []byte) error {
 	}
 	stream := probe.Streams[0]
 	artifact.Codec = stream.CodecName
+	artifact.FrameRate = stream.AvgFrameRate
 	if stream.CodecType != "" {
 		artifact.Type = stream.CodecType
 	}

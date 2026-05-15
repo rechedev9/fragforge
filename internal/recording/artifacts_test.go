@@ -70,6 +70,9 @@ func TestApplyProbeOutputVideo(t *testing.T) {
 	if artifact.FrameCount != 481 {
 		t.Fatalf("FrameCount = %d, want 481", artifact.FrameCount)
 	}
+	if artifact.FrameRate != "" {
+		t.Fatalf("FrameRate = %q, want empty because fixture omits avg_frame_rate", artifact.FrameRate)
+	}
 	if artifact.DurationSeconds != 8.016667 {
 		t.Fatalf("DurationSeconds = %f, want 8.016667", artifact.DurationSeconds)
 	}

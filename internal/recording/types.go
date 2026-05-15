@@ -70,6 +70,7 @@ type RecordingArtifact struct {
 	SizeBytes       int64   `json:"size_bytes"`
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 	FrameCount      int64   `json:"frame_count,omitempty"`
+	FrameRate       string  `json:"frame_rate,omitempty"`
 	Codec           string  `json:"codec,omitempty"`
 	Width           int     `json:"width,omitempty"`
 	Height          int     `json:"height,omitempty"`

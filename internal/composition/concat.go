@@ -3,6 +3,7 @@ package composition
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,4 +97,37 @@ func ConcatList(clips []SegmentClip) string {
 
 func escapeConcatPath(path string) string {
 	return strings.ReplaceAll(path, "'", "'\\''")
+}
+
+func ValidateFinalArtifact(artifact recording.RecordingArtifact, width, height, fps int, expectedDuration float64) []string {
+	var warnings []string
+	if artifact.ProbeError != "" {
+		warnings = append(warnings, fmt.Sprintf("final output probe failed: %s", artifact.ProbeError))
+		return warnings
+	}
+	if artifact.Path == "" || artifact.SizeBytes == 0 {
+		warnings = append(warnings, "final output is missing or empty")
+	}
+	if artifact.Codec != "h264" {
+		warnings = append(warnings, fmt.Sprintf("final output codec = %q, want h264", artifact.Codec))
+	}
+	if artifact.Width != width || artifact.Height != height {
+		warnings = append(warnings, fmt.Sprintf("final output resolution = %dx%d, want %dx%d", artifact.Width, artifact.Height, width, height))
+	}
+	wantFPS := fmt.Sprintf("%d/1", fps)
+	if artifact.FrameRate != "" && artifact.FrameRate != wantFPS {
+		warnings = append(warnings, fmt.Sprintf("final output frame_rate = %q, want %s", artifact.FrameRate, wantFPS))
+	}
+	if expectedDuration > 0 && artifact.DurationSeconds > 0 && math.Abs(artifact.DurationSeconds-expectedDuration) > 0.5 {
+		warnings = append(warnings, fmt.Sprintf("final output duration %.3fs differs from segment sum %.3fs", artifact.DurationSeconds, expectedDuration))
+	}
+	return warnings
+}
+
+func ClipDurationSum(clips []SegmentClip) float64 {
+	var total float64
+	for _, clip := range clips {
+		total += clip.DurationSeconds
+	}
+	return total
 }

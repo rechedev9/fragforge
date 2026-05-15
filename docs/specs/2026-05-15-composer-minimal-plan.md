@@ -12,6 +12,7 @@ Create the smallest useful post-recording stage after `zv-recorder`:
 2. Select `role=segment`, `type=video` artifacts in kill-plan order.
 3. Concatenate them into a single `final.mp4`.
 4. Emit `composition-result.json` for the next pipeline stage.
+5. Probe and validate the final MP4 shape.
 
 This slice intentionally does not implement effects, beat sync, music, overlays, or final delivery.
 
@@ -43,6 +44,11 @@ The current FFmpeg path uses concat demuxer plus re-encode:
 - AAC audio at 192 kbps
 - `+faststart`
 
+`composition-result.json` includes `output_artifact` with codec, size,
+duration, frame count, frame rate, and resolution. The composer warns if the
+final output is missing, empty, not H.264, not 1920x1080, not 60 fps, or if its
+duration drifts materially from the sum of segment clips.
+
 ## Validation Completed
 
 Test input: full 9-segment `zv-recorder` output in `%TEMP%\zv-recorder-real-full`.
@@ -55,6 +61,8 @@ Final probe:
 | Video | h264, 1920x1080, 60/1 fps, 4743 frames |
 | Audio | aac, 44100 Hz, stereo |
 | Size | 183645091 bytes |
+
+`composition-result.json` validation: `warnings=0`.
 
 ## Remaining Work
 

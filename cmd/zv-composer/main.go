@@ -70,6 +70,7 @@ func run() error {
 	if ffmpeg == "" {
 		ffmpeg = recording.FindFFmpeg()
 	}
+	ffprobe := recording.FindFFprobe()
 	if ffmpeg == "" {
 		result.Error = "ffmpeg not found"
 		_ = writeResult(resultPath, result)
@@ -83,6 +84,25 @@ func run() error {
 		_ = writeResult(resultPath, result)
 		return err
 	}
+	outputArtifact := recording.RecordingArtifact{
+		Role: "final",
+		Type: "video",
+		Path: absOut,
+	}
+	if info, err := os.Stat(absOut); err == nil {
+		outputArtifact.SizeBytes = info.Size()
+	}
+	if ffprobe != "" {
+		recording.ProbeArtifact(context.Background(), ffprobe, &outputArtifact)
+	}
+	result.OutputArtifact = outputArtifact
+	result.Warnings = append(result.Warnings, composition.ValidateFinalArtifact(
+		outputArtifact,
+		recordingResult.Plan.Stream.Width,
+		recordingResult.Plan.Stream.Height,
+		recordingResult.Plan.Stream.FPS,
+		composition.ClipDurationSum(clips),
+	)...)
 	return writeResult(resultPath, result)
 }
 

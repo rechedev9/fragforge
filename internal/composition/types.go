@@ -1,5 +1,6 @@
-// Package composition contains the first post-recording composition step.
 package composition
+
+import "github.com/reche/zackvideo/internal/recording"
 
 type SegmentClip struct {
 	SegmentID       string  `json:"segment_id"`
@@ -8,9 +9,10 @@ type SegmentClip struct {
 }
 
 type Result struct {
-	RecordingResult string        `json:"recording_result"`
-	Output          string        `json:"output"`
-	Clips           []SegmentClip `json:"clips"`
-	Warnings        []string      `json:"warnings,omitempty"`
-	Error           string        `json:"error,omitempty"`
+	RecordingResult string                      `json:"recording_result"`
+	Output          string                      `json:"output"`
+	OutputArtifact  recording.RecordingArtifact `json:"output_artifact,omitempty"`
+	Clips           []SegmentClip               `json:"clips"`
+	Warnings        []string                    `json:"warnings,omitempty"`
+	Error           string                      `json:"error,omitempty"`
 }
