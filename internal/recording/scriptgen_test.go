@@ -32,19 +32,57 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 		`tick >= item.tick`,
 		`fired[item.key] = true`,
 		`spec_player_by_accountid 188721128`,
-		`spec_mode 1`,
+		`spec_player_by_accountid 188721128; spec_mode 4`,
+		`camera-lock-seg-001`,
+		`camera-relock-seg-001`,
 		`demo_gototick 21958`,
 		`demo_gototick 31618`,
 		`demoui`,
 		`mirv_streams record fps 60`,
 		`mirv_streams record screen enabled 1`,
 		`mirv_streams record screen settings afxFfmpegYuv420p`,
+		`spec_show_xray 0`,
+		`cl_spec_show_bindings 0`,
+		`cl_drawhud 1`,
+		`cl_draw_only_deathnotices 0`,
+		`cl_show_observer_crosshair 2`,
+		`crosshair 1`,
 		`mirv_streams record start`,
 		`mirv_streams record end`,
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("generated JS missing %q\n%s", want, js)
 		}
+	}
+}
+
+func TestGenerateHLAEJavaScriptGameplayHUDIsDefault(t *testing.T) {
+	p := testPlan()
+	p.Stream.HUDMode = ""
+	js, err := GenerateHLAEJavaScript(p)
+	if err != nil {
+		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
+	}
+	if !strings.Contains(js, `cl_drawhud 1`) {
+		t.Fatalf("generated JS missing gameplay HUD:\n%s", js)
+	}
+	if strings.Contains(js, `cl_drawhud 0`) {
+		t.Fatalf("generated JS hides HUD in default mode:\n%s", js)
+	}
+}
+
+func TestGenerateHLAEJavaScriptCleanHUDMode(t *testing.T) {
+	p := testPlan()
+	p.Stream.HUDMode = HUDModeClean
+	js, err := GenerateHLAEJavaScript(p)
+	if err != nil {
+		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
+	}
+	if !strings.Contains(js, `spec_show_xray 0; cl_drawhud 0`) {
+		t.Fatalf("generated JS missing clean HUD command:\n%s", js)
+	}
+	if strings.Contains(js, `cl_draw_only_deathnotices 0`) {
+		t.Fatalf("clean mode should not enable gameplay HUD commands:\n%s", js)
 	}
 }
 

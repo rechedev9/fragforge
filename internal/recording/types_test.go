@@ -34,6 +34,9 @@ func TestNewPlanFromKillPlan(t *testing.T) {
 	if plan.Stream.Mode != StreamModeFFmpegDirect {
 		t.Errorf("Stream.Mode = %q, want %q", plan.Stream.Mode, StreamModeFFmpegDirect)
 	}
+	if plan.Stream.HUDMode != HUDModeGameplay {
+		t.Errorf("Stream.HUDMode = %q, want %q", plan.Stream.HUDMode, HUDModeGameplay)
+	}
 }
 
 func TestValidateRejectsBadSegment(t *testing.T) {
@@ -47,6 +50,14 @@ func TestValidateRejectsBadSegment(t *testing.T) {
 			{ID: "seg-001", TickStart: 100, TickEnd: 100},
 		},
 	}
+	if err := p.Validate(); err == nil {
+		t.Fatal("Validate error = nil, want error")
+	}
+}
+
+func TestValidateRejectsUnknownHUDMode(t *testing.T) {
+	p := testPlan()
+	p.Stream.HUDMode = "weird"
 	if err := p.Validate(); err == nil {
 		t.Fatal("Validate error = nil, want error")
 	}

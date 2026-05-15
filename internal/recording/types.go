@@ -24,13 +24,26 @@ const (
 	StreamModeTGASequence StreamMode = "tga_sequence"
 )
 
+// HUDMode controls whether HLAE records a clean stream or the in-game HUD.
+type HUDMode string
+
+const (
+	// HUDModeGameplay keeps the CS2 HUD, crosshair, killfeed, weapon, ammo,
+	// and health visible for a normal gameplay-looking recording.
+	HUDModeGameplay HUDMode = "gameplay"
+
+	// HUDModeClean hides the HUD for cinematic/effects-friendly captures.
+	HUDModeClean HUDMode = "clean"
+)
+
 // StreamConfig describes how HLAE should emit raw recordings.
 type StreamConfig struct {
-	Mode   StreamMode `json:"mode"`
-	FPS    int        `json:"fps"`
-	Width  int        `json:"width"`
-	Height int        `json:"height"`
-	CRF    int        `json:"crf,omitempty"`
+	Mode    StreamMode `json:"mode"`
+	HUDMode HUDMode    `json:"hud_mode,omitempty"`
+	FPS     int        `json:"fps"`
+	Width   int        `json:"width"`
+	Height  int        `json:"height"`
+	CRF     int        `json:"crf,omitempty"`
 }
 
 // RuntimeConfig captures HLAE runtime toggles that affect timing.
@@ -91,11 +104,12 @@ type RecordingResult struct {
 // DefaultStreamConfig returns the current V1 target recording format.
 func DefaultStreamConfig() StreamConfig {
 	return StreamConfig{
-		Mode:   StreamModeFFmpegDirect,
-		FPS:    60,
-		Width:  1920,
-		Height: 1080,
-		CRF:    18,
+		Mode:    StreamModeFFmpegDirect,
+		HUDMode: HUDModeGameplay,
+		FPS:     60,
+		Width:   1920,
+		Height:  1080,
+		CRF:     18,
 	}
 }
 
@@ -105,9 +119,7 @@ func NewPlanFromKillPlan(plan killplan.Plan, demoPath, outputDir string, stream 
 	if err != nil {
 		return RecordingPlan{}, err
 	}
-	if stream.Mode == "" {
-		stream = DefaultStreamConfig()
-	}
+	stream = normalizeStreamConfig(stream)
 	out := RecordingPlan{
 		DemoPath:        demoPath,
 		OutputDir:       outputDir,
@@ -167,6 +179,9 @@ func (p RecordingPlan) Validate() error {
 	if p.Stream.Mode == "" {
 		return fmt.Errorf("stream mode is required")
 	}
+	if p.Stream.HUDMode != "" && p.Stream.HUDMode != HUDModeGameplay && p.Stream.HUDMode != HUDModeClean {
+		return fmt.Errorf("stream hud_mode must be %q or %q", HUDModeGameplay, HUDModeClean)
+	}
 	if p.Stream.FPS <= 0 || p.Stream.Width <= 0 || p.Stream.Height <= 0 {
 		return fmt.Errorf("stream fps, width, and height must be positive")
 	}
@@ -187,6 +202,29 @@ func (p RecordingPlan) Validate() error {
 		}
 	}
 	return nil
+}
+
+func normalizeStreamConfig(stream StreamConfig) StreamConfig {
+	defaults := DefaultStreamConfig()
+	if stream.Mode == "" {
+		return defaults
+	}
+	if stream.HUDMode == "" {
+		stream.HUDMode = defaults.HUDMode
+	}
+	if stream.FPS == 0 {
+		stream.FPS = defaults.FPS
+	}
+	if stream.Width == 0 {
+		stream.Width = defaults.Width
+	}
+	if stream.Height == 0 {
+		stream.Height = defaults.Height
+	}
+	if stream.CRF == 0 {
+		stream.CRF = defaults.CRF
+	}
+	return stream
 }
 
 // SegmentOutputPath returns the preferred output file path for a segment.

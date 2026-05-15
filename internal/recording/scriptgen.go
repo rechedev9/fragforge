@@ -15,6 +15,7 @@ type scheduledCommand struct {
 
 // GenerateHLAEJavaScript renders a self-contained HLAE 2.x mirv-script file.
 func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
+	plan.Stream = normalizeStreamConfig(plan.Stream)
 	if err := plan.Validate(); err != nil {
 		return "", err
 	}
@@ -102,7 +103,9 @@ func buildSchedule(plan RecordingPlan) []scheduledCommand {
 
 		commands = append(commands,
 			scheduledCommand{Tick: seekTick, Key: "seek-" + s.ID, Cmd: fmt.Sprintf("demo_gototick %d", seekTarget)},
-			scheduledCommand{Tick: cameraTick, Key: "camera-" + s.ID, Cmd: fmt.Sprintf("spec_mode 1; spec_player_by_accountid %d", plan.TargetAccountID)},
+			scheduledCommand{Tick: cameraTick, Key: "camera-" + s.ID, Cmd: cameraCommand(plan.TargetAccountID)},
+			scheduledCommand{Tick: max(cameraTick+1, s.TickStart-1), Key: "camera-lock-" + s.ID, Cmd: cameraCommand(plan.TargetAccountID)},
+			scheduledCommand{Tick: s.TickStart + max(1, plan.Tickrate/2), Key: "camera-relock-" + s.ID, Cmd: cameraCommand(plan.TargetAccountID)},
 		)
 		if i == 0 {
 			commands = append(commands,
@@ -144,25 +147,41 @@ func buildSchedule(plan RecordingPlan) []scheduledCommand {
 	return commands
 }
 
+func cameraCommand(accountID uint32) string {
+	return fmt.Sprintf("spec_player_by_accountid %d; spec_mode 4", accountID)
+}
+
 func streamSetupCommands(plan RecordingPlan) []string {
 	recordName := slashPath(plan.OutputDir)
 	recordFPS := fmt.Sprintf("mirv_streams record fps %d", plan.Stream.FPS)
+	commands := []string{
+		fmt.Sprintf(`mirv_streams record name "%s"`, recordName),
+		recordFPS,
+		"mirv_streams record screen enabled 1",
+	}
 	switch plan.Stream.Mode {
 	case StreamModeTGASequence:
+		commands = append(commands, "mirv_streams record screen settings afxClassic")
+	default:
+		commands = append(commands, "mirv_streams record screen settings afxFfmpegYuv420p")
+	}
+	return append(commands, hudSetupCommands(plan.Stream.HUDMode)...)
+}
+
+func hudSetupCommands(mode HUDMode) []string {
+	switch mode {
+	case HUDModeClean:
 		return []string{
-			fmt.Sprintf(`mirv_streams record name "%s"`, recordName),
-			recordFPS,
-			"mirv_streams record screen enabled 1",
-			"mirv_streams record screen settings afxClassic",
 			"spec_show_xray 0; cl_drawhud 0",
 		}
 	default:
 		return []string{
-			fmt.Sprintf(`mirv_streams record name "%s"`, recordName),
-			recordFPS,
-			"mirv_streams record screen enabled 1",
-			"mirv_streams record screen settings afxFfmpegYuv420p",
-			"spec_show_xray 0; cl_drawhud 0",
+			"spec_show_xray 0",
+			"cl_spec_show_bindings 0",
+			"cl_drawhud 1",
+			"cl_draw_only_deathnotices 0",
+			"cl_show_observer_crosshair 2",
+			"crosshair 1",
 		}
 	}
 }

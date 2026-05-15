@@ -58,6 +58,13 @@ Dry-run:
 zv-recorder --dry-run --killplan C:\path\killplan.json --demo C:\path\demo.dem --out C:\tmp\zv-out
 ```
 
+HUD mode:
+
+- Default: `--hud gameplay` keeps the CS2 HUD, crosshair, killfeed, weapon,
+  ammo, and health visible for realistic POV gameplay clips.
+- Optional: `--hud clean` preserves the earlier HUD-less capture mode for
+  cinematic/effects-friendly renders.
+
 Dry-run writes:
 
 - `recording.js`

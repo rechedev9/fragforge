@@ -30,6 +30,7 @@ func run() error {
 		outDir       = flag.String("out", "", "recording output directory")
 		hlaeExe      = flag.String("hlae", "", "path to HLAE.exe")
 		cs2Exe       = flag.String("cs2", "", "path to cs2.exe")
+		hudMode      = flag.String("hud", string(recording.HUDModeGameplay), "HUD mode: gameplay or clean")
 		dryRun       = flag.Bool("dry-run", false, "generate plan and script without launching HLAE")
 		timeout      = flag.Duration("timeout", 15*time.Minute, "maximum duration to wait for CS2")
 	)
@@ -71,7 +72,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	plan, err := recording.NewPlanFromKillPlan(kp, absDemoPath, absOutDir, recording.DefaultStreamConfig())
+	stream := recording.DefaultStreamConfig()
+	stream.HUDMode = recording.HUDMode(*hudMode)
+	plan, err := recording.NewPlanFromKillPlan(kp, absDemoPath, absOutDir, stream)
 	if err != nil {
 		return err
 	}
