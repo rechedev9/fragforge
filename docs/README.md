@@ -37,3 +37,4 @@ Specs activos:
 - [`specs/2026-05-14-orchestrator-slice-plan.md`](./specs/2026-05-14-orchestrator-slice-plan.md) — `zv-orchestrator` (implementado).
 - [`specs/2026-05-14-hlae-prototype.md`](./specs/2026-05-14-hlae-prototype.md) — HLAE prototype sub-slice (pendiente de ejecutar en Windows).
 - [`specs/2026-05-14-hlae-prototype-plan.md`](./specs/2026-05-14-hlae-prototype-plan.md) — plan ejecutable del prototipo HLAE.
+- [`specs/2026-05-15-recorder-low-level-plan.md`](./specs/2026-05-15-recorder-low-level-plan.md) — contrato local de `zv-recorder` + generador JS HLAE.
