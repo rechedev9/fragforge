@@ -5,6 +5,7 @@ build:
 	go build -o bin/zv-orchestrator ./cmd/zv-orchestrator
 	go build -o bin/zv-recorder ./cmd/zv-recorder
 	go build -o bin/zv-composer ./cmd/zv-composer
+	go build -o bin/zv-pipeline ./cmd/zv-pipeline
 
 test:
 	go test ./... -count=1
