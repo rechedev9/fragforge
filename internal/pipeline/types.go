@@ -31,5 +31,6 @@ type Result struct {
 	CompositionResult string       `json:"composition_result"`
 	FinalOutput       string       `json:"final_output"`
 	Steps             []StepResult `json:"steps"`
+	Warnings          []string     `json:"warnings,omitempty"`
 	Error             string       `json:"error,omitempty"`
 }
