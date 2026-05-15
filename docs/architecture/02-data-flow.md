@@ -82,7 +82,7 @@ Job
   target_steamid64
   preset_id
   music_key
-  status            -- queued | parsing | parsed | recording | composing | mixing | encoding | done | failed
+  status            -- queued | parsing | parsed | recording | recorded | composing | composed | done | failed
   failure_reason
   created_at / updated_at
 

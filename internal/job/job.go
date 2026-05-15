@@ -19,10 +19,25 @@ const (
 	StatusQueued Status = iota
 	StatusParsing
 	StatusParsed
+	StatusRecording
+	StatusRecorded
+	StatusComposing
+	StatusComposed
+	StatusDone
 	StatusFailed
 )
 
-var statusNames = [...]string{"queued", "parsing", "parsed", "failed"}
+var statusNames = [...]string{
+	"queued",
+	"parsing",
+	"parsed",
+	"recording",
+	"recorded",
+	"composing",
+	"composed",
+	"done",
+	"failed",
+}
 
 // String returns the canonical lowercase representation used in JSON and DB.
 func (s Status) String() string {

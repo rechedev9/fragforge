@@ -11,10 +11,15 @@ import (
 
 func TestStatusStringMapping(t *testing.T) {
 	cases := map[Status]string{
-		StatusQueued:  "queued",
-		StatusParsing: "parsing",
-		StatusParsed:  "parsed",
-		StatusFailed:  "failed",
+		StatusQueued:    "queued",
+		StatusParsing:   "parsing",
+		StatusParsed:    "parsed",
+		StatusRecording: "recording",
+		StatusRecorded:  "recorded",
+		StatusComposing: "composing",
+		StatusComposed:  "composed",
+		StatusDone:      "done",
+		StatusFailed:    "failed",
 	}
 	for s, want := range cases {
 		if got := s.String(); got != want {
@@ -63,7 +68,7 @@ func TestJobMarshalsToExpectedShape(t *testing.T) {
 }
 
 func TestStatusJSONRoundTrip(t *testing.T) {
-	for _, s := range []Status{StatusQueued, StatusParsing, StatusParsed, StatusFailed} {
+	for _, s := range []Status{StatusQueued, StatusParsing, StatusParsed, StatusRecording, StatusRecorded, StatusComposing, StatusComposed, StatusDone, StatusFailed} {
 		b, err := json.Marshal(s)
 		if err != nil {
 			t.Fatalf("marshal %v: %v", s, err)
