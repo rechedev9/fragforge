@@ -19,6 +19,7 @@ import (
 	"github.com/reche/zackvideo/internal/job"
 	"github.com/reche/zackvideo/internal/killplan"
 	"github.com/reche/zackvideo/internal/rules"
+	"github.com/reche/zackvideo/internal/tasks"
 )
 
 // fakeRepo implements JobRepository for tests.
@@ -152,10 +153,6 @@ func TestPostJobsRejectsInvalidSteamID(t *testing.T) {
 	}
 }
 
-// keep imports needed by later tasks (Tasks 8, 9, 10 will reuse killplan + rules)
-var _ = killplan.SchemaVersion
-var _ = rules.Default
-
 func TestGetJobReturnsJob(t *testing.T) {
 	repo := newFakeRepo()
 	j := job.Job{
@@ -259,5 +256,96 @@ func TestGetPlanReturnsPlanWhenReady(t *testing.T) {
 	}
 	if !strings.Contains(rw.Body.String(), "de_inferno") {
 		t.Errorf("body does not include map: %s", rw.Body.String())
+	}
+}
+
+func TestStartRecordingEnqueuesRecordTaskWhenParsed(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/record", h.StartRecording)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
+	}
+	if queue.enqueued[0].Type() != tasks.TypeRecordDemo {
+		t.Fatalf("task type = %q, want %q", queue.enqueued[0].Type(), tasks.TypeRecordDemo)
+	}
+}
+
+func TestStartRecordingRejectsJobWithoutPlan(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/record", h.StartRecording)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rw.Code)
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
+	}
+}
+
+func TestStartCompositionEnqueuesComposeTaskWhenRecorded(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/compose", h.StartComposition)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/compose", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
+	}
+	if queue.enqueued[0].Type() != tasks.TypeComposeFinal {
+		t.Fatalf("task type = %q, want %q", queue.enqueued[0].Type(), tasks.TypeComposeFinal)
+	}
+}
+
+func TestStartCompositionRejectsWrongStatus(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/compose", h.StartComposition)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/compose", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rw.Code)
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
 	}
 }

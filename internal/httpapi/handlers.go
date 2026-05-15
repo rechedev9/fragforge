@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	maxDemoBytes        = 500 << 20 // 500 MiB hard cap
-	multipartMemBudget  = 32 << 20  // 32 MiB in-memory; spill beyond
+	maxDemoBytes       = 500 << 20 // 500 MiB hard cap
+	multipartMemBudget = 32 << 20  // 32 MiB in-memory; spill beyond
 )
 
 // JobRepository is the subset of *job.Repository used by handlers.
@@ -177,6 +177,75 @@ func (h *Handlers) GetPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, j.KillPlan)
+}
+
+// StartRecording handles POST /api/jobs/{id}/record.
+func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	if j.Status != job.StatusParsed || j.KillPlan == nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to record (status=%s)", j.Status))
+		return
+	}
+	task, err := tasks.NewRecordDemoTask(j.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "building task: "+err.Error())
+		return
+	}
+	if _, err := h.queue.Enqueue(task); err != nil {
+		writeError(w, http.StatusInternalServerError, "enqueueing task: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":   j.ID,
+		"task": tasks.TypeRecordDemo,
+	})
+}
+
+// StartComposition handles POST /api/jobs/{id}/compose.
+func (h *Handlers) StartComposition(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	if j.Status != job.StatusRecorded {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to compose (status=%s)", j.Status))
+		return
+	}
+	task, err := tasks.NewComposeFinalTask(j.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "building task: "+err.Error())
+		return
+	}
+	if _, err := h.queue.Enqueue(task); err != nil {
+		writeError(w, http.StatusInternalServerError, "enqueueing task: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":   j.ID,
+		"task": tasks.TypeComposeFinal,
+	})
+}
+
+func (h *Handlers) loadJob(w http.ResponseWriter, r *http.Request) (job.Job, bool) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job id")
+		return job.Job{}, false
+	}
+	j, err := h.repo.Get(r.Context(), id)
+	if errors.Is(err, job.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "job not found")
+		return job.Job{}, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return job.Job{}, false
+	}
+	return j, true
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
