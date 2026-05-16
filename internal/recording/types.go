@@ -54,14 +54,16 @@ type RuntimeConfig struct {
 
 // RecordingPlan is the lowest-level input to script generation.
 type RecordingPlan struct {
-	DemoPath        string             `json:"demo_path"`
-	OutputDir       string             `json:"output_dir"`
-	TargetSteamID64 string             `json:"target_steamid64"`
-	TargetAccountID uint32             `json:"target_account_id"`
-	Tickrate        int                `json:"tickrate"`
-	Segments        []RecordingSegment `json:"segments"`
-	Stream          StreamConfig       `json:"stream"`
-	Runtime         RuntimeConfig      `json:"runtime"`
+	DemoPath         string             `json:"demo_path"`
+	DemoMap          string             `json:"demo_map,omitempty"`
+	OutputDir        string             `json:"output_dir"`
+	TargetSteamID64  string             `json:"target_steamid64"`
+	TargetNameInDemo string             `json:"target_name_in_demo,omitempty"`
+	TargetAccountID  uint32             `json:"target_account_id"`
+	Tickrate         int                `json:"tickrate"`
+	Segments         []RecordingSegment `json:"segments"`
+	Stream           StreamConfig       `json:"stream"`
+	Runtime          RuntimeConfig      `json:"runtime"`
 }
 
 // RecordingSegment is one HLAE record window.
@@ -121,12 +123,14 @@ func NewPlanFromKillPlan(plan killplan.Plan, demoPath, outputDir string, stream 
 	}
 	stream = normalizeStreamConfig(stream)
 	out := RecordingPlan{
-		DemoPath:        demoPath,
-		OutputDir:       outputDir,
-		TargetSteamID64: plan.Target.SteamID64,
-		TargetAccountID: accountID,
-		Tickrate:        plan.Demo.Tickrate,
-		Stream:          stream,
+		DemoPath:         demoPath,
+		DemoMap:          plan.Demo.Map,
+		OutputDir:        outputDir,
+		TargetSteamID64:  plan.Target.SteamID64,
+		TargetNameInDemo: plan.Target.NameInDemo,
+		TargetAccountID:  accountID,
+		Tickrate:         plan.Demo.Tickrate,
+		Stream:           stream,
 		Runtime: RuntimeConfig{
 			QuitTickPad: 200,
 		},

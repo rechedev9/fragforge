@@ -3,6 +3,8 @@ package recording
 import (
 	"strings"
 	"testing"
+
+	"github.com/reche/zackvideo/internal/killplan"
 )
 
 func TestValidateArtifactsAcceptsCompleteSet(t *testing.T) {
@@ -36,5 +38,27 @@ func TestValidateArtifactsReportsMissingOutputs(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("warnings missing %q:\n%s", want, joined)
 		}
+	}
+}
+
+func TestValidateArtifactsUsesEffectiveRecordStart(t *testing.T) {
+	plan := testPlan()
+	plan.Segments = []RecordingSegment{
+		{
+			ID:        "seg-001",
+			TickStart: 14029,
+			TickEnd:   14770,
+			Kills: []killplan.Kill{
+				{Tick: 14221},
+			},
+		},
+	}
+	artifacts := []RecordingArtifact{
+		{SegmentID: "seg-001", TakeID: "take0000", Role: "raw", Type: "video", Path: "take0000/video.mp4", DurationSeconds: 9.58},
+		{SegmentID: "seg-001", TakeID: "take0000", Role: "raw", Type: "audio", Path: "take0000/audio.wav"},
+		{SegmentID: "seg-001", TakeID: "take0000", Role: "segment", Type: "video", Path: "segments/seg-001.mp4", DurationSeconds: 9.57},
+	}
+	if warnings := ValidateArtifacts(plan, artifacts); len(warnings) != 0 {
+		t.Fatalf("ValidateArtifacts warnings = %v", warnings)
 	}
 }

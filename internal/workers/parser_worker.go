@@ -56,19 +56,23 @@ func (w *ParserWorker) HandleParseDemo(ctx context.Context, t *asynq.Task) error
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusParsing, ""); err != nil {
 		return fmt.Errorf("mark parsing: %w", err)
 	}
+	logWorkerTransition(j.ID, tasks.TypeParseDemo, job.StatusParsing)
 
 	plan, parseErr := w.parse(ctx, j)
 	if parseErr != nil {
 		_ = w.repo.UpdateStatus(ctx, j.ID, job.StatusFailed, parseErr.Error())
+		logWorkerTransition(j.ID, tasks.TypeParseDemo, job.StatusFailed)
 		return parseErr
 	}
 
 	if err := w.repo.SetKillPlan(ctx, j.ID, plan); err != nil {
 		return fmt.Errorf("save plan: %w", err)
 	}
+	logWorkerArtifacts(j.ID, tasks.TypeParseDemo, []string{"kill_plan"})
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusParsed, ""); err != nil {
 		return fmt.Errorf("mark parsed: %w", err)
 	}
+	logWorkerTransition(j.ID, tasks.TypeParseDemo, job.StatusParsed)
 	return nil
 }
 

@@ -91,32 +91,37 @@ func buildSchedule(plan RecordingPlan) []scheduledCommand {
 		if i > 0 {
 			seekTick = plan.Segments[i-1].TickEnd + 32
 		}
-		leadTicks := plan.Tickrate * 2
+		recordStart := EffectiveRecordStartTick(s, plan.Tickrate)
+		leadTicks := plan.Tickrate * 5
 		seekTarget := max(1, s.TickStart-leadTicks)
-		cameraTick := s.TickStart - plan.Tickrate
-		if cameraTick <= seekTarget {
-			cameraTick = seekTarget + max(1, plan.Tickrate/2)
-		}
-		if cameraTick >= s.TickStart {
-			cameraTick = s.TickStart - 1
+		cameraWarmupTick := seekTarget + max(1, plan.Tickrate/2)
+		cameraLead3Tick := recordStart - plan.Tickrate*3
+		cameraLead2Tick := recordStart - plan.Tickrate*2
+		cameraLead1Tick := recordStart - plan.Tickrate
+		cameraLockTick := recordStart - 1
+		if cameraWarmupTick >= recordStart {
+			cameraWarmupTick = recordStart - max(2, plan.Tickrate/2)
 		}
 
 		commands = append(commands,
 			scheduledCommand{Tick: seekTick, Key: "seek-" + s.ID, Cmd: fmt.Sprintf("demo_gototick %d", seekTarget)},
-			scheduledCommand{Tick: cameraTick, Key: "camera-" + s.ID, Cmd: cameraCommand(plan.TargetAccountID)},
-			scheduledCommand{Tick: max(cameraTick+1, s.TickStart-1), Key: "camera-lock-" + s.ID, Cmd: cameraCommand(plan.TargetAccountID)},
-			scheduledCommand{Tick: s.TickStart + max(1, plan.Tickrate/2), Key: "camera-relock-" + s.ID, Cmd: cameraCommand(plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+1, cameraWarmupTick), Key: "camera-warmup-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+2, cameraLead3Tick), Key: "camera-lead-3s-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+3, cameraLead2Tick), Key: "camera-lead-2s-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+4, cameraLead1Tick), Key: "camera-lead-1s-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+5, cameraLockTick), Key: "camera-lock-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: recordStart + max(1, plan.Tickrate/2), Key: "camera-relock-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
 		)
 		if i == 0 {
 			commands = append(commands,
-				scheduledCommand{Tick: max(seekTarget, s.TickStart-6), Key: "hide-demoui", Cmd: "demoui"},
+				scheduledCommand{Tick: max(seekTarget, recordStart-6), Key: "hide-demoui", Cmd: "demoui"},
 			)
 		}
 
 		if plan.Runtime.HostTimescale > 0 && plan.Runtime.HostTimescale != 1 {
 			commands = append(commands,
 				scheduledCommand{
-					Tick: max(1, s.TickStart-6),
+					Tick: max(1, recordStart-6),
 					Key:  "timescale-up-" + s.ID,
 					Cmd:  fmt.Sprintf("host_timescale %s", formatFloat(plan.Runtime.HostTimescale)),
 				},
@@ -124,7 +129,7 @@ func buildSchedule(plan RecordingPlan) []scheduledCommand {
 		}
 
 		commands = append(commands,
-			scheduledCommand{Tick: s.TickStart, Key: "record-start-" + s.ID, Cmd: "mirv_streams record start"},
+			scheduledCommand{Tick: recordStart, Key: "record-start-" + s.ID, Cmd: "mirv_streams record start"},
 			scheduledCommand{Tick: s.TickEnd, Key: "record-end-" + s.ID, Cmd: "mirv_streams record end"},
 		)
 
@@ -141,20 +146,70 @@ func buildSchedule(plan RecordingPlan) []scheduledCommand {
 		pad = 200
 	}
 	commands = append(commands,
-		scheduledCommand{Tick: lastEnd + pad/2, Key: "disconnect", Cmd: "disconnect"},
-		scheduledCommand{Tick: lastEnd + pad, Key: "quit", Cmd: "quit"},
+		scheduledCommand{Tick: lastEnd + pad/2, Key: "shutdown", Cmd: "disconnect; quit"},
 	)
 	return commands
 }
 
-func cameraCommand(accountID uint32) string {
-	return fmt.Sprintf("spec_player_by_accountid %d; spec_mode 4", accountID)
+func cameraCommand(targetName string, accountID uint32) string {
+	if targetName != "" {
+		target := quoteConsoleArg(targetName)
+		return fmt.Sprintf("spec_autodirector 0; spec_mode 1; spec_player %s; spec_mode 1; spec_player %s", target, target)
+	}
+	return fmt.Sprintf("spec_autodirector 0; spec_mode 1; spec_player_by_accountid %d; spec_player_by_accountid %d", accountID, accountID)
+}
+
+func quoteConsoleArg(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	return `"` + value + `"`
+}
+
+// EffectiveRecordStartTick returns the actual tick where HLAE starts recording
+// a segment after applying recorder camera-settle timing.
+func EffectiveRecordStartTick(segment RecordingSegment, tickrate int) int {
+	if tickrate <= 0 || len(segment.Kills) == 0 {
+		return segment.TickStart
+	}
+	firstKill := firstKillTick(segment)
+	if firstKill <= 0 {
+		return segment.TickStart
+	}
+	latestStart := firstKill - tickrate
+	if latestStart <= segment.TickStart {
+		return segment.TickStart
+	}
+	stabilizedStart := segment.TickStart + tickrate*2
+	if stabilizedStart > latestStart {
+		return latestStart
+	}
+	return stabilizedStart
+}
+
+func effectiveRecordStartTick(segment RecordingSegment, tickrate int) int {
+	return EffectiveRecordStartTick(segment, tickrate)
+}
+
+func firstKillTick(segment RecordingSegment) int {
+	out := 0
+	for _, kill := range segment.Kills {
+		if kill.Tick <= 0 {
+			continue
+		}
+		if out == 0 || kill.Tick < out {
+			out = kill.Tick
+		}
+	}
+	return out
 }
 
 func streamSetupCommands(plan RecordingPlan) []string {
 	recordName := slashPath(plan.OutputDir)
 	recordFPS := fmt.Sprintf("mirv_streams record fps %d", plan.Stream.FPS)
 	commands := []string{
+		"cl_demo_predict 0",
+		"cl_trueview_show_status 0",
+		"mirv_panorama panelstyle panelId=trueview_row opacity=0",
 		fmt.Sprintf(`mirv_streams record name "%s"`, recordName),
 		recordFPS,
 		"mirv_streams record screen enabled 1",

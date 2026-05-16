@@ -19,7 +19,9 @@ Cada segmento crudo de HLAE entra al Effects Composer junto con la metadata de l
 
 ### Zoom tras kill (estilo AWP)
 
-`zoompan` permite zoom dinámico, pero la sintaxis es engorrosa. Para zoom "in-and-out" en un punto temporal preciso, esto suele ser más limpio:
+`zoompan` permite zoom dinámico, pero la sintaxis es engorrosa. En el editor local actual, el primer MVP usa una escala vertical dinámica antes del crop 9:16 para producir un punch-in suave sin cambiar duración/audio.
+
+Para zooms más complejos, esto suele ser más limpio:
 
 ```
 [0:v]split[base][zoom];
@@ -27,7 +29,7 @@ Cada segmento crudo de HLAE entra al Effects Composer junto con la metadata de l
 [base][zoomed]overlay=enable='between(t,5.0,6.0)'[v]
 ```
 
-(Pseudo, hay que afinar curva de easing; en Python con `ffmpeg-python` esto se construye programáticamente.)
+(Pseudo, hay que afinar curva de easing; si el filtergraph crece demasiado, Python con `ffmpeg-python` vuelve a ser una opción razonable.)
 
 ### Flash blanco (post-kill de pistola)
 
@@ -80,10 +82,11 @@ Tres ingredientes:
 
 La música baja automáticamente cuando suena algo fuerte en el juego, y vuelve. Sin trabajo manual.
 
-## Wrapper: `ffmpeg-python` vs subprocess crudo
+## Wrapper: Go subprocess vs `ffmpeg-python`
 
 Trade-off:
+- El editor local actual usa Go + subprocess con filtros generados desde una timeline Lua. Es suficiente para zoom, flash, text y color grade sin cambiar duración/audio.
 - `ffmpeg-python` permite construir el filtergraph como AST → testeable, refactorable.
 - Subprocess + strings es más cercano a los ejemplos de la doc, fácil de copiar y pegar.
 
-Para zackvideo Composer y Mixer: `ffmpeg-python`. Los filtergraphs son largos y se generan dinámicamente según las reglas Lua; tener un AST evita errores de quoting / escapes.
+Para el mixer musical futuro, `ffmpeg-python` sigue siendo candidato si los filtergraphs largos y `librosa` justifican introducir Python.

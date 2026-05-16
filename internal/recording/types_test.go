@@ -18,8 +18,10 @@ func TestAccountIDFromSteamID64(t *testing.T) {
 
 func TestNewPlanFromKillPlan(t *testing.T) {
 	kp := killplan.NewPlan()
+	kp.Demo.Map = "de_ancient"
 	kp.Demo.Tickrate = 64
 	kp.Target.SteamID64 = "76561198148986856"
+	kp.Target.NameInDemo = "MartinezSa"
 	kp.Segments = []killplan.Segment{
 		{ID: "seg-001", TickStart: 22086, TickEnd: 22406},
 	}
@@ -30,6 +32,12 @@ func TestNewPlanFromKillPlan(t *testing.T) {
 	}
 	if plan.TargetAccountID != 188721128 {
 		t.Errorf("TargetAccountID = %d, want 188721128", plan.TargetAccountID)
+	}
+	if plan.DemoMap != "de_ancient" {
+		t.Errorf("DemoMap = %q, want de_ancient", plan.DemoMap)
+	}
+	if plan.TargetNameInDemo != "MartinezSa" {
+		t.Errorf("TargetNameInDemo = %q, want MartinezSa", plan.TargetNameInDemo)
 	}
 	if plan.Stream.Mode != StreamModeFFmpegDirect {
 		t.Errorf("Stream.Mode = %q, want %q", plan.Stream.Mode, StreamModeFFmpegDirect)

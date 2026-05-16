@@ -31,8 +31,10 @@
 
 **Resumen del rol de cada lenguaje:**
 - **Go (core):** orquestador, parser, recording driver controller.
-- **Python (media):** composer, mixer, encoder.
-- **Lua (scripting):** scripts HLAE + reglas de efectos.
+- **Go (media local):** editor local 9:16 + Lua effects embebido con `gopher-lua`.
+- **Python (media futuro):** mixer/beat sync/encoder avanzado si librosa o filtergraphs complejos lo justifican.
+- **Lua (scripting):** reglas de efectos de post-procesado.
+- **JavaScript (HLAE):** carrier generado para `mirv_script_load` en HLAE 2.x.
 - **TypeScript (UI):** Next.js frontend.
 - **C++:** fuera del V1.
 
@@ -84,10 +86,10 @@ El usuario habla de "programar una IA" para los efectos. Hay dos interpretacione
 Frontend ............ Next.js 15 + Tailwind 4
 Orquestador ......... Go (chi + sqlx + asynq)              ← decidido
 Demo Parser ......... Go (demoinfocs-golang)               ← decidido
-Recording Driver .... Go controller + Lua scripts de HLAE (en Windows worker)
-Effects Composer .... Python (ffmpeg-python + lupa para Lua rules)
-Music Mixer ......... Python (librosa + ffmpeg-python)
-Encoder ............. Python (ffmpeg-python)
+Recording Driver .... Go controller + JavaScript generado para HLAE (Windows)
+Effects Composer .... Go local editor + gopher-lua + FFmpeg
+Music Mixer ......... Python futuro (librosa + FFmpeg) o Go si no hace falta librosa
+Encoder ............. FFmpeg desde el editor/composer local
 DB .................. PostgreSQL
 Object Storage ...... MinIO en el VPS (S3-compatible)
 Cola ................ Redis + Asynq
@@ -97,4 +99,4 @@ Deploy .............. VPS Linux del usuario (services Linux)
 
 **C++ queda fuera del V1 explícitamente.** Razones: ningún componente del pipeline lo requiere y empujarlo añade fricción sin beneficio medible. Si el usuario quiere preservar la preferencia, el orquestador es el candidato más razonable para reescribir en C++ más adelante, pero no V1.
 
-**Lua sí está presente** en dos lugares: scripts de HLAE (es el camino oficial vía `mirv_script_load`) y las reglas de efectos visuales del composer (lupa). Eso respeta la mitad "scripting" del stack preferido del usuario.
+**Lua sí está presente** en las reglas de efectos visuales del composer/editor. HLAE 2.x quedó validado con Boa JavaScript para `mirv_script_load`; por tanto, el carrier de grabación es JS generado desde Go, no Lua.

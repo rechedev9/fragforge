@@ -6,7 +6,7 @@
 |------------------------------------|-----------------------------------------------|----------------------------------------------|
 | Calidad de frame                   | Determinista, sin drops (renderiza on-demand) | Captura en tiempo real, susceptible a drops  |
 | Latencia / overhead                | Bajo (mismo proceso del juego)                | Captura externa (DXGI / NVENC)               |
-| Control programático               | Vía `mirv_cmd` / script Lua + CLI args        | API WebSocket bien definida desde cualquier lenguaje |
+| Control programático               | Vía JavaScript HLAE 2.x + CLI args            | API WebSocket bien definida desde cualquier lenguaje |
 | Soporte multi-escena / overlays    | No                                            | Sí                                            |
 | Ecosistema / ejemplos              | Limitado pero específico de CS                | Enorme (streaming, gaming)                    |
 | Plataforma                         | Solo Windows (HLAE)                           | Solo Windows en la práctica (OBS multiplataforma pero CS2/HLAE no) |
@@ -52,7 +52,7 @@ Razones:
 ┌─────────────────────────────────────────────────────────────┐
 │  Recording Driver (Go)                                      │
 │    1. Descarga .dem desde object storage                    │
-│    2. Genera script Lua por segmento (templating)           │
+│    2. Genera script JavaScript HLAE por segmento             │
 │    3. Lanza HLAE.exe con -cmdLine "...mirv_script_load..."  │
 │    4. Espera a que HLAE termine (mirv_cmd quit)             │
 │    5. Sube .mp4 resultante por segmento                     │
@@ -60,7 +60,7 @@ Razones:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Modo "una sesión, varios segmentos":** un solo script Lua agrega todos los segmentos del kill plan con seeks intermedios entre cada uno. CS2 carga el mapa una vez, lo que ahorra 30–60s por segmento. **A validar en prototipo:** que `mirv_streams record end` cierre el archivo, y que un `start` posterior no corrompa nada.
+**Modo "una sesión, varios segmentos":** un solo script JavaScript agrega todos los segmentos del kill plan con seeks intermedios entre cada uno. CS2 carga el mapa una vez, lo que ahorra 30–60s por segmento. **Validado en prototipo:** `mirv_streams record end` cierra cada take y un `start` posterior genera el siguiente take.
 
 ## Throughput estimado
 

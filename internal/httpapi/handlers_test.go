@@ -310,6 +310,28 @@ func TestStartRecordingRejectsJobWithoutPlan(t *testing.T) {
 	}
 }
 
+func TestStartRecordingAllowsIdempotentRetryWhenRecorded(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/record", h.StartRecording)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
+	}
+}
+
 func TestStartCompositionEnqueuesComposeTaskWhenRecorded(t *testing.T) {
 	repo := newFakeRepo()
 	queue := &fakeQueue{}
@@ -331,6 +353,27 @@ func TestStartCompositionEnqueuesComposeTaskWhenRecorded(t *testing.T) {
 	}
 	if queue.enqueued[0].Type() != tasks.TypeComposeFinal {
 		t.Fatalf("task type = %q, want %q", queue.enqueued[0].Type(), tasks.TypeComposeFinal)
+	}
+}
+
+func TestStartCompositionAllowsIdempotentRetryWhenComposed(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusComposed, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/compose", h.StartComposition)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/compose", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
 	}
 }
 

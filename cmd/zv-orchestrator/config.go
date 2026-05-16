@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -30,6 +29,7 @@ func loadConfig() (config, error) {
 		DatabaseURL:  os.Getenv("ZV_DATABASE_URL"),
 		RedisAddr:    envOr("ZV_REDIS_ADDR", "localhost:6379"),
 		DataDir:      envOr("ZV_DATA_DIR", "./data"),
+		MediaWorkDir: os.Getenv("ZV_MEDIA_WORK_DIR"),
 		RecorderPath: os.Getenv("ZV_RECORDER_PATH"),
 		ComposerPath: os.Getenv("ZV_COMPOSER_PATH"),
 		HLAEPath:     os.Getenv("ZV_HLAE_PATH"),
@@ -39,7 +39,6 @@ func loadConfig() (config, error) {
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
 	}
-	c.MediaWorkDir = envOr("ZV_MEDIA_WORK_DIR", filepath.Join(c.DataDir, "work"))
 
 	concRaw := envOr("ZV_WORKER_CONCURRENCY", "2")
 	conc, err := strconv.Atoi(concRaw)

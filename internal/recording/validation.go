@@ -40,7 +40,8 @@ func ValidateArtifacts(plan RecordingPlan, artifacts []RecordingArtifact) []stri
 		if !hasArtifact(items, "segment", "video") {
 			warnings = append(warnings, fmt.Sprintf("segment %s missing muxed clip", s.ID))
 		}
-		expected := float64(s.TickEnd-s.TickStart) / float64(plan.Tickrate)
+		recordStart := EffectiveRecordStartTick(s, plan.Tickrate)
+		expected := float64(s.TickEnd-recordStart) / float64(plan.Tickrate)
 		for _, a := range items {
 			if a.Type != "video" || a.DurationSeconds <= 0 {
 				continue

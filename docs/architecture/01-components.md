@@ -77,9 +77,9 @@ Ver detalles en [`research/01-demo-parsing.md`](../research/01-demo-parsing.md).
 
 - **HLAE Controller:** lanza CS2 con HLAE inyectado y `mirv_script_load` apuntando al script de control. Pasa por CLI:
   - Ruta a `.dem`
-  - Ruta al script Lua del segmento
+  - Ruta al script JavaScript generado para HLAE 2.x
   - Carpeta de salida
-- **Script Lua por segmento:** usa `mirv_cmd` para programar a ticks específicos:
+- **Script JavaScript generado:** usa el callback de frame de HLAE 2.x para programar comandos a ticks específicos:
   - `demo_gototick <start>`
   - `spec_player_by_accountid <target>` (cámara fija al jugador)
   - `mirv_streams record start` al entrar al rango de la kill
@@ -115,7 +115,7 @@ end)
 
 **Output:** clip con efectos aplicados (sin música todavía).
 
-**Implementación:** Python + ffmpeg-python o un wrapper sobre `ffmpeg` CLI. El motor Lua se embebe (lupa para Python) para evaluar las reglas. Ver [`research/04-post-processing.md`](../research/04-post-processing.md).
+**Implementación local actual:** `zv-editor` en Go evalúa reglas Lua con `gopher-lua` y construye filtros FFmpeg. Python queda reservado para música/beat sync o filtergraphs más complejos si hacen falta. Ver [`research/04-post-processing.md`](../research/04-post-processing.md).
 
 ## 6. Music Mixer
 

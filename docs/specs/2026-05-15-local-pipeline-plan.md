@@ -95,8 +95,25 @@ Result:
   - `POST /api/jobs/{id}/record`
   - `POST /api/jobs/{id}/compose`
   - `GET /api/jobs/{id}/final`
+- Migration state:
+  - `001_jobs.up.sql` remains the fresh schema and already includes media
+    statuses.
+  - `002_job_status_media.up.sql` upgrades databases that were created before
+    the media statuses existed.
+- Windows smoke:
+  - `scripts/smoke-real.ps1` validates API -> parse -> record -> compose ->
+    download with the real workers.
+  - The script requires `ZV_DATABASE_URL`, `ZV_RECORDER_PATH`, `ZV_HLAE_PATH`,
+    `ZV_CS2_PATH`, and `ZV_COMPOSER_PATH`.
+  - It retries `record` after `recorded` and `compose` after `composed` to
+    verify idempotent artifact skips.
+- Cleanup policy:
+  - When `ZV_MEDIA_WORK_DIR` is unset, record/compose workdirs are temporary
+    and are deleted at task completion.
+  - When `ZV_MEDIA_WORK_DIR` is set, workdirs are preserved for debugging.
+  - Durable storage keeps `recording-result.json`, `recording.js`,
+    `segments/*.mp4`, `composition-result.json`, and `final.mp4`.
 
 ## Remaining Work
 
-- Add cleanup policy for raw takes after final delivery.
 - Add effects/music/overlays between segment mux and final concat.

@@ -16,8 +16,8 @@ func TestLoadConfigAllowsParserOnlyMode(t *testing.T) {
 	if cfg.composeWorkerEnabled() {
 		t.Fatal("compose worker enabled, want disabled")
 	}
-	if cfg.MediaWorkDir != "data\\work" && cfg.MediaWorkDir != "data/work" {
-		t.Fatalf("MediaWorkDir = %q, want data/work", cfg.MediaWorkDir)
+	if cfg.MediaWorkDir != "" {
+		t.Fatalf("MediaWorkDir = %q, want empty default for temp cleanup", cfg.MediaWorkDir)
 	}
 }
 

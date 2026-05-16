@@ -209,7 +209,7 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if j.Status != job.StatusParsed || j.KillPlan == nil {
+	if (j.Status != job.StatusParsed && j.Status != job.StatusRecorded) || j.KillPlan == nil {
 		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to record (status=%s)", j.Status))
 		return
 	}
@@ -218,7 +218,7 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "building task: "+err.Error())
 		return
 	}
-	if _, err := h.queue.Enqueue(task); err != nil {
+	if _, err := h.queue.Enqueue(task, asynq.MaxRetry(0)); err != nil {
 		writeError(w, http.StatusInternalServerError, "enqueueing task: "+err.Error())
 		return
 	}
@@ -234,7 +234,7 @@ func (h *Handlers) StartComposition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if j.Status != job.StatusRecorded {
+	if j.Status != job.StatusRecorded && j.Status != job.StatusComposed {
 		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to compose (status=%s)", j.Status))
 		return
 	}

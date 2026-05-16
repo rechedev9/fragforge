@@ -92,14 +92,17 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusRecording, ""); err != nil {
 		return fmt.Errorf("mark recording: %w", err)
 	}
+	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecording)
 
 	if err := w.record(ctx, j); err != nil {
 		_ = w.repo.UpdateStatus(ctx, j.ID, job.StatusFailed, err.Error())
+		logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusFailed)
 		return err
 	}
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusRecorded, ""); err != nil {
 		return fmt.Errorf("mark recorded: %w", err)
 	}
+	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecorded)
 	return nil
 }
 
@@ -107,11 +110,12 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job) error {
 	if j.KillPlan == nil {
 		return fmt.Errorf("job %s has no kill plan", j.ID)
 	}
-	ready, err := recordingOutputsReady(w.storage, j.ID)
+	ready, keys, err := recordingOutputsReady(w.storage, j.ID)
 	if err != nil {
 		return err
 	}
 	if ready {
+		logWorkerSkip(j.ID, tasks.TypeRecordDemo, keys)
 		return nil
 	}
 
@@ -153,9 +157,11 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job) error {
 		}
 		return fmt.Errorf("read recording result: %w", err)
 	}
-	if err := uploadRecordingOutputs(w.storage, j.ID, outDir, resultPath, result); err != nil {
+	keys, err = uploadRecordingOutputs(w.storage, j.ID, outDir, resultPath, result)
+	if err != nil {
 		return err
 	}
+	logWorkerArtifacts(j.ID, tasks.TypeRecordDemo, keys)
 	if runErr != nil {
 		return runErr
 	}
@@ -217,23 +223,27 @@ func (w *ComposeWorker) HandleComposeFinal(ctx context.Context, t *asynq.Task) e
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusComposing, ""); err != nil {
 		return fmt.Errorf("mark composing: %w", err)
 	}
+	logWorkerTransition(j.ID, tasks.TypeComposeFinal, job.StatusComposing)
 
 	if err := w.compose(ctx, j); err != nil {
 		_ = w.repo.UpdateStatus(ctx, j.ID, job.StatusFailed, err.Error())
+		logWorkerTransition(j.ID, tasks.TypeComposeFinal, job.StatusFailed)
 		return err
 	}
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusComposed, ""); err != nil {
 		return fmt.Errorf("mark composed: %w", err)
 	}
+	logWorkerTransition(j.ID, tasks.TypeComposeFinal, job.StatusComposed)
 	return nil
 }
 
 func (w *ComposeWorker) compose(ctx context.Context, j job.Job) error {
-	ready, err := compositionOutputsReady(w.storage, j.ID)
+	ready, keys, err := compositionOutputsReady(w.storage, j.ID)
 	if err != nil {
 		return err
 	}
 	if ready {
+		logWorkerSkip(j.ID, tasks.TypeComposeFinal, keys)
 		return nil
 	}
 
@@ -291,6 +301,10 @@ func (w *ComposeWorker) compose(ctx context.Context, j job.Job) error {
 	if err := uploadFile(w.storage, artifacts.FinalMP4Key(j.ID), finalPath); err != nil {
 		return fmt.Errorf("upload final mp4: %w", err)
 	}
+	logWorkerArtifacts(j.ID, tasks.TypeComposeFinal, []string{
+		artifacts.CompositionResultKey(j.ID),
+		artifacts.FinalMP4Key(j.ID),
+	})
 	return nil
 }
 
@@ -361,27 +375,34 @@ func uploadFile(store storage.Storage, key, path string) error {
 	return store.Put(key, f)
 }
 
-func uploadOptionalFile(store storage.Storage, key, path string) error {
+func uploadOptionalFile(store storage.Storage, key, path string) (bool, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
-	return uploadFile(store, key, path)
+	return true, uploadFile(store, key, path)
 }
 
-func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultPath string, result recording.RecordingResult) error {
+func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultPath string, result recording.RecordingResult) ([]string, error) {
+	keys := []string{artifacts.RecordingResultKey(id)}
 	if err := uploadFile(store, artifacts.RecordingResultKey(id), resultPath); err != nil {
-		return fmt.Errorf("upload recording result: %w", err)
+		return nil, fmt.Errorf("upload recording result: %w", err)
 	}
 
 	scriptPath := result.Script
 	if scriptPath == "" {
 		scriptPath = filepath.Join(outDir, "recording.js")
 	}
-	if err := uploadOptionalFile(store, artifacts.RecordingScriptKey(id), scriptPath); err != nil {
-		return fmt.Errorf("upload recording script: %w", err)
+	uploadedScript, err := uploadOptionalFile(store, artifacts.RecordingScriptKey(id), scriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("upload recording script: %w", err)
+	}
+	if uploadedScript {
+		keys = append(keys, artifacts.RecordingScriptKey(id))
+	} else if result.Error == "" {
+		return nil, fmt.Errorf("recording script not found at %s", scriptPath)
 	}
 
 	uploadedSegments := 0
@@ -391,17 +412,18 @@ func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultP
 		}
 		key, err := artifacts.SegmentClipKey(id, artifact.SegmentID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := uploadFile(store, key, artifact.Path); err != nil {
-			return fmt.Errorf("upload segment %s: %w", artifact.SegmentID, err)
+			return nil, fmt.Errorf("upload segment %s: %w", artifact.SegmentID, err)
 		}
+		keys = append(keys, key)
 		uploadedSegments++
 	}
 	if result.Error == "" && uploadedSegments == 0 {
-		return fmt.Errorf("recording result has no segment clips")
+		return nil, fmt.Errorf("recording result has no segment clips")
 	}
-	return nil
+	return keys, nil
 }
 
 func decodeStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.RecordingResult, error) {
@@ -429,15 +451,24 @@ func readStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.R
 	return result, nil
 }
 
-func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, error) {
-	exists, err := store.Exists(artifacts.RecordingResultKey(id))
+func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string, error) {
+	resultKey := artifacts.RecordingResultKey(id)
+	exists, err := store.Exists(resultKey)
 	if err != nil || !exists {
-		return false, err
+		return false, nil, err
 	}
 	result, err := decodeStoredRecordingResult(store, id)
 	if err != nil || result.Error != "" {
-		return false, err
+		return false, nil, err
 	}
+
+	scriptKey := artifacts.RecordingScriptKey(id)
+	scriptExists, err := store.Exists(scriptKey)
+	if err != nil || !scriptExists {
+		return false, nil, err
+	}
+
+	keys := []string{resultKey, scriptKey}
 	segments := 0
 	for _, artifact := range result.Artifacts {
 		if artifact.Role != "segment" || artifact.Type != "video" || artifact.SegmentID == "" {
@@ -445,37 +476,43 @@ func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, error) {
 		}
 		key, err := artifacts.SegmentClipKey(id, artifact.SegmentID)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		exists, err := store.Exists(key)
 		if err != nil || !exists {
-			return false, err
+			return false, nil, err
 		}
+		keys = append(keys, key)
 		segments++
 	}
-	return segments > 0, nil
+	return segments > 0, keys, nil
 }
 
-func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, error) {
-	resultExists, err := store.Exists(artifacts.CompositionResultKey(id))
+func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string, error) {
+	resultKey := artifacts.CompositionResultKey(id)
+	finalKey := artifacts.FinalMP4Key(id)
+	resultExists, err := store.Exists(resultKey)
 	if err != nil || !resultExists {
-		return false, err
+		return false, nil, err
 	}
-	finalExists, err := store.Exists(artifacts.FinalMP4Key(id))
+	finalExists, err := store.Exists(finalKey)
 	if err != nil || !finalExists {
-		return false, err
+		return false, nil, err
 	}
 
-	rc, err := store.Open(artifacts.CompositionResultKey(id))
+	rc, err := store.Open(resultKey)
 	if err != nil {
-		return false, fmt.Errorf("open composition result: %w", err)
+		return false, nil, fmt.Errorf("open composition result: %w", err)
 	}
 	defer rc.Close()
 	var result composition.Result
 	if err := json.NewDecoder(rc).Decode(&result); err != nil {
-		return false, fmt.Errorf("decode composition result: %w", err)
+		return false, nil, fmt.Errorf("decode composition result: %w", err)
 	}
-	return result.Error == "", nil
+	if result.Error != "" {
+		return false, nil, nil
+	}
+	return true, []string{resultKey, finalKey}, nil
 }
 
 func localizeSegmentClips(store storage.Storage, id uuid.UUID, workDir string, result *recording.RecordingResult) error {

@@ -147,6 +147,7 @@ func TestRecordWorkerSkipsWhenOutputsAlreadyExist(t *testing.T) {
 		KillPlan: &plan,
 	}
 	putJSON(t, store, artifacts.RecordingResultKey(id), recordingResultWithSegment("", "stale-local.mp4"))
+	_ = store.Put(artifacts.RecordingScriptKey(id), bytes.NewReader([]byte("script")))
 	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
 
 	runner := &fakeRunner{fn: func(context.Context, string, ...string) ([]byte, error) {
@@ -164,6 +165,37 @@ func TestRecordWorkerSkipsWhenOutputsAlreadyExist(t *testing.T) {
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("runner calls = %d, want 0", len(runner.calls))
+	}
+}
+
+func TestPrepareStageDirCleansTempWorkDirWhenRootEmpty(t *testing.T) {
+	dir, cleanup, err := prepareStageDir("", uuid.New(), "record")
+	if err != nil {
+		t.Fatalf("prepareStageDir error = %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("work dir not created: %v", err)
+	}
+
+	cleanup()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("work dir still exists after cleanup, err=%v", err)
+	}
+}
+
+func TestPrepareStageDirKeepsExplicitWorkDir(t *testing.T) {
+	root := t.TempDir()
+	dir, cleanup, err := prepareStageDir(root, uuid.New(), "record")
+	if err != nil {
+		t.Fatalf("prepareStageDir error = %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("work dir not created: %v", err)
+	}
+
+	cleanup()
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("explicit work dir removed, err=%v", err)
 	}
 }
 

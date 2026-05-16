@@ -8,6 +8,26 @@
 
 **Tech Stack:** Go 1.26 · chi v5 (HTTP router) · pgx/v5 (Postgres driver) · hibiken/asynq (Redis-backed job queue) · golang-migrate (CLI, run once per dev) · existing `internal/parser` for demo logic.
 
+## Current media-flow addendum
+
+The orchestrator now covers the media stages as well as parsing:
+
+- Status enum values are `queued`, `parsing`, `parsed`, `recording`,
+  `recorded`, `composing`, `composed`, `done`, and `failed`.
+- `001_jobs.up.sql` is the fresh schema. `002_job_status_media.up.sql` exists
+  for databases migrated before media statuses were added; its down migration is
+  a documented no-op because PostgreSQL enum values are not safely reversible.
+- `scripts/smoke-real.ps1` is the Windows smoke for API -> parse -> record ->
+  compose -> download with real workers. It checks required media env vars,
+  starts Postgres/Redis through Docker Compose when available, retries manual
+  `record` and `compose` calls to exercise idempotent skips, and downloads the
+  final MP4.
+- Media workdirs are deleted after each task when `ZV_MEDIA_WORK_DIR` is unset.
+  Set `ZV_MEDIA_WORK_DIR` to preserve them for debugging.
+- Durable artifacts are `recording-result.json`, `recording.js`,
+  `segments/*.mp4`, `composition-result.json`, and `final.mp4` under
+  `jobs/{id}/...`.
+
 ---
 
 ## Slice scope

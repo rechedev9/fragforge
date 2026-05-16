@@ -8,6 +8,7 @@ require (
 	github.com/hibiken/asynq v0.26.0
 	github.com/jackc/pgx/v5 v5.7.1
 	github.com/markus-wa/demoinfocs-golang/v5 v5.2.0
+	github.com/yuin/gopher-lua v1.1.2
 )
 
 require (
