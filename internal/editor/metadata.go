@@ -44,6 +44,7 @@ func discoverKillPlanPath(recordingResultPath string) (string, error) {
 	recordingDir := filepath.Dir(recordingResultPath)
 	runDir := filepath.Dir(recordingDir)
 	pipelinePath := filepath.Join(runDir, "pipeline-result.json")
+	// #nosec G304 -- pipelinePath is derived from the recording result's local run directory.
 	if b, err := os.ReadFile(pipelinePath); err == nil {
 		var ref pipelineResultRef
 		if err := json.Unmarshal(b, &ref); err != nil {
@@ -69,6 +70,7 @@ func discoverKillPlanPath(recordingResultPath string) (string, error) {
 }
 
 func readKillPlan(path string) (killplan.Plan, error) {
+	// #nosec G304 -- kill plan path is an explicit local CLI/config input.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return killplan.Plan{}, err

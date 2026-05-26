@@ -119,10 +119,10 @@ func TestSegmentMinKillsInWindowDropsSingleKillSegments(t *testing.T) {
 	r.MinKillsInWindow = 2
 
 	kills := []RawKill{
-		mkKill(10000, 5, "awp"),                       // alone
-		mkKill(20000, 6, "awp"),                       // start of a pair...
-		mkKill(20000+2*testTickrate, 6, "awp"),        // ...with this one
-		mkKill(40000, 7, "awp"),                       // alone
+		mkKill(10000, 5, "awp"),                // alone
+		mkKill(20000, 6, "awp"),                // start of a pair...
+		mkKill(20000+2*testTickrate, 6, "awp"), // ...with this one
+		mkKill(40000, 7, "awp"),                // alone
 	}
 	got := Segment(kills, nil, r, testTickrate)
 	if len(got) != 1 {

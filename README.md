@@ -1,14 +1,19 @@
 # zackvideo
 
-Pipeline for generating CS2 highlight clips from `.dem` files. See [`docs/README.md`](./docs/README.md) for design docs.
+Pipeline for generating CS2 highlight clips from `.dem` files. See
+[`docs/README.md`](./docs/README.md) for design docs and
+[`docs/toolchain.md`](./docs/toolchain.md) for the external tools used by the
+local capture/edit workflow.
 
 ## Status
 
+- ✅ `zv` unified CLI façade for local workflows and agent skills
 - ✅ `zv-parser` CLI: demo → kill plan JSON
 - ✅ `zv-recorder` local HLAE/CS2 recording CLI
 - ✅ `zv-composer` local concat composer
 - ✅ `zv-editor` local 9:16 shorts editor
 - ✅ Local Lua effects scripting for `zv-editor`
+- ✅ Smoke-lineup segment mode and Lua annotations for utility clips
 - ✅ `zv-pipeline` local recorder → composer runner
 - ✅ `zv-orchestrator` HTTP API + Asynq parser/media workers
 - ✅ Minimal media workdir cleanup policy
@@ -16,7 +21,9 @@ Pipeline for generating CS2 highlight clips from `.dem` files. See [`docs/README
 
 ## Quick start (local development)
 
-Requires Go 1.26+, Docker, and Make.
+Requires Go 1.26+. The orchestrator also needs Docker for local Postgres and
+Redis. Unix-like shells can use `make`; on Windows, use the PowerShell scripts
+under `scripts/`.
 
 ```bash
 # 1. Bring up Postgres + Redis
@@ -44,7 +51,13 @@ export ZV_DATA_DIR="./data"
 make build
 
 # 4. Run the orchestrator
-./bin/zv-orchestrator
+./bin/zv serve
+```
+
+On Windows:
+
+```powershell
+.\scripts\build.ps1
 ```
 
 In another terminal:
@@ -109,22 +122,156 @@ If `ZV_MEDIA_WORK_DIR` is unset, media workers use temporary workdirs and delete
 them when a task finishes. If `ZV_MEDIA_WORK_DIR` is set, workdirs are preserved
 for debugging.
 
+### Cleaning local artifacts
+
+Local edit experiments can create multiple `shorts*` directories under a run.
+Use the cleanup script to keep the current realistic baseline and remove
+regenerable variants:
+
+```powershell
+# Preview only; prints targets and estimated space.
+.\scripts\cleanup-artifacts.ps1
+
+# Delete verified `shorts*` variants except the natural HQ baselines.
+.\scripts\cleanup-artifacts.ps1 -Apply
+```
+
+By default this targets
+`data\tries\faceit-288b1d33-martinez\run-004`, preserves `recording/`, root
+run files such as `final.mp4`, `shorts-natural-hq-full`, and
+`shorts-natural-hq2-full`. Pass `-RunDir` and comma-separated `-KeepShortsDir`
+values to clean another local run.
+
 ## Standalone CLI
 
-`zv-parser` parses a demo without the orchestrator:
+`zv` is the preferred local entrypoint. It keeps the older focused binaries
+available, but gives humans, scripts, and Codex skills one stable command tree:
 
 ```bash
-./bin/zv-parser parse \
+./bin/zv demo parse --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json
+./bin/zv demo players --demo testdata/foo.dem
+./bin/zv utility audit --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
+./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
+./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
+./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
+./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
+./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json
+./bin/zv gallery open --path data/runs/run-004/shorts/publish/index.html
+./bin/zv check
+./bin/zv check --format json
+./bin/zv serve
+./bin/zv pipeline --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/pipeline --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
+./bin/zv skills list
+./bin/zv skills show zackvideo-cs2-utility-shorts
+./bin/zv skills show zackvideo-lineup-audit
+./bin/zv skills show zackvideo-youtube-shorts-publish
+./bin/zv skills check
+./bin/zv skills list --format json
+./bin/zv skills show zackvideo-cs2-utility-shorts --format json
+./bin/zv skills show zackvideo-lineup-audit --format json
+./bin/zv skills show zackvideo-youtube-shorts-publish --format json
+./bin/zv skills check --format json
+./bin/zv workflows list
+./bin/zv workflows list --format json
+./bin/zv workflows show demo-parse
+./bin/zv workflows show demo-parse --format json
+./bin/zv workflows show demo-players
+./bin/zv workflows show demo-players --format json
+./bin/zv workflows show utility-audit
+./bin/zv workflows show utility-audit --format json
+./bin/zv workflows show record
+./bin/zv workflows show record --format json
+./bin/zv workflows show compose-final
+./bin/zv workflows show compose-final --format json
+./bin/zv workflows show shorts-render
+./bin/zv workflows show shorts-render --format json
+./bin/zv workflows show analysis-tactical-data
+./bin/zv workflows show analysis-tactical-data --format json
+./bin/zv workflows show analysis-viewer
+./bin/zv workflows show analysis-viewer --format json
+./bin/zv workflows show gallery-open
+./bin/zv workflows show gallery-open --format json
+./bin/zv workflows show serve
+./bin/zv workflows show serve --format json
+./bin/zv workflows show pipeline
+./bin/zv workflows show pipeline --format json
+./bin/zv workflows show skills-check
+./bin/zv workflows show skills-check --format json
+./bin/zv workflows show workflows-check
+./bin/zv workflows show workflows-check --format json
+./bin/zv workflows show project-check
+./bin/zv workflows show project-check --format json
+./bin/zv workflows run demo-parse -- --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json
+./bin/zv workflows run demo-players -- --demo testdata/foo.dem
+./bin/zv workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
+./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
+./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
+./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
+./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
+./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json
+./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts/publish/index.html
+./bin/zv workflows run serve
+./bin/zv workflows run pipeline -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/pipeline --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
+./bin/zv workflows run skills-check
+./bin/zv workflows run skills-check -- --format json
+./bin/zv workflows run workflows-check
+./bin/zv workflows run workflows-check -- --format json
+./bin/zv workflows run project-check
+./bin/zv workflows run project-check -- --format json
+./bin/zv workflows check
+./bin/zv workflows check --format json
+```
+
+`zv check` is the one-command project contract for skills, workflow catalog,
+and current workflow docs. `zv skills list`, `zv skills show <name>`, `zv skills check`,
+`zv workflows list`, and `zv workflows show <name>` accept `--format json`
+when a script or skill needs machine-readable output. `zv workflows run <name>`
+executes a cataloged workflow through the same canonical command tree. Workflow
+JSON includes both `command` and `run_command` so automation can display the
+canonical direct command while executing the standard workflow entrypoint. `zv
+check --format json` returns the combined skills/workflows/docs contract
+result. `zv workflows check` remains available as the workflow-scoped spelling.
+
+Repo-local skills currently exposed through `zv skills`:
+
+- `zackvideo-cs2-utility-shorts`
+- `zackvideo-lineup-audit`
+- `zackvideo-youtube-shorts-publish`
+
+Legacy binaries remain supported through pass-through commands such as
+`zv parser`, `zv editor`, `zv recorder`, `zv composer`, and `zv orchestrator`.
+
+`zv demo parse` parses a demo without the orchestrator:
+
+```bash
+./bin/zv demo parse \
   --demo testdata/foo.dem \
   --steamid 76561198000000000 \
   --rules testdata/example.rules.json \
   --out plan.json --verbose
 ```
 
-`zv-editor` generates one clean 9:16 short per recorded segment:
+To list demo participants and find SteamID64 values for targeting:
 
 ```bash
-./bin/zv-editor \
+./bin/zv demo players \
+  --demo testdata/foo.dem
+```
+
+To create one segment per target-player smoke throw instead of kill windows:
+
+```bash
+./bin/zv demo parse \
+  --demo testdata/foo.dem \
+  --steamid 76561198000000000 \
+  --segment-mode smokes \
+  --out plan-smokes.json --verbose
+```
+
+`zv shorts render` generates one clean 9:16 short per recorded segment:
+
+```bash
+./bin/zv shorts render \
   --recording-result data/runs/run-004/recording/recording-result.json \
   --killplan data/runs/plan.json \
   --out data/runs/run-004/shorts
@@ -132,15 +279,29 @@ for debugging.
 
 When `--killplan` is omitted, `zv-editor` tries to discover it from
 `pipeline-result.json` next to the recording run. The editor also writes a
-publish pack under `shorts/publish/` with clean MP4 filenames, English caption
-files, local gameplay cover JPGs, `pack-manifest.json`, and an `index.html`
-review gallery. Use `--no-covers` to skip JPG cover extraction. Use `--dry-run`
-to write the planned manifests, captions, FFmpeg commands, cover paths, and GPT
-Image cover prompts without rendering or publishing videos.
+YouTube Shorts upload pack under `shorts/publish/` with clean MP4 filenames,
+English caption files, local gameplay cover JPGs, `pack-manifest.json`, and an
+`index.html` review gallery. Rendered shorts are checked as 1080x1920 H.264
+60fps MP4s and warned if they exceed the current Shorts length limit of 180s.
+Use `--no-covers` to skip JPG cover extraction. Use `--dry-run` to write the
+planned manifests, captions, FFmpeg commands, cover paths, and GPT Image cover
+prompts without rendering or publishing videos.
 Use `--skip-existing` to reuse already rendered MP4/JPG files, and
 `--open-gallery` to open `shorts/publish/index.html` after a successful run.
 The gallery includes local search/filter controls and copy buttons for titles
 and captions; `publish-summary.md` gives a compact upload table.
+The default x264 encode is `--video-crf 18 --video-preset fast`. For a larger,
+cleaner local master, use a lower CRF and slower preset, for example
+`--video-crf 16 --video-preset slow`.
+Use `--preset natural-hq` for the preferred realistic export: no scripted
+effects, x264 CRF 16, and x264 preset `slow`.
+Use `--preset natural-hq2` for the current saved/recommended realistic export:
+no scripted effects, x264 CRF 16, x264 preset `slow`, Lanczos scaling,
+square-pixel normalization, audio loudness normalization, black/freeze quality
+checks, and cover contact sheets.
+`natural-hq3` and `natural-hq3-smooth` remain experimental comparison presets;
+`natural-hq2` is the baseline to keep unless a future comparison clearly beats
+it.
 
 By default, `zv-editor` applies the built-in Lua effects preset that reproduces
 the clean local look: subtle kill punch-ins and text labels. Use
@@ -149,7 +310,7 @@ use `--effects-preset none` for a base vertical crop without scripted effects;
 or pass a custom Lua script with `--effects`:
 
 ```bash
-./bin/zv-editor \
+./bin/zv shorts render \
   --recording-result data/runs/run-004/recording/recording-result.json \
   --out data/runs/run-004/shorts-awpgod \
   --effects-preset awpgod \
@@ -161,12 +322,68 @@ you want to tweak the Lua directly.
 
 Lua effects run in the post-processing editor, not in HLAE. HLAE recording
 still uses generated JavaScript. The current local Lua DSL exposes
-`on_segment`, `on_kill`, `zoom`, `flash`, `text`, and `grade`.
+`on_segment`, `on_kill`, `on_smoke`, `zoom`, `flash`, `text`, and `grade`.
+Scripts run in a local sandbox with filesystem/process modules disabled, and
+each short's Lua evaluation is capped so a bad loop cannot hang the editor.
+
+For the current natural baseline:
+
+```bash
+./bin/zv shorts render \
+  --recording-result data/runs/run-004/recording/recording-result.json \
+  --out data/runs/run-004/shorts-natural-hq \
+  --preset natural-hq
+```
+
+For the saved HQ2 baseline:
+
+```bash
+./bin/zv shorts render \
+  --recording-result data/runs/run-004/recording/recording-result.json \
+  --out data/runs/run-004/shorts-natural-hq2 \
+  --preset natural-hq2
+```
+
+For smoke-lineup clips, parse with `--segment-mode smokes`, record the emitted
+segments, then render with the educational preset. The preset keeps the
+`natural-hq2` encode/features baseline and adds only restrained text overlays:
+
+```bash
+./bin/zv shorts render \
+  --recording-result data/runs/run-004/recording/recording-result.json \
+  --killplan data/runs/plan-smokes.json \
+  --out data/runs/run-004/shorts-smoke-lineups \
+  --preset smoke-lineups \
+  --lineup-catalog data/lineups
+```
+
+Lineup destinations come from manual JSON catalogs such as
+`data/lineups/de_ancient.smokes.json`. If a smoke landing does not match the
+catalog, the editor still creates the clip, labels it as unmatched, and writes
+`unmatched-smokes.json` under the output directory for review.
+
+For an experimental HQ3 comparison:
+
+```bash
+./bin/zv shorts render \
+  --recording-result data/runs/run-004/recording/recording-result.json \
+  --out data/runs/run-004/shorts-natural-hq3 \
+  --preset natural-hq3
+```
+
+For an experimental smoother-motion HQ3 comparison:
+
+```bash
+./bin/zv shorts render \
+  --recording-result data/runs/run-004/recording/recording-result.json \
+  --out data/runs/run-004/shorts-natural-hq3-smooth \
+  --preset natural-hq3-smooth
+```
 
 For fast visual iteration, render only selected segments or cap the pack size:
 
 ```bash
-./bin/zv-editor \
+./bin/zv shorts render \
   --recording-result data/runs/run-004/recording/recording-result.json \
   --out data/runs/run-004/shorts-preview \
   --segments seg-001,seg-004 \
@@ -178,7 +395,7 @@ For fast visual iteration, render only selected segments or cap the pack size:
 For a player-branded layout, pass a transparent PNG cutout:
 
 ```bash
-./bin/zv-editor \
+./bin/zv shorts render \
   --recording-result data/runs/run-004/recording/recording-result.json \
   --out data/runs/run-004/shorts-premium \
   --preset short-premium-player \
@@ -186,7 +403,10 @@ For a player-branded layout, pass a transparent PNG cutout:
 ```
 
 If the source cutout still has a flat background, `--player-key-color #000000`
-can chromakey it during FFmpeg composition.
+can chromakey it during FFmpeg composition. The source video remains gameplay;
+the player asset is overlaid in the lower third and the top copy is generated
+from segment metadata as a short play description such as
+`2K con M4A1-S en de_ancient`.
 
 ## Tests
 
@@ -194,5 +414,8 @@ can chromakey it during FFmpeg composition.
 make test
 # Repository and worker integration tests skip if Postgres / TEST_DEMO_PATH is unavailable.
 ```
+
+`make test` also runs `zv check` so the repo-local skills, workflow
+catalog, and workflow docs stay aligned with the unified CLI contract.
 
 See [`docs/specs/`](./docs/specs/) for the specs and plans that produced this code.

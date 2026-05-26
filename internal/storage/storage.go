@@ -31,7 +31,7 @@ func NewLocal(root string) (*Local, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
+	if err := os.MkdirAll(abs, 0o750); err != nil {
 		return nil, err
 	}
 	return &Local{root: abs}, nil
@@ -43,10 +43,11 @@ func (l *Local) Put(key string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	// #nosec G304 -- path is resolved under Local.root by resolve.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -61,6 +62,7 @@ func (l *Local) Open(key string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G304 -- path is resolved under Local.root by resolve.
 	return os.Open(path)
 }
 
@@ -80,11 +82,22 @@ func (l *Local) Exists(key string) (bool, error) {
 }
 
 func (l *Local) resolve(key string) (string, error) {
-	if strings.Contains(key, "..") || strings.HasPrefix(key, "/") {
+	if strings.HasPrefix(key, "/") || strings.HasPrefix(key, `\`) {
 		return "", fmt.Errorf("storage: invalid key %q", key)
 	}
-	abs := filepath.Join(l.root, filepath.FromSlash(key))
-	if !strings.HasPrefix(abs, l.root+string(os.PathSeparator)) && abs != l.root {
+	clean := filepath.Clean(filepath.FromSlash(key))
+	if clean == "." || filepath.IsAbs(clean) {
+		return "", fmt.Errorf("storage: invalid key %q", key)
+	}
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("storage: invalid key %q", key)
+	}
+	abs := filepath.Join(l.root, clean)
+	rel, err := filepath.Rel(l.root, abs)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
 		return "", errors.New("storage: key escapes root")
 	}
 	return abs, nil

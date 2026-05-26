@@ -36,6 +36,7 @@ type commandRunner interface {
 type execCommandRunner struct{}
 
 func (execCommandRunner) Run(ctx context.Context, exe string, args ...string) ([]byte, error) {
+	// #nosec G204 -- media workers execute configured local binaries with argument slices, not shell strings.
 	cmd := exec.CommandContext(ctx, exe, args...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -334,7 +335,7 @@ func prepareStageDir(root string, id uuid.UUID, stage string) (string, func(), e
 	if base == "" {
 		base = os.TempDir()
 	}
-	if err := os.MkdirAll(base, 0o755); err != nil {
+	if err := os.MkdirAll(base, 0o750); err != nil {
 		return "", nil, err
 	}
 	dir, err := os.MkdirTemp(base, fmt.Sprintf("zv-%s-%s-", stage, id))
@@ -354,9 +355,10 @@ func copyStorageToFile(store storage.Storage, key, path string) error {
 	}
 	defer rc.Close()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
+	// #nosec G304 -- path is constructed under the worker stage directory.
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -367,6 +369,7 @@ func copyStorageToFile(store storage.Storage, key, path string) error {
 }
 
 func uploadFile(store storage.Storage, key, path string) error {
+	// #nosec G304 -- path is produced by recorder/composer stage outputs before upload.
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -540,6 +543,7 @@ func localizeSegmentClips(store storage.Storage, id uuid.UUID, workDir string, r
 }
 
 func readJSONFile(path string, dst any) error {
+	// #nosec G304 -- worker JSON paths are generated inside the stage work directory.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -548,12 +552,12 @@ func readJSONFile(path string, dst any) error {
 }
 
 func writeJSONFile(path string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }

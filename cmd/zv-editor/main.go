@@ -24,13 +24,21 @@ func run() error {
 		killPlanPath        = flag.String("killplan", "", "optional path to kill plan JSON; auto-discovered from pipeline-result.json when omitted")
 		outDir              = flag.String("out", "", "shorts output directory")
 		publishDir          = flag.String("publish-dir", "", "publish pack output directory; defaults to <out>/publish")
-		preset              = flag.String("preset", editor.PresetShortClean, "editor preset: short-clean or short-premium-player")
+		preset              = flag.String("preset", editor.PresetShortClean, "editor preset: short-clean, short-premium-player, natural-hq, natural-hq2, natural-hq3, natural-hq3-smooth, or smoke-lineups")
 		effectsPath         = flag.String("effects", "", "optional Lua effects script; overrides --effects-preset")
-		effectsPreset       = flag.String("effects-preset", editor.EffectsPresetBuiltinClean, "effects preset: builtin-clean, awpgod, or none")
+		effectsPreset       = flag.String("effects-preset", "", "effects preset: builtin-clean, awpgod, smoke-lineups, or none; defaults by preset")
+		lineupCatalogPath   = flag.String("lineup-catalog", "", "optional directory with manual smoke lineup catalog JSON files")
 		segments            = flag.String("segments", "", "optional comma-separated segment ids to render, e.g. seg-001,seg-004")
 		limit               = flag.Int("limit", 0, "optional max number of shorts to render after segment filtering")
 		playerImage         = flag.String("player-image", "", "player image asset for short-premium-player preset")
 		playerKeyColor      = flag.String("player-key-color", "", "optional chromakey color for player image, e.g. #000000")
+		videoCRF            = flag.Int("video-crf", 0, "x264 CRF quality from 1..51; lower is higher quality; defaults by preset")
+		videoPreset         = flag.String("video-preset", "", "x264 preset; defaults by preset")
+		hqFilters           = flag.Bool("hq-filters", false, "use Lanczos scaling and square-pixel normalization")
+		audioNormalize      = flag.Bool("audio-normalize", false, "normalize audio with FFmpeg loudnorm")
+		qualityChecks       = flag.Bool("quality-checks", false, "run FFmpeg black/freeze/crop detection after rendering")
+		coverSheets         = flag.Bool("cover-sheets", false, "generate tiled cover contact sheets")
+		temporalSmoothing   = flag.Bool("temporal-smoothing", false, "add subtle temporal frame blending for smoother perceived motion")
 		ffmpegPath          = flag.String("ffmpeg", "", "path to ffmpeg.exe; defaults to PATH")
 		ffprobePath         = flag.String("ffprobe", "", "path to ffprobe.exe; defaults to PATH")
 		covers              = flag.Bool("covers", true, "generate local JPG covers for publish pack")
@@ -56,10 +64,18 @@ func run() error {
 		Preset:              *preset,
 		EffectsPath:         *effectsPath,
 		EffectsPreset:       *effectsPreset,
+		LineupCatalogPath:   *lineupCatalogPath,
 		SegmentIDs:          segmentIDs,
 		Limit:               *limit,
 		PlayerImagePath:     *playerImage,
 		PlayerKeyColor:      *playerKeyColor,
+		VideoCRF:            *videoCRF,
+		VideoPreset:         *videoPreset,
+		HQFilters:           *hqFilters,
+		AudioNormalize:      *audioNormalize,
+		QualityChecks:       *qualityChecks,
+		CoverSheets:         *coverSheets,
+		TemporalSmoothing:   *temporalSmoothing,
 		FFmpegPath:          *ffmpegPath,
 		FFprobePath:         *ffprobePath,
 		DisableCovers:       !*covers || *noCovers,
@@ -106,10 +122,13 @@ func openPath(path string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
+		// #nosec G204 -- opens the generated local gallery path with the OS handler.
 		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
 	case "darwin":
+		// #nosec G204 -- opens the generated local gallery path with the OS handler.
 		cmd = exec.Command("open", path)
 	default:
+		// #nosec G204 -- opens the generated local gallery path with the OS handler.
 		cmd = exec.Command("xdg-open", path)
 	}
 	if err := cmd.Start(); err != nil {

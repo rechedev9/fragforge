@@ -39,6 +39,7 @@ func SegmentClipsFromRecording(result recording.RecordingResult) ([]SegmentClip,
 			SegmentID:       segment.ID,
 			Path:            artifacts[0].Path,
 			DurationSeconds: artifacts[0].DurationSeconds,
+			Artifact:        artifacts[0],
 		})
 	}
 	return clips, warnings
@@ -51,19 +52,20 @@ func ComposeConcat(ctx context.Context, ffmpegPath string, clips []SegmentClip, 
 	if len(clips) == 0 {
 		return fmt.Errorf("at least one clip is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o750); err != nil {
 		return err
 	}
 	if workDir == "" {
 		workDir = filepath.Dir(outputPath)
 	}
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err := os.MkdirAll(workDir, 0o750); err != nil {
 		return err
 	}
 	listPath := filepath.Join(workDir, "concat-list.txt")
-	if err := os.WriteFile(listPath, []byte(ConcatList(clips)), 0o644); err != nil {
+	if err := os.WriteFile(listPath, []byte(ConcatList(clips)), 0o600); err != nil {
 		return err
 	}
+	// #nosec G204 -- ffmpegPath is configured locally and args are not shell-interpolated.
 	cmd := exec.CommandContext(ctx, ffmpegPath,
 		"-y",
 		"-v", "error",

@@ -170,9 +170,12 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 	for _, want := range []string{
 		"../prompts/short-001-seg-001-cover.md",
 		"preset <span>short-clean</span>",
+		"video <span>crf 18 / fast</span>",
 		"id=\"search\"",
 		"data-copy-target=\".caption\"",
 		"All weapons",
+		"source: h264 | 1920x1080 | 60fps | 8.0s",
+		"output:",
 	} {
 		if !strings.Contains(string(indexHTML), want) {
 			t.Fatalf("publish gallery missing %q:\n%s", want, indexHTML)
@@ -186,6 +189,129 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 		if !strings.Contains(string(summary), want) {
 			t.Fatalf("publish summary missing %q:\n%s", want, summary)
 		}
+	}
+}
+
+func TestRunNaturalHQ3AppliesStoredPresetDefaults(t *testing.T) {
+	dir := t.TempDir()
+	recordingResultPath := writeRecordingResultFixture(t, dir)
+	outDir := filepath.Join(dir, "shorts")
+
+	result, err := Run(context.Background(), Config{
+		RecordingResultPath: recordingResultPath,
+		OutputDir:           outDir,
+		Preset:              PresetShortNaturalHQ3,
+		FFmpegPath:          filepath.Join(dir, "missing-ffmpeg"),
+		DryRun:              true,
+	})
+	if err != nil {
+		t.Fatalf("Run dry-run error = %v", err)
+	}
+	if result.Preset != PresetShortNaturalHQ3 || result.EffectsPreset != EffectsPresetNone {
+		t.Fatalf("result preset metadata = %#v", result)
+	}
+	if result.VideoCRF != NaturalHQ3VideoCRF || result.VideoPreset != NaturalHQ3VideoPreset {
+		t.Fatalf("result video encoding = crf %d preset %q", result.VideoCRF, result.VideoPreset)
+	}
+	if !result.HQFilters || !result.AudioNormalize || !result.QualityChecks || !result.CoverSheets {
+		t.Fatalf("result hq3 flags missing: %#v", result)
+	}
+	if len(result.Shorts) == 0 || len(result.Shorts[0].Effects) != 0 {
+		t.Fatalf("natural-hq3 short effects = %#v", result.Shorts)
+	}
+	if got := argAfter(result.Shorts[0].FFmpegCommand, "-profile:v"); got != "high" {
+		t.Fatalf("-profile:v arg = %q, want high", got)
+	}
+}
+
+func TestRunRejectsInvalidVideoEncodingOptions(t *testing.T) {
+	dir := t.TempDir()
+	recordingResultPath := writeRecordingResultFixture(t, dir)
+
+	_, err := Run(context.Background(), Config{
+		RecordingResultPath: recordingResultPath,
+		OutputDir:           filepath.Join(dir, "bad-crf"),
+		VideoCRF:            99,
+		FFmpegPath:          filepath.Join(dir, "missing-ffmpeg"),
+		DryRun:              true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "video crf") {
+		t.Fatalf("Run error = %v, want video crf validation", err)
+	}
+
+	_, err = Run(context.Background(), Config{
+		RecordingResultPath: recordingResultPath,
+		OutputDir:           filepath.Join(dir, "bad-preset"),
+		VideoPreset:         "cinema",
+		FFmpegPath:          filepath.Join(dir, "missing-ffmpeg"),
+		DryRun:              true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown video preset") {
+		t.Fatalf("Run error = %v, want video preset validation", err)
+	}
+}
+
+func TestRunNaturalHQAppliesStoredPresetDefaults(t *testing.T) {
+	dir := t.TempDir()
+	recordingResultPath := writeRecordingResultFixture(t, dir)
+	outDir := filepath.Join(dir, "shorts")
+
+	result, err := Run(context.Background(), Config{
+		RecordingResultPath: recordingResultPath,
+		OutputDir:           outDir,
+		Preset:              PresetShortNaturalHQ,
+		FFmpegPath:          filepath.Join(dir, "missing-ffmpeg"),
+		DryRun:              true,
+	})
+	if err != nil {
+		t.Fatalf("Run dry-run error = %v", err)
+	}
+	if result.Preset != PresetShortNaturalHQ || result.EffectsPreset != EffectsPresetNone {
+		t.Fatalf("result preset metadata = %#v", result)
+	}
+	if result.VideoCRF != NaturalHQVideoCRF || result.VideoPreset != NaturalHQVideoPreset {
+		t.Fatalf("result video encoding = crf %d preset %q", result.VideoCRF, result.VideoPreset)
+	}
+	if len(result.Shorts) == 0 || len(result.Shorts[0].Effects) != 0 {
+		t.Fatalf("natural-hq short effects = %#v", result.Shorts)
+	}
+
+	var manifest Manifest
+	b, err := os.ReadFile(filepath.Join(outDir, "edit-manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.EffectsPreset != EffectsPresetNone || manifest.VideoCRF != NaturalHQVideoCRF || manifest.VideoPreset != NaturalHQVideoPreset {
+		t.Fatalf("manifest preset metadata = %#v", manifest)
+	}
+}
+
+func TestRunNaturalHQ3SmoothAppliesTemporalSmoothing(t *testing.T) {
+	dir := t.TempDir()
+	recordingResultPath := writeRecordingResultFixture(t, dir)
+	outDir := filepath.Join(dir, "shorts")
+
+	result, err := Run(context.Background(), Config{
+		RecordingResultPath: recordingResultPath,
+		OutputDir:           outDir,
+		Preset:              PresetShortNaturalHQ3Smooth,
+		FFmpegPath:          filepath.Join(dir, "missing-ffmpeg"),
+		DryRun:              true,
+	})
+	if err != nil {
+		t.Fatalf("Run dry-run error = %v", err)
+	}
+	if result.Preset != PresetShortNaturalHQ3Smooth || !result.TemporalSmoothing {
+		t.Fatalf("result smooth metadata = %#v", result)
+	}
+	if len(result.Shorts) == 0 || !result.Shorts[0].TemporalSmoothing {
+		t.Fatalf("short smooth metadata missing = %#v", result.Shorts)
+	}
+	if got := argAfter(result.Shorts[0].FFmpegCommand, "-vf"); !strings.Contains(got, "tmix=frames=2:weights='1 2'") {
+		t.Fatalf("smooth filter missing tmix:\n%s", got)
 	}
 }
 
@@ -291,7 +417,7 @@ func TestRunPremiumPlayerWithFakeFFmpegWritesResults(t *testing.T) {
 	if result.PlayerImage == "" || result.PlayerKeyColor != "#000000" {
 		t.Fatalf("player metadata missing: %#v", result)
 	}
-	if result.Shorts[0].Headline != "MartinezSa 2K AK-47" {
+	if result.Shorts[0].Headline != "2K con AK-47 en de_ancient" {
 		t.Fatalf("headline = %q", result.Shorts[0].Headline)
 	}
 	if got := argAfter(result.Shorts[0].FFmpegCommand, "-filter_complex"); !strings.Contains(got, "chromakey=0x000000") {
@@ -345,6 +471,32 @@ func TestRunCoverFailureIsWarningOnly(t *testing.T) {
 	joined := strings.Join(result.Warnings, "\n")
 	if !strings.Contains(joined, "cover seg-001") {
 		t.Fatalf("warnings missing cover failure:\n%s", joined)
+	}
+}
+
+func TestRunShortRenderFailureWritesLog(t *testing.T) {
+	dir := t.TempDir()
+	recordingResultPath := writeRecordingResultFixture(t, dir)
+	outDir := filepath.Join(dir, "shorts")
+	ffmpegPath := fakeFFmpegFailingShorts(t, dir)
+
+	result, err := Run(context.Background(), Config{
+		RecordingResultPath: recordingResultPath,
+		OutputDir:           outDir,
+		FFmpegPath:          ffmpegPath,
+	})
+	if err == nil {
+		t.Fatal("Run error = nil, want short render failure")
+	}
+	if len(result.Shorts) == 0 || result.Shorts[0].RenderLogPath == "" {
+		t.Fatalf("render log path missing: %#v", result.Shorts)
+	}
+	b, readErr := os.ReadFile(result.Shorts[0].RenderLogPath)
+	if readErr != nil {
+		t.Fatalf("read render log: %v", readErr)
+	}
+	if !strings.Contains(string(b), "short render failed") {
+		t.Fatalf("render log missing failure output:\n%s", b)
 	}
 }
 
@@ -438,6 +590,47 @@ func fakeFFmpeg(t *testing.T, dir string) string {
 
 func fakeFFmpegFailingCovers(t *testing.T, dir string) string {
 	return fakeFFmpegWithCoverFailure(t, dir, true)
+}
+
+func fakeFFmpegFailingShorts(t *testing.T, dir string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		src := filepath.Join(dir, "fake-ffmpeg-failing-short.go")
+		body := `package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() {
+	out := ""
+	if len(os.Args) > 1 {
+		out = os.Args[len(os.Args)-1]
+	}
+	if strings.HasSuffix(out, ".mp4") {
+		_, _ = fmt.Fprintln(os.Stderr, "short render failed")
+		os.Exit(2)
+	}
+}
+`
+		if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "ffmpeg-failing-short.exe")
+		goExe := filepath.Join(runtime.GOROOT(), "bin", "go.exe")
+		if out, err := exec.Command(goExe, "build", "-o", path, src).CombinedOutput(); err != nil {
+			t.Fatalf("build fake ffmpeg: %v\n%s", err, out)
+		}
+		return path
+	}
+	path := filepath.Join(dir, "ffmpeg-failing-short")
+	body := "#!/bin/sh\nlast=\nfor arg in \"$@\"; do last=\"$arg\"; done\ncase \"$last\" in *.mp4) echo short render failed >&2; exit 2;; esac\n"
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func fakeFFmpegWithCoverFailure(t *testing.T, dir string, failCovers bool) string {

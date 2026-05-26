@@ -177,6 +177,7 @@ type ffprobeOutput struct {
 }
 
 func probeArtifact(ctx context.Context, ffprobePath string, artifact *RecordingArtifact) {
+	// #nosec G204 -- ffprobePath is configured locally and artifact path is passed as an argument.
 	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
 		"-show_entries", "format=duration",

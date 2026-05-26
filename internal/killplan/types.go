@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion identifies the kill plan document format. Downstream
 // consumers should reject versions they do not understand.
-const SchemaVersion = "1.0"
+const SchemaVersion = "1.1"
 
 // Plan is the top-level kill plan document.
 type Plan struct {
@@ -42,11 +42,12 @@ type Target struct {
 
 // Segment is one contiguous recording range covering one or more kills.
 type Segment struct {
-	ID        string `json:"id"`
-	Round     int    `json:"round"`
-	TickStart int    `json:"tick_start"`
-	TickEnd   int    `json:"tick_end"`
-	Kills     []Kill `json:"kills"`
+	ID        string         `json:"id"`
+	Round     int            `json:"round"`
+	TickStart int            `json:"tick_start"`
+	TickEnd   int            `json:"tick_end"`
+	Kills     []Kill         `json:"kills,omitempty"`
+	Utility   []UtilityThrow `json:"utility,omitempty"`
 }
 
 // Kill captures the metadata downstream stages need to choose effects
@@ -61,6 +62,43 @@ type Kill struct {
 	VictimPos [3]float64 `json:"victim_pos"`
 }
 
+// UtilityThrow captures one target-player utility event that can become a
+// standalone teaching clip, for example a smoke lineup.
+type UtilityThrow struct {
+	ID               string       `json:"id"`
+	Type             string       `json:"type"`
+	Round            int          `json:"round"`
+	ThrowTick        int          `json:"throw_tick"`
+	PopTick          int          `json:"pop_tick,omitempty"`
+	ExpireTick       int          `json:"expire_tick,omitempty"`
+	Thrower          Player       `json:"thrower"`
+	ThrowPos         [3]float64   `json:"throw_pos"`
+	LandingPos       [3]float64   `json:"landing_pos"`
+	LandingSource    string       `json:"landing_source,omitempty"`
+	ThrowPlace       string       `json:"throw_place,omitempty"`
+	ThrowStateTick   int          `json:"throw_state_tick,omitempty"`
+	ThrowStateSource string       `json:"throw_state_source,omitempty"`
+	ThrowAction      string       `json:"throw_action,omitempty"`
+	Stance           string       `json:"stance,omitempty"`
+	Movement         string       `json:"movement,omitempty"`
+	Speed2D          float64      `json:"speed_2d"`
+	OnGround         bool         `json:"on_ground"`
+	Walking          bool         `json:"walking"`
+	Ducking          bool         `json:"ducking"`
+	LineupMatch      *LineupMatch `json:"lineup_match,omitempty"`
+}
+
+// LineupMatch is the optional manual-catalog annotation for a utility throw.
+// The parser/editor should leave it empty when the destination is not known.
+type LineupMatch struct {
+	ID            string  `json:"id,omitempty"`
+	Destination   string  `json:"destination,omitempty"`
+	FromArea      string  `json:"from_area,omitempty"`
+	Side          string  `json:"side,omitempty"`
+	Confidence    float64 `json:"confidence,omitempty"`
+	DistanceUnits float64 `json:"distance_units,omitempty"`
+}
+
 // Player is the victim's identity at the moment of the kill.
 type Player struct {
 	SteamID64  string `json:"steamid64"`
@@ -72,6 +110,10 @@ type Player struct {
 type Stats struct {
 	TotalKillsTarget     int     `json:"total_kills_target"`
 	KillsAfterFilters    int     `json:"kills_after_filters"`
+	TotalUtilityTarget   int     `json:"total_utility_target,omitempty"`
+	UtilityAfterFilters  int     `json:"utility_after_filters,omitempty"`
+	TotalSmokesTarget    int     `json:"total_smokes_target,omitempty"`
+	SmokesAfterFilters   int     `json:"smokes_after_filters,omitempty"`
 	SegmentsCreated      int     `json:"segments_created"`
 	DurationSecondsTotal float64 `json:"duration_seconds_total"`
 }

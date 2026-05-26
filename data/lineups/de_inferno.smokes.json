@@ -1,0 +1,15 @@
+{
+  "map": "de_inferno",
+  "smokes": [
+    {
+      "id": "inferno-ctspawn-t-ramp-smoke",
+      "destination": "T ramp",
+      "from_area": "CTSpawn",
+      "side": "CT",
+      "landing": [145.9, 1012.0, 85.1],
+      "landing_radius": 18.0,
+      "throw": [2036.0, 1915.0, 177.0],
+      "throw_radius": 28.0
+    }
+  ]
+}

@@ -17,7 +17,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err := cfg.validate(); err != nil {
 		return Result{}, err
 	}
-	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.OutputDir, 0o750); err != nil {
 		return Result{}, err
 	}
 
@@ -74,14 +74,14 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 }
 
 func WriteResult(path string, result Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }
 
 func (c Config) validate() error {
@@ -110,6 +110,7 @@ func (c Config) validate() error {
 
 func runStep(ctx context.Context, name, exe string, args ...string) (StepResult, error) {
 	start := time.Now()
+	// #nosec G204 -- local pipeline runs configured repo CLIs with explicit argument slices.
 	cmd := exec.CommandContext(ctx, exe, args...)
 	output, err := cmd.CombinedOutput()
 	step := StepResult{
@@ -160,6 +161,7 @@ func collectCompositionResult(result *Result) error {
 }
 
 func readJSON(path string, dst any) error {
+	// #nosec G304 -- pipeline result paths are generated inside the configured output directory.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err

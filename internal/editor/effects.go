@@ -1,14 +1,18 @@
 package editor
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
+
+var effectsEvaluationTimeout = 2 * time.Second
 
 const builtinCleanEffectsScript = `
 on_segment(function(s)
@@ -158,6 +162,75 @@ on_kill(function(k)
 end)
 `
 
+const smokeLineupsEffectsScript = `
+on_segment(function(segment)
+  grade({
+    contrast = 1.03,
+    saturation = 1.24,
+    gamma = 1.00
+  })
+end)
+
+on_smoke(function(smoke)
+  local duration = smoke.duration or 0
+  local kind = "UTILITY"
+  if smoke.type == "smokegrenade" then kind = "SMOKE" end
+  if smoke.type == "flashbang" then kind = "FLASH" end
+  if smoke.type == "molotov" or smoke.type == "incgrenade" then kind = "MOLLY" end
+
+  local destination = smoke.destination
+  if destination == "" then
+    destination = "LINEUP"
+  end
+
+  local title = string.upper(destination .. " " .. kind)
+  local subtitle = "UTILITY THROW"
+  if smoke.from_area ~= "" then
+    subtitle = "FROM " .. string.upper(smoke.from_area)
+  end
+  local action = smoke.throw_action
+  if action ~= "" then
+    local action_label = string.upper(string.gsub(action, "_", " "))
+    if action == "jumpthrow" then
+      if smoke.stance == "crouching" or smoke.stance == "crouching_in_progress" then
+        action_label = "CROUCH JUMPTHROW"
+      elseif smoke.stance == "standing" then
+        action_label = "STANDING JUMPTHROW"
+      end
+    end
+    subtitle = subtitle .. " · " .. action_label
+  elseif smoke.movement ~= "" then
+    subtitle = subtitle .. " · " .. string.upper(smoke.movement)
+  end
+
+  if duration == 0 or smoke.time < duration - 0.1 then
+    text({
+      value = title,
+      start = smoke.time,
+      duration = 2.75,
+      x = 58,
+      y = 1368,
+      size = 58,
+      color = "white@0.97",
+      box_color = "0x2a1190@0.92",
+      box_border = 22
+    })
+
+    text({
+      value = subtitle,
+      start = smoke.time,
+      duration = 2.75,
+      x = 58,
+      y = 1450,
+      size = 34,
+      color = "white@0.96",
+      box_color = "black@0.84",
+      box_border = 14
+    })
+  end
+end)
+`
+
 type effectsSource struct {
 	Path   string
 	Preset string
@@ -171,8 +244,10 @@ type effectEvalContext struct {
 	sourceName       string
 	sourceIndex      int
 	sourceKill       *KillCue
+	sourceSmoke      *SmokeCue
 	segmentCallbacks []lua.LValue
 	killCallbacks    []lua.LValue
+	smokeCallbacks   []lua.LValue
 }
 
 func loadEffectsSource(path, preset string) (effectsSource, error) {
@@ -182,6 +257,7 @@ func loadEffectsSource(path, preset string) (effectsSource, error) {
 		if err != nil {
 			return effectsSource{}, fmt.Errorf("resolve effects script path: %w", err)
 		}
+		// #nosec G304 -- effects script path is an explicit local CLI/config input.
 		b, err := os.ReadFile(abs)
 		if err != nil {
 			return effectsSource{}, fmt.Errorf("read effects script: %w", err)
@@ -194,6 +270,8 @@ func loadEffectsSource(path, preset string) (effectsSource, error) {
 		return effectsSource{Preset: preset, Script: builtinCleanEffectsScript}, nil
 	case EffectsPresetAWPGod:
 		return effectsSource{Preset: preset, Script: awpgodEffectsScript}, nil
+	case EffectsPresetSmokeLineups:
+		return effectsSource{Preset: preset, Script: smokeLineupsEffectsScript}, nil
 	case EffectsPresetNone:
 		return effectsSource{Preset: preset}, nil
 	default:
@@ -223,6 +301,12 @@ func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath
 		if short.CoverPath != "" {
 			short.CoverCommand = BuildCoverFFmpegCommand(ffmpegPath, *short)
 		}
+		if short.CoverSheetPath != "" {
+			short.CoverSheetCommand = BuildCoverSheetFFmpegCommand(ffmpegPath, *short)
+		}
+		if short.QualityLogPath != "" {
+			short.QualityCommand = BuildQualityCheckFFmpegCommand(ffmpegPath, *short)
+		}
 		manifest.Warnings = append(manifest.Warnings, warnings...)
 	}
 	return nil
@@ -237,6 +321,9 @@ func evaluateEffects(source effectsSource, short ShortEdit) ([]Effect, []string,
 	}
 	L := lua.NewState(lua.Options{SkipOpenLibs: true})
 	defer L.Close()
+	evalCtx, cancel := context.WithTimeout(context.Background(), effectsEvaluationTimeout)
+	defer cancel()
+	L.SetContext(evalCtx)
 	openEffectsLuaLibs(L)
 	registerEffectsAPI(L, ctx)
 
@@ -250,7 +337,17 @@ func evaluateEffects(source effectsSource, short ShortEdit) ([]Effect, []string,
 		ctx.sourceName = "kill"
 		ctx.sourceIndex = i + 1
 		ctx.sourceKill = &kill
+		ctx.sourceSmoke = nil
 		if err := callCallbacks(L, ctx.killCallbacks, killLuaTable(L, short, kill), "kill", ctx); err != nil {
+			return nil, nil, err
+		}
+	}
+	for i, smoke := range short.Smokes {
+		ctx.sourceName = "smoke"
+		ctx.sourceIndex = i + 1
+		ctx.sourceKill = nil
+		ctx.sourceSmoke = &smoke
+		if err := callCallbacks(L, ctx.smokeCallbacks, smokeLuaTable(L, short, smoke), "smoke", ctx); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -274,6 +371,10 @@ func registerEffectsAPI(L *lua.LState, ctx *effectEvalContext) {
 	}))
 	L.SetGlobal("on_kill", L.NewFunction(func(L *lua.LState) int {
 		ctx.killCallbacks = append(ctx.killCallbacks, L.CheckFunction(1))
+		return 0
+	}))
+	L.SetGlobal("on_smoke", L.NewFunction(func(L *lua.LState) int {
+		ctx.smokeCallbacks = append(ctx.smokeCallbacks, L.CheckFunction(1))
 		return 0
 	}))
 	L.SetGlobal("zoom", L.NewFunction(func(L *lua.LState) int {
@@ -327,6 +428,11 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 		e.SourceKillWeapon = ctx.sourceKill.Weapon
 		e.SourceKillVictim = ctx.sourceKill.Victim
 		e.SourceKillHeadshot = ctx.sourceKill.Headshot
+	}
+	if ctx.sourceSmoke != nil {
+		e.SourceSmokeID = ctx.sourceSmoke.ID
+		e.SourceSmokeType = ctx.sourceSmoke.Type
+		e.SourceSmokeTarget = ctx.sourceSmoke.Destination
 	}
 
 	switch typ {
@@ -387,6 +493,9 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 func defaultEventTime(ctx *effectEvalContext) float64 {
 	if ctx.sourceKill != nil {
 		return ctx.sourceKill.TimeSeconds
+	}
+	if ctx.sourceSmoke != nil {
+		return ctx.sourceSmoke.TimeSeconds
 	}
 	return 0
 }
@@ -487,10 +596,50 @@ func (short ShortEdit) segmentLuaTable(L *lua.LState) *lua.LTable {
 	tb.RawSetString("player", lua.LString(short.Player))
 	tb.RawSetString("map", lua.LString(short.Map))
 	tb.RawSetString("kill_count", lua.LNumber(short.KillCount))
+	tb.RawSetString("smoke_count", lua.LNumber(short.SmokeCount))
+	tb.RawSetString("utility_count", lua.LNumber(short.SmokeCount))
 	tb.RawSetString("primary_weapon", lua.LString(short.PrimaryWeapon))
+	tb.RawSetString("primary_smoke", lua.LString(short.PrimarySmoke))
 	tb.RawSetString("label", lua.LString(short.Label))
 	tb.RawSetString("headline", lua.LString(short.Headline))
 	tb.RawSetString("duration", lua.LNumber(short.DurationSeconds))
+	return tb
+}
+
+func smokeLuaTable(L *lua.LState, short ShortEdit, smoke SmokeCue) *lua.LTable {
+	tb := L.NewTable()
+	tb.RawSetString("segment_id", lua.LString(short.SegmentID))
+	tb.RawSetString("preset", lua.LString(short.Preset))
+	tb.RawSetString("duration", lua.LNumber(short.DurationSeconds))
+	tb.RawSetString("id", lua.LString(smoke.ID))
+	tb.RawSetString("type", lua.LString(smoke.Type))
+	tb.RawSetString("round", lua.LNumber(smoke.Round))
+	tb.RawSetString("throw_tick", lua.LNumber(smoke.ThrowTick))
+	tb.RawSetString("pop_tick", lua.LNumber(smoke.PopTick))
+	tb.RawSetString("expire_tick", lua.LNumber(smoke.ExpireTick))
+	tb.RawSetString("time", lua.LNumber(smoke.TimeSeconds))
+	tb.RawSetString("pop_time", lua.LNumber(smoke.PopTimeSeconds))
+	tb.RawSetString("throw_place", lua.LString(smoke.ThrowPlace))
+	tb.RawSetString("throw_action", lua.LString(smoke.ThrowAction))
+	tb.RawSetString("stance", lua.LString(smoke.Stance))
+	tb.RawSetString("movement", lua.LString(smoke.Movement))
+	tb.RawSetString("speed_2d", lua.LNumber(smoke.Speed2D))
+	tb.RawSetString("on_ground", lua.LBool(smoke.OnGround))
+	tb.RawSetString("walking", lua.LBool(smoke.Walking))
+	tb.RawSetString("ducking", lua.LBool(smoke.Ducking))
+	tb.RawSetString("destination", lua.LString(smoke.Destination))
+	tb.RawSetString("from_area", lua.LString(smoke.FromArea))
+	tb.RawSetString("side", lua.LString(smoke.Side))
+	tb.RawSetString("match_id", lua.LString(smoke.MatchID))
+	tb.RawSetString("confidence", lua.LNumber(smoke.Confidence))
+	tb.RawSetString("distance_units", lua.LNumber(smoke.DistanceUnits))
+	tb.RawSetString("landing_x", lua.LNumber(smoke.LandingPos[0]))
+	tb.RawSetString("landing_y", lua.LNumber(smoke.LandingPos[1]))
+	tb.RawSetString("landing_z", lua.LNumber(smoke.LandingPos[2]))
+	tb.RawSetString("throw_x", lua.LNumber(smoke.ThrowPos[0]))
+	tb.RawSetString("throw_y", lua.LNumber(smoke.ThrowPos[1]))
+	tb.RawSetString("throw_z", lua.LNumber(smoke.ThrowPos[2]))
+	tb.RawSetString("matched", lua.LBool(smoke.Matched))
 	return tb
 }
 

@@ -40,6 +40,7 @@ func main() {
 }
 
 func run(demoPath, contains string) error {
+	// #nosec G304 -- demo path is an explicit local CLI input.
 	f, err := os.Open(demoPath)
 	if err != nil {
 		return fmt.Errorf("open demo: %w", err)

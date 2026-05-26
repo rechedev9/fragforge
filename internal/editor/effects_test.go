@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEvaluateEffectsCallbacksProduceTimeline(t *testing.T) {
@@ -56,6 +57,61 @@ end)
 	}
 }
 
+func TestEvaluateEffectsSmokeCallbacksProduceText(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_smoke(function(smoke)
+  text({
+    value = smoke.from_area .. " -> " .. smoke.destination,
+    at = smoke.pop_time,
+    pre = 0.1,
+    post = 0.4,
+    x = "(w-text_w)/2",
+    y = 140,
+    size = 42
+  })
+end)
+`,
+	}
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetSmokeLineups,
+		DurationSeconds: 6,
+		Smokes: []SmokeCue{
+			{
+				ID:             "smoke-001",
+				Type:           "smokegrenade",
+				TimeSeconds:    1,
+				PopTimeSeconds: 2,
+				FromArea:       "T Spawn",
+				Destination:    "CT",
+			},
+		},
+	}
+
+	effects, warnings, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
+	}
+	effect := effects[0]
+	if effect.Type != EffectText || effect.Value != "T Spawn -> CT" {
+		t.Fatalf("smoke text effect = %#v", effect)
+	}
+	if effect.StartSeconds != 1.9 || effect.EndSeconds != 2.4 {
+		t.Fatalf("smoke text window = %.3f-%.3f", effect.StartSeconds, effect.EndSeconds)
+	}
+	if effect.SourceSmokeID != "smoke-001" || effect.SourceSmokeTarget != "CT" {
+		t.Fatalf("smoke source metadata = %#v", effect)
+	}
+}
+
 func TestEvaluateEffectsRejectsInvalidScript(t *testing.T) {
 	_, _, err := evaluateEffects(effectsSource{
 		Preset: EffectsPresetExternal,
@@ -68,6 +124,54 @@ func TestEvaluateEffectsRejectsInvalidScript(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "scale") {
 		t.Fatalf("evaluateEffects error = %v, want scale validation", err)
+	}
+}
+
+func TestEvaluateEffectsDisablesUnsafeLuaLibraries(t *testing.T) {
+	_, _, err := evaluateEffects(effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+for _, name in ipairs({"dofile", "loadfile", "require", "collectgarbage", "print", "os", "io", "package", "debug"}) do
+  if _G[name] ~= nil then
+    error(name .. " should be disabled")
+  end
+end
+on_segment(function(s)
+  text({ value = s.label, start = 0, duration = 1 })
+end)
+`,
+	}, ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortClean,
+		Label:           "safe",
+		DurationSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+}
+
+func TestEvaluateEffectsTimesOutRunawayScript(t *testing.T) {
+	oldTimeout := effectsEvaluationTimeout
+	effectsEvaluationTimeout = 50 * time.Millisecond
+	t.Cleanup(func() {
+		effectsEvaluationTimeout = oldTimeout
+	})
+
+	start := time.Now()
+	_, _, err := evaluateEffects(effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `while true do end`,
+	}, ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortClean,
+		DurationSeconds: 5,
+	})
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("evaluateEffects error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("runaway Lua script took %s to stop", elapsed)
 	}
 }
 

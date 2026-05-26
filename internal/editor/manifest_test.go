@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,7 +58,13 @@ func TestBuildManifestUsesSegmentOrderAndKillTimes(t *testing.T) {
 	if len(first.CoverCommand) == 0 {
 		t.Fatal("cover command is empty")
 	}
-	if !strings.Contains(first.Caption, "MartinezSa turns this round on de_ancient into a clean 2K with the AK-47.") {
+	if manifest.VideoCRF != DefaultVideoCRF || manifest.VideoPreset != DefaultVideoPreset {
+		t.Fatalf("video encoding = crf %d preset %q", manifest.VideoCRF, manifest.VideoPreset)
+	}
+	if first.VideoCRF != DefaultVideoCRF || first.VideoPreset != DefaultVideoPreset {
+		t.Fatalf("short video encoding = crf %d preset %q", first.VideoCRF, first.VideoPreset)
+	}
+	if !strings.Contains(first.Caption, "MartinezSa turns this round on Ancient into a clean 2K with the AK-47.") {
 		t.Fatalf("caption = %q", first.Caption)
 	}
 }
@@ -77,7 +84,7 @@ func TestBuildManifestPremiumPlayerIncludesHeadlineAndImage(t *testing.T) {
 	if first.PlayerImage != opts.PlayerImagePath {
 		t.Fatalf("player image = %q, want %q", first.PlayerImage, opts.PlayerImagePath)
 	}
-	if first.Headline != "MartinezSa 2K AK-47" {
+	if first.Headline != "2K con AK-47 en de_ancient" {
 		t.Fatalf("headline = %q", first.Headline)
 	}
 	if got := argAfter(first.FFmpegCommand, "-filter_complex"); !strings.Contains(got, "overlay=x=(W-w)/2:y=H-h+36") {
@@ -169,8 +176,12 @@ func TestVideoFilterEscapesDrawtextAndBuildsPunchIns(t *testing.T) {
 	}
 	filter := VideoFilter(short)
 	for _, want := range []string{
-		"scale=w=-2:h='if(between(t\\,0.720\\,1.720)\\,1998\\,1920)':eval=frame",
+		"scale=w=-2:h='if(between(t\\,0.720\\,1.220)",
+		"(1920.000+(1998.000-1920.000)",
+		"if(between(t\\,1.220\\,1.720)",
+		"(1998.000+(1920.000-1998.000)",
 		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
+		"setsar=1",
 		"fps=60",
 		"Martinez\\:Sa\\'s | de_ancient | 100\\%",
 		"AK-47 HS",
@@ -187,6 +198,7 @@ func TestPremiumPlayerFilterSupportsChromakey(t *testing.T) {
 		Label:          "MartinezSa | de_ancient | 2K",
 		Headline:       "MartinezSa 2K M4A1-S",
 		PrimaryWeapon:  "M4A1-S",
+		Player:         "MartinezSa",
 		PlayerImage:    "martinez.jpg",
 		PlayerKeyColor: "#000000",
 	})
@@ -194,7 +206,7 @@ func TestPremiumPlayerFilterSupportsChromakey(t *testing.T) {
 		"chromakey=0x000000:0.09:0.03",
 		"overlay=x=(W-w)/2:y=H-h+36",
 		"MartinezSa 2K M4A1-S",
-		"M4A1-S",
+		"MartinezSa",
 		"format=yuv420p[v]",
 	} {
 		if !strings.Contains(filter, want) {
@@ -222,6 +234,278 @@ func TestBuildFFmpegCommandKeepsPathsAsArgs(t *testing.T) {
 	if got := argAfter(command, "-map"); got != "0:v:0" {
 		t.Fatalf("first -map arg = %q, want 0:v:0", got)
 	}
+	if got := argAfter(command, "-preset"); got != DefaultVideoPreset {
+		t.Fatalf("-preset arg = %q, want %q", got, DefaultVideoPreset)
+	}
+	if got := argAfter(command, "-crf"); got != "18" {
+		t.Fatalf("-crf arg = %q, want 18", got)
+	}
+}
+
+func TestBuildManifestUsesVideoEncodingOptions(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.VideoCRF = 16
+	opts.VideoPreset = "slow"
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.VideoCRF != 16 || manifest.VideoPreset != "slow" {
+		t.Fatalf("manifest video encoding = crf %d preset %q", manifest.VideoCRF, manifest.VideoPreset)
+	}
+	first := manifest.Shorts[0]
+	if first.VideoCRF != 16 || first.VideoPreset != "slow" {
+		t.Fatalf("short video encoding = crf %d preset %q", first.VideoCRF, first.VideoPreset)
+	}
+	if got := argAfter(first.FFmpegCommand, "-preset"); got != "slow" {
+		t.Fatalf("-preset arg = %q, want slow", got)
+	}
+	if got := argAfter(first.FFmpegCommand, "-crf"); got != "16" {
+		t.Fatalf("-crf arg = %q, want 16", got)
+	}
+}
+
+func TestBuildManifestNaturalHQDefaultsToNoEffectsAndHighQuality(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetShortNaturalHQ
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.Preset != PresetShortNaturalHQ {
+		t.Fatalf("preset = %q", manifest.Preset)
+	}
+	if manifest.EffectsPreset != EffectsPresetNone {
+		t.Fatalf("effects preset = %q, want none", manifest.EffectsPreset)
+	}
+	if manifest.VideoCRF != NaturalHQVideoCRF || manifest.VideoPreset != NaturalHQVideoPreset {
+		t.Fatalf("video encoding = crf %d preset %q", manifest.VideoCRF, manifest.VideoPreset)
+	}
+	first := manifest.Shorts[0]
+	if len(first.Effects) != 0 {
+		t.Fatalf("natural-hq effects = %#v, want none", first.Effects)
+	}
+	if got := argAfter(first.FFmpegCommand, "-preset"); got != NaturalHQVideoPreset {
+		t.Fatalf("-preset arg = %q, want %q", got, NaturalHQVideoPreset)
+	}
+	if got := argAfter(first.FFmpegCommand, "-crf"); got != "16" {
+		t.Fatalf("-crf arg = %q, want 16", got)
+	}
+}
+
+func TestBuildManifestNaturalHQ2EnablesQualityFeatures(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetShortNaturalHQ2
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.Preset != PresetShortNaturalHQ2 || manifest.EffectsPreset != EffectsPresetNone {
+		t.Fatalf("preset metadata = %#v", manifest)
+	}
+	if !manifest.HQFilters || !manifest.AudioNormalize || !manifest.QualityChecks || !manifest.CoverSheets {
+		t.Fatalf("hq2 feature flags missing: %#v", manifest)
+	}
+	first := manifest.Shorts[0]
+	if len(first.Effects) != 0 {
+		t.Fatalf("natural-hq2 effects = %#v, want none", first.Effects)
+	}
+	if !first.HQFilters || !first.AudioNormalize {
+		t.Fatalf("short hq2 flags missing: %#v", first)
+	}
+	if first.CoverSheetPath == "" || len(first.CoverSheetCommand) == 0 {
+		t.Fatalf("cover sheet missing: %#v", first)
+	}
+	if first.QualityLogPath == "" || len(first.QualityCommand) == 0 {
+		t.Fatalf("quality check missing: %#v", first)
+	}
+	filter := argAfter(first.FFmpegCommand, "-vf")
+	if !strings.Contains(filter, "flags=lanczos") || !strings.Contains(filter, "setsar=1") {
+		t.Fatalf("hq2 filter missing lanczos/setsar:\n%s", filter)
+	}
+	if got := argAfter(first.FFmpegCommand, "-af"); got != "loudnorm=I=-16:TP=-1.5:LRA=11" {
+		t.Fatalf("-af arg = %q, want loudnorm", got)
+	}
+}
+
+func TestBuildManifestSmokeLineupsMatchesCatalogAndAddsOverlay(t *testing.T) {
+	dir := t.TempDir()
+	result := testSmokeRecordingResult(dir)
+	catalogDir := filepath.Join(dir, "lineups")
+	if err := os.MkdirAll(catalogDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONFile(t, filepath.Join(catalogDir, "de_ancient.smokes.json"), map[string]any{
+		"map": "de_ancient",
+		"smokes": []map[string]any{
+			{
+				"id":             "ancient_mid_donut",
+				"destination":    "Donut",
+				"from_area":      "T Spawn",
+				"side":           "T",
+				"landing":        []float64{100, 200, 0},
+				"landing_radius": 64,
+			},
+		},
+	})
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetSmokeLineups
+	opts.LineupCatalogPath = catalogDir
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.Preset != PresetSmokeLineups || manifest.EffectsPreset != EffectsPresetSmokeLineups {
+		t.Fatalf("preset metadata = %#v", manifest)
+	}
+	if !manifest.HQFilters || !manifest.AudioNormalize || !manifest.QualityChecks || !manifest.CoverSheets {
+		t.Fatalf("smoke-lineups should inherit hq2 features: %#v", manifest)
+	}
+	if len(manifest.Shorts) != 1 {
+		t.Fatalf("shorts len = %d, want 1", len(manifest.Shorts))
+	}
+	short := manifest.Shorts[0]
+	if short.KillCount != 0 || short.SmokeCount != 1 || short.PrimarySmoke != "Donut" {
+		t.Fatalf("short smoke metadata = %#v", short)
+	}
+	if len(short.Smokes) != 1 || !short.Smokes[0].Matched || short.Smokes[0].Destination != "Donut" {
+		t.Fatalf("smoke cues = %#v", short.Smokes)
+	}
+	if !strings.Contains(short.Headline, "T Spawn -> Donut") {
+		t.Fatalf("headline = %q", short.Headline)
+	}
+	if !hasEffect(short.Effects, EffectGrade) || !hasEffect(short.Effects, EffectText) {
+		t.Fatalf("smoke grade/overlay effects missing: %#v", short.Effects)
+	}
+	filter := argAfter(short.FFmpegCommand, "-filter_complex")
+	if !strings.Contains(filter, "DONUT SMOKE") || !strings.Contains(filter, "FROM T SPAWN") || !strings.Contains(filter, "STANDING JUMPTHROW") {
+		t.Fatalf("smoke filter missing overlay text:\n%s", filter)
+	}
+	for _, want := range []string{
+		"eq=contrast=1.030:saturation=1.240:gamma=1.000",
+		"trim=start=1.975:end=4.075",
+		"setpts=(PTS-STARTPTS)*2.500",
+		"atempo=0.5,atempo=0.800",
+		"concat=n=3:v=1:a=0,fps=60,format=yuv420p[v]",
+		"loudnorm=I=-16:TP=-1.5:LRA=11[a]",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("smoke filter missing slow-motion part %q:\n%s", want, filter)
+		}
+	}
+}
+
+func TestBuildManifestNaturalHQ3EnablesRealisticMastering(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetShortNaturalHQ3
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.Preset != PresetShortNaturalHQ3 || manifest.EffectsPreset != EffectsPresetNone {
+		t.Fatalf("preset metadata = %#v", manifest)
+	}
+	if manifest.VideoCRF != NaturalHQ3VideoCRF || manifest.VideoPreset != NaturalHQ3VideoPreset {
+		t.Fatalf("video encoding = crf %d preset %q", manifest.VideoCRF, manifest.VideoPreset)
+	}
+	if !manifest.HQFilters || !manifest.AudioNormalize || !manifest.QualityChecks || !manifest.CoverSheets {
+		t.Fatalf("hq3 feature flags missing: %#v", manifest)
+	}
+	first := manifest.Shorts[0]
+	if len(first.Effects) != 0 {
+		t.Fatalf("natural-hq3 effects = %#v, want none", first.Effects)
+	}
+	if first.SourceArtifact.Width != 1920 || first.SourceArtifact.Height != 1080 || first.SourceArtifact.FrameRate != "60/1" {
+		t.Fatalf("source artifact missing: %#v", first.SourceArtifact)
+	}
+	if got := argAfter(first.FFmpegCommand, "-preset"); got != NaturalHQ3VideoPreset {
+		t.Fatalf("-preset arg = %q, want %q", got, NaturalHQ3VideoPreset)
+	}
+	if got := argAfter(first.FFmpegCommand, "-crf"); got != "15" {
+		t.Fatalf("-crf arg = %q, want 15", got)
+	}
+	if got := argAfter(first.FFmpegCommand, "-profile:v"); got != "high" {
+		t.Fatalf("-profile:v arg = %q, want high", got)
+	}
+	for _, key := range []string{"-color_primaries", "-color_trc", "-colorspace"} {
+		if got := argAfter(first.FFmpegCommand, key); got != "bt709" {
+			t.Fatalf("%s arg = %q, want bt709", key, got)
+		}
+	}
+	if got := argAfter(first.FFmpegCommand, "-x264-params"); got != "colorprim=bt709:transfer=bt709:colormatrix=bt709" {
+		t.Fatalf("-x264-params arg = %q, want bt709 params", got)
+	}
+	filter := argAfter(first.FFmpegCommand, "-vf")
+	if !strings.Contains(filter, "flags=lanczos+accurate_rnd") || !strings.Contains(filter, "setsar=1") {
+		t.Fatalf("hq3 filter missing accurate scaling/setsar:\n%s", filter)
+	}
+}
+
+func TestBuildManifestNaturalHQ3SmoothAddsTemporalSmoothing(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetShortNaturalHQ3Smooth
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.Preset != PresetShortNaturalHQ3Smooth || !manifest.TemporalSmoothing {
+		t.Fatalf("smooth preset metadata = %#v", manifest)
+	}
+	if manifest.VideoCRF != NaturalHQ3VideoCRF || manifest.VideoPreset != NaturalHQ3VideoPreset {
+		t.Fatalf("video encoding = crf %d preset %q", manifest.VideoCRF, manifest.VideoPreset)
+	}
+	first := manifest.Shorts[0]
+	if len(first.Effects) != 0 {
+		t.Fatalf("natural-hq3-smooth effects = %#v, want none", first.Effects)
+	}
+	if !first.TemporalSmoothing {
+		t.Fatalf("short temporal smoothing missing: %#v", first)
+	}
+	filter := argAfter(first.FFmpegCommand, "-vf")
+	if !strings.Contains(filter, "flags=lanczos+accurate_rnd") || !strings.Contains(filter, "tmix=frames=2:weights='1 2'") {
+		t.Fatalf("smooth filter missing tmix:\n%s", filter)
+	}
+	if got := argAfter(first.FFmpegCommand, "-x264-params"); got != "colorprim=bt709:transfer=bt709:colormatrix=bt709" {
+		t.Fatalf("-x264-params arg = %q, want bt709 params", got)
+	}
+	if strings.Contains(filter, "drawtext=") {
+		t.Fatalf("smooth preset should not add text effects:\n%s", filter)
+	}
+}
+
+func TestBuildManifestWarnsOnUnexpectedSourceFormat(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	result.Artifacts[1].Width = 1280
+	result.Artifacts[1].Height = 720
+	result.Artifacts[1].FrameRate = "30/1"
+
+	manifest := BuildManifest(result, testManifestOptions(dir, nil))
+	joined := strings.Join(manifest.Warnings, "\n")
+	for _, want := range []string{
+		"source seg-001 resolution = 1280x720, want 1920x1080",
+		`source seg-001 frame_rate = "30/1", want 60fps`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("warnings missing %q:\n%s", want, joined)
+		}
+	}
 }
 
 func TestGenerateCoverPromptUsesMetadata(t *testing.T) {
@@ -238,7 +522,7 @@ func TestGenerateCoverPromptUsesMetadata(t *testing.T) {
 			{Weapon: "AWP", Victim: "opponent-two"},
 		},
 	})
-	for _, want := range []string{"MartinezSa", "de_ancient", "2K", "AK-47", "AWP", "opponent-one", "1 headshot", "Gameplay frame", "Player cutout/reference", "martinez.png"} {
+	for _, want := range []string{"MartinezSa", "de_ancient", "2K", "AK-47", "AWP", "opponent-one", "1 headshot", "Gameplay frame", "Player cutout/reference", "martinez.png", "2K con AK-47 en de_ancient"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
@@ -309,8 +593,48 @@ func testRecordingResult(dir string) recording.RecordingResult {
 			},
 		},
 		Artifacts: []recording.RecordingArtifact{
-			{SegmentID: "seg-002", Role: "segment", Type: "video", Path: filepath.Join(dir, "recording", "segments", "seg-002.mp4"), DurationSeconds: 5},
-			{SegmentID: "seg-001", Role: "segment", Type: "video", Path: filepath.Join(dir, "recording", "segments", "seg-001.mp4"), DurationSeconds: 8},
+			{SegmentID: "seg-002", Role: "segment", Type: "video", Path: filepath.Join(dir, "recording", "segments", "seg-002.mp4"), SizeBytes: 9_500_000, DurationSeconds: 5, Codec: "h264", Width: 1920, Height: 1080, FrameRate: "60/1"},
+			{SegmentID: "seg-001", Role: "segment", Type: "video", Path: filepath.Join(dir, "recording", "segments", "seg-001.mp4"), SizeBytes: 14_500_000, DurationSeconds: 8, Codec: "h264", Width: 1920, Height: 1080, FrameRate: "60/1"},
+		},
+	}
+}
+
+func testSmokeRecordingResult(dir string) recording.RecordingResult {
+	return recording.RecordingResult{
+		Plan: recording.RecordingPlan{
+			DemoPath:         filepath.Join(dir, "match-de_ancient.dem"),
+			DemoMap:          "de_ancient",
+			OutputDir:        filepath.Join(dir, "recording"),
+			TargetSteamID64:  "76561198148986856",
+			TargetNameInDemo: "MartinezSa",
+			TargetAccountID:  188721128,
+			Tickrate:         64,
+			Stream:           recording.DefaultStreamConfig(),
+			Segments: []recording.RecordingSegment{
+				{
+					ID:        "seg-001",
+					Round:     3,
+					TickStart: 9000,
+					TickEnd:   9800,
+					Utility: []killplan.UtilityThrow{
+						{
+							ID:          "smoke-001",
+							Type:        "smokegrenade",
+							Round:       3,
+							ThrowTick:   9200,
+							PopTick:     9500,
+							ThrowPlace:  "T Spawn",
+							ThrowAction: "jumpthrow",
+							Stance:      "standing",
+							ThrowPos:    [3]float64{10, 20, 0},
+							LandingPos:  [3]float64{110, 205, 0},
+						},
+					},
+				},
+			},
+		},
+		Artifacts: []recording.RecordingArtifact{
+			{SegmentID: "seg-001", Role: "segment", Type: "video", Path: filepath.Join(dir, "recording", "segments", "seg-001.mp4"), SizeBytes: 12_000_000, DurationSeconds: 10, Codec: "h264", Width: 1920, Height: 1080, FrameRate: "60/1"},
 		},
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/reche/zackvideo/internal/composition"
 	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/reche/zackvideo/internal/lineups"
 	"github.com/reche/zackvideo/internal/recording"
 )
 
@@ -38,7 +39,14 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if preset == "" {
 		preset = PresetShortClean
 	}
-	effectsSource, err := loadEffectsSource(opts.EffectsPath, opts.EffectsPreset)
+	effectsPreset := opts.EffectsPreset
+	if preset == PresetSmokeLineups && opts.EffectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
+		effectsPreset = EffectsPresetSmokeLineups
+	}
+	if isNaturalPreset(preset) && opts.EffectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
+		effectsPreset = EffectsPresetNone
+	}
+	effectsSource, err := loadEffectsSource(opts.EffectsPath, effectsPreset)
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
@@ -48,24 +56,54 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		playerImagePath = opts.PlayerImagePath
 		playerKeyColor = opts.PlayerKeyColor
 	}
+	videoCRF, err := normalizeVideoCRFForPreset(preset, opts.VideoCRF)
+	if err != nil {
+		return Manifest{Warnings: warnings}, err
+	}
+	videoPreset, err := normalizeVideoPresetForPreset(preset, opts.VideoPreset)
+	if err != nil {
+		return Manifest{Warnings: warnings}, err
+	}
+	hqFeaturesDefault := preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth || preset == PresetSmokeLineups
+	hqFilters := opts.HQFilters || hqFeaturesDefault
+	audioNormalize := opts.AudioNormalize || hqFeaturesDefault
+	qualityChecks := opts.QualityChecks || hqFeaturesDefault
+	coverSheets := opts.CoverSheets || hqFeaturesDefault
+	temporalSmoothing := opts.TemporalSmoothing || preset == PresetShortNaturalHQ3Smooth
 	segmentFilter := uniqueSegmentIDs(opts.SegmentIDs)
+	lineupCatalog, err := lineups.LoadDir(opts.LineupCatalogPath)
+	if err != nil {
+		return Manifest{Warnings: warnings}, err
+	}
+	logDir := filepath.Join(opts.OutputDir, "logs")
 	manifest := Manifest{
-		Preset:          preset,
-		RecordingResult: opts.RecordingResultPath,
-		KillPlan:        opts.KillPlanPath,
-		OutputDir:       opts.OutputDir,
-		PublishDir:      opts.PublishDir,
-		GalleryPath:     filepath.Join(opts.PublishDir, "index.html"),
-		SummaryPath:     filepath.Join(opts.PublishDir, "publish-summary.md"),
-		SegmentFilter:   append([]string(nil), segmentFilter...),
-		Limit:           opts.Limit,
-		SkipExisting:    opts.SkipExisting,
-		EffectsPath:     effectsSource.Path,
-		EffectsPreset:   effectsSource.Preset,
-		PlayerImage:     playerImagePath,
-		PlayerKeyColor:  playerKeyColor,
-		CoversEnabled:   opts.CoversEnabled,
-		Warnings:        warnings,
+		Preset:            preset,
+		RecordingResult:   opts.RecordingResultPath,
+		KillPlan:          opts.KillPlanPath,
+		OutputDir:         opts.OutputDir,
+		PublishDir:        opts.PublishDir,
+		GalleryPath:       filepath.Join(opts.PublishDir, "index.html"),
+		SummaryPath:       filepath.Join(opts.PublishDir, "publish-summary.md"),
+		SegmentFilter:     append([]string(nil), segmentFilter...),
+		Limit:             opts.Limit,
+		SkipExisting:      opts.SkipExisting,
+		EffectsPath:       effectsSource.Path,
+		EffectsPreset:     effectsSource.Preset,
+		LineupCatalogPath: opts.LineupCatalogPath,
+		PlayerImage:       playerImagePath,
+		PlayerKeyColor:    playerKeyColor,
+		VideoCRF:          videoCRF,
+		VideoPreset:       videoPreset,
+		HQFilters:         hqFilters,
+		AudioNormalize:    audioNormalize,
+		QualityChecks:     qualityChecks,
+		CoverSheets:       coverSheets,
+		TemporalSmoothing: temporalSmoothing,
+		CoversEnabled:     opts.CoversEnabled,
+		Warnings:          warnings,
+	}
+	if opts.LineupCatalogPath != "" {
+		manifest.UnmatchedSmokes = filepath.Join(opts.OutputDir, "unmatched-smokes.json")
 	}
 	selected := segmentIDSet(segmentFilter)
 	availableSegments := map[string]bool{}
@@ -99,41 +137,74 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		input := resolvePath(baseDir, clip.Path)
 		output := filepath.Join(opts.OutputDir, fmt.Sprintf("short-%03d-%s.mp4", index, segment.ID))
 		promptPath := filepath.Join(promptDir, fmt.Sprintf("short-%03d-%s-cover.md", index, segment.ID))
+		logBase := fmt.Sprintf("short-%03d-%s", index, segment.ID)
 		kills := killCues(segment, result.Plan.Tickrate)
+		smokes := smokeCues(segment, result.Plan.Tickrate, mapName, lineupCatalog, opts.LineupCatalogPath != "")
 		killCount := len(segment.Kills)
+		smokeCount := len(smokes)
 		primaryWeapon := primaryWeapon(segment.Kills)
+		primarySmoke := primarySmoke(smokes)
 		label := shortLabel(player, mapName, killCount)
-		headline := premiumHeadline(player, killCount, primaryWeapon)
+		headline := premiumHeadline(mapName, killCount, primaryWeapon)
 		title, caption, hashtags := publishText(player, mapName, killCount, primaryWeapon)
+		if smokeCount > 0 && killCount == 0 {
+			label = smokeLabel(player, mapName, smokes[0])
+			headline = smokeHeadline(mapName, smokes[0])
+			title, caption, hashtags = publishSmokeText(player, mapName, smokes[0])
+		}
 		publishBase := publishFileBase(index, segment.ID, player, mapName, killCount, primaryWeapon)
-		coverTime := coverTimeSeconds(kills, clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds))
+		if smokeCount > 0 && killCount == 0 {
+			publishBase = publishSmokeFileBase(index, segment.ID, player, mapName, smokes[0])
+		}
+		duration := clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds)
+		coverTime := coverTimeSeconds(kills, duration)
+		if len(kills) == 0 && len(smokes) > 0 {
+			coverTime = coverTimeSecondsForSmoke(smokes[0], duration)
+		}
 		edit := ShortEdit{
-			Index:           index,
-			SegmentID:       segment.ID,
-			Preset:          preset,
-			Player:          player,
-			Map:             mapName,
-			KillCount:       killCount,
-			PrimaryWeapon:   primaryWeapon,
-			Input:           input,
-			Output:          output,
-			PromptPath:      promptPath,
-			PublishPath:     filepath.Join(opts.PublishDir, publishBase+".mp4"),
-			PlayerImage:     playerImagePath,
-			PlayerKeyColor:  playerKeyColor,
-			CaptionPath:     filepath.Join(opts.PublishDir, publishBase+".caption.txt"),
-			DurationSeconds: clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds),
-			Label:           label,
-			Title:           title,
-			Headline:        headline,
-			Caption:         caption,
-			Hashtags:        hashtags,
-			Kills:           kills,
+			Index:             index,
+			SegmentID:         segment.ID,
+			Preset:            preset,
+			Player:            player,
+			Map:               mapName,
+			KillCount:         killCount,
+			PrimaryWeapon:     primaryWeapon,
+			SmokeCount:        smokeCount,
+			PrimarySmoke:      primarySmoke,
+			Input:             input,
+			Output:            output,
+			SourceArtifact:    clip.Artifact,
+			PromptPath:        promptPath,
+			PublishPath:       filepath.Join(opts.PublishDir, publishBase+".mp4"),
+			PlayerImage:       playerImagePath,
+			PlayerKeyColor:    playerKeyColor,
+			VideoCRF:          videoCRF,
+			VideoPreset:       videoPreset,
+			HQFilters:         hqFilters,
+			AudioNormalize:    audioNormalize,
+			TemporalSmoothing: temporalSmoothing,
+			CaptionPath:       filepath.Join(opts.PublishDir, publishBase+".caption.txt"),
+			DurationSeconds:   duration,
+			Label:             label,
+			Title:             title,
+			Headline:          headline,
+			Caption:           caption,
+			Hashtags:          hashtags,
+			Kills:             kills,
+			Smokes:            smokes,
+			RenderLogPath:     filepath.Join(logDir, logBase+"-render.log"),
 		}
 		if opts.CoversEnabled {
 			edit.CoverPath = filepath.Join(opts.PublishDir, publishBase+".cover.jpg")
+			if coverSheets {
+				edit.CoverSheetPath = filepath.Join(opts.PublishDir, publishBase+".sheet.jpg")
+			}
 			edit.CoverTimeSeconds = coverTime
 		}
+		if qualityChecks {
+			edit.QualityLogPath = filepath.Join(logDir, logBase+"-quality.log")
+		}
+		manifest.Warnings = append(manifest.Warnings, ValidateSourceArtifact(edit.SourceArtifact)...)
 		manifest.Shorts = append(manifest.Shorts, edit)
 	}
 	if len(manifest.Shorts) == 0 {
@@ -143,6 +214,10 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		return manifest, err
 	}
 	return manifest, nil
+}
+
+func isNaturalPreset(preset string) bool {
+	return preset == PresetShortNaturalHQ || preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth
 }
 
 func uniqueSegmentIDs(ids []string) []string {
@@ -159,6 +234,49 @@ func uniqueSegmentIDs(ids []string) []string {
 	return out
 }
 
+func normalizeVideoCRF(crf int) (int, error) {
+	if crf == 0 {
+		return DefaultVideoCRF, nil
+	}
+	if crf < 1 || crf > 51 {
+		return 0, fmt.Errorf("video crf must be between 1 and 51")
+	}
+	return crf, nil
+}
+
+func normalizeVideoCRFForPreset(preset string, crf int) (int, error) {
+	if crf == 0 && (preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth) {
+		return NaturalHQ3VideoCRF, nil
+	}
+	if crf == 0 && (isNaturalPreset(preset) || preset == PresetSmokeLineups) {
+		return NaturalHQVideoCRF, nil
+	}
+	return normalizeVideoCRF(crf)
+}
+
+func normalizeVideoPreset(preset string) (string, error) {
+	preset = strings.ToLower(strings.TrimSpace(preset))
+	if preset == "" {
+		return DefaultVideoPreset, nil
+	}
+	switch preset {
+	case "ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow":
+		return preset, nil
+	default:
+		return "", fmt.Errorf("unknown video preset %q", preset)
+	}
+}
+
+func normalizeVideoPresetForPreset(editPreset, videoPreset string) (string, error) {
+	if strings.TrimSpace(videoPreset) == "" && (editPreset == PresetShortNaturalHQ3 || editPreset == PresetShortNaturalHQ3Smooth) {
+		return NaturalHQ3VideoPreset, nil
+	}
+	if strings.TrimSpace(videoPreset) == "" && (isNaturalPreset(editPreset) || editPreset == PresetSmokeLineups) {
+		return NaturalHQVideoPreset, nil
+	}
+	return normalizeVideoPreset(videoPreset)
+}
+
 func segmentIDSet(ids []string) map[string]bool {
 	if len(ids) == 0 {
 		return nil
@@ -170,19 +288,18 @@ func segmentIDSet(ids []string) map[string]bool {
 	return out
 }
 
-func premiumHeadline(player string, killCount int, weapon string) string {
+func premiumHeadline(mapName string, killCount int, weapon string) string {
 	parts := []string{}
-	if player != "" {
-		parts = append(parts, player)
-	}
 	if killCount > 0 {
 		parts = append(parts, fmt.Sprintf("%dK", killCount))
+	} else {
+		parts = append(parts, "Highlight")
 	}
 	if weapon != "" {
-		parts = append(parts, weapon)
+		parts = append(parts, "con", weapon)
 	}
-	if len(parts) == 0 {
-		return "CS2 highlight"
+	if mapName != "" {
+		parts = append(parts, "en", mapName)
 	}
 	return strings.Join(parts, " ")
 }
@@ -228,6 +345,149 @@ func killCues(segment recording.RecordingSegment, tickrate int) []KillCue {
 		})
 	}
 	return out
+}
+
+func smokeCues(segment recording.RecordingSegment, tickrate int, mapName string, catalog lineups.Catalog, catalogRequested bool) []SmokeCue {
+	if tickrate <= 0 {
+		return nil
+	}
+	recordStart := recording.EffectiveRecordStartTick(segment, tickrate)
+	utility := append([]killplan.UtilityThrow(nil), segment.Utility...)
+	sort.SliceStable(utility, func(i, j int) bool {
+		return utility[i].ThrowTick < utility[j].ThrowTick
+	})
+	out := make([]SmokeCue, 0, len(utility))
+	for _, smoke := range utility {
+		if !isOverlayUtilityType(smoke.Type) {
+			continue
+		}
+		if smoke.ThrowTick <= 0 || smoke.ThrowTick < recordStart || smoke.ThrowTick > segment.TickEnd {
+			continue
+		}
+		match := smoke.LineupMatch
+		if (match == nil || match.ID == "" || strings.HasPrefix(match.ID, "auto-")) && !catalog.Empty() {
+			if m, ok := catalog.MatchSmoke(mapName, smoke); ok {
+				match = &m
+			}
+		}
+		cue := SmokeCue{
+			ID:          smoke.ID,
+			Type:        smoke.Type,
+			Round:       smoke.Round,
+			ThrowTick:   smoke.ThrowTick,
+			PopTick:     smoke.PopTick,
+			ExpireTick:  smoke.ExpireTick,
+			TimeSeconds: roundMillis(float64(smoke.ThrowTick-recordStart) / float64(tickrate)),
+			ThrowPlace:  smoke.ThrowPlace,
+			ThrowAction: smoke.ThrowAction,
+			Stance:      smoke.Stance,
+			Movement:    smoke.Movement,
+			Speed2D:     smoke.Speed2D,
+			OnGround:    smoke.OnGround,
+			Walking:     smoke.Walking,
+			Ducking:     smoke.Ducking,
+			ThrowPos:    smoke.ThrowPos,
+			LandingPos:  smoke.LandingPos,
+		}
+		if smoke.PopTick > 0 && smoke.PopTick >= recordStart && smoke.PopTick <= segment.TickEnd {
+			cue.PopTimeSeconds = roundMillis(float64(smoke.PopTick-recordStart) / float64(tickrate))
+		}
+		if match != nil && match.ID != "" {
+			cue.Destination = match.Destination
+			cue.FromArea = match.FromArea
+			cue.Side = match.Side
+			cue.MatchID = match.ID
+			cue.Confidence = match.Confidence
+			cue.DistanceUnits = match.DistanceUnits
+			cue.Matched = true
+		} else if catalogRequested {
+			cue.UnmatchedReason = "no catalog match"
+		}
+		out = append(out, cue)
+	}
+	return out
+}
+
+func parserSmokeGrenadeType() string {
+	return "smokegrenade"
+}
+
+func isOverlayUtilityType(typ string) bool {
+	switch typ {
+	case "smokegrenade", "flashbang", "molotov", "incgrenade":
+		return true
+	default:
+		return false
+	}
+}
+
+func primarySmoke(smokes []SmokeCue) string {
+	if len(smokes) == 0 {
+		return ""
+	}
+	if smokes[0].Destination != "" {
+		return smokes[0].Destination
+	}
+	return utilityDisplayName(smokes[0].Type)
+}
+
+func smokeLabel(player, mapName string, smoke SmokeCue) string {
+	parts := []string{}
+	if player != "" {
+		parts = append(parts, player)
+	}
+	if mapName != "" {
+		parts = append(parts, mapName)
+	}
+	if smoke.Destination != "" {
+		parts = append(parts, utilityDisplayName(smoke.Type)+" "+smoke.Destination)
+	} else {
+		parts = append(parts, utilityDisplayName(smoke.Type))
+	}
+	return strings.Join(parts, " | ")
+}
+
+func smokeHeadline(mapName string, smoke SmokeCue) string {
+	destination := smoke.Destination
+	if destination == "" {
+		destination = utilityDisplayName(smoke.Type)
+	}
+	if smoke.FromArea != "" && smoke.Destination != "" {
+		destination = smoke.FromArea + " -> " + smoke.Destination
+	}
+	if mapName != "" {
+		return destination + " en " + mapName
+	}
+	return destination
+}
+
+func utilityDisplayName(typ string) string {
+	switch typ {
+	case "flashbang":
+		return "Flash"
+	case "molotov":
+		return "Molotov"
+	case "incgrenade":
+		return "Incendiary"
+	case "smokegrenade":
+		return "Smoke"
+	default:
+		return "Utility"
+	}
+}
+
+func coverTimeSecondsForSmoke(smoke SmokeCue, duration float64) float64 {
+	t := smoke.TimeSeconds + 0.25
+	if smoke.PopTimeSeconds > 0 {
+		t = smoke.PopTimeSeconds
+	}
+	if t < 0 {
+		return 0
+	}
+	if duration > 0 && t > duration {
+		return duration
+	}
+	return t
 }
 
 func clipDuration(segment recording.RecordingSegment, tickrate int, clipDuration float64) float64 {

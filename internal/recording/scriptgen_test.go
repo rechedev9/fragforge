@@ -50,7 +50,9 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 		`demoui`,
 		`mirv_streams record fps 60`,
 		`mirv_streams record screen enabled 1`,
-		`mirv_streams record screen settings afxFfmpegYuv420p`,
+		`mirv_streams settings add ffmpeg zvFfmpegYuv420pCrf18`,
+		`-crf 18`,
+		`mirv_streams record screen settings zvFfmpegYuv420pCrf18`,
 		`disconnect; quit`,
 		`spec_show_xray 0`,
 		`cl_spec_show_bindings 0`,
@@ -64,6 +66,27 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 		if !strings.Contains(js, want) {
 			t.Errorf("generated JS missing %q\n%s", want, js)
 		}
+	}
+}
+
+func TestGenerateHLAEJavaScriptUsesConfiguredCRF(t *testing.T) {
+	p := testPlan()
+	p.Stream.CRF = 16
+	js, err := GenerateHLAEJavaScript(p)
+	if err != nil {
+		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
+	}
+	for _, want := range []string{
+		`mirv_streams settings add ffmpeg zvFfmpegYuv420pCrf16`,
+		`-crf 16`,
+		`mirv_streams record screen settings zvFfmpegYuv420pCrf16`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("generated JS missing %q\n%s", want, js)
+		}
+	}
+	if strings.Contains(js, `afxFfmpegYuv420p`) {
+		t.Fatalf("generated JS should use the CRF-specific preset:\n%s", js)
 	}
 }
 

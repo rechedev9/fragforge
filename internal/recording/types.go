@@ -68,11 +68,12 @@ type RecordingPlan struct {
 
 // RecordingSegment is one HLAE record window.
 type RecordingSegment struct {
-	ID        string          `json:"id"`
-	Round     int             `json:"round,omitempty"`
-	TickStart int             `json:"tick_start"`
-	TickEnd   int             `json:"tick_end"`
-	Kills     []killplan.Kill `json:"kills,omitempty"`
+	ID        string                  `json:"id"`
+	Round     int                     `json:"round,omitempty"`
+	TickStart int                     `json:"tick_start"`
+	TickEnd   int                     `json:"tick_end"`
+	Kills     []killplan.Kill         `json:"kills,omitempty"`
+	Utility   []killplan.UtilityThrow `json:"utility,omitempty"`
 }
 
 // RecordingArtifact is one file discovered after recording.
@@ -142,6 +143,7 @@ func NewPlanFromKillPlan(plan killplan.Plan, demoPath, outputDir string, stream 
 			TickStart: s.TickStart,
 			TickEnd:   s.TickEnd,
 			Kills:     s.Kills,
+			Utility:   s.Utility,
 		})
 	}
 	if err := out.Validate(); err != nil {
@@ -188,6 +190,9 @@ func (p RecordingPlan) Validate() error {
 	}
 	if p.Stream.FPS <= 0 || p.Stream.Width <= 0 || p.Stream.Height <= 0 {
 		return fmt.Errorf("stream fps, width, and height must be positive")
+	}
+	if p.Stream.CRF < 1 || p.Stream.CRF > 51 {
+		return fmt.Errorf("stream crf must be between 1 and 51")
 	}
 	seen := map[string]bool{}
 	for i, s := range p.Segments {

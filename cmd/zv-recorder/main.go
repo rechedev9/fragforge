@@ -31,6 +31,8 @@ func run() error {
 		hlaeExe      = flag.String("hlae", "", "path to HLAE.exe")
 		cs2Exe       = flag.String("cs2", "", "path to cs2.exe")
 		hudMode      = flag.String("hud", string(recording.HUDModeGameplay), "HUD mode: gameplay or clean")
+		fps          = flag.Int("fps", 0, "recording FPS; defaults to recorder preset")
+		videoCRF     = flag.Int("video-crf", 0, "HLAE stream CRF; defaults to recorder preset")
 		dryRun       = flag.Bool("dry-run", false, "generate plan and script without launching HLAE")
 		timeout      = flag.Duration("timeout", 15*time.Minute, "maximum duration to wait for CS2")
 	)
@@ -74,12 +76,21 @@ func run() error {
 	}
 	stream := recording.DefaultStreamConfig()
 	stream.HUDMode = recording.HUDMode(*hudMode)
+	if *fps > 0 {
+		stream.FPS = *fps
+	}
+	if *videoCRF < 0 {
+		return fmt.Errorf("--video-crf must be between 1 and 51, or 0 for default")
+	}
+	if *videoCRF > 0 {
+		stream.CRF = *videoCRF
+	}
 	plan, err := recording.NewPlanFromKillPlan(kp, absDemoPath, absOutDir, stream)
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(plan.OutputDir, 0o755); err != nil {
+	if err := os.MkdirAll(plan.OutputDir, 0o750); err != nil {
 		return err
 	}
 	script, err := recording.GenerateHLAEJavaScript(plan)
@@ -87,7 +98,7 @@ func run() error {
 		return err
 	}
 	scriptPath := filepath.Join(plan.OutputDir, "recording.js")
-	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		return err
 	}
 
@@ -132,6 +143,7 @@ func run() error {
 }
 
 func readKillPlan(path string) (killplan.Plan, error) {
+	// #nosec G304 -- kill plan path is an explicit local CLI input.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return killplan.Plan{}, err
@@ -171,6 +183,7 @@ func launchAndWait(ctx context.Context, hlaeExe, cs2Exe string, plan recording.R
 		return err
 	}
 	cs2CmdLine := fmt.Sprintf(`-insecure -condebug -w %d -h %d +cl_demo_predict 0 +playdemo "%s" +mirv_script_load "%s"`, plan.Stream.Width, plan.Stream.Height, plan.DemoPath, scriptPath)
+	// #nosec G204 -- HLAE/CS2 paths are explicit local tool paths and args are not shell-interpolated.
 	cmd := exec.CommandContext(ctx, hlaeExe,
 		"-customLoader",
 		"-noGui",
@@ -208,7 +221,7 @@ func ensureHLAEFFmpegConfig(hlaeExe string) error {
 		return fmt.Errorf("HLAE FFmpeg config missing: install ffmpeg under %s or create %s", filepath.Join(dir, "bin"), ini)
 	}
 	content := fmt.Sprintf("[Ffmpeg]\r\nPath=%s\r\n", ffmpegPath)
-	return os.WriteFile(ini, []byte(content), 0o644)
+	return os.WriteFile(ini, []byte(content), 0o600)
 }
 
 func locateHookDLL(hlaeExe string) (string, error) {
@@ -260,6 +273,7 @@ func processRunning(image string) (bool, error) {
 	if runtime.GOOS != "windows" {
 		return false, nil
 	}
+	// #nosec G204 -- tasklist executable is fixed and image is derived from a local executable path.
 	out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq "+image, "/FO", "CSV", "/NH").Output()
 	if err != nil {
 		return false, err
@@ -273,5 +287,5 @@ func writeResult(outDir string, result recording.RecordingResult) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(outDir, "recording-result.json"), append(b, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(outDir, "recording-result.json"), append(b, '\n'), 0o600)
 }

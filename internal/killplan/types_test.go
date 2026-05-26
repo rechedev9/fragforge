@@ -8,8 +8,8 @@ import (
 )
 
 func TestSchemaVersionConstant(t *testing.T) {
-	if SchemaVersion != "1.0" {
-		t.Errorf("SchemaVersion = %q, want %q", SchemaVersion, "1.0")
+	if SchemaVersion != "1.1" {
+		t.Errorf("SchemaVersion = %q, want %q", SchemaVersion, "1.1")
 	}
 }
 
@@ -19,8 +19,8 @@ func TestPlanMarshalIncludesSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal error = %v", err)
 	}
-	if !strings.Contains(string(b), `"schema_version":"1.0"`) {
-		t.Errorf("Marshaled plan missing schema_version=1.0: %s", string(b))
+	if !strings.Contains(string(b), `"schema_version":"1.1"`) {
+		t.Errorf("Marshaled plan missing schema_version=1.1: %s", string(b))
 	}
 }
 
@@ -29,8 +29,8 @@ func TestNewPlanSetsSchemaVersionAndTimestamp(t *testing.T) {
 	p := NewPlan()
 	after := time.Now().UTC()
 
-	if p.SchemaVersion != "1.0" {
-		t.Errorf("SchemaVersion = %q, want %q", p.SchemaVersion, "1.0")
+	if p.SchemaVersion != "1.1" {
+		t.Errorf("SchemaVersion = %q, want %q", p.SchemaVersion, "1.1")
 	}
 	if p.GeneratedAt.Before(before) || p.GeneratedAt.After(after) {
 		t.Errorf("GeneratedAt = %v, expected between %v and %v", p.GeneratedAt, before, after)
@@ -65,7 +65,7 @@ func TestSteamIDSerializesAsString(t *testing.T) {
 
 func TestPlanRoundtrip(t *testing.T) {
 	original := Plan{
-		SchemaVersion: "1.0",
+		SchemaVersion: "1.1",
 		GeneratedAt:   time.Date(2026, 5, 14, 17, 42, 0, 0, time.UTC),
 		Demo: Demo{
 			Path:          "/tmp/demo.dem",

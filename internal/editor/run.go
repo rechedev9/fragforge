@@ -47,6 +47,21 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if preset == "" {
 		preset = PresetShortClean
 	}
+	videoCRF, err := normalizeVideoCRFForPreset(preset, cfg.VideoCRF)
+	if err != nil {
+		return Result{}, err
+	}
+	videoPreset, err := normalizeVideoPresetForPreset(preset, cfg.VideoPreset)
+	if err != nil {
+		return Result{}, err
+	}
+	effectsPreset := cfg.EffectsPreset
+	if preset == PresetSmokeLineups && cfg.EffectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
+		effectsPreset = EffectsPresetSmokeLineups
+	}
+	if isNaturalPreset(preset) && cfg.EffectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
+		effectsPreset = EffectsPresetNone
+	}
 	playerImagePath := cfg.PlayerImagePath
 	if playerImagePath != "" {
 		playerImagePath, err = filepath.Abs(playerImagePath)
@@ -83,11 +98,19 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		PublishDir:          publishDir,
 		Preset:              preset,
 		EffectsPath:         effectsPath,
-		EffectsPreset:       cfg.EffectsPreset,
+		EffectsPreset:       effectsPreset,
+		LineupCatalogPath:   cfg.LineupCatalogPath,
 		SegmentIDs:          cfg.SegmentIDs,
 		Limit:               cfg.Limit,
 		PlayerImagePath:     playerImagePath,
 		PlayerKeyColor:      cfg.PlayerKeyColor,
+		VideoCRF:            videoCRF,
+		VideoPreset:         videoPreset,
+		HQFilters:           cfg.HQFilters,
+		AudioNormalize:      cfg.AudioNormalize,
+		QualityChecks:       cfg.QualityChecks,
+		CoverSheets:         cfg.CoverSheets,
+		TemporalSmoothing:   cfg.TemporalSmoothing,
 		FFmpegPath:          commandFFmpeg,
 		CoversEnabled:       coversEnabled,
 		SkipExisting:        cfg.SkipExisting,
@@ -99,7 +122,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	manifest.Warnings = append(metadataWarnings, manifest.Warnings...)
 	result := resultFromManifest(manifest, cfg.DryRun)
 
-	if err := os.MkdirAll(filepath.Join(outDir, "prompts"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(outDir, "prompts"), 0o750); err != nil {
 		result.Error = err.Error()
 		_ = WriteResult(filepath.Join(outDir, "shorts-result.json"), result)
 		return result, err
@@ -112,6 +135,11 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return result, err
 	}
 	if err := WriteManifest(filepath.Join(outDir, "edit-manifest.json"), manifest); err != nil {
+		result.Error = err.Error()
+		_ = WriteResult(filepath.Join(outDir, "shorts-result.json"), result)
+		return result, err
+	}
+	if err := WriteUnmatchedSmokes(manifest); err != nil {
 		result.Error = err.Error()
 		_ = WriteResult(filepath.Join(outDir, "shorts-result.json"), result)
 		return result, err
@@ -137,103 +165,18 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		_ = WriteResult(resultPath, result)
 		return result, errors.New(result.Error)
 	}
-
-	for i, short := range manifest.Shorts {
-		if err := os.MkdirAll(filepath.Dir(short.Output), 0o755); err != nil {
-			result.Error = err.Error()
-			_ = WriteResult(resultPath, result)
-			return result, err
-		}
-		if cfg.SkipExisting && fileExistsNonEmpty(short.Output) {
-			result.Shorts[i].RenderSkipped = true
-		} else {
-			if err := runFFmpeg(ctx, short.FFmpegCommand, "short edit"); err != nil {
-				result.Error = err.Error()
-				_ = WriteResult(resultPath, result)
-				return result, err
-			}
-		}
-		artifact := recording.RecordingArtifact{
-			SegmentID: short.SegmentID,
-			Role:      "short",
-			Type:      "video",
-			Path:      short.Output,
-		}
-		if info, err := os.Stat(short.Output); err == nil {
-			artifact.SizeBytes = info.Size()
-		}
-		if ffprobePath != "" {
-			recording.ProbeArtifact(ctx, ffprobePath, &artifact)
-		}
-		result.Shorts[i].OutputArtifact = artifact
-		result.Warnings = append(result.Warnings, ValidateShortArtifact(artifact)...)
-		if err := publishShort(short); err != nil {
-			result.Error = err.Error()
-			_ = WriteResult(resultPath, result)
-			return result, err
-		}
-		publishArtifact := recording.RecordingArtifact{
-			SegmentID: short.SegmentID,
-			Role:      "publish",
-			Type:      "video",
-			Path:      short.PublishPath,
-		}
-		if info, err := os.Stat(short.PublishPath); err == nil {
-			publishArtifact.SizeBytes = info.Size()
-		}
-		if ffprobePath != "" {
-			recording.ProbeArtifact(ctx, ffprobePath, &publishArtifact)
-		}
-		result.Shorts[i].PublishArtifact = publishArtifact
-		result.Warnings = append(result.Warnings, ValidateShortArtifact(publishArtifact)...)
-		if coversEnabled {
-			if cfg.SkipExisting && fileExistsNonEmpty(short.CoverPath) {
-				result.Shorts[i].CoverSkipped = true
-				coverArtifact := recording.RecordingArtifact{
-					SegmentID: short.SegmentID,
-					Role:      "cover",
-					Type:      "image",
-					Path:      short.CoverPath,
-				}
-				if info, err := os.Stat(short.CoverPath); err == nil {
-					coverArtifact.SizeBytes = info.Size()
-				}
-				if ffprobePath != "" {
-					recording.ProbeArtifact(ctx, ffprobePath, &coverArtifact)
-				}
-				result.Shorts[i].CoverArtifact = coverArtifact
-				result.Warnings = append(result.Warnings, ValidateCoverArtifact(coverArtifact)...)
-			} else if err := runFFmpeg(ctx, short.CoverCommand, "cover extract"); err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("cover %s: %v", short.SegmentID, err))
-			} else {
-				coverArtifact := recording.RecordingArtifact{
-					SegmentID: short.SegmentID,
-					Role:      "cover",
-					Type:      "image",
-					Path:      short.CoverPath,
-				}
-				if info, err := os.Stat(short.CoverPath); err == nil {
-					coverArtifact.SizeBytes = info.Size()
-				}
-				if ffprobePath != "" {
-					recording.ProbeArtifact(ctx, ffprobePath, &coverArtifact)
-				}
-				result.Shorts[i].CoverArtifact = coverArtifact
-				result.Warnings = append(result.Warnings, ValidateCoverArtifact(coverArtifact)...)
-			}
-		}
-	}
-	if err := WritePackManifest(packPath, PackManifestFromManifest(manifest, result)); err != nil {
-		result.Error = err.Error()
-		_ = WriteResult(resultPath, result)
+	if err := renderShortPack(ctx, &manifest, &result, shortPackOptions{
+		OutputDir:      outDir,
+		ResultPath:     resultPath,
+		PackPath:       packPath,
+		FFprobePath:    ffprobePath,
+		CoversEnabled:  coversEnabled,
+		SkipExisting:   cfg.SkipExisting,
+		ValidateVideos: true,
+	}); err != nil {
 		return result, err
 	}
-	if err := WritePublishGallery(manifest.GalleryPath, manifest); err != nil {
-		result.Error = err.Error()
-		_ = WriteResult(resultPath, result)
-		return result, err
-	}
-	return result, WriteResult(resultPath, result)
+	return result, nil
 }
 
 func (c Config) validate() error {
@@ -246,24 +189,30 @@ func (c Config) validate() error {
 	if c.Limit < 0 {
 		return fmt.Errorf("limit must be >= 0")
 	}
+	preset := c.Preset
+	if preset == "" {
+		preset = PresetShortClean
+	}
+	if _, err := normalizeVideoCRFForPreset(preset, c.VideoCRF); err != nil {
+		return err
+	}
+	if _, err := normalizeVideoPresetForPreset(preset, c.VideoPreset); err != nil {
+		return err
+	}
 	for _, id := range c.SegmentIDs {
 		if strings.TrimSpace(id) == "" {
 			return fmt.Errorf("segment ids must not be empty")
 		}
 	}
-	preset := c.Preset
-	if preset == "" {
-		preset = PresetShortClean
-	}
 	if c.EffectsPath == "" && c.EffectsPreset != "" {
 		switch c.EffectsPreset {
-		case EffectsPresetBuiltinClean, EffectsPresetAWPGod, EffectsPresetNone:
+		case EffectsPresetBuiltinClean, EffectsPresetAWPGod, EffectsPresetSmokeLineups, EffectsPresetNone:
 		default:
 			return fmt.Errorf("unknown effects preset %q", c.EffectsPreset)
 		}
 	}
 	switch preset {
-	case PresetShortClean:
+	case PresetShortClean, PresetShortNaturalHQ, PresetShortNaturalHQ2, PresetShortNaturalHQ3, PresetShortNaturalHQ3Smooth, PresetSmokeLineups:
 		if c.PlayerImagePath != "" {
 			return fmt.Errorf("--player-image requires --preset %q", PresetShortPremiumPlayer)
 		}
@@ -287,6 +236,7 @@ func (c Config) validate() error {
 }
 
 func ReadRecordingResult(path string) (recording.RecordingResult, error) {
+	// #nosec G304 -- recording result path is an explicit local CLI/config input.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return recording.RecordingResult{}, err
@@ -299,84 +249,141 @@ func ReadRecordingResult(path string) (recording.RecordingResult, error) {
 }
 
 func WriteManifest(path string, manifest Manifest) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }
 
 func WriteResult(path string, result Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }
 
 func WritePackManifest(path string, manifest PackManifest) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }
 
 func resultFromManifest(manifest Manifest, dryRun bool) Result {
 	result := Result{
-		Preset:          manifest.Preset,
-		RecordingResult: manifest.RecordingResult,
-		KillPlan:        manifest.KillPlan,
-		OutputDir:       manifest.OutputDir,
-		PublishDir:      manifest.PublishDir,
-		GalleryPath:     manifest.GalleryPath,
-		SummaryPath:     manifest.SummaryPath,
-		SegmentFilter:   append([]string(nil), manifest.SegmentFilter...),
-		Limit:           manifest.Limit,
-		SkipExisting:    manifest.SkipExisting,
-		EffectsPath:     manifest.EffectsPath,
-		EffectsPreset:   manifest.EffectsPreset,
-		PlayerImage:     manifest.PlayerImage,
-		PlayerKeyColor:  manifest.PlayerKeyColor,
-		CoversEnabled:   manifest.CoversEnabled,
-		DryRun:          dryRun,
-		Warnings:        append([]string(nil), manifest.Warnings...),
-		Shorts:          make([]ShortResult, 0, len(manifest.Shorts)),
+		Preset:            manifest.Preset,
+		RecordingResult:   manifest.RecordingResult,
+		KillPlan:          manifest.KillPlan,
+		OutputDir:         manifest.OutputDir,
+		PublishDir:        manifest.PublishDir,
+		GalleryPath:       manifest.GalleryPath,
+		SummaryPath:       manifest.SummaryPath,
+		SegmentFilter:     append([]string(nil), manifest.SegmentFilter...),
+		Limit:             manifest.Limit,
+		SkipExisting:      manifest.SkipExisting,
+		EffectsPath:       manifest.EffectsPath,
+		EffectsPreset:     manifest.EffectsPreset,
+		LineupCatalogPath: manifest.LineupCatalogPath,
+		UnmatchedSmokes:   manifest.UnmatchedSmokes,
+		PlayerImage:       manifest.PlayerImage,
+		PlayerKeyColor:    manifest.PlayerKeyColor,
+		VideoCRF:          manifest.VideoCRF,
+		VideoPreset:       manifest.VideoPreset,
+		HQFilters:         manifest.HQFilters,
+		AudioNormalize:    manifest.AudioNormalize,
+		QualityChecks:     manifest.QualityChecks,
+		CoverSheets:       manifest.CoverSheets,
+		TemporalSmoothing: manifest.TemporalSmoothing,
+		CoversEnabled:     manifest.CoversEnabled,
+		DryRun:            dryRun,
+		Warnings:          append([]string(nil), manifest.Warnings...),
+		Shorts:            make([]ShortResult, 0, len(manifest.Shorts)),
 	}
 	for _, short := range manifest.Shorts {
 		result.Shorts = append(result.Shorts, ShortResult{
-			Index:            short.Index,
-			SegmentID:        short.SegmentID,
-			Preset:           short.Preset,
-			Input:            short.Input,
-			Output:           short.Output,
-			PromptPath:       short.PromptPath,
-			PublishPath:      short.PublishPath,
-			PlayerImage:      short.PlayerImage,
-			PlayerKeyColor:   short.PlayerKeyColor,
-			CaptionPath:      short.CaptionPath,
-			CoverPath:        short.CoverPath,
-			CoverTimeSeconds: short.CoverTimeSeconds,
-			DurationSeconds:  short.DurationSeconds,
-			Title:            short.Title,
-			Headline:         short.Headline,
-			Caption:          short.Caption,
-			Hashtags:         append([]string(nil), short.Hashtags...),
-			Effects:          append([]Effect(nil), short.Effects...),
-			FFmpegCommand:    append([]string(nil), short.FFmpegCommand...),
-			CoverCommand:     append([]string(nil), short.CoverCommand...),
+			Index:             short.Index,
+			SegmentID:         short.SegmentID,
+			Preset:            short.Preset,
+			Input:             short.Input,
+			Output:            short.Output,
+			SourceArtifact:    short.SourceArtifact,
+			PromptPath:        short.PromptPath,
+			PublishPath:       short.PublishPath,
+			PlayerImage:       short.PlayerImage,
+			PlayerKeyColor:    short.PlayerKeyColor,
+			VideoCRF:          short.VideoCRF,
+			VideoPreset:       short.VideoPreset,
+			HQFilters:         short.HQFilters,
+			AudioNormalize:    short.AudioNormalize,
+			TemporalSmoothing: short.TemporalSmoothing,
+			CaptionPath:       short.CaptionPath,
+			CoverPath:         short.CoverPath,
+			CoverSheetPath:    short.CoverSheetPath,
+			CoverTimeSeconds:  short.CoverTimeSeconds,
+			DurationSeconds:   short.DurationSeconds,
+			Title:             short.Title,
+			Headline:          short.Headline,
+			Caption:           short.Caption,
+			Hashtags:          append([]string(nil), short.Hashtags...),
+			SmokeCount:        short.SmokeCount,
+			PrimarySmoke:      short.PrimarySmoke,
+			Smokes:            append([]SmokeCue(nil), short.Smokes...),
+			Effects:           append([]Effect(nil), short.Effects...),
+			FFmpegCommand:     append([]string(nil), short.FFmpegCommand...),
+			CoverCommand:      append([]string(nil), short.CoverCommand...),
+			CoverSheetCommand: append([]string(nil), short.CoverSheetCommand...),
+			QualityCommand:    append([]string(nil), short.QualityCommand...),
+			RenderLogPath:     short.RenderLogPath,
+			QualityLogPath:    short.QualityLogPath,
 		})
 	}
 	return result
+}
+
+func WriteUnmatchedSmokes(manifest Manifest) error {
+	if manifest.UnmatchedSmokes == "" {
+		return nil
+	}
+	type unmatchedSmoke struct {
+		SegmentID string   `json:"segment_id"`
+		Player    string   `json:"player,omitempty"`
+		Map       string   `json:"map,omitempty"`
+		Smoke     SmokeCue `json:"smoke"`
+	}
+	var out []unmatchedSmoke
+	for _, short := range manifest.Shorts {
+		for _, smoke := range short.Smokes {
+			if smoke.Matched {
+				continue
+			}
+			out = append(out, unmatchedSmoke{
+				SegmentID: short.SegmentID,
+				Player:    short.Player,
+				Map:       short.Map,
+				Smoke:     smoke,
+			})
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(manifest.UnmatchedSmokes), 0o750); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(manifest.UnmatchedSmokes, append(b, '\n'), 0o600)
 }
 
 func mediaWorkRequired(manifest Manifest, coversEnabled, skipExisting bool) bool {
@@ -388,6 +395,9 @@ func mediaWorkRequired(manifest Manifest, coversEnabled, skipExisting bool) bool
 			return true
 		}
 		if coversEnabled && short.CoverPath != "" && !fileExistsNonEmpty(short.CoverPath) {
+			return true
+		}
+		if coversEnabled && short.CoverSheetPath != "" && !fileExistsNonEmpty(short.CoverSheetPath) {
 			return true
 		}
 	}
@@ -414,11 +424,11 @@ func supportedPlayerImage(path string) bool {
 func writePrompts(manifest Manifest) []string {
 	var warnings []string
 	for _, short := range manifest.Shorts {
-		if err := os.MkdirAll(filepath.Dir(short.PromptPath), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(short.PromptPath), 0o750); err != nil {
 			warnings = append(warnings, fmt.Sprintf("write prompt for %s: %v", short.SegmentID, err))
 			continue
 		}
-		if err := os.WriteFile(short.PromptPath, []byte(GenerateCoverPrompt(short)), 0o644); err != nil {
+		if err := os.WriteFile(short.PromptPath, []byte(GenerateCoverPrompt(short)), 0o600); err != nil {
 			warnings = append(warnings, fmt.Sprintf("write prompt for %s: %v", short.SegmentID, err))
 		}
 	}

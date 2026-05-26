@@ -1,6 +1,28 @@
 /bin/
-/data/
+/data/*
+!/data/lineups/
+!/data/lineups/*.json
 /.env
+
+# Generated media and overlay renders
+*.mp4
+*.mov
+*.webm
+*.avi
+*.mkv
+*.wav
+*.flac
+*.aac
+*.tga
+*.exr
+*.y4m
+*.yuv
+frames/
+*/frames/
+overlays/**/dist/
+overlays/**/render/
+overlays/**/renders/
+overlays/**/out/
 
 # Local demos and goldens (per testdata/README.md)
 /testdata/*.dem

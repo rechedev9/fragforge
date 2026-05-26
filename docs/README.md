@@ -17,7 +17,22 @@ Pipeline para generar highlight reels automáticos de CS2 a partir de archivos `
   - [`04-post-processing.md`](./research/04-post-processing.md) — FFmpeg: concat, zoompan, overlay, mezcla de audio.
   - [`05-music-sync.md`](./research/05-music-sync.md) — librosa para detectar beats y alinear cortes.
   - [`06-prior-art.md`](./research/06-prior-art.md) — proyectos similares y aprendizajes.
+  - [`08-opensrc-agent-context.md`](./research/08-opensrc-agent-context.md) — uso de OpenSrc para inspeccionar dependencias.
+- [`toolchain.md`](./toolchain.md) — herramientas externas, límites de uso y comandos operativos.
+- [`security-performance-audit.md`](./security-performance-audit.md) — auditoría de seguridad/performance y gates para 5/5.
 - [`specs/`](./specs) — specs de cambios concretos cuando se empiece a implementar.
+
+## CLI operativo
+
+El punto de entrada operativo actual es el CLI unificado `zv`, ejecutado desde
+la raíz del repo:
+
+```bash
+./bin/zv check
+./bin/zv skills list
+./bin/zv workflows list
+./bin/zv workflows run demo-parse -- --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json
+```
 
 ## Estado
 

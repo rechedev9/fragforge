@@ -1,0 +1,55 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "WebSearch",
+      "WebFetch",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(go test*)",
+      "Bash(go vet*)",
+      "Bash(gofmt*)",
+      "Bash(goimports*)",
+      "Bash(staticcheck*)",
+      "Bash(govulncheck*)",
+      "Bash(gosec*)",
+      "Bash(scripts/go-format-changed.sh*)",
+      "Bash(scripts/go-gate.sh*)",
+      "Bash(scripts/go-tools-check.sh*)",
+      "Bash(scripts/check-codex-harness.sh*)",
+      "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-toolchain.ps1*)",
+      "Bash(pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-toolchain.ps1*)"
+    ],
+    "ask": [
+      "Bash(go mod tidy*)",
+      "Bash(go get*)",
+      "Bash(go install*)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git reset*)",
+      "Bash(git clean*)",
+      "Bash(docker*)",
+      "Bash(docker compose*)",
+      "Bash(ffmpeg*)",
+      "Bash(powershell.exe*)",
+      "Bash(pwsh*)",
+      "Bash(scripts/build.ps1*)",
+      "Bash(scripts/cleanup-artifacts.ps1*)",
+      "Bash(scripts/audit-security-performance.ps1*)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/*id_rsa*)",
+      "Read(**/*id_ed25519*)",
+      "Read(**/*secret*)",
+      "Read(**/*token*)",
+      "Bash(rm -rf *)",
+      "Bash(git reset --hard*)",
+      "Bash(git push --force*)"
+    ]
+  }
+}

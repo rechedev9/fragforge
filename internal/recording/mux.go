@@ -21,7 +21,7 @@ func MuxSegmentClips(ctx context.Context, plan RecordingPlan, artifacts []Record
 	}
 
 	outDir := filepath.Join(plan.OutputDir, "segments")
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return []RecordingArtifact{{
 			Role:       "segment",
 			Path:       outDir,
@@ -47,6 +47,7 @@ func MuxSegmentClips(ctx context.Context, plan RecordingPlan, artifacts []Record
 			Role:      "segment",
 			Path:      path,
 		}
+		// #nosec G204 -- ffmpegPath is configured locally and media paths are passed as arguments.
 		cmd := exec.CommandContext(ctx, ffmpegPath,
 			"-y",
 			"-v", "error",

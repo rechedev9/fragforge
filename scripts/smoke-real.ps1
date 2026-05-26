@@ -181,7 +181,7 @@ if (-not $SkipInfra) {
 $probeID = [guid]::NewGuid().ToString()
 $probeStatus = & curl.exe -sS -o NUL -w "%{http_code}" "$BaseUrl/api/jobs/$probeID" 2>$null
 if ($LASTEXITCODE -ne 0 -or $probeStatus -ne "404") {
-    Fail "Orchestrator is not reachable or healthy at $BaseUrl (probe status=$probeStatus). Start bin\zv-orchestrator with the current environment and run migrations first."
+    Fail "Orchestrator is not reachable or healthy at $BaseUrl (probe status=$probeStatus). Start bin\zv serve with the current environment and run migrations first."
 }
 
 Write-Host "Uploading demo..."

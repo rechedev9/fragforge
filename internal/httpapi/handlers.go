@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	maxDemoBytes       = 500 << 20 // 500 MiB hard cap
-	multipartMemBudget = 32 << 20  // 32 MiB in-memory; spill beyond
+	maxDemoBytes       = 500 << 20            // 500 MiB demo cap
+	maxMultipartBytes  = maxDemoBytes + 1<<20 // allow multipart headers around the demo
+	multipartMemBudget = 32 << 20             // 32 MiB in-memory; spill beyond
 )
 
 // JobRepository is the subset of *job.Repository used by handlers.
@@ -59,8 +60,9 @@ type createJobConfig struct {
 
 // CreateJob handles POST /api/jobs.
 func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxDemoBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, maxMultipartBytes)
 
+	// #nosec G120 -- r.Body is capped with MaxBytesReader immediately above.
 	if err := r.ParseMultipartForm(multipartMemBudget); err != nil {
 		writeError(w, http.StatusBadRequest, "parsing multipart form: "+err.Error())
 		return

@@ -54,8 +54,21 @@ func TestLocalOpenMissingReturnsErrNotExist(t *testing.T) {
 
 func TestLocalRejectsEscapingKeys(t *testing.T) {
 	store, _ := NewLocal(t.TempDir())
-	err := store.Put("../escaped.dem", bytes.NewReader([]byte("x")))
-	if err == nil {
-		t.Error("expected error rejecting key with ..")
+	for _, key := range []string{
+		"../escaped.dem",
+		"demos/../../escaped.dem",
+		"/absolute.dem",
+	} {
+		err := store.Put(key, bytes.NewReader([]byte("x")))
+		if err == nil {
+			t.Errorf("expected error rejecting key %q", key)
+		}
+	}
+}
+
+func TestLocalAllowsDotsInsideFileName(t *testing.T) {
+	store, _ := NewLocal(t.TempDir())
+	if err := store.Put("demos/match..v1.dem", bytes.NewReader([]byte("x"))); err != nil {
+		t.Fatalf("Put with dots in file name error = %v", err)
 	}
 }

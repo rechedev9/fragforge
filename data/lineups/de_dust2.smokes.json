@@ -1,0 +1,135 @@
+{
+  "map": "de_dust2",
+  "smokes": [
+    {
+      "id": "dust2-ropz-upper-b-doors-smoke-a",
+      "destination": "B doors",
+      "from_area": "UpperTunnel",
+      "side": "T",
+      "landing": [-1975.219, 1853.656, 2.594],
+      "landing_radius": 24.0,
+      "throw": [-1712.968, 1029.123, 31.928],
+      "throw_radius": 28.0
+    },
+    {
+      "id": "dust2-ropz-upper-b-doors-smoke-b",
+      "destination": "B doors",
+      "from_area": "UpperTunnel",
+      "side": "T",
+      "landing": [-1976.031, 1856.594, 2.688],
+      "landing_radius": 24.0,
+      "throw": [-1712.926, 1027.601, 32.03],
+      "throw_radius": 28.0
+    },
+    {
+      "id": "dust2-ropz-upper-mid-doors-smoke",
+      "destination": "Mid doors",
+      "from_area": "UpperTunnel",
+      "side": "T",
+      "landing": [-164.906, 2209.0, -53.938],
+      "landing_radius": 32.0,
+      "throw": [-1712.951, 1031.319, 31.77],
+      "throw_radius": 28.0
+    },
+    {
+      "id": "dust2-ropz-upper-xbox-smoke",
+      "destination": "Xbox",
+      "from_area": "UpperTunnel",
+      "side": "T",
+      "landing": [650.094, 570.594, 2.781],
+      "landing_radius": 32.0,
+      "throw": [-1712.9, 1028.172, 31.985],
+      "throw_radius": 28.0
+    },
+    {
+      "id": "dust2-ropz-tspawn-long-corner-smoke",
+      "destination": "Long corner",
+      "from_area": "TSpawn",
+      "side": "T",
+      "landing": [1285.063, 1149.156, 1.5],
+      "landing_radius": 32.0,
+      "throw": [0.812, -660.07, 43.594],
+      "throw_radius": 36.0
+    },
+    {
+      "id": "dust2-ropz-upper-b-doors-smoke-c",
+      "destination": "B doors",
+      "from_area": "UpperTunnel",
+      "side": "T",
+      "landing": [-1975.969, 1853.906, 2.594],
+      "landing_radius": 24.0,
+      "throw": [-1712.949, 1033.309, 31.691],
+      "throw_radius": 28.0
+    },
+    {
+      "id": "dust2-ropz-bsite-xbox-smoke",
+      "destination": "Xbox",
+      "from_area": "BombsiteB",
+      "side": "CT",
+      "landing": [579.375, 584.344, 3.156],
+      "landing_radius": 32.0,
+      "throw": [-1721.948, 1849.895, 0.773],
+      "throw_radius": 36.0
+    },
+    {
+      "id": "dust2-ropz-bsite-a-short-smoke",
+      "destination": "A short",
+      "from_area": "BombsiteB",
+      "side": "CT",
+      "landing": [1060.344, 1210.625, 159.219],
+      "landing_radius": 32.0,
+      "throw": [-1900.837, 1905.317, 0.064],
+      "throw_radius": 36.0
+    },
+    {
+      "id": "dust2-ropz-bsite-b-doors-smoke-a",
+      "destination": "B doors",
+      "from_area": "BombsiteB",
+      "side": "CT",
+      "landing": [-1935.313, 1457.813, 35.844],
+      "landing_radius": 32.0,
+      "throw": [-2076.593, 2952.263, 34.122],
+      "throw_radius": 48.0
+    },
+    {
+      "id": "dust2-ropz-bsite-b-doors-smoke-b",
+      "destination": "B doors",
+      "from_area": "BombsiteB",
+      "side": "CT",
+      "landing": [-1939.438, 1513.188, 37.125],
+      "landing_radius": 32.0,
+      "throw": [-2076.107, 3005.46, 34.464],
+      "throw_radius": 48.0
+    },
+    {
+      "id": "dust2-ropz-hole-b-doors-smoke",
+      "destination": "B doors",
+      "from_area": "Hole",
+      "side": "CT",
+      "landing": [-1987.469, 1580.719, 32.844],
+      "landing_radius": 32.0,
+      "throw": [-1373.689, 2663.277, 125.231],
+      "throw_radius": 48.0
+    },
+    {
+      "id": "dust2-ropz-short-a-site-smoke",
+      "destination": "A site",
+      "from_area": "ShortStairs",
+      "side": "CT",
+      "landing": [497.344, 2211.063, 98.0],
+      "landing_radius": 32.0,
+      "throw": [344.756, 1880.01, 96.36],
+      "throw_radius": 36.0
+    },
+    {
+      "id": "dust2-ropz-bsite-b-doors-smoke-c",
+      "destination": "B doors",
+      "from_area": "BombsiteB",
+      "side": "CT",
+      "landing": [-1950.219, 1598.063, 34.656],
+      "landing_radius": 32.0,
+      "throw": [-1878.29, 1932.486, -0.544],
+      "throw_radius": 48.0
+    }
+  ]
+}

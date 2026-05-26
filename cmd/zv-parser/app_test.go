@@ -52,6 +52,16 @@ func TestRunInvalidSteamIDExits2(t *testing.T) {
 	}
 }
 
+func TestRunInvalidSegmentModeExits2(t *testing.T) {
+	code, _, stderr := runApp(t, "parse", "--demo", "/tmp/x.dem", "--steamid", "76561198000000000", "--segment-mode", "utilityx")
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "segment-mode") {
+		t.Errorf("stderr %q should mention --segment-mode", stderr)
+	}
+}
+
 func TestRunNonexistentDemoExits3(t *testing.T) {
 	code, _, stderr := runApp(t,
 		"parse",
@@ -96,5 +106,30 @@ func TestRunUnknownSubcommandExits2(t *testing.T) {
 	code, _, _ := runApp(t, "frobnicate")
 	if code != 2 {
 		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestRunUtilityAuditMissingPlanExits2(t *testing.T) {
+	code, _, stderr := runApp(t, "utility-audit")
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "plan") {
+		t.Errorf("stderr %q should mention --plan", stderr)
+	}
+}
+
+func TestRunUtilityAuditInvalidFormatExits2(t *testing.T) {
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, []byte(`{"schema_version":"1.1","segments":[]}`), 0o644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+	code, _, stderr := runApp(t, "utility-audit", "--plan", planPath, "--format", "xml")
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "format") {
+		t.Errorf("stderr %q should mention format", stderr)
 	}
 }

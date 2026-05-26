@@ -3,9 +3,10 @@ package composition
 import "github.com/reche/zackvideo/internal/recording"
 
 type SegmentClip struct {
-	SegmentID       string  `json:"segment_id"`
-	Path            string  `json:"path"`
-	DurationSeconds float64 `json:"duration_seconds,omitempty"`
+	SegmentID       string                      `json:"segment_id"`
+	Path            string                      `json:"path"`
+	DurationSeconds float64                     `json:"duration_seconds,omitempty"`
+	Artifact        recording.RecordingArtifact `json:"artifact,omitempty"`
 }
 
 type Result struct {

@@ -1,0 +1,65 @@
+{
+  "map": "de_mirage",
+  "smokes": [
+    {
+      "id": "mirage-ropz-catwalk-mid-smoke",
+      "destination": "Mid",
+      "from_area": "Catwalk",
+      "side": "CT",
+      "landing": [-542.438, -466.719, -166.0],
+      "landing_radius": 24.0,
+      "throw": [-936.397, 252.432, -170.816],
+      "throw_radius": 32.0
+    },
+    {
+      "id": "mirage-ropz-bsite-b-apps-smoke",
+      "destination": "B apps",
+      "from_area": "BombsiteB",
+      "side": "CT",
+      "landing": [-1463.438, 764.0, -45.969],
+      "landing_radius": 24.0,
+      "throw": [-1325.404, 456.864, -167.969],
+      "throw_radius": 32.0
+    },
+    {
+      "id": "mirage-ropz-underpass-a-ramp-smoke",
+      "destination": "A ramp",
+      "from_area": "Underpass",
+      "side": "CT",
+      "landing": [6.438, -2320.625, -37.969],
+      "landing_radius": 28.0,
+      "throw": [-892.198, 294.876, -167.607],
+      "throw_radius": 36.0
+    },
+    {
+      "id": "mirage-ropz-palace-connector-smoke",
+      "destination": "Connector",
+      "from_area": "PalaceInterior",
+      "side": "T",
+      "landing": [-1248.281, -663.531, -165.969],
+      "landing_radius": 28.0,
+      "throw": [83.877, -2031.018, -39.969],
+      "throw_radius": 36.0
+    },
+    {
+      "id": "mirage-ropz-tspawn-window-smoke",
+      "destination": "Window",
+      "from_area": "TSpawn",
+      "side": "T",
+      "landing": [-56.0, -461.406, -164.656],
+      "landing_radius": 28.0,
+      "throw": [1216.0, -211.0, -163.969],
+      "throw_radius": 36.0
+    },
+    {
+      "id": "mirage-ropz-tspawn-connector-smoke",
+      "destination": "Connector",
+      "from_area": "TSpawn",
+      "side": "T",
+      "landing": [-1194.344, -633.219, -165.969],
+      "landing_radius": 28.0,
+      "throw": [1289.857, -352.66, -123.438],
+      "throw_radius": 36.0
+    }
+  ]
+}

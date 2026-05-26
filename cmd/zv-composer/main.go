@@ -107,6 +107,7 @@ func run() error {
 }
 
 func readRecordingResult(path string) (recording.RecordingResult, error) {
+	// #nosec G304 -- recording result path is an explicit local CLI input.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return recording.RecordingResult{}, err
@@ -119,12 +120,12 @@ func readRecordingResult(path string) (recording.RecordingResult, error) {
 }
 
 func writeResult(path string, result composition.Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return os.WriteFile(path, append(b, '\n'), 0o600)
 }

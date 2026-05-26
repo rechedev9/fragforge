@@ -14,7 +14,10 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	if short.PlayerImage != "" {
 		return BuildPremiumPlayerFFmpegCommand(ffmpegPath, short)
 	}
-	return []string{
+	if short.Preset == PresetSmokeLineups && len(short.Smokes) > 0 {
+		return BuildSmokeLineupFFmpegCommand(ffmpegPath, short)
+	}
+	command := []string{
 		ffmpegPath,
 		"-y",
 		"-v", "error",
@@ -23,20 +26,60 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		"-map", "0:a?",
 		"-vf", VideoFilter(short),
 		"-c:v", "libx264",
-		"-preset", "fast",
-		"-crf", "18",
-		"-c:a", "aac",
-		"-b:a", "192k",
+		"-preset", videoPresetForCommand(short.VideoPreset),
+		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
+	}
+	command = appendVideoEncodeArgs(command, short)
+	command = appendAudioEncodeArgs(command, short)
+	return append(command,
 		"-movflags", "+faststart",
 		short.Output,
+	)
+}
+
+func appendAudioEncodeArgs(command []string, short ShortEdit) []string {
+	if short.AudioNormalize {
+		command = append(command, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11")
 	}
+	return appendAudioCodecArgs(command)
+}
+
+func appendAudioCodecArgs(command []string) []string {
+	return append(command,
+		"-c:a", "aac",
+		"-b:a", "192k",
+	)
+}
+
+func BuildSmokeLineupFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	command := []string{
+		ffmpegPath,
+		"-y",
+		"-v", "error",
+		"-i", short.Input,
+		"-filter_complex", SmokeLineupSlowMotionFilter(short),
+		"-map", "[v]",
+		"-map", "[a]",
+		"-c:v", "libx264",
+		"-preset", videoPresetForCommand(short.VideoPreset),
+		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
+	}
+	command = appendVideoEncodeArgs(command, short)
+	command = appendAudioCodecArgs(command)
+	return append(command,
+		"-movflags", "+faststart",
+		short.Output,
+	)
 }
 
 func BuildPremiumPlayerFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	return []string{
+	command := []string{
 		ffmpegPath,
 		"-y",
 		"-v", "error",
@@ -47,19 +90,53 @@ func BuildPremiumPlayerFFmpegCommand(ffmpegPath string, short ShortEdit) []strin
 		"-map", "[v]",
 		"-map", "0:a?",
 		"-c:v", "libx264",
-		"-preset", "fast",
-		"-crf", "18",
-		"-c:a", "aac",
-		"-b:a", "192k",
+		"-preset", videoPresetForCommand(short.VideoPreset),
+		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
+	}
+	command = appendVideoEncodeArgs(command, short)
+	command = appendAudioEncodeArgs(command, short)
+	return append(command,
 		"-movflags", "+faststart",
 		"-shortest",
 		short.Output,
+	)
+}
+
+func appendVideoEncodeArgs(command []string, short ShortEdit) []string {
+	if short.Preset != PresetShortNaturalHQ3 && short.Preset != PresetShortNaturalHQ3Smooth {
+		return command
 	}
+	return append(command,
+		"-profile:v", "high",
+		"-color_primaries", "bt709",
+		"-color_trc", "bt709",
+		"-colorspace", "bt709",
+		"-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709",
+	)
+}
+
+func videoCRFForCommand(crf int) int {
+	if crf <= 0 {
+		return DefaultVideoCRF
+	}
+	return crf
+}
+
+func videoPresetForCommand(preset string) string {
+	preset = strings.ToLower(strings.TrimSpace(preset))
+	if preset == "" {
+		return DefaultVideoPreset
+	}
+	return preset
 }
 
 func BuildCoverFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
+	}
+	filter := "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+	if short.HQFilters {
+		filter = "thumbnail=30,scale=1080:1920:force_original_aspect_ratio=increase:flags=" + hqScaleFlags(short) + ",crop=1080:1920,setsar=1"
 	}
 	return []string{
 		ffmpegPath,
@@ -68,27 +145,67 @@ func BuildCoverFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		"-ss", fmt.Sprintf("%.3f", short.CoverTimeSeconds),
 		"-i", short.Output,
 		"-frames:v", "1",
-		"-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
+		"-vf", filter,
 		"-q:v", "2",
 		short.CoverPath,
 	}
 }
 
+func BuildCoverSheetFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	return []string{
+		ffmpegPath,
+		"-y",
+		"-v", "error",
+		"-i", short.Output,
+		"-frames:v", "1",
+		"-vf", "fps=2,scale=360:640:force_original_aspect_ratio=increase:flags=" + hqScaleFlags(short) + ",crop=360:640,setsar=1,tile=3x3",
+		"-q:v", "3",
+		short.CoverSheetPath,
+	}
+}
+
+func BuildQualityCheckFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	return []string{
+		ffmpegPath,
+		"-hide_banner",
+		"-nostats",
+		"-v", "info",
+		"-i", short.Output,
+		"-vf", "blackdetect=d=0.40:pix_th=0.10,freezedetect=n=-60dB:d=1,cropdetect=24:16:0",
+		"-an",
+		"-f", "null",
+		"-",
+	}
+}
+
 func runFFmpeg(ctx context.Context, command []string, label string) error {
+	_, err := runFFmpegOutput(ctx, command, label)
+	return err
+}
+
+func runFFmpegOutput(ctx context.Context, command []string, label string) (string, error) {
 	if len(command) == 0 || command[0] == "" {
-		return fmt.Errorf("ffmpeg command is empty")
+		return "", fmt.Errorf("ffmpeg command is empty")
 	}
 	if label == "" {
 		label = "command"
 	}
+	// #nosec G204 -- commands are generated by this package as argument slices, not shell strings.
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	out, err := cmd.CombinedOutput()
+	output := string(out)
 	if err != nil {
-		msg := strings.TrimSpace(string(out))
+		msg := strings.TrimSpace(output)
 		if msg != "" {
-			return fmt.Errorf("ffmpeg %s: %w: %s", label, err, msg)
+			return output, fmt.Errorf("ffmpeg %s: %w: %s", label, err, msg)
 		}
-		return fmt.Errorf("ffmpeg %s: %w", label, err)
+		return output, fmt.Errorf("ffmpeg %s: %w", label, err)
 	}
-	return nil
+	return output, nil
 }

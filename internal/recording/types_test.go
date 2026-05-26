@@ -70,3 +70,11 @@ func TestValidateRejectsUnknownHUDMode(t *testing.T) {
 		t.Fatal("Validate error = nil, want error")
 	}
 }
+
+func TestValidateRejectsInvalidCRF(t *testing.T) {
+	p := testPlan()
+	p.Stream.CRF = 52
+	if err := p.Validate(); err == nil {
+		t.Fatal("Validate error = nil, want error")
+	}
+}

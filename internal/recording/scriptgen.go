@@ -218,9 +218,25 @@ func streamSetupCommands(plan RecordingPlan) []string {
 	case StreamModeTGASequence:
 		commands = append(commands, "mirv_streams record screen settings afxClassic")
 	default:
-		commands = append(commands, "mirv_streams record screen settings afxFfmpegYuv420p")
+		settingName := ffmpegSettingName(plan.Stream.CRF)
+		commands = append(commands,
+			ffmpegSettingsCommand(settingName, plan.Stream.CRF),
+			"mirv_streams record screen settings "+settingName,
+		)
 	}
 	return append(commands, hudSetupCommands(plan.Stream.HUDMode)...)
+}
+
+func ffmpegSettingName(crf int) string {
+	return fmt.Sprintf("zvFfmpegYuv420pCrf%d", crf)
+}
+
+func ffmpegSettingsCommand(name string, crf int) string {
+	return fmt.Sprintf(
+		`mirv_streams settings add ffmpeg %s "-c:v libx264 -preset fast -crf %d -pix_fmt yuv420p {QUOTE}{AFX_STREAM_PATH}\video.mp4{QUOTE}"`,
+		name,
+		crf,
+	)
 }
 
 func hudSetupCommands(mode HUDMode) []string {
