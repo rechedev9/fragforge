@@ -215,6 +215,83 @@ func TestPremiumPlayerFilterSupportsChromakey(t *testing.T) {
 	}
 }
 
+func TestBuildManifestViralSquareUsesBlurredLayoutAndExternalEffects(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	effectsPath := filepath.Join(dir, "raizerinho.lua")
+	if err := os.WriteFile(effectsPath, []byte(`
+on_segment(function(s)
+  grade({
+    saturation = 1.25
+  })
+  image({
+    path = "assets/graffiti-top.png",
+    start = 0,
+    duration = s.duration,
+    x = "(W-w)/2",
+    y = 128,
+    width = 720
+  })
+end)
+on_kill(function(k)
+  killfeed({
+    at = k.time,
+    pre = 0.2,
+    post = 1.2,
+    width = 430,
+    crop_x = 1558,
+    crop_y = 64,
+    crop_width = 360,
+    crop_height = 110
+  })
+end)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetShortViralSquare
+	opts.EffectsPath = effectsPath
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.Preset != PresetShortViralSquare || manifest.EffectsPreset != EffectsPresetExternal {
+		t.Fatalf("preset metadata = %#v", manifest)
+	}
+	if manifest.VideoCRF != NaturalHQVideoCRF || manifest.VideoPreset != NaturalHQVideoPreset {
+		t.Fatalf("video encoding = crf %d preset %q", manifest.VideoCRF, manifest.VideoPreset)
+	}
+	if !manifest.HQFilters || !manifest.AudioNormalize || !manifest.QualityChecks || !manifest.CoverSheets {
+		t.Fatalf("viral-square feature flags missing: %#v", manifest)
+	}
+	short := manifest.Shorts[0]
+	filter := argAfter(short.FFmpegCommand, "-filter_complex")
+	for _, want := range []string{
+		"scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos",
+		"boxblur=24:1",
+		"crop=1080:1080:(iw-ow)/2:(ih-oh)/2",
+		"overlay=x=0:y=420:format=auto",
+		"eq=contrast=1.000:saturation=1.250:gamma=1.000",
+		"crop=360:110:1558:64",
+		"scale=w=430:h=-1:flags=lanczos",
+		"overlay=x=W-w-18:y=438:format=auto",
+		"[1:v]format=rgba,scale=w=720:h=-1:flags=lanczos[img0]",
+		"overlay=x=(W-w)/2:y=128:format=auto",
+		"format=yuv420p[v]",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("viral-square filter missing %q:\n%s", want, filter)
+		}
+	}
+	if got := argAfter(short.FFmpegCommand, "-af"); got != "loudnorm=I=-16:TP=-1.5:LRA=11" {
+		t.Fatalf("-af arg = %q, want loudnorm", got)
+	}
+	if !containsArg(short.FFmpegCommand, "assets/graffiti-top.png") {
+		t.Fatalf("ffmpeg command missing image input: %#v", short.FFmpegCommand)
+	}
+}
+
 func TestBuildFFmpegCommandKeepsPathsAsArgs(t *testing.T) {
 	short := ShortEdit{
 		Input:  `C:\clips\clip's input.mp4`,
@@ -646,4 +723,13 @@ func argAfter(args []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func containsArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }

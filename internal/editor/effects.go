@@ -389,6 +389,14 @@ func registerEffectsAPI(L *lua.LState, ctx *effectEvalContext) {
 		ctx.addEffectFromTable(L, EffectText)
 		return 0
 	}))
+	L.SetGlobal("image", L.NewFunction(func(L *lua.LState) int {
+		ctx.addEffectFromTable(L, EffectImage)
+		return 0
+	}))
+	L.SetGlobal("killfeed", L.NewFunction(func(L *lua.LState) int {
+		ctx.addEffectFromTable(L, EffectKillfeed)
+		return 0
+	}))
 	L.SetGlobal("grade", L.NewFunction(func(L *lua.LState) int {
 		ctx.addEffectFromTable(L, EffectGrade)
 		return 0
@@ -467,6 +475,22 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 			return e, fmt.Errorf("box_border %d outside range 0..128", e.BoxBorder)
 		}
 		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, defaultEventTime(ctx), 0, 1, 1, ctx.short.DurationSeconds)
+	case EffectImage:
+		e.Path = tableString(tb, "path", "")
+		if strings.TrimSpace(e.Path) == "" {
+			return e, fmt.Errorf("path is required")
+		}
+		e.X = tablePosition(tb, "x", "(W-w)/2")
+		e.Y = tablePosition(tb, "y", "72")
+		e.Width = tableInt(tb, "width", 0)
+		e.Height = tableInt(tb, "height", 0)
+		if e.Width < 0 || e.Width > 2160 {
+			return e, fmt.Errorf("width %d outside range 0..2160", e.Width)
+		}
+		if e.Height < 0 || e.Height > 3840 {
+			return e, fmt.Errorf("height %d outside range 0..3840", e.Height)
+		}
+		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, defaultEventTime(ctx), 0, ctx.short.DurationSeconds, ctx.short.DurationSeconds, ctx.short.DurationSeconds)
 	case EffectGrade:
 		e.Contrast = tableFloat(tb, "contrast", 1)
 		e.Saturation = tableFloat(tb, "saturation", 1)
@@ -481,6 +505,34 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 			return e, fmt.Errorf("gamma %.3f outside range 0..4", e.Gamma)
 		}
 		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, 0, 0, ctx.short.DurationSeconds, ctx.short.DurationSeconds, ctx.short.DurationSeconds)
+	case EffectKillfeed:
+		e.X = tablePosition(tb, "x", "W-w-18")
+		e.Y = tablePosition(tb, "y", "438")
+		e.Width = tableInt(tb, "width", 430)
+		e.Height = tableInt(tb, "height", 0)
+		e.CropX = tableInt(tb, "crop_x", 1558)
+		e.CropY = tableInt(tb, "crop_y", 64)
+		e.CropWidth = tableInt(tb, "crop_width", 360)
+		e.CropHeight = tableInt(tb, "crop_height", 110)
+		if e.Width < 0 || e.Width > 2160 {
+			return e, fmt.Errorf("width %d outside range 0..2160", e.Width)
+		}
+		if e.Height < 0 || e.Height > 3840 {
+			return e, fmt.Errorf("height %d outside range 0..3840", e.Height)
+		}
+		if e.CropX < 0 || e.CropX > 3840 {
+			return e, fmt.Errorf("crop_x %d outside range 0..3840", e.CropX)
+		}
+		if e.CropY < 0 || e.CropY > 2160 {
+			return e, fmt.Errorf("crop_y %d outside range 0..2160", e.CropY)
+		}
+		if e.CropWidth <= 0 || e.CropWidth > 3840 {
+			return e, fmt.Errorf("crop_width %d outside range 1..3840", e.CropWidth)
+		}
+		if e.CropHeight <= 0 || e.CropHeight > 2160 {
+			return e, fmt.Errorf("crop_height %d outside range 1..2160", e.CropHeight)
+		}
+		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, defaultEventTime(ctx), 0.35, 2.80, 3.15, ctx.short.DurationSeconds)
 	default:
 		return e, fmt.Errorf("unknown effect type %q", typ)
 	}

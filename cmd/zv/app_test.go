@@ -2881,6 +2881,7 @@ func TestValidateSkillWorkflowRequirementSkillsCoversCurrentRequirements(t *test
 	skills := []skillInfo{
 		{Name: "zackvideo-cs2-utility-shorts"},
 		{Name: "zackvideo-lineup-audit"},
+		{Name: "zackvideo-shorts-production"},
 		{Name: "zackvideo-youtube-shorts-publish"},
 	}
 
@@ -7859,6 +7860,7 @@ func TestZVBinarySkillsCheckRejectsMissingRequiredRepoSkillEndToEnd(t *testing.T
 	}
 	for _, want := range []string{
 		"skill:zackvideo-lineup-audit: workflow requirements reference missing repo skill",
+		"skill:zackvideo-shorts-production: workflow requirements reference missing repo skill",
 		"skill:zackvideo-youtube-shorts-publish: workflow requirements reference missing repo skill",
 	} {
 		if !hasIssueContaining(result.Issues, want) {
@@ -9730,7 +9732,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 		"== shell syntax ==",
 		"== Codex sees AGENTS.md ==",
 		"== ZackVideo workflow contract ==",
-		"OK: 3 skills, 14 workflows, 13 workflow docs, and 19 agent prompt wrappers checked",
+		"OK: 4 skills, 14 workflows, 13 workflow docs, and 19 agent prompt wrappers checked",
 		"OK: Codex harness is wired",
 	} {
 		if !strings.Contains(body, want) {

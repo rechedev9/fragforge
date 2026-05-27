@@ -64,7 +64,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
-	hqFeaturesDefault := preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth || preset == PresetSmokeLineups
+	hqFeaturesDefault := preset == PresetShortViralSquare || preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth || preset == PresetSmokeLineups
 	hqFilters := opts.HQFilters || hqFeaturesDefault
 	audioNormalize := opts.AudioNormalize || hqFeaturesDefault
 	qualityChecks := opts.QualityChecks || hqFeaturesDefault
@@ -248,7 +248,7 @@ func normalizeVideoCRFForPreset(preset string, crf int) (int, error) {
 	if crf == 0 && (preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth) {
 		return NaturalHQ3VideoCRF, nil
 	}
-	if crf == 0 && (isNaturalPreset(preset) || preset == PresetSmokeLineups) {
+	if crf == 0 && (preset == PresetShortViralSquare || isNaturalPreset(preset) || preset == PresetSmokeLineups) {
 		return NaturalHQVideoCRF, nil
 	}
 	return normalizeVideoCRF(crf)
@@ -271,7 +271,7 @@ func normalizeVideoPresetForPreset(editPreset, videoPreset string) (string, erro
 	if strings.TrimSpace(videoPreset) == "" && (editPreset == PresetShortNaturalHQ3 || editPreset == PresetShortNaturalHQ3Smooth) {
 		return NaturalHQ3VideoPreset, nil
 	}
-	if strings.TrimSpace(videoPreset) == "" && (isNaturalPreset(editPreset) || editPreset == PresetSmokeLineups) {
+	if strings.TrimSpace(videoPreset) == "" && (editPreset == PresetShortViralSquare || isNaturalPreset(editPreset) || editPreset == PresetSmokeLineups) {
 		return NaturalHQVideoPreset, nil
 	}
 	return normalizeVideoPreset(videoPreset)

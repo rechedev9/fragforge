@@ -34,6 +34,9 @@ const (
 
 	// HUDModeClean hides the HUD for cinematic/effects-friendly captures.
 	HUDModeClean HUDMode = "clean"
+
+	// HUDModeDeathnotices hides the gameplay HUD but keeps kill notices visible.
+	HUDModeDeathnotices HUDMode = "deathnotices"
 )
 
 // StreamConfig describes how HLAE should emit raw recordings.
@@ -185,8 +188,8 @@ func (p RecordingPlan) Validate() error {
 	if p.Stream.Mode == "" {
 		return fmt.Errorf("stream mode is required")
 	}
-	if p.Stream.HUDMode != "" && p.Stream.HUDMode != HUDModeGameplay && p.Stream.HUDMode != HUDModeClean {
-		return fmt.Errorf("stream hud_mode must be %q or %q", HUDModeGameplay, HUDModeClean)
+	if p.Stream.HUDMode != "" && p.Stream.HUDMode != HUDModeGameplay && p.Stream.HUDMode != HUDModeClean && p.Stream.HUDMode != HUDModeDeathnotices {
+		return fmt.Errorf("stream hud_mode must be %q, %q, or %q", HUDModeGameplay, HUDModeClean, HUDModeDeathnotices)
 	}
 	if p.Stream.FPS <= 0 || p.Stream.Width <= 0 || p.Stream.Height <= 0 {
 		return fmt.Errorf("stream fps, width, and height must be positive")

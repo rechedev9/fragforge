@@ -15,6 +15,10 @@ const (
 	// keeping the same vertical gameplay base.
 	PresetShortPremiumPlayer = "short-premium-player"
 
+	// PresetShortViralSquare uses a blurred vertical background with centered
+	// square gameplay for social clips that need top/bottom copy.
+	PresetShortViralSquare = "viral-square"
+
 	// PresetShortNaturalHQ keeps gameplay unmodified and raises encode quality
 	// for cleaner local masters.
 	PresetShortNaturalHQ = "natural-hq"
@@ -384,10 +388,12 @@ type PublishItem struct {
 type EffectType string
 
 const (
-	EffectZoom  EffectType = "zoom"
-	EffectFlash EffectType = "flash"
-	EffectText  EffectType = "text"
-	EffectGrade EffectType = "grade"
+	EffectZoom     EffectType = "zoom"
+	EffectFlash    EffectType = "flash"
+	EffectText     EffectType = "text"
+	EffectGrade    EffectType = "grade"
+	EffectImage    EffectType = "image"
+	EffectKillfeed EffectType = "killfeed"
 )
 
 type Effect struct {
@@ -399,8 +405,15 @@ type Effect struct {
 	Opacity            float64    `json:"opacity,omitempty"`
 	Color              string     `json:"color,omitempty"`
 	Value              string     `json:"value,omitempty"`
+	Path               string     `json:"path,omitempty"`
 	X                  string     `json:"x,omitempty"`
 	Y                  string     `json:"y,omitempty"`
+	Width              int        `json:"width,omitempty"`
+	Height             int        `json:"height,omitempty"`
+	CropX              int        `json:"crop_x,omitempty"`
+	CropY              int        `json:"crop_y,omitempty"`
+	CropWidth          int        `json:"crop_width,omitempty"`
+	CropHeight         int        `json:"crop_height,omitempty"`
 	Size               int        `json:"size,omitempty"`
 	FontColor          string     `json:"font_color,omitempty"`
 	BoxColor           string     `json:"box_color,omitempty"`

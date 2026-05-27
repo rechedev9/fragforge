@@ -212,7 +212,7 @@ func (c Config) validate() error {
 		}
 	}
 	switch preset {
-	case PresetShortClean, PresetShortNaturalHQ, PresetShortNaturalHQ2, PresetShortNaturalHQ3, PresetShortNaturalHQ3Smooth, PresetSmokeLineups:
+	case PresetShortClean, PresetShortViralSquare, PresetShortNaturalHQ, PresetShortNaturalHQ2, PresetShortNaturalHQ3, PresetShortNaturalHQ3Smooth, PresetSmokeLineups:
 		if c.PlayerImagePath != "" {
 			return fmt.Errorf("--player-image requires --preset %q", PresetShortPremiumPlayer)
 		}

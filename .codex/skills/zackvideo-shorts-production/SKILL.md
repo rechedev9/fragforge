@@ -24,7 +24,7 @@ Use ZackVideo as the deterministic source of truth: parse demo segments, record 
 
 ## Inputs
 
-- Parse the demo into a segment plan. For utility Shorts, use the same command with `--segment-mode utility` and write `plan-utility.json`.
+- Parse the demo into a segment plan. For utility Shorts, add `--segment-mode utility` and write `plan-utility.json`. For kill highlight packs, add `--rules <run>\all-kills.rules.json`.
 
 ```powershell
 .\bin\zv.exe workflows run demo-parse -- `
@@ -53,30 +53,9 @@ Treat `catalog` destinations as publishable. Treat `auto` and `unknown` as revie
 
 For kill highlight packs, prefer an explicit "all kills" rules file so pistols, SMGs, rifles, knives, and utility kills are not silently filtered by the parser default weapon list. Use the previous local `all-kills.rules.json` shape when it exists in a comparable run; otherwise create one under the run directory with every canonical weapon name from `internal/parser/demo.go` and `exclude_team_kills: true`.
 
-Parse kill packs with that rules file:
-
-```powershell
-.\bin\zv.exe workflows run demo-parse -- `
-  --demo <demo.dem> `
-  --steamid <SteamID64> `
-  --rules <run>\all-kills.rules.json `
-  --out <run>\plan.json `
-  --verbose
-```
-
 ## Record
 
-Generate the HLAE script first. Remove `--dry-run` and add `--hlae C:\HLAE-2.190.1\HLAE.exe --cs2 <cs2.exe>` only when the user wants an actual capture run.
-
-```powershell
-.\bin\zv.exe workflows run record -- `
-  --killplan <run>\plan.json `
-  --demo <demo.dem> `
-  --out <run>\recording `
-  --dry-run
-```
-
-For player-branded kill Shorts, record with deathnotices visible and high source FPS so the editor can crop the native killfeed and deliver smoother 60fps output:
+Generate the HLAE script first. Remove `--dry-run` only when the user wants an actual capture run.
 
 ```powershell
 .\bin\zv.exe workflows run record -- `
@@ -90,6 +69,8 @@ For player-branded kill Shorts, record with deathnotices visible and high source
   --video-crf 16 `
   --timeout 45m
 ```
+
+For player-branded kill Shorts, record with deathnotices visible and high source FPS so the editor can crop the native killfeed and deliver smoother 60fps output. For a dry run, keep the same command shape but use `--dry-run` and omit `--hlae`/`--cs2`.
 
 If CS2 crashes near the end, inspect `<run>\recording-...\segments` and `recording-result.json` before rerunning. Compare segment MP4 count against the plan, verify every listed segment with `ffprobe`, and confirm `recording-result.json` references those files. Continue from existing artifacts when the check passes; rerun only missing or corrupt segments when it fails.
 
@@ -185,15 +166,7 @@ Expected warnings: source recordings at `120/1` may warn that the source is not 
 
 Use `natural-hq2` as the current professional baseline for kill/highlight Shorts. It keeps a realistic look, CRF 16 slow encode, Lanczos scaling, square-pixel normalization, audio loudness normalization, black/freeze checks, and cover sheets.
 
-```powershell
-.\bin\zv.exe workflows run shorts-render -- `
-  --recording-result <run>\recording\recording-result.json `
-  --killplan <run>\plan.json `
-  --out <run>\shorts-natural-hq2 `
-  --preset natural-hq2
-```
-
-For utility clips, use the same render command with `--killplan <run>\plan-utility.json --preset smoke-lineups --lineup-catalog data\lineups`. For fast iteration, add `--segments seg-001,seg-004 --limit 2 --dry-run`. Use `--skip-existing` only when burned-in video content will not change.
+For natural kill clips, use the same render workflow with `--preset natural-hq2`, the non-deathnotice recording result, and an output such as `<run>\shorts-natural-hq2`. For utility clips, use `--killplan <run>\plan-utility.json --preset smoke-lineups --lineup-catalog data\lineups`. For fast iteration, add `--segments seg-001,seg-004 --limit 2 --dry-run`. Use `--skip-existing` only when burned-in video content will not change.
 
 ## Long Compilations
 

@@ -30,7 +30,7 @@ func run() error {
 		outDir       = flag.String("out", "", "recording output directory")
 		hlaeExe      = flag.String("hlae", "", "path to HLAE.exe")
 		cs2Exe       = flag.String("cs2", "", "path to cs2.exe")
-		hudMode      = flag.String("hud", string(recording.HUDModeGameplay), "HUD mode: gameplay or clean")
+		hudMode      = flag.String("hud", string(recording.HUDModeGameplay), "HUD mode: gameplay, clean, or deathnotices")
 		fps          = flag.Int("fps", 0, "recording FPS; defaults to recorder preset")
 		videoCRF     = flag.Int("video-crf", 0, "HLAE stream CRF; defaults to recorder preset")
 		dryRun       = flag.Bool("dry-run", false, "generate plan and script without launching HLAE")

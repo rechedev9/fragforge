@@ -146,6 +146,28 @@ func TestGenerateHLAEJavaScriptCleanHUDMode(t *testing.T) {
 	}
 }
 
+func TestGenerateHLAEJavaScriptDeathnoticesHUDMode(t *testing.T) {
+	p := testPlan()
+	p.Stream.HUDMode = HUDModeDeathnotices
+	js, err := GenerateHLAEJavaScript(p)
+	if err != nil {
+		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
+	}
+	for _, want := range []string{
+		`cl_drawhud 1`,
+		`cl_draw_only_deathnotices 1`,
+		`cl_show_observer_crosshair 2`,
+		`crosshair 1`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("generated JS missing %q\n%s", want, js)
+		}
+	}
+	if strings.Contains(js, `cl_drawhud 0`) || strings.Contains(js, `cl_draw_only_deathnotices 0`) {
+		t.Fatalf("deathnotices mode should keep death notices visible:\n%s", js)
+	}
+}
+
 func TestGenerateHLAEJavaScriptEscapesCommandsViaJSON(t *testing.T) {
 	p := testPlan()
 	p.OutputDir = `C:\Users\name with spaces\out`

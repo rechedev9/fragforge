@@ -245,6 +245,15 @@ func hudSetupCommands(mode HUDMode) []string {
 		return []string{
 			"spec_show_xray 0; cl_drawhud 0",
 		}
+	case HUDModeDeathnotices:
+		return []string{
+			"spec_show_xray 0",
+			"cl_spec_show_bindings 0",
+			"cl_drawhud 1",
+			"cl_draw_only_deathnotices 1",
+			"cl_show_observer_crosshair 2",
+			"crosshair 1",
+		}
 	default:
 		return []string{
 			"spec_show_xray 0",

@@ -777,7 +777,7 @@ func formatBytes(size int64) string {
 }
 
 func effectCountParts(counts map[EffectType]int) []string {
-	order := []EffectType{EffectZoom, EffectFlash, EffectText, EffectGrade}
+	order := []EffectType{EffectZoom, EffectFlash, EffectText, EffectGrade, EffectImage, EffectKillfeed}
 	parts := make([]string, 0, len(counts))
 	for _, typ := range order {
 		if counts[typ] > 0 {
@@ -802,6 +802,10 @@ func effectSummary(effects []Effect) string {
 			parts = append(parts, fmt.Sprintf("text %q %.2f-%.2fs", effect.Value, effect.StartSeconds, effect.EndSeconds))
 		case EffectGrade:
 			parts = append(parts, fmt.Sprintf("grade c%.2f s%.2f g%.2f", effect.Contrast, effect.Saturation, effect.Gamma))
+		case EffectImage:
+			parts = append(parts, fmt.Sprintf("image %s %.2f-%.2fs", filepath.Base(effect.Path), effect.StartSeconds, effect.EndSeconds))
+		case EffectKillfeed:
+			parts = append(parts, fmt.Sprintf("killfeed crop %dx%d %.2f-%.2fs", effect.CropWidth, effect.CropHeight, effect.StartSeconds, effect.EndSeconds))
 		default:
 			parts = append(parts, fmt.Sprintf("%s %.2f-%.2fs", effect.Type, effect.StartSeconds, effect.EndSeconds))
 		}

@@ -164,11 +164,13 @@ available, but gives humans, scripts, and Codex skills one stable command tree:
 ./bin/zv skills list
 ./bin/zv skills show zackvideo-cs2-utility-shorts
 ./bin/zv skills show zackvideo-lineup-audit
+./bin/zv skills show zackvideo-shorts-production
 ./bin/zv skills show zackvideo-youtube-shorts-publish
 ./bin/zv skills check
 ./bin/zv skills list --format json
 ./bin/zv skills show zackvideo-cs2-utility-shorts --format json
 ./bin/zv skills show zackvideo-lineup-audit --format json
+./bin/zv skills show zackvideo-shorts-production --format json
 ./bin/zv skills show zackvideo-youtube-shorts-publish --format json
 ./bin/zv skills check --format json
 ./bin/zv workflows list
@@ -236,6 +238,7 @@ Repo-local skills currently exposed through `zv skills`:
 
 - `zackvideo-cs2-utility-shorts`
 - `zackvideo-lineup-audit`
+- `zackvideo-shorts-production`
 - `zackvideo-youtube-shorts-publish`
 
 Legacy binaries remain supported through pass-through commands such as

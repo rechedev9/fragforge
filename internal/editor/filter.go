@@ -26,6 +26,155 @@ func VideoFilter(short ShortEdit) string {
 	return strings.Join(filters, ",")
 }
 
+func ViralSquareFilter(short ShortEdit) string {
+	background := []string{
+		viralSquareBackgroundScaleFilter(short),
+		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
+		"boxblur=24:1",
+		"setsar=1",
+	}
+	foregroundHeight := "1080"
+	if expr := zoomHeightExpressionForBase(short.Effects, 1080); expr != "" {
+		foregroundHeight = "'" + expr + "'"
+	}
+	foreground := []string{
+		scaleFilter(foregroundHeight, short),
+		"crop=1080:1080:(iw-ow)/2:(ih-oh)/2",
+		"setsar=1",
+	}
+	foreground = appendTemporalSmoothingFilter(foreground, short)
+	final := []string{"fps=60"}
+	final = appendEffectFilters(final, short.Effects)
+	images := imageEffects(short.Effects)
+	killfeeds := killfeedEffects(short.Effects)
+	final = append(final, "format=rgba")
+	clauses := []string{
+		fmt.Sprintf("[0:v]%s[bg]", strings.Join(background, ",")),
+		fmt.Sprintf("[0:v]%s[fg]", strings.Join(foreground, ",")),
+		"[bg][fg]overlay=x=0:y=420:format=auto[base]",
+		fmt.Sprintf("[base]%s[vbase]", strings.Join(final, ",")),
+	}
+	current := "vbase"
+	for i, effect := range killfeeds {
+		killfeedLabel := fmt.Sprintf("kf%d", i)
+		next := fmt.Sprintf("vkf%d", i)
+		clauses = append(clauses,
+			fmt.Sprintf("[0:v]%s[%s]", sourceCropFilter(effect, short), killfeedLabel),
+			fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
+				current,
+				killfeedLabel,
+				effectPosition(effect.X, "W-w-18"),
+				effectPosition(effect.Y, "438"),
+				betweenExpression(effect.StartSeconds, effect.EndSeconds),
+				next,
+			),
+		)
+		current = next
+	}
+	for i, effect := range images {
+		imageInput := i + 1
+		imageLabel := fmt.Sprintf("img%d", i)
+		next := fmt.Sprintf("vimg%d", i)
+		if i == len(images)-1 {
+			next = "vimages"
+		}
+		clauses = append(clauses,
+			fmt.Sprintf("[%d:v]format=rgba,%s[%s]", imageInput, imageScaleFilter(effect), imageLabel),
+			fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
+				current,
+				imageLabel,
+				effectPosition(effect.X, "(W-w)/2"),
+				effectPosition(effect.Y, "72"),
+				betweenExpression(effect.StartSeconds, effect.EndSeconds),
+				next,
+			),
+		)
+		current = next
+	}
+	clauses = append(clauses, fmt.Sprintf("[%s]format=yuv420p[v]", current))
+	return strings.Join(clauses, ";")
+}
+
+func imageEffects(effects []Effect) []Effect {
+	out := []Effect{}
+	for _, effect := range effects {
+		if effect.Type == EffectImage {
+			out = append(out, effect)
+		}
+	}
+	return out
+}
+
+func killfeedEffects(effects []Effect) []Effect {
+	out := []Effect{}
+	for _, effect := range effects {
+		if effect.Type == EffectKillfeed {
+			out = append(out, effect)
+		}
+	}
+	return out
+}
+
+func imageScaleFilter(effect Effect) string {
+	switch {
+	case effect.Width > 0 && effect.Height > 0:
+		return fmt.Sprintf("scale=w=%d:h=%d:flags=lanczos", effect.Width, effect.Height)
+	case effect.Width > 0:
+		return fmt.Sprintf("scale=w=%d:h=-1:flags=lanczos", effect.Width)
+	case effect.Height > 0:
+		return fmt.Sprintf("scale=w=-1:h=%d:flags=lanczos", effect.Height)
+	default:
+		return "scale=w=760:h=-1:flags=lanczos"
+	}
+}
+
+func sourceCropFilter(effect Effect, short ShortEdit) string {
+	cropWidth := effect.CropWidth
+	if cropWidth == 0 {
+		cropWidth = 360
+	}
+	cropHeight := effect.CropHeight
+	if cropHeight == 0 {
+		cropHeight = 110
+	}
+	filters := []string{
+		scaleFilter("1080", short),
+		fmt.Sprintf("crop=%d:%d:%d:%d", cropWidth, cropHeight, effect.CropX, effect.CropY),
+		sourceCropScaleFilter(effect),
+	}
+	filters = append(filters, gradeFilters(short.Effects)...)
+	filters = append(filters, "format=rgba")
+	return strings.Join(filters, ",")
+}
+
+func sourceCropScaleFilter(effect Effect) string {
+	switch {
+	case effect.Width > 0 && effect.Height > 0:
+		return fmt.Sprintf("scale=w=%d:h=%d:flags=lanczos", effect.Width, effect.Height)
+	case effect.Width > 0:
+		return fmt.Sprintf("scale=w=%d:h=-1:flags=lanczos", effect.Width)
+	case effect.Height > 0:
+		return fmt.Sprintf("scale=w=-1:h=%d:flags=lanczos", effect.Height)
+	default:
+		return "scale=w=430:h=-1:flags=lanczos"
+	}
+}
+
+func effectPosition(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func viralSquareBackgroundScaleFilter(short ShortEdit) string {
+	filter := "scale=1080:1920:force_original_aspect_ratio=increase"
+	if short.HQFilters {
+		filter += ":flags=" + hqScaleFlags(short)
+	}
+	return filter
+}
+
 func SmokeLineupSlowMotionFilter(short ShortEdit) string {
 	window := smokeLineupSlowMotionWindow(short)
 	base := VideoFilter(short)
@@ -208,12 +357,16 @@ func appendTemporalSmoothingFilter(filters []string, short ShortEdit) []string {
 }
 
 func zoomHeightExpression(effects []Effect) string {
+	return zoomHeightExpressionForBase(effects, 1920)
+}
+
+func zoomHeightExpressionForBase(effects []Effect, baseHeight float64) string {
 	var terms []string
 	for _, effect := range effects {
 		if effect.Type != EffectZoom || effect.Scale <= 1 {
 			continue
 		}
-		terms = append(terms, smoothZoomHeightExpression(effect))
+		terms = append(terms, smoothZoomHeightExpressionForBase(effect, baseHeight))
 	}
 	if len(terms) == 0 {
 		return ""
@@ -226,6 +379,10 @@ func zoomHeightExpression(effects []Effect) string {
 }
 
 func smoothZoomHeightExpression(effect Effect) string {
+	return smoothZoomHeightExpressionForBase(effect, 1920)
+}
+
+func smoothZoomHeightExpressionForBase(effect Effect, baseHeight float64) string {
 	start := effect.StartSeconds
 	end := effect.EndSeconds
 	at := effect.AtSeconds
@@ -233,18 +390,19 @@ func smoothZoomHeightExpression(effect Effect) string {
 		at = start + (end-start)/2
 	}
 	if at <= start || end <= at {
-		height := int(math.Round(1920 * effect.Scale))
-		return fmt.Sprintf("if(%s\\,%d\\,1920)", betweenExpression(start, end), height)
+		height := int(math.Round(baseHeight * effect.Scale))
+		return fmt.Sprintf("if(%s\\,%d\\,%d)", betweenExpression(start, end), height, int(math.Round(baseHeight)))
 	}
-	peak := 1920 * effect.Scale
-	rise := smoothZoomRampExpression(start, at, 1920, peak)
-	fall := smoothZoomRampExpression(at, end, peak, 1920)
+	peak := baseHeight * effect.Scale
+	rise := smoothZoomRampExpression(start, at, baseHeight, peak)
+	fall := smoothZoomRampExpression(at, end, peak, baseHeight)
 	return fmt.Sprintf(
-		"if(%s\\,%s\\,if(%s\\,%s\\,1920))",
+		"if(%s\\,%s\\,if(%s\\,%s\\,%d))",
 		betweenExpression(start, at),
 		rise,
 		betweenExpression(at, end),
 		fall,
+		int(math.Round(baseHeight)),
 	)
 }
 
@@ -260,24 +418,7 @@ func smoothZoomRampExpression(start, end, from, to float64) string {
 }
 
 func appendEffectFilters(filters []string, effects []Effect) []string {
-	for _, effect := range effects {
-		if effect.Type != EffectGrade {
-			continue
-		}
-		contrast := effect.Contrast
-		if contrast == 0 {
-			contrast = 1
-		}
-		saturation := effect.Saturation
-		if saturation == 0 {
-			saturation = 1
-		}
-		gamma := effect.Gamma
-		if gamma == 0 {
-			gamma = 1
-		}
-		filters = append(filters, fmt.Sprintf("eq=contrast=%.3f:saturation=%.3f:gamma=%.3f", contrast, saturation, gamma))
-	}
+	filters = append(filters, gradeFilters(effects)...)
 	for _, effect := range effects {
 		if effect.Type != EffectFlash {
 			continue
@@ -329,6 +470,29 @@ func appendEffectFilters(filters []string, effects []Effect) []string {
 			boxBorder = 12
 		}
 		filters = append(filters, drawTextExpr(effect.Value, x, y, size, effect.StartSeconds, effect.EndSeconds, fontColor, boxColor, boxBorder))
+	}
+	return filters
+}
+
+func gradeFilters(effects []Effect) []string {
+	filters := []string{}
+	for _, effect := range effects {
+		if effect.Type != EffectGrade {
+			continue
+		}
+		contrast := effect.Contrast
+		if contrast == 0 {
+			contrast = 1
+		}
+		saturation := effect.Saturation
+		if saturation == 0 {
+			saturation = 1
+		}
+		gamma := effect.Gamma
+		if gamma == 0 {
+			gamma = 1
+		}
+		filters = append(filters, fmt.Sprintf("eq=contrast=%.3f:saturation=%.3f:gamma=%.3f", contrast, saturation, gamma))
 	}
 	return filters
 }

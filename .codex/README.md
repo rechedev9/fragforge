@@ -106,6 +106,7 @@ Repo-local skills live under `.codex/skills/`:
 
 - `zackvideo-cs2-utility-shorts`: parse, audit, record, render, and review CS2 utility Shorts.
 - `zackvideo-lineup-audit`: correct utility destinations through manual lineup catalogs.
+- `zackvideo-shorts-production`: generate, polish, and QA professional CS2 Shorts packs.
 - `zackvideo-youtube-shorts-publish`: review publish packs and prepare YouTube Shorts metadata/uploads.
 
 The unified CLI can discover the same repo-local skills:
@@ -114,6 +115,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv skills list
 ./bin/zv skills show zackvideo-cs2-utility-shorts
 ./bin/zv skills show zackvideo-lineup-audit
+./bin/zv skills show zackvideo-shorts-production
 ./bin/zv skills show zackvideo-youtube-shorts-publish
 ./bin/zv skills check
 ./bin/zv check
@@ -121,6 +123,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv skills list --format json
 ./bin/zv skills show zackvideo-cs2-utility-shorts --format json
 ./bin/zv skills show zackvideo-lineup-audit --format json
+./bin/zv skills show zackvideo-shorts-production --format json
 ./bin/zv skills show zackvideo-youtube-shorts-publish --format json
 ./bin/zv skills check --format json
 ./bin/zv workflows list

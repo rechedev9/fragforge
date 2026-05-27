@@ -14,6 +14,9 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	if short.PlayerImage != "" {
 		return BuildPremiumPlayerFFmpegCommand(ffmpegPath, short)
 	}
+	if short.Preset == PresetShortViralSquare {
+		return BuildViralSquareFFmpegCommand(ffmpegPath, short)
+	}
 	if short.Preset == PresetSmokeLineups && len(short.Smokes) > 0 {
 		return BuildSmokeLineupFFmpegCommand(ffmpegPath, short)
 	}
@@ -29,6 +32,35 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		"-preset", videoPresetForCommand(short.VideoPreset),
 		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
 	}
+	command = appendVideoEncodeArgs(command, short)
+	command = appendAudioEncodeArgs(command, short)
+	return append(command,
+		"-movflags", "+faststart",
+		short.Output,
+	)
+}
+
+func BuildViralSquareFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	command := []string{
+		ffmpegPath,
+		"-y",
+		"-v", "error",
+		"-i", short.Input,
+	}
+	for _, effect := range imageEffects(short.Effects) {
+		command = append(command, "-i", effect.Path)
+	}
+	command = append(command,
+		"-filter_complex", ViralSquareFilter(short),
+		"-map", "[v]",
+		"-map", "0:a?",
+		"-c:v", "libx264",
+		"-preset", videoPresetForCommand(short.VideoPreset),
+		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
+	)
 	command = appendVideoEncodeArgs(command, short)
 	command = appendAudioEncodeArgs(command, short)
 	return append(command,

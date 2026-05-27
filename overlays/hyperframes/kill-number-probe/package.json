@@ -1,0 +1,11 @@
+{
+  "name": "kill-number-probe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.6.40 preview",
+    "check": "npx --yes hyperframes@0.6.40 lint && npx --yes hyperframes@0.6.40 validate && npx --yes hyperframes@0.6.40 inspect",
+    "render": "npx --yes hyperframes@0.6.40 render",
+    "publish": "npx --yes hyperframes@0.6.40 publish"
+  }
+}

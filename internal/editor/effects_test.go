@@ -112,6 +112,96 @@ end)
 	}
 }
 
+func TestEvaluateEffectsImageCallbackProducesOverlay(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_segment(function(s)
+  image({
+    path = "assets/title.png",
+    start = 0,
+    duration = s.duration,
+    x = "(W-w)/2",
+    y = 96,
+    width = 720
+  })
+end)
+`,
+	}
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortViralSquare,
+		DurationSeconds: 6,
+	}
+
+	effects, warnings, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
+	}
+	effect := effects[0]
+	if effect.Type != EffectImage || effect.Path != "assets/title.png" || effect.Width != 720 {
+		t.Fatalf("image effect = %#v", effect)
+	}
+	if effect.StartSeconds != 0 || effect.EndSeconds != 6 {
+		t.Fatalf("image window = %.3f-%.3f", effect.StartSeconds, effect.EndSeconds)
+	}
+}
+
+func TestEvaluateEffectsKillfeedCallbackProducesSourceCropOverlay(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_kill(function(k)
+  killfeed({
+    at = k.time,
+    pre = 0.25,
+    post = 1.5,
+    x = "W-w-18",
+    y = 438,
+    width = 430,
+    crop_x = 1558,
+    crop_y = 64,
+    crop_width = 360,
+    crop_height = 110
+  })
+end)
+`,
+	}
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortViralSquare,
+		DurationSeconds: 6,
+		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "MP9", Headshot: true}},
+	}
+
+	effects, warnings, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
+	}
+	effect := effects[0]
+	if effect.Type != EffectKillfeed || effect.Width != 430 || effect.CropX != 1558 || effect.CropWidth != 360 {
+		t.Fatalf("killfeed effect = %#v", effect)
+	}
+	if effect.StartSeconds != 0.75 || effect.EndSeconds != 2.5 {
+		t.Fatalf("killfeed window = %.3f-%.3f", effect.StartSeconds, effect.EndSeconds)
+	}
+	if effect.SourceKillWeapon != "MP9" || !effect.SourceKillHeadshot {
+		t.Fatalf("killfeed source metadata = %#v", effect)
+	}
+}
+
 func TestEvaluateEffectsRejectsInvalidScript(t *testing.T) {
 	_, _, err := evaluateEffects(effectsSource{
 		Preset: EffectsPresetExternal,
