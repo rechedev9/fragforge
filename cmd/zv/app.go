@@ -1764,21 +1764,6 @@ func usageLineCommandStem(line string) string {
 	return strings.Join(usageStem, " ")
 }
 
-func usageContainsCommandStem(lines []string, stem string) bool {
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if after, ok := strings.CutPrefix(line, "usage:"); ok {
-			line = strings.TrimSpace(after)
-		}
-		for _, part := range strings.Split(line, "|") {
-			if usageLineCommandStem(part) == stem {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func isWorkflowSlug(name string) bool {
 	if name == "" || strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
 		return false
