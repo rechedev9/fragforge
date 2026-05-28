@@ -14,6 +14,9 @@ func checkWorkflowDocs() ([]workflowDoc, []skillIssue, error) {
 		return nil, nil, err
 	}
 	docs := workflowDocs()
+	// The legacy-command set is invariant; resolve it once rather than walking
+	// the filesystem for it on every doc.
+	legacyCommands := legacyWorkflowCommands()
 	var issues []skillIssue
 	for i, doc := range docs {
 		path := filepath.Join(root, filepath.FromSlash(doc.Path))
@@ -28,7 +31,7 @@ func checkWorkflowDocs() ([]workflowDoc, []skillIssue, error) {
 		}
 		body := string(b)
 		docs[i].Body = body
-		for _, legacy := range legacyWorkflowCommands() {
+		for _, legacy := range legacyCommands {
 			if strings.Contains(body, legacy) {
 				issues = append(issues, skillIssue{Path: doc.Path, Message: fmt.Sprintf("documents legacy direct command %s", legacy)})
 			}

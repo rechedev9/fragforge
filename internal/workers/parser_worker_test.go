@@ -33,6 +33,19 @@ func (f *fakeRepo) Get(_ context.Context, id uuid.UUID) (job.Job, error) {
 	}
 	return *j, nil
 }
+
+// GetMeta mirrors the production lean read: it returns the job without its kill
+// plan, so a test fails if the parser or compose worker ever relies on KillPlan
+// from the metadata path.
+func (f *fakeRepo) GetMeta(_ context.Context, id uuid.UUID) (job.Job, error) {
+	j, ok := f.jobs[id]
+	if !ok {
+		return job.Job{}, job.ErrNotFound
+	}
+	meta := *j
+	meta.KillPlan = nil
+	return meta, nil
+}
 func (f *fakeRepo) UpdateStatus(_ context.Context, id uuid.UUID, s job.Status, reason string) error {
 	j := f.jobs[id]
 	if j == nil {

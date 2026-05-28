@@ -103,8 +103,10 @@ type analysisData struct {
 }
 
 type server struct {
-	data analysisData
-	tmpl *template.Template
+	data    analysisData
+	summary summary
+	places  []string
+	tmpl    *template.Template
 }
 
 type pageData struct {
@@ -139,6 +141,10 @@ func main() {
 	}
 	s := &server{
 		data: data,
+		// The analysis is immutable once loaded, so derive the summary and place
+		// breakdown once instead of recomputing them on every index request.
+		summary: summarize(data.Deaths),
+		places:  places(data.Deaths),
 		tmpl: template.Must(template.New("viewer").Funcs(template.FuncMap{
 			"f1":       f1,
 			"f0":       f0,
@@ -190,8 +196,8 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	s.render(w, "page", pageData{
 		Analysis: s.data,
-		Summary:  summarize(s.data.Deaths),
-		Places:   places(s.data.Deaths),
+		Summary:  s.summary,
+		Places:   s.places,
 		Deaths:   deaths,
 		Selected: selected,
 	})

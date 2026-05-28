@@ -41,7 +41,11 @@ type shortPackRenderer struct {
 }
 
 func (p *shortPackRenderer) render(ctx context.Context) error {
-	for i, short := range p.manifest.Shorts {
+	for i := range p.manifest.Shorts {
+		// Iterate by pointer: ShortEdit embeds several artifacts and slices, so
+		// ranging by value would copy the whole struct each iteration and again
+		// into every helper call.
+		short := &p.manifest.Shorts[i]
 		if err := p.renderShort(ctx, i, short); err != nil {
 			return err
 		}
@@ -57,7 +61,7 @@ func (p *shortPackRenderer) render(ctx context.Context) error {
 	return nil
 }
 
-func (p *shortPackRenderer) renderShort(ctx context.Context, i int, short ShortEdit) error {
+func (p *shortPackRenderer) renderShort(ctx context.Context, i int, short *ShortEdit) error {
 	if err := os.MkdirAll(filepath.Dir(short.Output), 0o750); err != nil {
 		return err
 	}
@@ -75,8 +79,8 @@ func (p *shortPackRenderer) renderShort(ctx context.Context, i int, short ShortE
 	return nil
 }
 
-func (p *shortPackRenderer) publishShort(ctx context.Context, i int, short ShortEdit) error {
-	if err := publishShort(short); err != nil {
+func (p *shortPackRenderer) publishShort(ctx context.Context, i int, short *ShortEdit) error {
+	if err := publishShort(*short); err != nil {
 		return err
 	}
 	artifact := p.probeArtifact(ctx, short.SegmentID, "publish", "video", short.PublishPath)
@@ -88,7 +92,7 @@ func (p *shortPackRenderer) publishShort(ctx context.Context, i int, short Short
 	return nil
 }
 
-func (p *shortPackRenderer) runQualityCheck(ctx context.Context, short ShortEdit) {
+func (p *shortPackRenderer) runQualityCheck(ctx context.Context, short *ShortEdit) {
 	if len(short.QualityCommand) == 0 {
 		return
 	}
@@ -105,7 +109,7 @@ func (p *shortPackRenderer) runQualityCheck(ctx context.Context, short ShortEdit
 	p.result.Warnings = append(p.result.Warnings, QualityWarningsFromFFmpegLog(short.SegmentID, output)...)
 }
 
-func (p *shortPackRenderer) renderCover(ctx context.Context, i int, short ShortEdit) {
+func (p *shortPackRenderer) renderCover(ctx context.Context, i int, short *ShortEdit) {
 	if p.opts.SkipExisting && fileExistsNonEmpty(short.CoverPath) {
 		p.result.Shorts[i].CoverSkipped = true
 		p.result.Shorts[i].CoverArtifact = p.probeCover(ctx, short.SegmentID, "cover", short.CoverPath)
@@ -118,7 +122,7 @@ func (p *shortPackRenderer) renderCover(ctx context.Context, i int, short ShortE
 	p.result.Shorts[i].CoverArtifact = p.probeCover(ctx, short.SegmentID, "cover", short.CoverPath)
 }
 
-func (p *shortPackRenderer) renderCoverSheet(ctx context.Context, i int, short ShortEdit) {
+func (p *shortPackRenderer) renderCoverSheet(ctx context.Context, i int, short *ShortEdit) {
 	if short.CoverSheetPath == "" {
 		return
 	}

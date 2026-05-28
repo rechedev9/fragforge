@@ -4,6 +4,7 @@ type skillInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Path        string `json:"-"`
+	Body        string `json:"-"`
 }
 
 type skillDetail struct {

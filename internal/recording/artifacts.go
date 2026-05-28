@@ -19,7 +19,9 @@ func CollectArtifacts(ctx context.Context, plan RecordingPlan, ffprobePath strin
 	takeSegments := mapTakesToSegments(files, plan.Segments)
 	for i := range files {
 		files[i].SegmentID = takeSegments[files[i].TakeID]
-		if ffprobePath != "" {
+		// Image-sequence frames carry no container metadata, so probing them is
+		// both meaningless and, for a multi-thousand-frame take, ruinously slow.
+		if ffprobePath != "" && !isImageSequenceExt(filepath.Ext(files[i].Path)) {
 			probeArtifact(ctx, ffprobePath, &files[i])
 		}
 	}
@@ -48,6 +50,12 @@ func ProbeArtifact(ctx context.Context, ffprobePath string, artifact *RecordingA
 
 func discoverMediaFiles(root string) []RecordingArtifact {
 	var artifacts []RecordingArtifact
+	// A TGA/EXR capture writes one frame file per rendered frame, so a take can
+	// hold thousands of them. Collapse each directory's frames into a single
+	// sequence artifact (with FrameCount and aggregate size) instead of emitting
+	// one artifact — and later one ffprobe — per frame.
+	sequences := map[string]*RecordingArtifact{}
+	var sequenceDirs []string
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -58,12 +66,33 @@ func discoverMediaFiles(root string) []RecordingArtifact {
 			}
 			return nil
 		}
-		mediaType := mediaTypeForExt(filepath.Ext(path))
+		ext := filepath.Ext(path)
+		mediaType := mediaTypeForExt(ext)
 		if mediaType == "" {
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
+			return nil
+		}
+		if isImageSequenceExt(ext) {
+			dir := filepath.Dir(path)
+			seq := sequences[dir]
+			if seq == nil {
+				seq = &RecordingArtifact{
+					TakeID: nearestTakeID(root, path),
+					Type:   mediaType,
+					Role:   "raw",
+					Path:   path,
+				}
+				sequences[dir] = seq
+				sequenceDirs = append(sequenceDirs, dir)
+			}
+			seq.FrameCount++
+			seq.SizeBytes += info.Size()
+			if path < seq.Path {
+				seq.Path = path
+			}
 			return nil
 		}
 		artifacts = append(artifacts, RecordingArtifact{
@@ -75,6 +104,9 @@ func discoverMediaFiles(root string) []RecordingArtifact {
 		})
 		return nil
 	})
+	for _, dir := range sequenceDirs {
+		artifacts = append(artifacts, *sequences[dir])
+	}
 	sort.SliceStable(artifacts, func(i, j int) bool {
 		if artifacts[i].TakeID == artifacts[j].TakeID {
 			if artifacts[i].Type == artifacts[j].Type {
@@ -85,6 +117,18 @@ func discoverMediaFiles(root string) []RecordingArtifact {
 		return takeLess(artifacts[i].TakeID, artifacts[j].TakeID)
 	})
 	return artifacts
+}
+
+// isImageSequenceExt reports whether ext is a raw per-frame capture format. Such
+// files are emitted one-per-frame and must be grouped into a single sequence
+// artifact rather than treated as standalone media.
+func isImageSequenceExt(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".tga", ".exr":
+		return true
+	default:
+		return false
+	}
 }
 
 func mediaTypeForExt(ext string) string {

@@ -85,49 +85,50 @@ type segmentMediaPair struct {
 }
 
 func segmentMediaPairs(artifacts []RecordingArtifact) []segmentMediaPair {
+	// Group by pointer into the input slice: RecordingArtifact is large, so a
+	// value map would copy both video and audio structs on every read-modify-write.
 	type partial struct {
-		video RecordingArtifact
-		audio RecordingArtifact
+		video *RecordingArtifact
+		audio *RecordingArtifact
 	}
-	grouped := map[string]partial{}
-	for _, a := range artifacts {
+	grouped := map[string]*partial{}
+	for i := range artifacts {
+		a := &artifacts[i]
 		if a.SegmentID == "" || a.TakeID == "" {
 			continue
 		}
 		key := a.SegmentID + "\x00" + a.TakeID
 		p := grouped[key]
+		if p == nil {
+			p = &partial{}
+			grouped[key] = p
+		}
 		switch a.Type {
 		case "video":
-			if p.video.Path == "" || filepath.Base(a.Path) == "video.mp4" {
+			if p.video == nil || filepath.Base(a.Path) == "video.mp4" {
 				p.video = a
 			}
 		case "audio":
-			if p.audio.Path == "" || filepath.Base(a.Path) == "audio.wav" {
+			if p.audio == nil || filepath.Base(a.Path) == "audio.wav" {
 				p.audio = a
 			}
 		}
-		grouped[key] = p
 	}
 
 	pairs := make([]segmentMediaPair, 0, len(grouped))
 	for key, p := range grouped {
-		if p.video.Path == "" || p.audio.Path == "" {
+		if p.video == nil || p.audio == nil {
 			continue
 		}
 		segmentID, takeID := splitPairKey(key)
 		pairs = append(pairs, segmentMediaPair{
 			segmentID: segmentID,
 			takeID:    takeID,
-			video:     p.video,
-			audio:     p.audio,
+			video:     *p.video,
+			audio:     *p.audio,
 		})
 	}
-	sort.SliceStable(pairs, func(i, j int) bool {
-		if pairs[i].segmentID == pairs[j].segmentID {
-			return takeLess(pairs[i].takeID, pairs[j].takeID)
-		}
-		return pairs[i].segmentID < pairs[j].segmentID
-	})
+	// The only caller re-sorts by plan order, so do not sort here.
 	return pairs
 }
 

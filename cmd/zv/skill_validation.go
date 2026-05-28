@@ -66,13 +66,12 @@ func checkSkills() ([]skillInfo, []skillIssue, error) {
 		return skills, issues, nil
 	}
 	seenSkills := make(map[string]string, len(skills))
+	// The legacy-binary set is invariant; resolve it once rather than walking the
+	// filesystem for it on every skill.
+	legacyBinaries := legacySkillBinaries()
 	for _, skill := range skills {
-		// #nosec G304 -- skill path is resolved from the repo-local skills directory.
-		b, err := os.ReadFile(skill.Path)
-		if err != nil {
-			return nil, nil, fmt.Errorf("read skill %s: %w", skill.Path, err)
-		}
-		body := string(b)
+		// loadSkills already read the file into skill.Body; reuse it.
+		body := skill.Body
 		if strings.TrimSpace(skill.Name) == "" {
 			issues = append(issues, skillIssue{Path: skill.Path, Message: "missing skill name"})
 		} else {
@@ -94,7 +93,7 @@ func checkSkills() ([]skillInfo, []skillIssue, error) {
 		if !strings.Contains(body, `.\\bin\\zv.exe`) && !strings.Contains(body, `.\bin\zv.exe`) && !strings.Contains(body, `./bin/zv`) {
 			issues = append(issues, skillIssue{Path: skill.Path, Message: "does not document the unified zv CLI"})
 		}
-		for _, legacy := range legacySkillBinaries() {
+		for _, legacy := range legacyBinaries {
 			if strings.Contains(body, legacy) {
 				issues = append(issues, skillIssue{Path: skill.Path, Message: fmt.Sprintf("documents legacy direct binary %s", legacy)})
 			}
@@ -275,14 +274,15 @@ func findSkillsDir() (string, error) {
 }
 
 func parseSkill(path string) (skillInfo, error) {
-	f, err := os.Open(path)
+	// #nosec G304 -- skill path is resolved from the repo-local skills directory.
+	b, err := os.ReadFile(path)
 	if err != nil {
-		return skillInfo{}, fmt.Errorf("open skill %s: %w", path, err)
+		return skillInfo{}, fmt.Errorf("read skill %s: %w", path, err)
 	}
-	defer f.Close()
 
-	skill := skillInfo{Path: path}
-	scanner := bufio.NewScanner(f)
+	// Keep the full body so callers (checkSkills) need not re-read the file.
+	skill := skillInfo{Path: path, Body: string(b)}
+	scanner := bufio.NewScanner(strings.NewReader(skill.Body))
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return skillInfo{}, fmt.Errorf("scan skill %s: %w", path, err)
