@@ -17,6 +17,7 @@ local capture/edit workflow.
 - ✅ `zv-pipeline` local recorder → composer runner
 - ✅ `zv-orchestrator` HTTP API + Asynq parser/media workers
 - ✅ Minimal media workdir cleanup policy
+- ✅ `services/cs2-market` Python market intelligence prototype for CS2 item signals
 - ⏳ Music sync, advanced overlays, frontend
 
 ## Quick start (local development)
@@ -243,6 +244,29 @@ Repo-local skills currently exposed through `zv skills`:
 
 Legacy binaries remain supported through pass-through commands such as
 `zv parser`, `zv editor`, `zv recorder`, `zv composer`, and `zv orchestrator`.
+
+## CS2 market intelligence prototype
+
+`services/cs2-market` is a separate Python service for public CS2 item market
+research. It ingests free/public data, stores price snapshots, scores 2-8 week
+small-ticket signals, and exports Shorts-ready scripts. It is intentionally
+separate from the Go demo-to-video pipeline.
+
+```powershell
+cd services\cs2-market
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+cs2market init-db
+cs2market ingest skinport --currency USD
+cs2market ingest historical-csv data\market\historical\prices.csv --source legacy-prices
+cs2market ml status --category skin
+cs2market ml features --category skin --out data\market\ml\features.csv
+cs2market ml labels --features data\market\ml\features.csv --horizon-days 30 --out data\market\ml\labels.csv
+cs2market ml train --labels data\market\ml\labels.csv
+cs2market score --limit 25
+cs2market export-shorts
+```
 
 `zv demo parse` parses a demo without the orchestrator:
 
