@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -33,6 +35,7 @@ const (
 type JobRepository interface {
 	Create(ctx context.Context, j *job.Job) error
 	Get(ctx context.Context, id uuid.UUID) (job.Job, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
 }
 
 // Enqueuer is the subset of *asynq.Client used by handlers.
@@ -112,23 +115,33 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 	h256 := sha256.New()
 	tee := io.TeeReader(file, h256)
 	if err := h.storage.Put(key, tee); err != nil {
-		writeError(w, http.StatusInternalServerError, "storing demo: "+err.Error())
+		internalError(w, "store demo", err)
 		return
 	}
 	j.DemoSHA256 = hex.EncodeToString(h256.Sum(nil))
 
 	if err := h.repo.Create(r.Context(), j); err != nil {
-		writeError(w, http.StatusInternalServerError, "creating job: "+err.Error())
+		internalError(w, "create job", err)
 		return
 	}
 
 	task, err := tasks.NewParseDemoTask(j.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "building task: "+err.Error())
+		internalError(w, "build parse task", err)
 		return
 	}
 	if _, err := h.queue.Enqueue(task); err != nil {
-		writeError(w, http.StatusInternalServerError, "enqueueing task: "+err.Error())
+		// The job row and demo blob are already persisted. Mark the job failed
+		// so it is not stranded in "queued" with no task to advance it; the row
+		// stays visible and auditable instead of silently orphaned. Use a fresh,
+		// short-lived context so the compensating write lands even if the request
+		// context is already cancelled (client disconnect or proxy deadline).
+		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if uerr := h.repo.UpdateStatus(markCtx, j.ID, job.StatusFailed, "enqueue parse task: "+err.Error()); uerr != nil {
+			log.Printf("httpapi: mark job %s failed after enqueue error: %v", j.ID, uerr)
+		}
+		markCancel()
+		internalError(w, "enqueue parse task", err)
 		return
 	}
 
@@ -152,7 +165,7 @@ func (h *Handlers) GetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, "get job", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, j)
@@ -172,7 +185,7 @@ func (h *Handlers) GetPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, "get plan", err)
 		return
 	}
 	if j.KillPlan == nil {
@@ -217,11 +230,13 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := tasks.NewRecordDemoTask(j.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "building task: "+err.Error())
+		internalError(w, "build record task", err)
 		return
 	}
+	// The job stays in its parsed/recorded state on enqueue failure so the
+	// client can retry the POST once the queue recovers.
 	if _, err := h.queue.Enqueue(task, asynq.MaxRetry(0)); err != nil {
-		writeError(w, http.StatusInternalServerError, "enqueueing task: "+err.Error())
+		internalError(w, "enqueue record task", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -242,11 +257,13 @@ func (h *Handlers) StartComposition(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := tasks.NewComposeFinalTask(j.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "building task: "+err.Error())
+		internalError(w, "build compose task", err)
 		return
 	}
+	// The job stays in its recorded/composed state on enqueue failure so the
+	// client can retry the POST once the queue recovers.
 	if _, err := h.queue.Enqueue(task); err != nil {
-		writeError(w, http.StatusInternalServerError, "enqueueing task: "+err.Error())
+		internalError(w, "enqueue compose task", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -268,7 +285,7 @@ func (h *Handlers) loadJob(w http.ResponseWriter, r *http.Request) (job.Job, boo
 		return job.Job{}, false
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		internalError(w, "load job", err)
 		return job.Job{}, false
 	}
 	return j, true
@@ -282,4 +299,11 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// internalError logs the underlying error at the boundary and returns a generic
+// 500 to the client so driver/SQL/storage internals are not exposed.
+func internalError(w http.ResponseWriter, op string, err error) {
+	log.Printf("httpapi: %s: %v", op, err)
+	writeError(w, http.StatusInternalServerError, "internal error")
 }

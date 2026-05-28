@@ -25,7 +25,9 @@ import (
 
 // fakeRepo implements JobRepository for tests.
 type fakeRepo struct {
-	jobs map[uuid.UUID]job.Job
+	jobs            map[uuid.UUID]job.Job
+	getErr          error
+	updateHonorsCtx bool
 }
 
 func newFakeRepo() *fakeRepo { return &fakeRepo{jobs: map[uuid.UUID]job.Job{}} }
@@ -37,11 +39,29 @@ func (f *fakeRepo) Create(_ context.Context, j *job.Job) error {
 	return nil
 }
 func (f *fakeRepo) Get(_ context.Context, id uuid.UUID) (job.Job, error) {
+	if f.getErr != nil {
+		return job.Job{}, f.getErr
+	}
 	j, ok := f.jobs[id]
 	if !ok {
 		return job.Job{}, job.ErrNotFound
 	}
 	return j, nil
+}
+func (f *fakeRepo) UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, reason string) error {
+	if f.updateHonorsCtx {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	j, ok := f.jobs[id]
+	if !ok {
+		return job.ErrNotFound
+	}
+	j.Status = s
+	j.FailureReason = reason
+	f.jobs[id] = j
+	return nil
 }
 
 // fakeStorage records every Put call.
@@ -73,9 +93,13 @@ func (f *fakeStorage) Exists(key string) (bool, error) {
 // fakeQueue captures enqueued tasks.
 type fakeQueue struct {
 	enqueued []*asynq.Task
+	err      error
 }
 
 func (q *fakeQueue) Enqueue(t *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	if q.err != nil {
+		return nil, q.err
+	}
 	q.enqueued = append(q.enqueued, t)
 	return &asynq.TaskInfo{ID: "x"}, nil
 }
@@ -123,6 +147,77 @@ func TestPostJobsCreatesJobAndEnqueues(t *testing.T) {
 	}
 	if len(queue.enqueued) != 1 {
 		t.Errorf("queue has %d tasks, want 1", len(queue.enqueued))
+	}
+}
+
+func TestPostJobsMarksJobFailedWhenEnqueueFails(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{err: errors.New("redis down")}
+	h := NewHandlers(repo, store, queue)
+
+	body, ct := multipartBody(t, []byte("dem-bytes"), `{"target_steamid":"76561198000000000"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+	req.Header.Set("Content-Type", ct)
+	rw := httptest.NewRecorder()
+
+	h.CreateJob(rw, req)
+
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(repo.jobs) != 1 {
+		t.Fatalf("repo jobs = %d, want 1", len(repo.jobs))
+	}
+	for _, j := range repo.jobs {
+		if j.Status != job.StatusFailed {
+			t.Fatalf("job status = %s, want failed (must not be stranded in queued with no task)", j.Status)
+		}
+	}
+}
+
+func TestPostJobsFailedWriteSurvivesCancelledRequestContext(t *testing.T) {
+	repo := newFakeRepo()
+	repo.updateHonorsCtx = true // mimic pgxpool: refuse a cancelled context
+	store := newFakeStorage()
+	queue := &fakeQueue{err: errors.New("redis down")}
+	h := NewHandlers(repo, store, queue)
+
+	body, ct := multipartBody(t, []byte("dem-bytes"), `{"target_steamid":"76561198000000000"}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body).WithContext(ctx)
+	req.Header.Set("Content-Type", ct)
+	cancel() // client disconnect / proxy deadline before the handler finishes
+	rw := httptest.NewRecorder()
+
+	h.CreateJob(rw, req)
+
+	if len(repo.jobs) != 1 {
+		t.Fatalf("repo jobs = %d, want 1", len(repo.jobs))
+	}
+	for _, j := range repo.jobs {
+		if j.Status != job.StatusFailed {
+			t.Fatalf("job status = %s, want failed (compensating write must survive a cancelled request context)", j.Status)
+		}
+	}
+}
+
+func TestGetJobHidesInternalErrorDetails(t *testing.T) {
+	repo := newFakeRepo()
+	repo.getErr = errors.New(`pq: relation "jobs" does not exist [secret-schema]`)
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}", h.GetJob)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+uuid.New().String(), nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rw.Code)
+	}
+	if strings.Contains(rw.Body.String(), "secret-schema") {
+		t.Fatalf("response leaked internal error detail: %s", rw.Body.String())
 	}
 }
 
