@@ -4,6 +4,7 @@ package tasks
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -18,6 +19,22 @@ const (
 
 	// TypeComposeFinal is the Asynq task type for building the first final MP4.
 	TypeComposeFinal = "compose:final"
+)
+
+const (
+	// parseDemoTimeout bounds how long a single demo parse may run before Asynq
+	// cancels the task context. Parsing a legitimate CS2 demo finishes in
+	// seconds; this generous ceiling stops a corrupt or pathological demo from
+	// pinning a worker slot indefinitely. The parser worker threads this context
+	// into demoinfocs via parser.RunWithContext, so an exceeded deadline aborts
+	// ParseToEnd instead of running forever.
+	parseDemoTimeout = 15 * time.Minute
+
+	// parseDemoMaxRetry caps retries for a parse task. Parsing is deterministic:
+	// a demo that fails (corrupt, target-not-found, or timed out) fails the same
+	// way every time, so the default 25 retries only waste worker slots. One
+	// retry still absorbs a transient infrastructure blip (Redis/temp-file).
+	parseDemoMaxRetry = 1
 )
 
 // ParseDemoPayload carries the inputs the worker needs to fetch from the DB.
@@ -42,7 +59,10 @@ func NewParseDemoTask(id uuid.UUID) (*asynq.Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeParseDemo, payload), nil
+	return asynq.NewTask(TypeParseDemo, payload,
+		asynq.Timeout(parseDemoTimeout),
+		asynq.MaxRetry(parseDemoMaxRetry),
+	), nil
 }
 
 func NewRecordDemoTask(id uuid.UUID) (*asynq.Task, error) {
