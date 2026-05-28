@@ -62,7 +62,18 @@ func Load(r io.Reader) (Rules, error) {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&raw); err != nil {
+		// An empty (or whitespace-only) document yields the defaults.
+		if errors.Is(err, io.EOF) {
+			return Default(), nil
+		}
 		return Rules{}, fmt.Errorf("decoding rules: %w", err)
+	}
+	// Reject a second JSON value or trailing content so a concatenated or
+	// truncated file is not silently parsed as just its first document. Use a
+	// clean-EOF check rather than dec.More(), which returns false for a stray
+	// trailing '}' or ']' and would let corrupted input through.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return Rules{}, errors.New("rules: unexpected content after rules document")
 	}
 
 	rules := Default()

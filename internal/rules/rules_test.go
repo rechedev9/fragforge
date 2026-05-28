@@ -56,6 +56,39 @@ func TestLoadEmptyJSON(t *testing.T) {
 	}
 }
 
+func TestLoadEmptyReaderYieldsDefaults(t *testing.T) {
+	r, err := Load(strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("Load(\"\") error = %v, want nil (empty document yields defaults)", err)
+	}
+	if r.WindowSeconds != 8 || len(r.Weapons) == 0 {
+		t.Errorf("Load(\"\") = %#v, want Default()", r)
+	}
+}
+
+func TestLoadWhitespaceOnlyYieldsDefaults(t *testing.T) {
+	r, err := Load(strings.NewReader("   \n\t  "))
+	if err != nil {
+		t.Fatalf("Load(whitespace) error = %v, want nil", err)
+	}
+	if r.WindowSeconds != 8 || len(r.Weapons) == 0 {
+		t.Errorf("Load(whitespace) = %#v, want Default()", r)
+	}
+}
+
+func TestLoadTrailingContentRejected(t *testing.T) {
+	for _, body := range []string{
+		`{"window_seconds": 5} {"window_seconds": 10}`, // second document
+		`{"window_seconds": 5}}`,                       // stray closing brace
+		`{"window_seconds": 5}]`,                       // stray closing bracket
+		`{"window_seconds": 5} garbage`,                // trailing garbage
+	} {
+		if _, err := Load(strings.NewReader(body)); err == nil {
+			t.Errorf("Load(%q) error = nil, want error about trailing content", body)
+		}
+	}
+}
+
 func TestLoadPartialJSONMergesWithDefaults(t *testing.T) {
 	r, err := Load(strings.NewReader(`{"window_seconds": 15, "pre_roll_seconds": 2}`))
 	if err != nil {
