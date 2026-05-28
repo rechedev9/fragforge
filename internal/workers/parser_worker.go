@@ -75,7 +75,7 @@ func (w *ParserWorker) HandleParseDemo(ctx context.Context, t *asynq.Task) error
 	return nil
 }
 
-func (w *ParserWorker) parse(_ context.Context, j job.Job) (killplan.Plan, error) {
+func (w *ParserWorker) parse(ctx context.Context, j job.Job) (killplan.Plan, error) {
 	rc, err := w.storage.Open(j.DemoPath)
 	if err != nil {
 		return killplan.Plan{}, fmt.Errorf("open demo: %w", err)
@@ -105,7 +105,7 @@ func (w *ParserWorker) parse(_ context.Context, j job.Job) (killplan.Plan, error
 		DemoPath: j.DemoPath,
 		SHA256:   j.DemoSHA256,
 	}
-	plan, err := parser.Run(p, j.TargetSteamID, j.Rules, meta)
+	plan, err := parser.RunWithContext(ctx, p, j.TargetSteamID, j.Rules, meta, parser.RunOptions{SegmentMode: parser.SegmentModeKills})
 	if err != nil {
 		if errors.Is(err, parser.ErrTargetNotFound) {
 			return killplan.Plan{}, fmt.Errorf("target steamid %s not found in demo", j.TargetSteamID)
