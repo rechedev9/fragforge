@@ -99,7 +99,7 @@ func (c *Collector) Build(m PlanMeta) (killplan.Plan, error) {
 		return killplan.Plan{}, errors.New("tickrate must be > 0")
 	}
 
-	sort.SliceStable(c.kills, func(i, j int) bool { return c.kills[i].Tick < c.kills[j].Tick })
+	sortRawKillsByTick(c.kills)
 
 	segs := Segment(c.kills, c.roundEnds, c.rules, m.Tickrate)
 	if segs == nil {
@@ -136,4 +136,20 @@ func totalSegmentSeconds(segs []killplan.Segment, tickrate int) float64 {
 		total += float64(s.TickEnd-s.TickStart) / float64(tickrate)
 	}
 	return total
+}
+
+func sortRawKillsByTick(kills []RawKill) {
+	if rawKillsSortedByTick(kills) {
+		return
+	}
+	sort.SliceStable(kills, func(i, j int) bool { return kills[i].Tick < kills[j].Tick })
+}
+
+func rawKillsSortedByTick(kills []RawKill) bool {
+	for i := 1; i < len(kills); i++ {
+		if kills[i].Tick < kills[i-1].Tick {
+			return false
+		}
+	}
+	return true
 }

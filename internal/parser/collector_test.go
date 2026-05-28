@@ -146,3 +146,25 @@ func TestBuildPlanRoundEndClipping(t *testing.T) {
 		t.Errorf("TickEnd = %d, want 10100 (clipped)", plan.Segments[0].TickEnd)
 	}
 }
+
+func TestSortRawKillsByTickKeepsStableOrder(t *testing.T) {
+	kills := []RawKill{
+		{Tick: 20, Victim: killplan.Player{NameInDemo: "late"}},
+		{Tick: 10, Victim: killplan.Player{NameInDemo: "first"}},
+		{Tick: 10, Victim: killplan.Player{NameInDemo: "second"}},
+	}
+
+	sortRawKillsByTick(kills)
+
+	got := []string{
+		kills[0].Victim.NameInDemo,
+		kills[1].Victim.NameInDemo,
+		kills[2].Victim.NameInDemo,
+	}
+	want := []string{"first", "second", "late"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	}
+}

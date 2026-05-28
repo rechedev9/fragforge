@@ -43,27 +43,21 @@ func Segment(kills []RawKill, roundEnds []RoundEnd, r rules.Rules, tickrate int)
 	windowTicks := r.WindowSeconds * tickrate
 	preRollTicks := r.PreRollSeconds * tickrate
 	postRollTicks := r.PostRollSeconds * tickrate
+	roundEndByRound := indexRoundEnds(roundEnds)
 
-	// Group consecutive kills whose gap stays within the window.
-	var groups [][]RawKill
-	current := []RawKill{kills[0]}
-	for i := 1; i < len(kills); i++ {
-		gap := kills[i].Tick - kills[i-1].Tick
-		if gap <= windowTicks {
-			current = append(current, kills[i])
+	out := make([]killplan.Segment, 0, countKillSegmentGroups(kills, windowTicks, r.MinKillsInWindow))
+	groupStart := 0
+	for i := 1; i <= len(kills); i++ {
+		if i < len(kills) && kills[i].Tick-kills[i-1].Tick <= windowTicks {
 			continue
 		}
-		groups = append(groups, current)
-		current = []RawKill{kills[i]}
-	}
-	groups = append(groups, current)
 
-	// Filter by min_kills_in_window and materialize segments.
-	out := make([]killplan.Segment, 0, len(groups))
-	for _, g := range groups {
+		g := kills[groupStart:i]
+		groupStart = i
 		if len(g) < r.MinKillsInWindow {
 			continue
 		}
+
 		first := g[0]
 		last := g[len(g)-1]
 		tickStart := first.Tick - preRollTicks
@@ -71,7 +65,7 @@ func Segment(kills []RawKill, roundEnds []RoundEnd, r rules.Rules, tickrate int)
 			tickStart = 0
 		}
 		tickEnd := last.Tick + postRollTicks
-		if endTick, ok := roundEndForKill(roundEnds, first.Round); ok && endTick < tickEnd && endTick >= last.Tick {
+		if endTick, ok := roundEndForRound(roundEndByRound, first.Round); ok && endTick < tickEnd && endTick >= last.Tick {
 			tickEnd = endTick
 		}
 
@@ -87,13 +81,40 @@ func Segment(kills []RawKill, roundEnds []RoundEnd, r rules.Rules, tickrate int)
 	return out
 }
 
-func roundEndForKill(roundEnds []RoundEnd, round int) (int, bool) {
+func countKillSegmentGroups(kills []RawKill, windowTicks, minKills int) int {
+	count := 0
+	groupStart := 0
+	for i := 1; i <= len(kills); i++ {
+		if i < len(kills) && kills[i].Tick-kills[i-1].Tick <= windowTicks {
+			continue
+		}
+		if i-groupStart >= minKills {
+			count++
+		}
+		groupStart = i
+	}
+	return count
+}
+
+func indexRoundEnds(roundEnds []RoundEnd) map[int]int {
+	if len(roundEnds) == 0 {
+		return nil
+	}
+	out := make(map[int]int, len(roundEnds))
 	for _, re := range roundEnds {
-		if re.Round == round {
-			return re.Tick, true
+		if _, ok := out[re.Round]; !ok {
+			out[re.Round] = re.Tick
 		}
 	}
-	return 0, false
+	return out
+}
+
+func roundEndForRound(roundEndByRound map[int]int, round int) (int, bool) {
+	if len(roundEndByRound) == 0 {
+		return 0, false
+	}
+	tick, ok := roundEndByRound[round]
+	return tick, ok
 }
 
 func buildKillPlanKills(in []RawKill) []killplan.Kill {

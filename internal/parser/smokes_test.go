@@ -40,6 +40,40 @@ func TestSegmentSmokesCreatesOneSegmentPerSmoke(t *testing.T) {
 	}
 }
 
+func TestSegmentUtilityDoesNotExposeSharedAppendCapacity(t *testing.T) {
+	got := SegmentUtility([]RawUtilityThrow{
+		{Type: SmokeGrenadeType, Round: 5, ThrowTick: 10000, PopTick: 10200},
+		{Type: FlashbangType, Round: 6, ThrowTick: 20000, PopTick: 20100},
+	}, nil, defaultTestRules(), testTickrate)
+	if len(got) != 2 {
+		t.Fatalf("segments len = %d, want 2", len(got))
+	}
+
+	extended := append(got[0].Utility, killplan.UtilityThrow{ID: "extra"})
+	if len(extended) != 2 {
+		t.Fatalf("extended utility len = %d, want 2", len(extended))
+	}
+	if got[1].Utility[0].ID == "extra" {
+		t.Fatalf("append to first segment utility mutated second segment")
+	}
+}
+
+func TestSegmentUtilityAllFilteredKeepsEmptyNonNilResult(t *testing.T) {
+	r := defaultTestRules()
+	r.MinRound = 10
+	r.MaxRound = 10
+
+	got := SegmentUtility([]RawUtilityThrow{
+		{Type: SmokeGrenadeType, Round: 5, ThrowTick: 10000, PopTick: 10200},
+	}, nil, r, testTickrate)
+	if got == nil {
+		t.Fatalf("SegmentUtility all filtered = nil, want empty non-nil slice")
+	}
+	if len(got) != 0 {
+		t.Fatalf("segments len = %d, want 0", len(got))
+	}
+}
+
 func TestSegmentSmokesFallbackWhenPopTickMissing(t *testing.T) {
 	got := SegmentSmokes([]RawUtilityThrow{mkSmoke(10000, 0, 5)}, nil, defaultTestRules(), testTickrate)
 	if len(got) != 1 {
@@ -96,5 +130,46 @@ func TestUtilityCollectorCountsSmokesBeforeRoundFilters(t *testing.T) {
 	}
 	if got, want := plan.Stats.SmokesAfterFilters, 1; got != want {
 		t.Fatalf("SmokesAfterFilters = %d, want %d", got, want)
+	}
+}
+
+func TestUtilityGeneratedIDsMatchLegacyFormatting(t *testing.T) {
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "tick", got: utilityTickID("smoke", 123), want: "smoke-123"},
+		{name: "negative tick", got: utilityTickID("smoke", -1), want: "smoke--1"},
+		{name: "ordinal one", got: utilityOrdinalID("flash", 1), want: "flash-001"},
+		{name: "ordinal wide", got: utilityOrdinalID("flash", 1000), want: "flash-1000"},
+		{name: "ordinal zero", got: utilityOrdinalID("flash", 0), want: "flash-000"},
+		{name: "ordinal negative", got: utilityOrdinalID("flash", -1), want: "flash--01"},
+		{name: "ordinal negative wide", got: utilityOrdinalID("flash", -100), want: "flash--100"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Fatalf("id = %q, want %q", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSortUtilityThrowsByThrowTickKeepsStableOrder(t *testing.T) {
+	utility := []RawUtilityThrow{
+		{ID: "late", ThrowTick: 20},
+		{ID: "first", ThrowTick: 10},
+		{ID: "second", ThrowTick: 10},
+	}
+
+	sortUtilityThrowsByThrowTick(utility)
+
+	got := []string{utility[0].ID, utility[1].ID, utility[2].ID}
+	want := []string{"first", "second", "late"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
 	}
 }

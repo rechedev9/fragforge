@@ -162,6 +162,21 @@ func TestSegmentClippedAtRoundEnd(t *testing.T) {
 	}
 }
 
+func TestSegmentUsesFirstRoundEndWhenDuplicatesExist(t *testing.T) {
+	kills := []RawKill{mkKill(10000, 5, "awp")}
+	roundEnds := []RoundEnd{
+		{Round: 5, Tick: 10100},
+		{Round: 5, Tick: 10200},
+	}
+	got := Segment(kills, roundEnds, defaultTestRules(), testTickrate)
+	if len(got) != 1 {
+		t.Fatalf("got %d segments, want 1", len(got))
+	}
+	if got[0].TickEnd != 10100 {
+		t.Errorf("TickEnd = %d, want first round end 10100", got[0].TickEnd)
+	}
+}
+
 func TestSegmentNotClippedWhenRoundEndIsAfterPostRoll(t *testing.T) {
 	// Round 5 ends way after post-roll; no clipping should happen.
 	kills := []RawKill{mkKill(10000, 5, "awp")}

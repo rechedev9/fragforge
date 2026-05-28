@@ -153,6 +153,10 @@ func TestSegmentIDFormat(t *testing.T) {
 		{42, "seg-042"},
 		{100, "seg-100"},
 		{1000, "seg-1000"},
+		{0, "seg-000"},
+		{-1, "seg--01"},
+		{-42, "seg--42"},
+		{-100, "seg--100"},
 	}
 	for _, tt := range tests {
 		got := FormatSegmentID(tt.n)

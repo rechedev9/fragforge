@@ -1,8 +1,7 @@
 package parser
 
 import (
-	"fmt"
-	"sort"
+	"strconv"
 
 	"github.com/reche/zackvideo/internal/killplan"
 	"github.com/reche/zackvideo/internal/rules"
@@ -50,8 +49,14 @@ func SegmentSmokes(smokes []RawUtilityThrow, roundEnds []RoundEnd, r rules.Rules
 	preRollTicks := r.PreRollSeconds * tickrate
 	postRollTicks := r.PostRollSeconds * tickrate
 	fallbackTicks := 8 * tickrate
+	roundEndByRound := indexRoundEnds(roundEnds)
+	segmentCount := len(smokes)
+	if roundFilterActive(r) {
+		segmentCount = countSmokeSegments(smokes, r)
+	}
 
-	out := make([]killplan.Segment, 0, len(smokes))
+	out := make([]killplan.Segment, 0, segmentCount)
+	utilityThrows := make([]killplan.UtilityThrow, 0, segmentCount)
 	for _, smoke := range smokes {
 		if smoke.Type != SmokeGrenadeType {
 			continue
@@ -67,19 +72,21 @@ func SegmentSmokes(smokes []RawUtilityThrow, roundEnds []RoundEnd, r rules.Rules
 		if smoke.PopTick > 0 {
 			tickEnd = smoke.PopTick + postRollTicks
 		}
-		if endTick, ok := roundEndForKill(roundEnds, smoke.Round); ok && endTick < tickEnd && endTick >= smoke.ThrowTick {
+		if endTick, ok := roundEndForRound(roundEndByRound, smoke.Round); ok && endTick < tickEnd && endTick >= smoke.ThrowTick {
 			tickEnd = endTick
 		}
 		if tickEnd <= tickStart {
 			tickEnd = tickStart + max(1, tickrate)
 		}
+		utilityStart := len(utilityThrows)
+		utilityThrows = append(utilityThrows, buildUtilityThrow(smoke))
 
 		out = append(out, killplan.Segment{
 			ID:        killplan.FormatSegmentID(len(out) + 1),
 			Round:     smoke.Round,
 			TickStart: tickStart,
 			TickEnd:   tickEnd,
-			Utility:   []killplan.UtilityThrow{buildUtilityThrow(smoke)},
+			Utility:   utilityThrows[utilityStart : utilityStart+1 : utilityStart+1],
 		})
 	}
 	return out
@@ -95,7 +102,13 @@ func SegmentUtility(utility []RawUtilityThrow, roundEnds []RoundEnd, r rules.Rul
 
 	preRollTicks := r.PreRollSeconds * tickrate
 	postRollTicks := r.PostRollSeconds * tickrate
-	out := make([]killplan.Segment, 0, len(utility))
+	roundEndByRound := indexRoundEnds(roundEnds)
+	segmentCount := len(utility)
+	if roundFilterActive(r) {
+		segmentCount = countUtilitySegments(utility, r)
+	}
+	out := make([]killplan.Segment, 0, segmentCount)
+	utilityThrows := make([]killplan.UtilityThrow, 0, segmentCount)
 	for _, u := range utility {
 		if !isTrackedUtilityType(u.Type) || !r.AllowsRound(u.Round) {
 			continue
@@ -111,28 +124,54 @@ func SegmentUtility(utility []RawUtilityThrow, roundEnds []RoundEnd, r rules.Rul
 				tickEnd = u.PopTick + 2*tickrate
 			}
 		}
-		if endTick, ok := roundEndForKill(roundEnds, u.Round); ok && endTick < tickEnd && endTick >= u.ThrowTick {
+		if endTick, ok := roundEndForRound(roundEndByRound, u.Round); ok && endTick < tickEnd && endTick >= u.ThrowTick {
 			tickEnd = endTick
 		}
 		if tickEnd <= tickStart {
 			tickEnd = tickStart + max(1, tickrate)
 		}
+		utilityStart := len(utilityThrows)
+		utilityThrows = append(utilityThrows, buildUtilityThrow(u))
 
 		out = append(out, killplan.Segment{
 			ID:        killplan.FormatSegmentID(len(out) + 1),
 			Round:     u.Round,
 			TickStart: tickStart,
 			TickEnd:   tickEnd,
-			Utility:   []killplan.UtilityThrow{buildUtilityThrow(u)},
+			Utility:   utilityThrows[utilityStart : utilityStart+1 : utilityStart+1],
 		})
 	}
 	return out
 }
 
+func roundFilterActive(r rules.Rules) bool {
+	return r.MinRound > 1 || r.MaxRound != 0
+}
+
+func countSmokeSegments(smokes []RawUtilityThrow, r rules.Rules) int {
+	count := 0
+	for _, smoke := range smokes {
+		if smoke.Type == SmokeGrenadeType && r.AllowsRound(smoke.Round) {
+			count++
+		}
+	}
+	return count
+}
+
+func countUtilitySegments(utility []RawUtilityThrow, r rules.Rules) int {
+	count := 0
+	for _, u := range utility {
+		if isTrackedUtilityType(u.Type) && r.AllowsRound(u.Round) {
+			count++
+		}
+	}
+	return count
+}
+
 func buildUtilityThrow(in RawUtilityThrow) killplan.UtilityThrow {
 	id := in.ID
 	if id == "" {
-		id = fmt.Sprintf("%s-%d", utilityIDPrefix(in.Type), in.ThrowTick)
+		id = utilityTickID(utilityIDPrefix(in.Type), in.ThrowTick)
 	}
 	typ := in.Type
 	if typ == "" {
@@ -196,186 +235,53 @@ func utilityIDPrefix(typ string) string {
 	}
 }
 
-type SmokeCollector struct {
-	target string
-	rules  rules.Rules
-
-	smokes    []RawUtilityThrow
-	roundEnds []RoundEnd
-
-	totalSmokesTarget  int
-	smokesAfterFilters int
-
-	targetName        string
-	targetTeamAtStart string
-	targetSeen        bool
-}
-
-type UtilityCollector struct {
-	target string
-	rules  rules.Rules
-
-	utility   []RawUtilityThrow
-	roundEnds []RoundEnd
-
-	totalUtilityTarget  int
-	utilityAfterFilters int
-	totalSmokesTarget   int
-	smokesAfterFilters  int
-
-	targetName        string
-	targetTeamAtStart string
-	targetSeen        bool
-}
-
-func NewSmokeCollector(target string, r rules.Rules) *SmokeCollector {
-	return &SmokeCollector{target: target, rules: r}
-}
-
-func NewUtilityCollector(target string, r rules.Rules) *UtilityCollector {
-	return &UtilityCollector{target: target, rules: r}
-}
-
-func (c *SmokeCollector) RecordTargetIdentity(name, teamAtStart string) {
-	c.targetName = name
-	c.targetTeamAtStart = teamAtStart
-	c.targetSeen = true
-}
-
-func (c *UtilityCollector) RecordTargetIdentity(name, teamAtStart string) {
-	c.targetName = name
-	c.targetTeamAtStart = teamAtStart
-	c.targetSeen = true
-}
-
-func (c *SmokeCollector) RecordSmoke(s RawUtilityThrow) {
-	c.totalSmokesTarget++
-	if s.Type == "" {
-		s.Type = SmokeGrenadeType
+func utilityTickID(prefix string, tick int) string {
+	var b [32]byte
+	if len(prefix)+1+20 <= len(b) {
+		out := b[:0]
+		out = append(out, prefix...)
+		out = append(out, '-')
+		out = strconv.AppendInt(out, int64(tick), 10)
+		return string(out)
 	}
-	if !c.rules.AllowsRound(s.Round) {
-		return
-	}
-	c.smokes = append(c.smokes, s)
-	c.smokesAfterFilters++
+	return prefix + "-" + strconv.Itoa(tick)
 }
 
-func (c *UtilityCollector) RecordUtility(u RawUtilityThrow) {
-	if !isTrackedUtilityType(u.Type) {
-		return
+func utilityOrdinalID(prefix string, n int) string {
+	var b [32]byte
+	if len(prefix)+1+20 <= len(b) {
+		out := b[:0]
+		out = append(out, prefix...)
+		out = append(out, '-')
+		out = appendZeroPadded3(out, n)
+		return string(out)
 	}
-	c.totalUtilityTarget++
-	if u.Type == SmokeGrenadeType {
-		c.totalSmokesTarget++
-	}
-	if !c.rules.AllowsRound(u.Round) {
-		return
-	}
-	c.utility = append(c.utility, u)
-	c.utilityAfterFilters++
-	if u.Type == SmokeGrenadeType {
-		c.smokesAfterFilters++
-	}
+	return prefix + "-" + zeroPadded3(n)
 }
 
-func (c *SmokeCollector) RecordRoundEnd(re RoundEnd) {
-	c.roundEnds = append(c.roundEnds, re)
+func zeroPadded3(n int) string {
+	var b [20]byte
+	out := appendZeroPadded3(b[:0], n)
+	return string(out)
 }
 
-func (c *UtilityCollector) RecordRoundEnd(re RoundEnd) {
-	c.roundEnds = append(c.roundEnds, re)
-}
-
-func (c *SmokeCollector) Build(m PlanMeta) (killplan.Plan, error) {
-	if !c.targetSeen {
-		return killplan.Plan{}, fmt.Errorf("target steamid %q not found in demo", c.target)
+func appendZeroPadded3(out []byte, n int) []byte {
+	if n >= 0 && n < 1000 {
+		return append(out,
+			byte('0'+n/100),
+			byte('0'+n/10%10),
+			byte('0'+n%10),
+		)
 	}
-	if m.Tickrate <= 0 {
-		return killplan.Plan{}, fmt.Errorf("tickrate must be > 0")
-	}
-
-	sort.SliceStable(c.smokes, func(i, j int) bool {
-		return c.smokes[i].ThrowTick < c.smokes[j].ThrowTick
-	})
-	for i := range c.smokes {
-		if c.smokes[i].ID == "" {
-			c.smokes[i].ID = fmt.Sprintf("smoke-%03d", i+1)
+	if n > -100 && n < 0 {
+		abs := -n
+		out = append(out, '-')
+		if abs >= 10 {
+			out = append(out, byte('0'+abs/10))
+		} else {
+			out = append(out, '0')
 		}
+		return append(out, byte('0'+abs%10))
 	}
-
-	segs := SegmentSmokes(c.smokes, c.roundEnds, c.rules, m.Tickrate)
-	if segs == nil {
-		segs = []killplan.Segment{}
-	}
-
-	plan := killplan.NewPlan()
-	plan.Demo = killplan.Demo{
-		Path:          m.DemoPath,
-		SHA256:        m.SHA256,
-		Map:           m.Map,
-		Tickrate:      m.Tickrate,
-		DurationTicks: m.DurationTicks,
-	}
-	plan.Target = killplan.Target{
-		SteamID64:   c.target,
-		NameInDemo:  c.targetName,
-		TeamAtStart: c.targetTeamAtStart,
-	}
-	plan.Rules = c.rules
-	plan.Segments = segs
-	plan.Stats = killplan.Stats{
-		TotalSmokesTarget:    c.totalSmokesTarget,
-		SmokesAfterFilters:   c.smokesAfterFilters,
-		SegmentsCreated:      len(segs),
-		DurationSecondsTotal: totalSegmentSeconds(segs, m.Tickrate),
-	}
-	return plan, nil
-}
-
-func (c *UtilityCollector) Build(m PlanMeta) (killplan.Plan, error) {
-	if !c.targetSeen {
-		return killplan.Plan{}, fmt.Errorf("target steamid %q not found in demo", c.target)
-	}
-	if m.Tickrate <= 0 {
-		return killplan.Plan{}, fmt.Errorf("tickrate must be > 0")
-	}
-
-	sort.SliceStable(c.utility, func(i, j int) bool {
-		return c.utility[i].ThrowTick < c.utility[j].ThrowTick
-	})
-	for i := range c.utility {
-		if c.utility[i].ID == "" {
-			c.utility[i].ID = fmt.Sprintf("%s-%03d", utilityIDPrefix(c.utility[i].Type), i+1)
-		}
-	}
-
-	segs := SegmentUtility(c.utility, c.roundEnds, c.rules, m.Tickrate)
-	if segs == nil {
-		segs = []killplan.Segment{}
-	}
-
-	plan := killplan.NewPlan()
-	plan.Demo = killplan.Demo{
-		Path:          m.DemoPath,
-		SHA256:        m.SHA256,
-		Map:           m.Map,
-		Tickrate:      m.Tickrate,
-		DurationTicks: m.DurationTicks,
-	}
-	plan.Target = killplan.Target{
-		SteamID64:   c.target,
-		NameInDemo:  c.targetName,
-		TeamAtStart: c.targetTeamAtStart,
-	}
-	plan.Rules = c.rules
-	plan.Segments = segs
-	plan.Stats = killplan.Stats{
-		TotalUtilityTarget:   c.totalUtilityTarget,
-		UtilityAfterFilters:  c.utilityAfterFilters,
-		TotalSmokesTarget:    c.totalSmokesTarget,
-		SmokesAfterFilters:   c.smokesAfterFilters,
-		SegmentsCreated:      len(segs),
-		DurationSecondsTotal: totalSegmentSeconds(segs, m.Tickrate),
-	}
-	return plan, nil
+	return strconv.AppendInt(out, int64(n), 10)
 }

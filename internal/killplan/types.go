@@ -5,7 +5,7 @@ package killplan
 
 import (
 	"encoding/json"
-	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -139,5 +139,23 @@ func NewPlan() Plan {
 // FormatSegmentID renders a 1-based segment number as "seg-001", zero-padded
 // to three digits (or as many as fit).
 func FormatSegmentID(n int) string {
-	return fmt.Sprintf("seg-%03d", n)
+	if n >= 0 && n < 1000 {
+		var b [7]byte
+		copy(b[:], "seg-000")
+		b[6] = byte('0' + n%10)
+		b[5] = byte('0' + n/10%10)
+		b[4] = byte('0' + n/100)
+		return string(b[:])
+	}
+	if n > -100 && n < 0 {
+		var b [7]byte
+		copy(b[:], "seg--00")
+		abs := -n
+		b[6] = byte('0' + abs%10)
+		if abs >= 10 {
+			b[5] = byte('0' + abs/10)
+		}
+		return string(b[:])
+	}
+	return "seg-" + strconv.Itoa(n)
 }

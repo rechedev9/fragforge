@@ -170,3 +170,42 @@ func TestTeamLabelMap(t *testing.T) {
 		}
 	}
 }
+
+func TestFindRecentPendingUtilityMatchesTypeAndThrower(t *testing.T) {
+	thrower := mkPlayer(killerID, "MARTINEZSA", common.TeamCounterTerrorists)
+	otherThrower := mkPlayer(victimID, "Other", common.TeamTerrorists)
+	want := &RawUtilityThrow{
+		Type:      FlashbangType,
+		Thrower:   playerIdentity(thrower),
+		ThrowTick: 100,
+	}
+	pending := []*RawUtilityThrow{
+		{Type: FlashbangType, Thrower: playerIdentity(otherThrower), ThrowTick: 110},
+		{Type: SmokeGrenadeType, Thrower: playerIdentity(thrower), ThrowTick: 120},
+		want,
+	}
+
+	got := findRecentPendingUtility(pending, thrower, want.Thrower.SteamID64, FlashbangType, 130, 64)
+	if got != want {
+		t.Fatalf("findRecentPendingUtility returned %+v, want %+v", got, want)
+	}
+}
+
+func TestFindRecentPendingFireUtilityMatchesMolotovOrIncendiary(t *testing.T) {
+	thrower := mkPlayer(killerID, "MARTINEZSA", common.TeamCounterTerrorists)
+	want := &RawUtilityThrow{
+		Type:      IncendiaryGrenadeType,
+		Thrower:   playerIdentity(thrower),
+		ThrowTick: 100,
+	}
+	pending := []*RawUtilityThrow{
+		{Type: SmokeGrenadeType, Thrower: playerIdentity(thrower), ThrowTick: 120},
+		want,
+		{Type: FlashbangType, Thrower: playerIdentity(thrower), ThrowTick: 125},
+	}
+
+	got := findRecentPendingFireUtility(pending, thrower, want.Thrower.SteamID64, 130, 64)
+	if got != want {
+		t.Fatalf("findRecentPendingFireUtility returned %+v, want %+v", got, want)
+	}
+}
