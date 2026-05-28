@@ -210,7 +210,7 @@ func streamSetupCommands(plan RecordingPlan) []string {
 		"cl_demo_predict 0",
 		"cl_trueview_show_status 0",
 		"mirv_panorama panelstyle panelId=trueview_row opacity=0",
-		fmt.Sprintf(`mirv_streams record name "%s"`, recordName),
+		fmt.Sprintf("mirv_streams record name %s", quoteConsoleArg(recordName)),
 		recordFPS,
 		"mirv_streams record screen enabled 1",
 	}

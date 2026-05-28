@@ -130,14 +130,25 @@ func run() error {
 
 	if err := launchAndWait(ctx, absHLAEExe, absCS2Exe, plan, scriptPath); err != nil {
 		result.Error = err.Error()
-		result.Artifacts = recording.CollectArtifacts(context.Background(), plan, ffprobePath)
+		// Best-effort diagnostics: launchAndWait commonly fails because ctx hit
+		// its deadline, so collect artifacts under a fresh, short-lived context
+		// rather than the (likely cancelled) recording context.
+		diagCtx, diagCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		result.Artifacts = recording.CollectArtifacts(diagCtx, plan, ffprobePath)
+		diagCancel()
 		result.Warnings = recording.ValidateArtifacts(plan, result.Artifacts)
 		_ = writeResult(plan.OutputDir, result)
 		return err
 	}
 
-	result.Artifacts = recording.CollectArtifacts(context.Background(), plan, ffprobePath)
-	result.Artifacts = append(result.Artifacts, recording.MuxSegmentClips(context.Background(), plan, result.Artifacts, ffmpegPath, ffprobePath)...)
+	// Post-processing (ffprobe/ffmpeg) runs after recording, so give it its own
+	// timeout budget: bounded so a hung subprocess cannot run indefinitely, but
+	// not the recording's leftover budget — a capture that legitimately consumed
+	// most of --timeout would otherwise starve muxing and drop its segment clips.
+	postCtx, postCancel := context.WithTimeout(context.Background(), *timeout)
+	defer postCancel()
+	result.Artifacts = recording.CollectArtifacts(postCtx, plan, ffprobePath)
+	result.Artifacts = append(result.Artifacts, recording.MuxSegmentClips(postCtx, plan, result.Artifacts, ffmpegPath, ffprobePath)...)
 	result.Warnings = recording.ValidateArtifacts(plan, result.Artifacts)
 	return writeResult(plan.OutputDir, result)
 }

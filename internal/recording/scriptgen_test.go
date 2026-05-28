@@ -7,6 +7,28 @@ import (
 	"github.com/reche/zackvideo/internal/killplan"
 )
 
+func TestStreamSetupCommandsQuotesRecordName(t *testing.T) {
+	plan := testPlan()
+	// A double quote in the output path must be escaped, not left to terminate
+	// the quoted console argument and inject further MIRV commands.
+	plan.OutputDir = `C:\out\evil" ; quit ;`
+
+	cmds := streamSetupCommands(plan)
+	nameCmd := ""
+	for _, c := range cmds {
+		if strings.HasPrefix(c, "mirv_streams record name ") {
+			nameCmd = c
+			break
+		}
+	}
+	if nameCmd == "" {
+		t.Fatal("no 'mirv_streams record name' command generated")
+	}
+	if !strings.Contains(nameCmd, `\"`) {
+		t.Fatalf("record name command did not escape embedded quote: %q", nameCmd)
+	}
+}
+
 func testPlan() RecordingPlan {
 	return RecordingPlan{
 		DemoPath:         `C:\demos\x.dem`,
