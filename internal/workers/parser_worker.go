@@ -60,8 +60,7 @@ func (w *ParserWorker) HandleParseDemo(ctx context.Context, t *asynq.Task) error
 
 	plan, parseErr := w.parse(ctx, j)
 	if parseErr != nil {
-		_ = w.repo.UpdateStatus(ctx, j.ID, job.StatusFailed, parseErr.Error())
-		logWorkerTransition(j.ID, tasks.TypeParseDemo, job.StatusFailed)
+		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeParseDemo, parseErr)
 		return parseErr
 	}
 

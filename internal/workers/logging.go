@@ -20,6 +20,10 @@ func logWorkerArtifacts(id uuid.UUID, taskType string, keys []string) {
 	log.Printf("worker job=%s task=%s artifact_keys=%s", id, taskType, strings.Join(keys, ","))
 }
 
+func logWorkerError(id uuid.UUID, op string, err error) {
+	log.Printf("worker job=%s op=%s error=%v", id, op, err)
+}
+
 func logWorkerSkip(id uuid.UUID, taskType string, keys []string) {
 	if len(keys) == 0 {
 		log.Printf("worker job=%s task=%s skip=artifacts_ready", id, taskType)

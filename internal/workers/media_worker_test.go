@@ -322,6 +322,28 @@ func TestComposeWorkerSkipsWhenOutputsAlreadyExist(t *testing.T) {
 	}
 }
 
+func TestIsTerminalAttempt(t *testing.T) {
+	cases := []struct {
+		name              string
+		retried, maxRetry int
+		inTask            bool
+		want              bool
+	}{
+		{"outside asynq task context", 0, 0, false, true},
+		{"no-retry task first attempt", 0, 0, true, true},
+		{"retryable task mid-flight", 3, 25, true, false},
+		{"retryable task final attempt", 25, 25, true, true},
+		{"retryable task past max", 26, 25, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTerminalAttempt(tc.retried, tc.maxRetry, tc.inTask); got != tc.want {
+				t.Errorf("isTerminalAttempt(%d, %d, %v) = %v, want %v", tc.retried, tc.maxRetry, tc.inTask, got, tc.want)
+			}
+		})
+	}
+}
+
 func minimalKillPlan() killplan.Plan {
 	plan := killplan.NewPlan()
 	plan.Demo.Tickrate = 64

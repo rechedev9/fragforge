@@ -35,6 +35,9 @@ func (f *fakeRepo) Get(_ context.Context, id uuid.UUID) (job.Job, error) {
 }
 func (f *fakeRepo) UpdateStatus(_ context.Context, id uuid.UUID, s job.Status, reason string) error {
 	j := f.jobs[id]
+	if j == nil {
+		return job.ErrNotFound
+	}
 	j.Status = s
 	j.FailureReason = reason
 	return nil

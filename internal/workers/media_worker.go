@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -23,10 +24,69 @@ import (
 
 const defaultMediaWorkerTimeout = "20m"
 
+// failureWriteTimeout bounds the fresh-context status write performed when a
+// task fails. The handler context is frequently already cancelled at that
+// point (Asynq deadline or shutdown), so the terminal StatusFailed write needs
+// its own context to land in the database.
+const failureWriteTimeout = 5 * time.Second
+
 // StatusRepository is the subset of *job.Repository needed by media workers.
 type StatusRepository interface {
 	Get(ctx context.Context, id uuid.UUID) (job.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
+}
+
+// statusUpdater is the single method markFailed needs; both StatusRepository
+// and JobRepository satisfy it.
+type statusUpdater interface {
+	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
+}
+
+// markFailed records a job's terminal failure on a fresh, short-lived context
+// so the write survives a handler context already cancelled by an Asynq
+// deadline or shutdown (pgxpool.Exec refuses to run on a cancelled context).
+// The secondary error is logged rather than discarded: a job stranded in a
+// non-terminal status is otherwise invisible to operators.
+func markFailed(repo statusUpdater, id uuid.UUID, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), failureWriteTimeout)
+	defer cancel()
+	if err := repo.UpdateStatus(ctx, id, job.StatusFailed, reason); err != nil {
+		logWorkerError(id, "mark failed", err)
+	}
+}
+
+// recordTaskFailure records a job's failure, but only when the current Asynq
+// attempt is terminal (returning the error now archives the task instead of
+// scheduling another retry). For a retryable task an intermediate failure is
+// left as the in-progress status so the job does not flap StatusFailed<->in
+// progress across retries; the terminal failure is recorded once retries are
+// exhausted.
+func recordTaskFailure(ctx context.Context, repo statusUpdater, id uuid.UUID, taskType string, err error) {
+	if !taskIsTerminal(ctx) {
+		logWorkerError(id, taskType+" will retry", err)
+		return
+	}
+	markFailed(repo, id, err.Error())
+	logWorkerTransition(id, taskType, job.StatusFailed)
+}
+
+// taskIsTerminal reports whether the current Asynq attempt is the last one, so
+// returning an error archives the task instead of retrying. Outside an Asynq
+// task context (e.g. direct unit tests) it returns true so a failure is still
+// recorded.
+func taskIsTerminal(ctx context.Context) bool {
+	retried, ok1 := asynq.GetRetryCount(ctx)
+	maxRetry, ok2 := asynq.GetMaxRetry(ctx)
+	return isTerminalAttempt(retried, maxRetry, ok1 && ok2)
+}
+
+// isTerminalAttempt holds the retry arithmetic separately so it can be tested
+// without an Asynq task context.
+func isTerminalAttempt(retried, maxRetry int, inTask bool) bool {
+	if !inTask {
+		return true
+	}
+	return retried >= maxRetry
 }
 
 type commandRunner interface {
@@ -96,8 +156,7 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecording)
 
 	if err := w.record(ctx, j); err != nil {
-		_ = w.repo.UpdateStatus(ctx, j.ID, job.StatusFailed, err.Error())
-		logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusFailed)
+		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeRecordDemo, err)
 		return err
 	}
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusRecorded, ""); err != nil {
@@ -227,8 +286,7 @@ func (w *ComposeWorker) HandleComposeFinal(ctx context.Context, t *asynq.Task) e
 	logWorkerTransition(j.ID, tasks.TypeComposeFinal, job.StatusComposing)
 
 	if err := w.compose(ctx, j); err != nil {
-		_ = w.repo.UpdateStatus(ctx, j.ID, job.StatusFailed, err.Error())
-		logWorkerTransition(j.ID, tasks.TypeComposeFinal, job.StatusFailed)
+		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeComposeFinal, err)
 		return err
 	}
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusComposed, ""); err != nil {
