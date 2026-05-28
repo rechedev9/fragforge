@@ -28,6 +28,36 @@ func TestCollectArtifactsMapsTakeFoldersToSegments(t *testing.T) {
 	assertArtifact(t, got[2], "seg-002", "take0001", "video", "raw", "video.mp4", 4)
 }
 
+func TestCollectArtifactsCollapsesImageSequencePerTake(t *testing.T) {
+	dir := t.TempDir()
+	// A TGA-sequence take holds one file per frame; collection must yield a
+	// single sequence artifact, not one artifact (and one ffprobe) per frame.
+	writeTestFile(t, filepath.Join(dir, "take0000", "0000.tga"), 3)
+	writeTestFile(t, filepath.Join(dir, "take0000", "0001.tga"), 4)
+	writeTestFile(t, filepath.Join(dir, "take0000", "0002.tga"), 5)
+
+	plan := testPlan()
+	plan.OutputDir = dir
+
+	got := CollectArtifacts(context.Background(), plan, "")
+	if len(got) != 1 {
+		t.Fatalf("CollectArtifacts returned %d artifacts, want 1 collapsed sequence: %#v", len(got), got)
+	}
+	a := got[0]
+	if a.SegmentID != "seg-001" || a.TakeID != "take0000" || a.Type != "video" || a.Role != "raw" {
+		t.Errorf("artifact = %+v, want seg-001/take0000/video/raw", a)
+	}
+	if a.FrameCount != 3 {
+		t.Errorf("FrameCount = %d, want 3", a.FrameCount)
+	}
+	if a.SizeBytes != 12 {
+		t.Errorf("SizeBytes = %d, want 12 (sum of frame sizes)", a.SizeBytes)
+	}
+	if filepath.Base(a.Path) != "0000.tga" {
+		t.Errorf("Path = %q, want the lexically-first frame 0000.tga", a.Path)
+	}
+}
+
 func TestCollectArtifactsLeavesUnmappedExtraTakes(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "take0009", "video.mp4"), 1)

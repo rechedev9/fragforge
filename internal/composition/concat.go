@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/reche/zackvideo/internal/recording"
@@ -36,17 +35,22 @@ func SegmentClipsFromRecording(result recording.RecordingResult) ([]SegmentClip,
 			missing = append(missing, segment.ID)
 			continue
 		}
-		sort.SliceStable(artifacts, func(i, j int) bool {
-			return artifacts[i].Path < artifacts[j].Path
-		})
+		// Only the lexicographically-first clip is used, so scan for the minimum
+		// instead of sorting the whole slice.
+		chosen := artifacts[0]
+		for _, a := range artifacts[1:] {
+			if a.Path < chosen.Path {
+				chosen = a
+			}
+		}
 		if len(artifacts) > 1 {
-			warnings = append(warnings, fmt.Sprintf("segment %s has %d composed input clips; using %s", segment.ID, len(artifacts), artifacts[0].Path))
+			warnings = append(warnings, fmt.Sprintf("segment %s has %d composed input clips; using %s", segment.ID, len(artifacts), chosen.Path))
 		}
 		clips = append(clips, SegmentClip{
 			SegmentID:       segment.ID,
-			Path:            artifacts[0].Path,
-			DurationSeconds: artifacts[0].DurationSeconds,
-			Artifact:        artifacts[0],
+			Path:            chosen.Path,
+			DurationSeconds: chosen.DurationSeconds,
+			Artifact:        chosen,
 		})
 	}
 	if len(missing) > 0 {

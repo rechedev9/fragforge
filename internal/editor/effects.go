@@ -10,6 +10,7 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
+	"github.com/yuin/gopher-lua/parse"
 )
 
 var effectsEvaluationTimeout = 2 * time.Second
@@ -290,9 +291,15 @@ func normalizeEffectsPreset(preset string) string {
 func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath string) error {
 	manifest.EffectsPath = source.Path
 	manifest.EffectsPreset = source.Preset
+	// Compile the effects script once and reuse the bytecode for every short.
+	// Re-parsing the same source per clip dominates a multi-clip render.
+	proto, err := compileEffectsScript(source)
+	if err != nil {
+		return fmt.Errorf("compile effects script: %w", err)
+	}
 	for i := range manifest.Shorts {
 		short := &manifest.Shorts[i]
-		effects, warnings, err := evaluateEffects(source, *short)
+		effects, warnings, err := evaluateCompiledEffects(proto, *short)
 		if err != nil {
 			return fmt.Errorf("evaluate effects for %s: %w", short.SegmentID, err)
 		}
@@ -312,8 +319,30 @@ func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath
 	return nil
 }
 
-func evaluateEffects(source effectsSource, short ShortEdit) ([]Effect, []string, error) {
+// compileEffectsScript parses and compiles the Lua effects source into reusable
+// bytecode. It returns a nil proto (and nil error) when the source is empty so
+// callers can treat "no script" as "no effects".
+func compileEffectsScript(source effectsSource) (*lua.FunctionProto, error) {
 	if strings.TrimSpace(source.Script) == "" {
+		return nil, nil
+	}
+	chunk, err := parse.Parse(strings.NewReader(source.Script), "effects")
+	if err != nil {
+		return nil, err
+	}
+	return lua.Compile(chunk, "effects")
+}
+
+func evaluateEffects(source effectsSource, short ShortEdit) ([]Effect, []string, error) {
+	proto, err := compileEffectsScript(source)
+	if err != nil {
+		return nil, nil, err
+	}
+	return evaluateCompiledEffects(proto, short)
+}
+
+func evaluateCompiledEffects(proto *lua.FunctionProto, short ShortEdit) ([]Effect, []string, error) {
+	if proto == nil {
 		return nil, nil, nil
 	}
 	ctx := &effectEvalContext{
@@ -327,7 +356,8 @@ func evaluateEffects(source effectsSource, short ShortEdit) ([]Effect, []string,
 	openEffectsLuaLibs(L)
 	registerEffectsAPI(L, ctx)
 
-	if err := L.DoString(source.Script); err != nil {
+	L.Push(L.NewFunctionFromProto(proto))
+	if err := L.PCall(0, lua.MultRet, nil); err != nil {
 		return nil, nil, err
 	}
 	if err := callCallbacks(L, ctx.segmentCallbacks, short.segmentLuaTable(L), "segment", ctx); err != nil {

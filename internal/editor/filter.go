@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // effectColorPattern matches the FFmpeg colour forms accepted from Lua presets:
@@ -538,7 +539,7 @@ func drawText(text string, x, y, size int, start, end float64, fontColor, boxCol
 
 func drawTextExpr(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int) string {
 	fontOption := ""
-	if fontFile := defaultDrawtextFontFile(); fontFile != "" {
+	if fontFile := drawtextFontFile(); fontFile != "" {
 		fontOption = fmt.Sprintf(":fontfile='%s'", escapeDrawtextOption(filepath.ToSlash(fontFile)))
 	}
 	return fmt.Sprintf(
@@ -579,6 +580,11 @@ func ffmpegColor(raw string) string {
 		return raw
 	}
 }
+
+// drawtextFontFile resolves the drawtext font path once per process. The font
+// location is invariant for a run, so the filesystem probe in
+// defaultDrawtextFontFile must not repeat for every drawtext clause and clip.
+var drawtextFontFile = sync.OnceValue(defaultDrawtextFontFile)
 
 func defaultDrawtextFontFile() string {
 	if runtime.GOOS != "windows" {

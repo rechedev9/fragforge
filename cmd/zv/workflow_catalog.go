@@ -1,15 +1,33 @@
 package main
 
+import "sync"
+
 func findWorkflow(name string) (workflowInfo, bool) {
-	for _, workflow := range workflowCatalog() {
-		if workflow.Name == name {
-			return workflow, true
-		}
-	}
-	return workflowInfo{}, false
+	w, ok := workflowCatalogByName()[name]
+	return w, ok
 }
 
+// The workflow catalog is static data, identical for the life of the process.
+// Build it (and its name index) once: validation rebuilt and re-scanned it on
+// every documented command line across every doc and skill.
+var (
+	workflowCatalogOnce   = sync.OnceValue(buildWorkflowCatalog)
+	workflowCatalogByName = sync.OnceValue(func() map[string]workflowInfo {
+		catalog := workflowCatalogOnce()
+		byName := make(map[string]workflowInfo, len(catalog))
+		for _, w := range catalog {
+			byName[w.Name] = w
+		}
+		return byName
+	})
+)
+
+// workflowCatalog returns the shared catalog. Callers must treat it as read-only.
 func workflowCatalog() []workflowInfo {
+	return workflowCatalogOnce()
+}
+
+func buildWorkflowCatalog() []workflowInfo {
 	return withWorkflowRunCommands([]workflowInfo{
 		{
 			Name:        "demo-parse",

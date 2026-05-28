@@ -27,11 +27,32 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("postgres config: %v", err)
+	}
+	// The pool is shared by the Asynq workers (each in-flight task can hold a
+	// connection) and the HTTP server. Size it for worker concurrency plus
+	// request headroom so tasks and requests do not block acquiring a connection,
+	// and keep a couple of warm connections to avoid cold-start latency.
+	const httpConnHeadroom = 8
+	if want := int32(cfg.WorkerConcurrency + httpConnHeadroom); want > poolCfg.MaxConns {
+		poolCfg.MaxConns = want
+	}
+	poolCfg.MinConns = 2
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		log.Fatalf("postgres: %v", err)
 	}
 	defer pool.Close()
+
+	pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
+	err = pool.Ping(pingCtx)
+	cancelPing()
+	if err != nil {
+		log.Fatalf("postgres ping: %v", err)
+	}
 
 	store, err := storage.NewLocal(cfg.DataDir)
 	if err != nil {

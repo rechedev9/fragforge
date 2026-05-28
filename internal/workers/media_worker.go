@@ -33,6 +33,7 @@ const failureWriteTimeout = 5 * time.Second
 // StatusRepository is the subset of *job.Repository needed by media workers.
 type StatusRepository interface {
 	Get(ctx context.Context, id uuid.UUID) (job.Job, error)
+	GetMeta(ctx context.Context, id uuid.UUID) (job.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
 }
 
@@ -276,7 +277,7 @@ func (w *ComposeWorker) HandleComposeFinal(ctx context.Context, t *asynq.Task) e
 		return fmt.Errorf("decode payload: %w", err)
 	}
 
-	j, err := w.repo.Get(ctx, payload.JobID)
+	j, err := w.repo.GetMeta(ctx, payload.JobID)
 	if err != nil {
 		return fmt.Errorf("load job %s: %w", payload.JobID, err)
 	}
