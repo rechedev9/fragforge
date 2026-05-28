@@ -93,7 +93,7 @@ func (c *Collector) KillsAfterFilters() int { return c.killsAfterFilters }
 // player was never observed in the demo.
 func (c *Collector) Build(m PlanMeta) (killplan.Plan, error) {
 	if !c.targetSeen {
-		return killplan.Plan{}, fmt.Errorf("target steamid %q not found in demo", c.target)
+		return killplan.Plan{}, fmt.Errorf("target steamid %q: %w", c.target, ErrTargetNotFound)
 	}
 	if m.Tickrate <= 0 {
 		return killplan.Plan{}, errors.New("tickrate must be > 0")

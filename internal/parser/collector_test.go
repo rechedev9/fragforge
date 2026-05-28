@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/reche/zackvideo/internal/killplan"
@@ -77,6 +78,9 @@ func TestBuildPlanFailsWhenTargetNeverSeen(t *testing.T) {
 	_, err := c.Build(meta())
 	if err == nil {
 		t.Fatal("Build() error = nil, want error about target not seen")
+	}
+	if !errors.Is(err, ErrTargetNotFound) {
+		t.Fatalf("Build() error = %v, want errors.Is(ErrTargetNotFound)", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -218,7 +219,7 @@ func runKills(p demoinfocs.Parser, target string, r rules.Rules, m PlanMeta) (ki
 	if err != nil {
 		// Translate the collector's "target not seen" error into the sentinel
 		// so the CLI can map it to its exit code.
-		if strings.Contains(err.Error(), "not found in demo") {
+		if errors.Is(err, ErrTargetNotFound) {
 			return killplan.Plan{}, ErrTargetNotFound
 		}
 		return killplan.Plan{}, err

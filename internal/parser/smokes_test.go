@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/reche/zackvideo/internal/killplan"
@@ -82,6 +83,22 @@ func TestSegmentSmokesFallbackWhenPopTickMissing(t *testing.T) {
 	wantEnd := 10000 + 8*testTickrate
 	if got[0].TickEnd != wantEnd {
 		t.Fatalf("TickEnd = %d, want fallback %d", got[0].TickEnd, wantEnd)
+	}
+}
+
+func TestSmokeCollectorBuildFailsWhenTargetNeverSeen(t *testing.T) {
+	c := NewSmokeCollector(targetID, defaultTestRules())
+	_, err := c.Build(meta())
+	if !errors.Is(err, ErrTargetNotFound) {
+		t.Fatalf("Build() error = %v, want errors.Is(ErrTargetNotFound)", err)
+	}
+}
+
+func TestUtilityCollectorBuildFailsWhenTargetNeverSeen(t *testing.T) {
+	c := NewUtilityCollector(targetID, defaultTestRules())
+	_, err := c.Build(meta())
+	if !errors.Is(err, ErrTargetNotFound) {
+		t.Fatalf("Build() error = %v, want errors.Is(ErrTargetNotFound)", err)
 	}
 }
 

@@ -65,7 +65,11 @@ func Segment(kills []RawKill, roundEnds []RoundEnd, r rules.Rules, tickrate int)
 			tickStart = 0
 		}
 		tickEnd := last.Tick + postRollTicks
-		if endTick, ok := roundEndForRound(roundEndByRound, first.Round); ok && endTick < tickEnd && endTick >= last.Tick {
+		// Clip the post-roll at the end of the round where the segment actually
+		// ends (last kill's round). For the common single-round group this is the
+		// same as the first kill's round; for a group that spans a round boundary
+		// it prevents the clip from bleeding into the following round.
+		if endTick, ok := roundEndForRound(roundEndByRound, last.Round); ok && endTick < tickEnd && endTick >= last.Tick {
 			tickEnd = endTick
 		}
 

@@ -1,9 +1,9 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
@@ -279,7 +279,7 @@ func runUtility(p demoinfocs.Parser, target string, r rules.Rules, m PlanMeta) (
 
 	plan, err := c.Build(m)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found in demo") {
+		if errors.Is(err, ErrTargetNotFound) {
 			return killplan.Plan{}, ErrTargetNotFound
 		}
 		return killplan.Plan{}, err

@@ -191,6 +191,28 @@ func TestSegmentNotClippedWhenRoundEndIsAfterPostRoll(t *testing.T) {
 	}
 }
 
+func TestSegmentClippedAtRoundEndWhenGroupSpansRounds(t *testing.T) {
+	// A group can span a round boundary: the first kill is in round 5, the last
+	// in round 6 (within the merge window). The post-roll must be clipped at the
+	// end of the round where the segment actually ends (round 6), not the round
+	// where it started — otherwise the clip bleeds into round 7's footage.
+	kills := []RawKill{
+		mkKill(10000, 5, "awp"),
+		mkKill(10000+4*testTickrate, 6, "awp"), // 10256, within the 8s window
+	}
+	roundEnds := []RoundEnd{
+		{Round: 5, Tick: 10100}, // before the last kill; must not drive the clip
+		{Round: 6, Tick: 10400}, // within the post-roll; the segment must clip here
+	}
+	got := Segment(kills, roundEnds, defaultTestRules(), testTickrate)
+	if len(got) != 1 {
+		t.Fatalf("got %d segments, want 1", len(got))
+	}
+	if got[0].TickEnd != 10400 {
+		t.Errorf("TickEnd = %d, want 10400 (clipped at the ending round's end)", got[0].TickEnd)
+	}
+}
+
 func TestSegmentRoundIsFirstKillsRound(t *testing.T) {
 	// Edge case: two kills span a round boundary (unusual but possible if a
 	// kill counted at the end of one round and the next sits at the very start).

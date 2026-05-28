@@ -100,7 +100,7 @@ func (c *UtilityCollector) RecordRoundEnd(re RoundEnd) {
 
 func (c *SmokeCollector) Build(m PlanMeta) (killplan.Plan, error) {
 	if !c.targetSeen {
-		return killplan.Plan{}, fmt.Errorf("target steamid %q not found in demo", c.target)
+		return killplan.Plan{}, fmt.Errorf("target steamid %q: %w", c.target, ErrTargetNotFound)
 	}
 	if m.Tickrate <= 0 {
 		return killplan.Plan{}, fmt.Errorf("tickrate must be > 0")
@@ -144,7 +144,7 @@ func (c *SmokeCollector) Build(m PlanMeta) (killplan.Plan, error) {
 
 func (c *UtilityCollector) Build(m PlanMeta) (killplan.Plan, error) {
 	if !c.targetSeen {
-		return killplan.Plan{}, fmt.Errorf("target steamid %q not found in demo", c.target)
+		return killplan.Plan{}, fmt.Errorf("target steamid %q: %w", c.target, ErrTargetNotFound)
 	}
 	if m.Tickrate <= 0 {
 		return killplan.Plan{}, fmt.Errorf("tickrate must be > 0")
