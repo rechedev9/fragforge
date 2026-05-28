@@ -10,6 +10,38 @@ import (
 	"time"
 )
 
+func TestValidateEffectColor(t *testing.T) {
+	valid := []string{
+		"white", "red", "black",
+		"white@0.92", "black@0.36", "red@0.5",
+		"#ffffff", "#FF00FF",
+		"0xff0000", "0x2a1190@0.92", "0xff0000ff",
+	}
+	for _, v := range valid {
+		if err := validateEffectColor("color", v); err != nil {
+			t.Errorf("validateEffectColor(%q) = %v, want nil", v, err)
+		}
+	}
+
+	// All of these would inject extra filtergraph clauses or stream labels if
+	// interpolated into a drawbox/drawtext color argument.
+	invalid := []string{
+		"",
+		"white:drawbox=x=0:y=0",
+		"red,sendcmd=c='reverse'",
+		"white@0.5[tag]",
+		"black;exec",
+		"red 0.5",
+		"white\nred",
+		"0xff0000:t=fill",
+	}
+	for _, v := range invalid {
+		if err := validateEffectColor("color", v); err == nil {
+			t.Errorf("validateEffectColor(%q) = nil, want error", v)
+		}
+	}
+}
+
 func TestEvaluateEffectsCallbacksProduceTimeline(t *testing.T) {
 	source := effectsSource{
 		Preset: EffectsPresetExternal,
@@ -54,6 +86,58 @@ end)
 	}
 	if effects[2].Type != EffectFlash || effects[2].StartSeconds != 1 || effects[2].EndSeconds != 1.1 || effects[2].Opacity != 0.25 {
 		t.Fatalf("flash effect = %#v", effects[2])
+	}
+}
+
+func TestValidateEffectPosition(t *testing.T) {
+	valid := []string{"48", "72", "140", "(W-w)/2", "(w-text_w)/2", "W-w-18", "(h-text_h)/2", "-5"}
+	for _, v := range valid {
+		if err := validateEffectPosition("x", v); err != nil {
+			t.Errorf("validateEffectPosition(%q) = %v, want nil", v, err)
+		}
+	}
+	// All of these would close the drawtext/overlay option and inject a new
+	// filtergraph clause if interpolated unescaped into an x=/y= argument.
+	invalid := []string{"", "0:drawbox=w=iw", "10,20", "5;quit", "x[v]", "1\n2", "w=iw"}
+	for _, v := range invalid {
+		if err := validateEffectPosition("x", v); err == nil {
+			t.Errorf("validateEffectPosition(%q) = nil, want error", v)
+		}
+	}
+}
+
+func TestEvaluateEffectsRejectsPositionInjection(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_segment(function(s)
+  text({ value = "hi", start = 0, duration = 1, x = "0:drawbox=w=iw:h=ih:color=red", y = 34, size = 28 })
+end)
+`,
+	}
+	short := ShortEdit{SegmentID: "seg-001", Preset: PresetShortClean, Label: "x", DurationSeconds: 5}
+	if _, _, err := evaluateEffects(source, short); err == nil {
+		t.Fatal("evaluateEffects error = nil, want error for x position with filtergraph metacharacters")
+	}
+}
+
+func TestEvaluateEffectsRejectsFlashColorWithOpacity(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_kill(function(k)
+  flash({ at = k.time, duration = 0.1, color = "white@0.5" })
+end)
+`,
+	}
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortClean,
+		DurationSeconds: 5,
+		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AWP"}},
+	}
+	if _, _, err := evaluateEffects(source, short); err == nil {
+		t.Fatal("evaluateEffects error = nil, want error for flash color with @opacity (double-opacity)")
 	}
 }
 

@@ -229,6 +229,13 @@ func (c Config) validate() error {
 		if !supportedPlayerImage(c.PlayerImagePath) {
 			return fmt.Errorf("player image must be png, jpg, jpeg, or webp")
 		}
+		// PlayerKeyColor is interpolated into a chromakey= filtergraph argument,
+		// so hold it to the same colour allowlist as Lua effect colours.
+		if c.PlayerKeyColor != "" {
+			if err := validateEffectColor("--player-key-color", c.PlayerKeyColor); err != nil {
+				return err
+			}
+		}
 	default:
 		return fmt.Errorf("unknown preset %q", c.Preset)
 	}

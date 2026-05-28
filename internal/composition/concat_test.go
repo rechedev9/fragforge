@@ -22,7 +22,10 @@ func TestSegmentClipsFromRecordingUsesPlanOrder(t *testing.T) {
 		},
 	}
 
-	clips, warnings := SegmentClipsFromRecording(result)
+	clips, warnings, err := SegmentClipsFromRecording(result)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %v", warnings)
 	}
@@ -34,15 +37,46 @@ func TestSegmentClipsFromRecordingUsesPlanOrder(t *testing.T) {
 	}
 }
 
-func TestSegmentClipsFromRecordingWarnsMissingSegment(t *testing.T) {
+func TestSegmentClipsFromRecordingMissingSegmentIsFatal(t *testing.T) {
 	result := recording.RecordingResult{
 		Plan: recording.RecordingPlan{
 			Segments: []recording.RecordingSegment{{ID: "seg-001"}},
 		},
 	}
-	_, warnings := SegmentClipsFromRecording(result)
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "seg-001 missing") {
-		t.Fatalf("warnings = %v", warnings)
+	clips, warnings, err := SegmentClipsFromRecording(result)
+	if err == nil || !strings.Contains(err.Error(), "seg-001") {
+		t.Fatalf("err = %v, want fatal error mentioning seg-001", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none (a missing clip is fatal, not a warning)", warnings)
+	}
+	if len(clips) != 0 {
+		t.Fatalf("clips len = %d, want 0", len(clips))
+	}
+}
+
+func TestSegmentClipsFromRecordingDuplicateIsNonFatal(t *testing.T) {
+	result := recording.RecordingResult{
+		Plan: recording.RecordingPlan{
+			Segments: []recording.RecordingSegment{{ID: "seg-001"}},
+		},
+		Artifacts: []recording.RecordingArtifact{
+			{SegmentID: "seg-001", Role: "segment", Type: "video", Path: "segments/seg-001-b.mp4", DurationSeconds: 5},
+			{SegmentID: "seg-001", Role: "segment", Type: "video", Path: "segments/seg-001-a.mp4", DurationSeconds: 6},
+		},
+	}
+	clips, warnings, err := SegmentClipsFromRecording(result)
+	if err != nil {
+		t.Fatalf("err = %v, want nil (duplicate clips are resolved deterministically, not fatal)", err)
+	}
+	if len(clips) != 1 {
+		t.Fatalf("clips len = %d, want 1", len(clips))
+	}
+	if clips[0].Path != "segments/seg-001-a.mp4" {
+		t.Fatalf("chosen clip = %s, want lexicographically first segments/seg-001-a.mp4", clips[0].Path)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "seg-001") {
+		t.Fatalf("warnings = %v, want one duplicate-clip warning", warnings)
 	}
 }
 

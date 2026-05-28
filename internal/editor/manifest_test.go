@@ -69,6 +69,46 @@ func TestBuildManifestUsesSegmentOrderAndKillTimes(t *testing.T) {
 	}
 }
 
+func TestBuildManifestSanitizesSegmentIDInOutputPaths(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	// A pathological segment ID must not let output paths escape the output
+	// directory. The "short-NNN-" prefix absorbs one "..", so use several.
+	const evil = "../../../../evil"
+	result.Plan.Segments[0].ID = evil
+	result.Artifacts[1].SegmentID = evil // the seg-001 clip
+
+	opts := testManifestOptions(dir, nil)
+	manifest := BuildManifest(result, opts)
+
+	idx := -1
+	for i, s := range manifest.Shorts {
+		if s.SegmentID == evil {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("no short produced for segment %q", evil)
+	}
+	short := manifest.Shorts[idx]
+	for _, p := range []string{short.Output, short.PromptPath} {
+		rel, err := filepath.Rel(opts.OutputDir, p)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			t.Fatalf("path %q escapes output dir %q (rel=%q, err=%v)", p, opts.OutputDir, rel, err)
+		}
+	}
+	for _, p := range []string{short.PublishPath, short.CaptionPath, short.CoverPath} {
+		rel, err := filepath.Rel(opts.PublishDir, p)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			t.Fatalf("publish path %q escapes publish dir %q (rel=%q, err=%v)", p, opts.PublishDir, rel, err)
+		}
+	}
+	if got := filepath.Base(short.Output); got != "short-001-evil.mp4" {
+		t.Fatalf("output base = %q, want short-001-evil.mp4 (sanitized)", got)
+	}
+}
+
 func TestBuildManifestPremiumPlayerIncludesHeadlineAndImage(t *testing.T) {
 	dir := t.TempDir()
 	result := testRecordingResult(dir)

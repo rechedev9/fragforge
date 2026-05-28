@@ -13,7 +13,13 @@ import (
 	"github.com/reche/zackvideo/internal/recording"
 )
 
-func SegmentClipsFromRecording(result recording.RecordingResult) ([]SegmentClip, []string) {
+// SegmentClipsFromRecording resolves the composed input clip for each planned
+// segment, in plan order. The two failure modes have different severities, so
+// they are reported through different channels: a segment with no composed clip
+// is fatal and surfaces via the returned error, while a segment with multiple
+// composed clips is benign (the lexicographically first is used deterministically)
+// and surfaces as a warning. Callers decide their own policy from there.
+func SegmentClipsFromRecording(result recording.RecordingResult) ([]SegmentClip, []string, error) {
 	bySegment := map[string][]recording.RecordingArtifact{}
 	for _, artifact := range result.Artifacts {
 		if artifact.Role == "segment" && artifact.Type == "video" && artifact.SegmentID != "" {
@@ -22,11 +28,12 @@ func SegmentClipsFromRecording(result recording.RecordingResult) ([]SegmentClip,
 	}
 
 	var warnings []string
+	var missing []string
 	clips := make([]SegmentClip, 0, len(result.Plan.Segments))
 	for _, segment := range result.Plan.Segments {
 		artifacts := bySegment[segment.ID]
 		if len(artifacts) == 0 {
-			warnings = append(warnings, fmt.Sprintf("segment %s missing composed input clip", segment.ID))
+			missing = append(missing, segment.ID)
 			continue
 		}
 		sort.SliceStable(artifacts, func(i, j int) bool {
@@ -42,7 +49,10 @@ func SegmentClipsFromRecording(result recording.RecordingResult) ([]SegmentClip,
 			Artifact:        artifacts[0],
 		})
 	}
-	return clips, warnings
+	if len(missing) > 0 {
+		return clips, warnings, fmt.Errorf("recording result missing composed clips for segments: %s", strings.Join(missing, ", "))
+	}
+	return clips, warnings, nil
 }
 
 func ComposeConcat(ctx context.Context, ffmpegPath string, clips []SegmentClip, outputPath, workDir string) error {
@@ -81,7 +91,12 @@ func ComposeConcat(ctx context.Context, ffmpegPath string, clips []SegmentClip, 
 		"-movflags", "+faststart",
 		outputPath,
 	)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("ffmpeg concat: %w: %s", err, msg)
+		}
 		return fmt.Errorf("ffmpeg concat: %w", err)
 	}
 	return nil

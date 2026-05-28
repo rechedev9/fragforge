@@ -451,7 +451,15 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 		}
 		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, defaultEventTime(ctx), 0.28, 0.72, 1, ctx.short.DurationSeconds)
 	case EffectFlash:
-		e.Color = tableString(tb, "color", "white")
+		var err error
+		if e.Color, err = tableColor(tb, "color", "white"); err != nil {
+			return e, err
+		}
+		// The flash drawbox appends its own @opacity, so the color must be bare;
+		// an embedded @opacity would render an invalid double-opacity color.
+		if strings.Contains(e.Color, "@") {
+			return e, fmt.Errorf("flash color %q must not include @opacity; use the opacity field instead", e.Color)
+		}
 		e.Opacity = tableFloat(tb, "opacity", 0.18)
 		if e.Opacity < 0 || e.Opacity > 1 {
 			return e, fmt.Errorf("opacity %.3f outside range 0..1", e.Opacity)
@@ -462,14 +470,23 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 		if strings.TrimSpace(e.Value) == "" {
 			return e, fmt.Errorf("value is required")
 		}
-		e.X = tablePosition(tb, "x", "48")
-		e.Y = tablePosition(tb, "y", "72")
+		var err error
+		if e.X, err = tablePositionValidated(tb, "x", "48"); err != nil {
+			return e, err
+		}
+		if e.Y, err = tablePositionValidated(tb, "y", "72"); err != nil {
+			return e, err
+		}
 		e.Size = tableInt(tb, "size", 32)
 		if e.Size <= 0 || e.Size > 240 {
 			return e, fmt.Errorf("size %d outside range 1..240", e.Size)
 		}
-		e.FontColor = tableString(tb, "color", "white@0.92")
-		e.BoxColor = tableString(tb, "box_color", "black@0.36")
+		if e.FontColor, err = tableColor(tb, "color", "white@0.92"); err != nil {
+			return e, err
+		}
+		if e.BoxColor, err = tableColor(tb, "box_color", "black@0.36"); err != nil {
+			return e, err
+		}
 		e.BoxBorder = tableInt(tb, "box_border", 12)
 		if e.BoxBorder < 0 || e.BoxBorder > 128 {
 			return e, fmt.Errorf("box_border %d outside range 0..128", e.BoxBorder)
@@ -480,8 +497,13 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 		if strings.TrimSpace(e.Path) == "" {
 			return e, fmt.Errorf("path is required")
 		}
-		e.X = tablePosition(tb, "x", "(W-w)/2")
-		e.Y = tablePosition(tb, "y", "72")
+		var err error
+		if e.X, err = tablePositionValidated(tb, "x", "(W-w)/2"); err != nil {
+			return e, err
+		}
+		if e.Y, err = tablePositionValidated(tb, "y", "72"); err != nil {
+			return e, err
+		}
 		e.Width = tableInt(tb, "width", 0)
 		e.Height = tableInt(tb, "height", 0)
 		if e.Width < 0 || e.Width > 2160 {
@@ -506,8 +528,13 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 		}
 		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, 0, 0, ctx.short.DurationSeconds, ctx.short.DurationSeconds, ctx.short.DurationSeconds)
 	case EffectKillfeed:
-		e.X = tablePosition(tb, "x", "W-w-18")
-		e.Y = tablePosition(tb, "y", "438")
+		var err error
+		if e.X, err = tablePositionValidated(tb, "x", "W-w-18"); err != nil {
+			return e, err
+		}
+		if e.Y, err = tablePositionValidated(tb, "y", "438"); err != nil {
+			return e, err
+		}
 		e.Width = tableInt(tb, "width", 430)
 		e.Height = tableInt(tb, "height", 0)
 		e.CropX = tableInt(tb, "crop_x", 1558)
@@ -604,6 +631,22 @@ func tableString(tb *lua.LTable, key, def string) string {
 		return def
 	}
 	return lua.LVAsString(value)
+}
+
+// tableColor reads a colour from a Lua table, trims it, and validates it as a
+// plain FFmpeg colour spec. It returns the exact string it validated, so the
+// stored value always matches what was checked (no validate/use gap).
+func tableColor(tb *lua.LTable, key, def string) (string, error) {
+	value := strings.TrimSpace(tableString(tb, key, def))
+	return value, validateEffectColor(key, value)
+}
+
+// tablePositionValidated reads a position from a Lua table and validates it as a
+// safe FFmpeg position expression, since it is interpolated unescaped into the
+// drawtext/overlay filtergraph.
+func tablePositionValidated(tb *lua.LTable, key, def string) (string, error) {
+	value := tablePosition(tb, key, def)
+	return value, validateEffectPosition(key, value)
 }
 
 func tablePosition(tb *lua.LTable, key, def string) string {

@@ -48,7 +48,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	clips, warnings := composition.SegmentClipsFromRecording(recordingResult)
+	clips, warnings, clipErr := composition.SegmentClipsFromRecording(recordingResult)
 	result := composition.Result{
 		RecordingResult: absRecordingResult,
 		Output:          absOut,
@@ -60,10 +60,12 @@ func run() error {
 	if *dryRun {
 		return writeResult(resultPath, result)
 	}
-	if len(warnings) > 0 {
-		result.Error = "recording result has missing or duplicate segment clips"
+	// A missing segment clip is fatal; duplicate clips are resolved
+	// deterministically and recorded as warnings without aborting the render.
+	if clipErr != nil {
+		result.Error = clipErr.Error()
 		_ = writeResult(resultPath, result)
-		return errors.New(result.Error)
+		return clipErr
 	}
 
 	ffmpeg := *ffmpegPath
@@ -93,7 +95,7 @@ func run() error {
 		outputArtifact.SizeBytes = info.Size()
 	}
 	if ffprobe != "" {
-		recording.ProbeArtifact(context.Background(), ffprobe, &outputArtifact)
+		recording.ProbeArtifact(ctx, ffprobe, &outputArtifact)
 	}
 	result.OutputArtifact = outputArtifact
 	result.Warnings = append(result.Warnings, composition.ValidateFinalArtifact(

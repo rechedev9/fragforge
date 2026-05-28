@@ -21,7 +21,12 @@ func BuildManifest(result recording.RecordingResult, opts ManifestOptions) Manif
 }
 
 func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Manifest, error) {
-	clips, warnings := composition.SegmentClipsFromRecording(result)
+	clips, warnings, clipErr := composition.SegmentClipsFromRecording(result)
+	if clipErr != nil {
+		// The manifest is built best-effort: a missing segment clip is recorded
+		// as a warning rather than aborting manifest generation.
+		warnings = append(warnings, clipErr.Error())
+	}
 	clipBySegment := map[string]composition.SegmentClip{}
 	for _, clip := range clips {
 		clipBySegment[clip.SegmentID] = clip
@@ -135,9 +140,13 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		}
 		index := i + 1
 		input := resolvePath(baseDir, clip.Path)
-		output := filepath.Join(opts.OutputDir, fmt.Sprintf("short-%03d-%s.mp4", index, segment.ID))
-		promptPath := filepath.Join(promptDir, fmt.Sprintf("short-%03d-%s-cover.md", index, segment.ID))
-		logBase := fmt.Sprintf("short-%03d-%s", index, segment.ID)
+		// Sanitize the segment ID before it lands in file paths so a crafted ID
+		// cannot escape the output directory. safeFilenameToken preserves the
+		// machine-generated "seg-NNN" form.
+		safeID := safeFilenameToken(segment.ID)
+		output := filepath.Join(opts.OutputDir, fmt.Sprintf("short-%03d-%s.mp4", index, safeID))
+		promptPath := filepath.Join(promptDir, fmt.Sprintf("short-%03d-%s-cover.md", index, safeID))
+		logBase := fmt.Sprintf("short-%03d-%s", index, safeID)
 		kills := killCues(segment, result.Plan.Tickrate)
 		smokes := smokeCues(segment, result.Plan.Tickrate, mapName, lineupCatalog, opts.LineupCatalogPath != "")
 		killCount := len(segment.Kills)
@@ -152,9 +161,9 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			headline = smokeHeadline(mapName, smokes[0])
 			title, caption, hashtags = publishSmokeText(player, mapName, smokes[0])
 		}
-		publishBase := publishFileBase(index, segment.ID, player, mapName, killCount, primaryWeapon)
+		publishBase := publishFileBase(index, safeID, player, mapName, killCount, primaryWeapon)
 		if smokeCount > 0 && killCount == 0 {
-			publishBase = publishSmokeFileBase(index, segment.ID, player, mapName, smokes[0])
+			publishBase = publishSmokeFileBase(index, safeID, player, mapName, smokes[0])
 		}
 		duration := clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds)
 		coverTime := coverTimeSeconds(kills, duration)

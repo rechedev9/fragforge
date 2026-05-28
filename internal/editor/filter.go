@@ -5,9 +5,44 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
+
+// effectColorPattern matches the FFmpeg colour forms accepted from Lua presets:
+// a named colour, #RRGGBB, or 0xRRGGBB[AA], each optionally followed by
+// @opacity. Anything else — notably ':' ',' '[' ']' ';' or whitespace — is
+// rejected so a preset cannot smuggle extra filtergraph clauses or stream
+// labels into a drawbox/drawtext colour argument.
+var effectColorPattern = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9]*|#[0-9A-Fa-f]{6}|0x[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)(?:@[0-9]+(?:\.[0-9]+)?)?$`)
+
+// validateEffectColor rejects colour values that are not a plain FFmpeg colour
+// spec. It validates the value exactly as given (callers trim before storing),
+// so the validated form is the form that reaches the filtergraph. field is used
+// only for the error message.
+func validateEffectColor(field, value string) error {
+	if !effectColorPattern.MatchString(value) {
+		return fmt.Errorf("%s %q is not a valid color", field, value)
+	}
+	return nil
+}
+
+// effectPositionPattern matches the FFmpeg position expressions accepted from
+// Lua presets: digits, identifiers (W, w, h, text_w, ...), arithmetic,
+// parentheses, dots and spaces. It rejects ':' ',' ';' '[' ']' '=' quotes and
+// newlines so a preset cannot smuggle extra filtergraph clauses through an x=/y=
+// argument, which is interpolated unescaped into drawtext/overlay filters.
+var effectPositionPattern = regexp.MustCompile(`^[A-Za-z0-9_.()+\-*/ ]+$`)
+
+// validateEffectPosition rejects position values that are not a plain numeric or
+// FFmpeg expression. field is used only for the error message.
+func validateEffectPosition(field, value string) error {
+	if !effectPositionPattern.MatchString(value) {
+		return fmt.Errorf("%s %q is not a valid position expression", field, value)
+	}
+	return nil
+}
 
 func VideoFilter(short ShortEdit) string {
 	scaleHeight := "1920"
