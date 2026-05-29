@@ -33,3 +33,6 @@ overlays/**/out/
 .idea/
 .vscode/
 *.swp
+
+# Local git worktrees
+/.worktrees/
