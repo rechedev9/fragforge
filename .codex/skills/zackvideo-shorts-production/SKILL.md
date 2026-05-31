@@ -1,6 +1,6 @@
 ---
 name: zackvideo-shorts-production
-description: "Generate professional CS2 Shorts with ZackVideo from demos, archives, kill plans, utility plans, or recording results. Use when asked to create, rerender, review, polish, concatenate, split, or QA Shorts packs, especially player-branded kill highlights with the standard blurred top/bottom layout, player photo at the bottom, channel logo watermark at the top right, deathnotice killfeed, 120fps capture, long compilations, map-specific compilations, split by map/player, joining many Shorts into one video, publish galleries, and platform-ready upload assets."
+description: "Generate professional CS2 Shorts with ZackVideo from demos, archives, kill plans, utility plans, or recording results. Use when asked to create, rerender, review, polish, concatenate, split, or QA Shorts packs, especially realistic full-gameplay kill highlights with complete CS2 UI, FFmpeg-only natural-hq2-full rendering, mild digital-vibrance saturation, 120fps capture, long compilations, map-specific compilations, split by map/player, joining many Shorts into one video, publish galleries, and platform-ready upload assets."
 ---
 
 # ZackVideo Shorts Production
@@ -61,24 +61,26 @@ Generate the HLAE script first. Remove `--dry-run` only when the user wants an a
 .\bin\zv.exe workflows run record -- `
   --killplan <run>\plan.json `
   --demo <demo.dem> `
-  --out <run>\recording-deathnotices-120 `
+  --out <run>\recording-gameplay-120 `
   --hlae C:\HLAE-2.190.1\HLAE.exe `
   --cs2 "<cs2.exe>" `
-  --hud deathnotices `
+  --hud gameplay `
   --fps 120 `
   --video-crf 16 `
   --timeout 45m
 ```
 
-For player-branded kill Shorts, record with deathnotices visible and high source FPS so the editor can crop the native killfeed and deliver smoother 60fps output. For a dry run, keep the same command shape but use `--dry-run` and omit `--hlae`/`--cs2`.
+For realistic kill Shorts, record with the full gameplay HUD visible and high source FPS so the editor preserves radar, killfeed, score, crosshair, health, ammo, and round context while delivering smoother 60fps output. Use `--hud gameplay` unless the user explicitly asks for a cleaner/deathnotice-only style. For a dry run, keep the same command shape but use `--dry-run` and omit `--hlae`/`--cs2`.
 
 If CS2 crashes near the end, inspect `<run>\recording-...\segments` and `recording-result.json` before rerunning. Compare segment MP4 count against the plan, verify every listed segment with `ffprobe`, and confirm `recording-result.json` references those files. Continue from existing artifacts when the check passes; rerun only missing or corrupt segments when it fails.
 
-## Player Kill Render
+## Legacy Player-Branded Render
 
-Use this pattern by default for player kill/highlight Shorts when the user provides an explicit player image path or explicitly approves a discovered image. Do not guess which image belongs to a player. If no suitable image is available, ask for one or fall back to `natural-hq2` rather than burning in the wrong asset.
+Do not use this older blurred/player-photo/Lua style by default. It remains here only for explicit user requests that ask for player branding, blurred top/bottom bands, custom overlays, or Lua effects.
 
-It matches the current house style: blurred top/bottom gameplay, centered square gameplay, player cutout/photo in the lower band, channel logo watermark in the upper-right blurred band, native deathnotice killfeed in the upper right, mild saturation, and smoother 60fps delivery.
+Use this pattern only when the user provides an explicit player image path or explicitly approves a discovered image. Do not guess which image belongs to a player. If no suitable image is available, ask for one or fall back to `natural-hq2-full` rather than burning in the wrong asset.
+
+It matches the older branded style: blurred top/bottom gameplay, centered square gameplay, player cutout/photo in the lower band, channel logo watermark in the upper-right blurred band, native deathnotice killfeed in the upper right, mild saturation, and smoother 60fps delivery.
 
 1. Convert player images and the channel logo to PNG assets under `<run>\assets` when needed. The channel logo watermark is required for the standard player-branded style; use the user-provided channel logo image, not a guessed replacement.
 
@@ -164,9 +166,11 @@ Expected warnings: source recordings at `120/1` may warn that the source is not 
 
 ## Natural/Utility Render
 
-Use `natural-hq2` as the current professional baseline for kill/highlight Shorts. It keeps a realistic look, CRF 16 slow encode, Lanczos scaling, square-pixel normalization, audio loudness normalization, black/freeze checks, and cover sheets.
+Use `natural-hq2-full` as the current professional baseline for kill/highlight Shorts. It is FFmpeg-only, avoids Lua/scripted effects, preserves the complete captured gameplay frame and CS2 UI inside the vertical Shorts canvas, applies a mild saturation lift for a digital-vibrance feel, and keeps CRF 16 slow encode, Lanczos scaling, square-pixel normalization, audio loudness normalization, black/freeze checks, and cover sheets.
 
-For natural kill clips, use the same render workflow with `--preset natural-hq2`, the non-deathnotice recording result, and an output such as `<run>\shorts-natural-hq2`. For utility clips, use `--killplan <run>\plan-utility.json --preset smoke-lineups --lineup-catalog data\lineups`. For fast iteration, add `--segments seg-001,seg-004 --limit 2 --dry-run`. Use `--skip-existing` only when burned-in video content will not change.
+Use `natural-hq2-full-plus` only for explicit A/B tests. It keeps the same full-UI layout but adds stronger digital-vibrance color, light sharpening, CRF 15, x264 preset `slower`, and BT.709 mastering metadata.
+
+For natural kill clips, use the same render workflow with `--preset natural-hq2-full`, the gameplay-HUD recording result, and an output such as `<run>\shorts-natural-hq2-full`. For utility clips, use `--killplan <run>\plan-utility.json --preset smoke-lineups --lineup-catalog data\lineups`. For fast iteration, add `--segments seg-001,seg-004 --limit 2 --dry-run`. Use `--skip-existing` only when burned-in video content will not change.
 
 ## Long Compilations
 
@@ -208,11 +212,10 @@ Open the generated gallery when it was not opened by the render command:
 
 Check the gallery and `publish-summary.md` for:
 
-- 1080x1920 vertical framing with the important action visible.
-- Player image anchored in the lower blurred band without covering the core gameplay.
-- Channel logo watermark visible at the top right, inside the blurred band, without covering the killfeed or action.
-- Blurred top and bottom bands present for `viral-square` kill packs.
-- Native deathnotice killfeed crop appears when a kill occurs and does not cover the crosshair/action.
+- 1080x1920 vertical framing with complete gameplay/UI preserved for `natural-hq2-full`.
+- HUD, radar, killfeed, score, crosshair, health, ammo, and round context remain visible and readable enough to represent the demo correctly.
+- No blurred top/bottom bands, player image overlays, logo overlays, cinematic crops, or Lua/scripted effects are present unless the user explicitly requested that style.
+- Saturation looks slightly more vivid than stock CS2 capture without crushing detail or misrepresenting the gameplay.
 - No black/frozen sections, missing audio, text clipping, or overlay overlap.
 - Kill labels, lineup destination, origin, stance, and action match the plan/audit.
 - Captions and titles are human-readable, specific, and not hashtag spam.

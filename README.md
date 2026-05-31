@@ -301,7 +301,8 @@ To create one segment per target-player smoke throw instead of kill windows:
 ./bin/zv shorts render \
   --recording-result data/runs/run-004/recording/recording-result.json \
   --killplan data/runs/plan.json \
-  --out data/runs/run-004/shorts
+  --out data/runs/run-004/shorts-natural-hq2-full \
+  --preset natural-hq2-full
 ```
 
 When `--killplan` is omitted, `zv-editor` tries to discover it from
@@ -322,16 +323,25 @@ cleaner local master, use a lower CRF and slower preset, for example
 `--video-crf 16 --video-preset slow`.
 Use `--preset natural-hq` for the preferred realistic export: no scripted
 effects, x264 CRF 16, and x264 preset `slow`.
-Use `--preset natural-hq2` for the current saved/recommended realistic export:
-no scripted effects, x264 CRF 16, x264 preset `slow`, Lanczos scaling,
-square-pixel normalization, audio loudness normalization, black/freeze quality
-checks, and cover contact sheets.
+Use `--preset natural-hq2-full` for the current saved/recommended realistic
+export: no scripted effects, full captured gameplay/UI preserved inside the
+vertical Shorts canvas, a mild FFmpeg-only saturation lift for CS2-style digital
+vibrance, x264 CRF 16, x264 preset `slow`, Lanczos scaling, square-pixel
+normalization, audio loudness normalization, black/freeze quality checks, and
+cover contact sheets.
+Use `--preset natural-hq2` only when a vertical center crop is intentionally
+preferred over preserving the complete HUD/radar/killfeed frame.
+Use `--preset natural-hq2-full-plus` for A/B comparison renders with stronger
+FFmpeg-only digital-vibrance color, light sharpening, CRF 15, x264 preset
+`slower`, and BT.709 mastering metadata.
 `natural-hq3` and `natural-hq3-smooth` remain experimental comparison presets;
-`natural-hq2` is the baseline to keep unless a future comparison clearly beats
-it.
+`natural-hq2-full` is the baseline to keep unless a future comparison clearly
+beats it.
 
-By default, `zv-editor` applies the built-in Lua effects preset that reproduces
-the clean local look: subtle kill punch-ins and text labels. Use
+The legacy `short-clean` default applies the built-in Lua effects preset that
+reproduces the clean local look: subtle kill punch-ins and text labels. Current
+CS2 kill/highlight production should pass `--preset natural-hq2-full` instead.
+Use
 `--effects-preset awpgod` for stronger punch-ins, color grade, and AWP flashes;
 use `--effects-preset none` for a base vertical crop without scripted effects;
 or pass a custom Lua script with `--effects`:
@@ -362,13 +372,22 @@ For the current natural baseline:
   --preset natural-hq
 ```
 
-For the saved HQ2 baseline:
+For the saved HQ2 full-UI baseline:
 
 ```bash
 ./bin/zv shorts render \
   --recording-result data/runs/run-004/recording/recording-result.json \
-  --out data/runs/run-004/shorts-natural-hq2 \
-  --preset natural-hq2
+  --out data/runs/run-004/shorts-natural-hq2-full \
+  --preset natural-hq2-full
+```
+
+For the sharper digital-vibrance comparison preset:
+
+```bash
+./bin/zv shorts render \
+  --recording-result data/runs/run-004/recording/recording-result.json \
+  --out data/runs/run-004/shorts-natural-hq2-full-plus \
+  --preset natural-hq2-full-plus
 ```
 
 For smoke-lineup clips, parse with `--segment-mode smokes`, record the emitted
