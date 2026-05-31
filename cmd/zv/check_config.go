@@ -208,6 +208,7 @@ func groupUsageTexts() map[string]string {
 		"utility":   utilityUsage,
 		"compose":   composeUsage,
 		"shorts":    shortsUsage,
+		"music":     musicUsage,
 		"analysis":  analysisUsage,
 		"gallery":   galleryUsage,
 		"check":     checkUsage,
@@ -230,6 +231,7 @@ func legacyPassThroughs() []legacyPassThrough {
 		{Command: "orchestrator", Binary: "zv-orchestrator"},
 		{Command: "analysis-viewer", Binary: "zv-analysis-viewer"},
 		{Command: "tactical-data", Binary: "zv-tactical-data"},
+		{Command: "rhythm", Binary: "zv-rhythm"},
 	}
 }
 
@@ -244,5 +246,6 @@ func defaultLegacyCommandEntrypointNames() []string {
 		"zv-pipeline",
 		"zv-orchestrator",
 		"zv-tactical-data",
+		"zv-rhythm",
 	}
 }

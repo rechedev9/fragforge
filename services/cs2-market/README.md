@@ -40,6 +40,7 @@ cs2market score --category skin --limit 25 --write data\market\signals\latest.js
 cs2market download-images --signals data\market\signals\latest.json --out data\market\assets\skins
 cs2market export-shorts --signals data\market\signals\latest.json --out data\market\shorts --include-images
 cs2market render-videos --manifest-dir data\market\shorts\<YYYYMMDD> --background data\market\gpt-image\cs2-skin-investment-short-bg.png --out data\market\shorts-rendered
+cs2market dashboard build --out data\market\dashboard\index.html
 cs2market serve --host 127.0.0.1 --port 8090
 ```
 
@@ -87,6 +88,35 @@ cs2market ml backtest --labels data\market\ml\labels.csv --top-k 25 --out data\m
 Training requires both winning and losing labeled examples. If the database only
 contains current prices, `ml train` will write an `insufficient_data` report
 instead of pretending the model is ready.
+
+## Analytics dashboards
+
+Dashboard code lives inside this service, under `src/cs2market/analytics`.
+Generated dashboard artifacts live under `data/market/dashboard`.
+The analytics stack uses Polars for tabular ETL, NumPy for numeric summaries,
+and Matplotlib for static charts.
+The interactive frontend lives under `frontend/` and is built with Svelte/Vite.
+
+Build the Svelte dashboard from local market artifacts:
+
+```powershell
+cs2market dashboard build --out data\market\dashboard\index.html
+```
+
+The command writes both `index.html` and `dashboard-data.json`. The JSON is also
+embedded into the generated HTML so the dashboard can be opened directly from
+disk, while still supporting HTTP serving.
+
+For frontend development:
+
+```powershell
+cd services\cs2-market\frontend
+npm install
+npm run dev
+```
+
+The project boundary is documented in
+[`docs/analytics-boundaries.md`](docs/analytics-boundaries.md).
 
 ## HTTP API
 

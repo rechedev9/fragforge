@@ -66,6 +66,12 @@ func buildWorkflowCatalog() []workflowInfo {
 			RunArgs:     []string{"shorts", "render"},
 		},
 		{
+			Name:        "music-analyze",
+			Description: "Analyze music beats and build optional kill-to-beat sync suggestions.",
+			Command:     "zv music analyze --input <audio-or-video> --out <rhythm.json>",
+			RunArgs:     []string{"music", "analyze"},
+		},
+		{
 			Name:        "analysis-tactical-data",
 			Description: "Export sampled tactical data for replay experiments.",
 			Command:     "zv analysis tactical-data --demo <demo.dem> --out <tactical.json> --start <tick> --end <tick>",

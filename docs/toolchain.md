@@ -120,6 +120,9 @@ Lua runs in `zv-editor` post-processing, not in HLAE. Use it for deterministic
 timeline decisions such as small zooms, text annotations, flashes, grades, and
 segment-specific labels.
 
+Text, image, and killfeed overlays can declare `fade_in` and `fade_out` seconds
+to avoid hard cuts at 24 FPS and 60 FPS delivery rates.
+
 Use Lua when the effect is logic-driven and tied to kill metadata. Avoid using
 Lua for polished motion graphics that are easier to author in an animation
 timeline; use HyperFrames for that layer instead.

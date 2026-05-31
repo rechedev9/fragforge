@@ -79,6 +79,24 @@ func runShorts(args []string, stdout, stderr io.Writer, stdin io.Reader, runner 
 	}
 }
 
+func runMusic(args []string, stdout, stderr io.Writer, stdin io.Reader, runner commandRunner) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, musicUsage)
+		return exitInvalidArgs
+	}
+	if isHelp(args[0]) {
+		fmt.Fprint(stdout, musicUsage)
+		return exitSuccess
+	}
+	switch args[0] {
+	case "analyze":
+		return runCanonicalDelegate(append([]string{"music"}, args...), "zv-rhythm", args, stdout, stderr, stdin, runner)
+	default:
+		fmt.Fprintf(stderr, "unknown music command %q\n%s", args[0], musicUsage)
+		return exitInvalidArgs
+	}
+}
+
 func runAnalysis(args []string, stdout, stderr io.Writer, stdin io.Reader, runner commandRunner) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, analysisUsage)

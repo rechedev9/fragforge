@@ -9,6 +9,7 @@ Usage:
   zv record [zv-recorder flags]
   zv compose final [zv-composer flags]
   zv shorts render [zv-editor flags]
+  zv music analyze [zv-rhythm analyze flags]
   zv analysis tactical-data [zv-tactical-data flags]
   zv analysis view [zv-analysis-viewer flags]
   zv gallery open --path <index.html>
@@ -31,6 +32,7 @@ Legacy pass-throughs:
   zv orchestrator [zv-orchestrator args]
   zv analysis-viewer [zv-analysis-viewer args]
   zv tactical-data [zv-tactical-data args]
+  zv rhythm [zv-rhythm args]
 
 Use "zv <command> --help" for the underlying command help.
 `
@@ -45,6 +47,9 @@ const composeUsage = `usage: zv compose final [zv-composer flags]
 `
 
 const shortsUsage = `usage: zv shorts render [zv-editor flags]
+`
+
+const musicUsage = `usage: zv music analyze --input <audio-or-video> --out <rhythm.json> [--killplan <plan.json>]
 `
 
 const analysisUsage = `usage: zv analysis tactical-data [zv-tactical-data flags] | zv analysis view [zv-analysis-viewer flags]

@@ -154,10 +154,11 @@ available, but gives humans, scripts, and Codex skills one stable command tree:
 ./bin/zv utility audit --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
 ./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
-./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
+./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts-natural-hq2-full --preset natural-hq2-full
+./bin/zv music analyze --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
 ./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json
-./bin/zv gallery open --path data/runs/run-004/shorts/publish/index.html
+./bin/zv gallery open --path data/runs/run-004/shorts-natural-hq2-full/publish/index.html
 ./bin/zv check
 ./bin/zv check --format json
 ./bin/zv serve
@@ -188,6 +189,8 @@ available, but gives humans, scripts, and Codex skills one stable command tree:
 ./bin/zv workflows show compose-final --format json
 ./bin/zv workflows show shorts-render
 ./bin/zv workflows show shorts-render --format json
+./bin/zv workflows show music-analyze
+./bin/zv workflows show music-analyze --format json
 ./bin/zv workflows show analysis-tactical-data
 ./bin/zv workflows show analysis-tactical-data --format json
 ./bin/zv workflows show analysis-viewer
@@ -209,10 +212,11 @@ available, but gives humans, scripts, and Codex skills one stable command tree:
 ./bin/zv workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
 ./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
-./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
+./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts-natural-hq2-full --preset natural-hq2-full
+./bin/zv workflows run music-analyze -- --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
 ./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json
-./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts/publish/index.html
+./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts-natural-hq2-full/publish/index.html
 ./bin/zv workflows run serve
 ./bin/zv workflows run pipeline -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/pipeline --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv workflows run skills-check

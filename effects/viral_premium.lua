@@ -58,9 +58,9 @@ on_segment(function(s)
   combo_active = false
 
   grade({
-    contrast = 1.10,
-    saturation = 1.14,
-    gamma = 1.01
+    contrast = 1.06,
+    saturation = 1.10,
+    gamma = 1.00
   })
 
   text({
@@ -72,7 +72,9 @@ on_segment(function(s)
     size = 52,
     color = "white@0.96",
     box_color = "black@0.46",
-    box_border = 18
+    box_border = 18,
+    fade_in = 0.16,
+    fade_out = 0.24
   })
 
   local tag = join2(segment.player, segment.map)
@@ -86,7 +88,9 @@ on_segment(function(s)
       size = 28,
       color = "white@0.90",
       box_color = "black@0.34",
-      box_border = 12
+      box_border = 12,
+      fade_in = 0.18,
+      fade_out = 0.24
     })
   end
 
@@ -99,7 +103,9 @@ on_segment(function(s)
     size = 38,
     color = "white@0.90",
     box_color = "black@0.34",
-    box_border = 14
+    box_border = 14,
+    fade_in = 0.18,
+    fade_out = 0.24
   })
 end)
 
@@ -146,7 +152,9 @@ on_kill(function(k)
     size = 36,
     color = "white@0.96",
     box_color = "black@0.44",
-    box_border = 16
+    box_border = 16,
+    fade_in = 0.06,
+    fade_out = 0.16
   })
 
   if segment.kill_count > 1 then
@@ -160,7 +168,9 @@ on_kill(function(k)
       size = 32,
       color = "white@0.92",
       box_color = "black@0.36",
-      box_border = 14
+      box_border = 14,
+      fade_in = 0.06,
+      fade_out = 0.16
     })
   end
 
@@ -177,7 +187,9 @@ on_kill(function(k)
       size = 56,
       color = "white@0.96",
       box_color = "black@0.48",
-      box_border = 20
+      box_border = 20,
+      fade_in = 0.10,
+      fade_out = 0.20
     })
   end
   last_kill_time = k.time
@@ -196,7 +208,9 @@ on_kill(function(k)
       size = 56,
       color = "white@0.96",
       box_color = "black@0.48",
-      box_border = 20
+      box_border = 20,
+      fade_in = 0.12,
+      fade_out = 0.24
     })
   end
 end)

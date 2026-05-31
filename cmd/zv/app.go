@@ -34,6 +34,8 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 		return runCompose(args[1:], stdout, stderr, stdin, runner)
 	case "shorts":
 		return runShorts(args[1:], stdout, stderr, stdin, runner)
+	case "music":
+		return runMusic(args[1:], stdout, stderr, stdin, runner)
 	case "analysis":
 		return runAnalysis(args[1:], stdout, stderr, stdin, runner)
 	case "gallery":

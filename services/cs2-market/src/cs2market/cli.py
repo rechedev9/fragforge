@@ -61,6 +61,18 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--ffmpeg", default="ffmpeg")
     render.add_argument("--duration", type=float, default=12.0)
 
+    dashboard = sub.add_parser("dashboard")
+    dashboard_sub = dashboard.add_subparsers(dest="dashboard_command", required=True)
+    dashboard_build = dashboard_sub.add_parser("build")
+    dashboard_build.add_argument("--out", type=Path, default=Path("data/market/dashboard/index.html"))
+    dashboard_build.add_argument("--signals", type=Path)
+    dashboard_build.add_argument("--features", type=Path)
+    dashboard_build.add_argument("--predictions", type=Path)
+    dashboard_build.add_argument("--metrics", type=Path)
+    dashboard_build.add_argument("--backtest", type=Path)
+    dashboard_build.add_argument("--assets-dir", type=Path)
+    dashboard_build.add_argument("--no-frontend", action="store_true", help="write the Python fallback HTML without building Svelte")
+
     ml = sub.add_parser("ml")
     ml_sub = ml.add_subparsers(dest="ml_command", required=True)
 
@@ -131,6 +143,9 @@ def main(argv: list[str] | None = None) -> int:
 
         uvicorn.run(create_app(settings), host=args.host, port=args.port)
         return 0
+
+    if args.command == "dashboard":
+        return _run_dashboard(args, settings)
 
     service = MarketService(settings)
     try:
@@ -329,6 +344,37 @@ def _run_ml(args: argparse.Namespace, service: MarketService) -> int:
         return 0
 
     raise ValueError(f"unknown ml command: {args.ml_command}")
+
+
+def _run_dashboard(args: argparse.Namespace, settings: Settings) -> int:
+    from .analytics import DashboardInputs, build_dashboard
+
+    inputs = DashboardInputs.from_settings(settings)
+    inputs = DashboardInputs(
+        signals_path=args.signals or inputs.signals_path,
+        features_path=args.features or inputs.features_path,
+        predictions_path=args.predictions or inputs.predictions_path,
+        metrics_path=args.metrics or inputs.metrics_path,
+        backtest_path=args.backtest or inputs.backtest_path,
+        assets_dir=args.assets_dir or inputs.assets_dir,
+    )
+    if args.dashboard_command == "build":
+        result = build_dashboard(inputs, args.out, build_frontend=not args.no_frontend)
+        print(
+            json.dumps(
+                {
+                    "dashboard": str(result.output_path),
+                    "data": str(result.data_path),
+                    "signals": result.signal_count,
+                    "features": result.feature_count,
+                    "predictions": result.prediction_count,
+                    "sources": [str(path) for path in result.source_paths],
+                },
+                indent=2,
+            )
+        )
+        return 0
+    raise ValueError(f"unknown dashboard command: {args.dashboard_command}")
 
 
 if __name__ == "__main__":

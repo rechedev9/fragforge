@@ -522,6 +522,9 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 			return e, fmt.Errorf("box_border %d outside range 0..128", e.BoxBorder)
 		}
 		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, defaultEventTime(ctx), 0, 1, 1, ctx.short.DurationSeconds)
+		if err := setEffectFades(tb, &e); err != nil {
+			return e, err
+		}
 	case EffectImage:
 		e.Path = tableString(tb, "path", "")
 		if strings.TrimSpace(e.Path) == "" {
@@ -543,6 +546,9 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 			return e, fmt.Errorf("height %d outside range 0..3840", e.Height)
 		}
 		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, defaultEventTime(ctx), 0, ctx.short.DurationSeconds, ctx.short.DurationSeconds, ctx.short.DurationSeconds)
+		if err := setEffectFades(tb, &e); err != nil {
+			return e, err
+		}
 	case EffectGrade:
 		e.Contrast = tableFloat(tb, "contrast", 1)
 		e.Saturation = tableFloat(tb, "saturation", 1)
@@ -590,6 +596,9 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 			return e, fmt.Errorf("crop_height %d outside range 1..2160", e.CropHeight)
 		}
 		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, defaultEventTime(ctx), 0.35, 2.80, 3.15, ctx.short.DurationSeconds)
+		if err := setEffectFades(tb, &e); err != nil {
+			return e, err
+		}
 	default:
 		return e, fmt.Errorf("unknown effect type %q", typ)
 	}
@@ -597,6 +606,30 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 		return e, fmt.Errorf("end %.3f must be greater than start %.3f", e.EndSeconds, e.StartSeconds)
 	}
 	return e, nil
+}
+
+func setEffectFades(tb *lua.LTable, e *Effect) error {
+	var err error
+	e.FadeInSeconds, err = tableFadeSeconds(tb, "fade_in")
+	if err != nil {
+		return err
+	}
+	e.FadeOutSeconds, err = tableFadeSeconds(tb, "fade_out")
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func tableFadeSeconds(tb *lua.LTable, key string) (float64, error) {
+	value, ok := tableOptionalFloat(tb, key)
+	if !ok {
+		return 0, nil
+	}
+	if value < 0 || value > 5 {
+		return 0, fmt.Errorf("%s %.3f outside range 0..5", key, value)
+	}
+	return value, nil
 }
 
 func defaultEventTime(ctx *effectEvalContext) float64 {

@@ -112,6 +112,36 @@ During edits:
 - Parser-only Go tests and pure unit tests are safe by default.
 - If a command may be slow or side-effectful, explain before running it.
 
+Media output and cleanup:
+
+- For CS2 Shorts, default to the most realistic demo-representative format
+  available. Preserve the captured game view and full in-game UI when present
+  (HUD, radar, killfeed, score, crosshair, health, ammo, and round context).
+  Avoid blurred top/bottom layouts, cinematic crops, or stylized framing unless
+  the user explicitly asks for that style for a specific run.
+- For kill/highlight Shorts, prefer the `natural-hq2-full` preset: FFmpeg-only,
+  no Lua/scripted effects, complete gameplay frame preserved in the vertical
+  canvas, high-quality encode, and a subtle saturation lift to approximate the
+  digital-vibrance look many CS2 players expect.
+- Use `natural-hq2-full-plus` only for explicit A/B tests: it keeps the same
+  full-UI layout but adds stronger color, light sharpening, CRF 15, slower
+  x264 encoding, and BT.709 metadata.
+- Put every final, upload-ready recording, Shorts pack, long compilation, cover,
+  caption, manifest, and review sheet under a folder named
+  `shortslistosparasubir` inside the run output directory. Intermediate capture,
+  parser, recorder, render, and log artifacts may remain in their normal
+  run-specific folders.
+- Final responses should point the user to the `shortslistosparasubir` folder or
+  to files inside it when delivering finished media.
+- After `.dem` files have been parsed/recorded and the final upload-ready media
+  has been validated, clean up the used `.dem` files by sending them to the
+  Windows Recycle Bin, not by permanently deleting them.
+- If demos were extracted from an archive, recycle only the extracted `.dem`
+  copies by default. Keep the original downloaded archive unless the user
+  explicitly asks to remove it.
+- Do not recycle `.dem` files until no further rerender, recapture, or parsing
+  step needs them. If that is unclear, keep them and mention the pending cleanup.
+
 Local capture path:
 
 - Use `C:\HLAE-2.190.1\HLAE.exe` for HLAE capture on this machine.

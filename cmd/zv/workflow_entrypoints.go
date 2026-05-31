@@ -144,6 +144,10 @@ func workflowDelegatedCommand(args []string) string {
 		if len(args) >= 2 && args[1] == "render" {
 			return "zv-editor"
 		}
+	case "music":
+		if len(args) >= 2 && args[1] == "analyze" {
+			return "zv-rhythm"
+		}
 	case "analysis":
 		if len(args) < 2 {
 			return ""

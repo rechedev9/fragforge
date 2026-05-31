@@ -28,8 +28,8 @@ const (
 	// no-effects gameplay style.
 	PresetShortNaturalHQ2 = "natural-hq2"
 
-	// PresetShortNaturalHQ2Full keeps the complete captured gameplay frame and
-	// full in-game UI inside a vertical Shorts canvas, with a mild FFmpeg-only
+	// PresetShortNaturalHQ2Full renders a continuous 9:16 gameplay crop with
+	// full vertical coverage, no scripted effects, and a mild FFmpeg-only
 	// saturation lift.
 	PresetShortNaturalHQ2Full = "natural-hq2-full"
 
@@ -435,6 +435,8 @@ type Effect struct {
 	FontColor          string     `json:"font_color,omitempty"`
 	BoxColor           string     `json:"box_color,omitempty"`
 	BoxBorder          int        `json:"box_border,omitempty"`
+	FadeInSeconds      float64    `json:"fade_in_seconds,omitempty"`
+	FadeOutSeconds     float64    `json:"fade_out_seconds,omitempty"`
 	Contrast           float64    `json:"contrast,omitempty"`
 	Saturation         float64    `json:"saturation,omitempty"`
 	Gamma              float64    `json:"gamma,omitempty"`

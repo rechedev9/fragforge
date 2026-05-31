@@ -140,6 +140,8 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows show compose-final --format json
 ./bin/zv workflows show shorts-render
 ./bin/zv workflows show shorts-render --format json
+./bin/zv workflows show music-analyze
+./bin/zv workflows show music-analyze --format json
 ./bin/zv workflows show analysis-tactical-data
 ./bin/zv workflows show analysis-tactical-data --format json
 ./bin/zv workflows show analysis-viewer
@@ -162,6 +164,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
 ./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
+./bin/zv music analyze --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
 ./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json
 ./bin/zv gallery open --path data/runs/run-004/shorts/publish/index.html
@@ -173,6 +176,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
 ./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
+./bin/zv workflows run music-analyze -- --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
 ./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json
 ./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts/publish/index.html

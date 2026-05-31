@@ -8,6 +8,7 @@ build:
 	go build -o bin/zv-recorder ./cmd/zv-recorder
 	go build -o bin/zv-composer ./cmd/zv-composer
 	go build -o bin/zv-editor ./cmd/zv-editor
+	go build -o bin/zv-rhythm ./cmd/zv-rhythm
 	go build -o bin/zv-analysis-viewer ./cmd/zv-analysis-viewer
 	go build -o bin/zv-pipeline ./cmd/zv-pipeline
 	go build -o bin/zv-tactical-data ./cmd/zv-tactical-data

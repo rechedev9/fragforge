@@ -74,15 +74,15 @@ func VideoFilter(short ShortEdit) string {
 
 func FullFrameVideoFilter(short ShortEdit) string {
 	filters := []string{
-		fullFrameScaleFilter(short),
+		fullFrameBackgroundScaleFilter(short),
+		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
 		fullFrameGradeFilter(short),
+		"setsar=1",
 	}
 	if short.Preset == PresetShortNaturalHQ2FullPlus {
 		filters = append(filters, "unsharp=5:5:0.35:3:3:0.15")
 	}
 	filters = append(filters,
-		"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
-		"setsar=1",
 		"fps=60",
 	)
 	filters = appendTemporalSmoothingFilter(filters, short)
@@ -156,7 +156,7 @@ func ViralSquareFilter(short ShortEdit) string {
 			next = "vimages"
 		}
 		clauses = append(clauses,
-			fmt.Sprintf("[%d:v]format=rgba,%s[%s]", imageInput, imageScaleFilter(effect), imageLabel),
+			fmt.Sprintf("[%d:v]%s[%s]", imageInput, imageOverlayFilter(effect, short), imageLabel),
 			fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
 				current,
 				imageLabel,
@@ -192,6 +192,28 @@ func killfeedEffects(effects []Effect) []Effect {
 	return out
 }
 
+func imageOverlayFilter(effect Effect, short ShortEdit) string {
+	filters := []string{
+		"format=rgba",
+		imageScaleFilter(effect),
+	}
+	if hasEffectFade(effect) {
+		duration := short.DurationSeconds
+		if duration <= 0 {
+			duration = effect.EndSeconds
+		}
+		filters = append(filters,
+			"loop=loop=-1:size=1:start=0",
+			"setpts=N/60/TB",
+		)
+		if duration > 0 {
+			filters = append(filters, fmt.Sprintf("trim=duration=%.3f", duration))
+		}
+		filters = append(filters, overlayFadeFilters(effect)...)
+	}
+	return strings.Join(filters, ",")
+}
+
 func imageScaleFilter(effect Effect) string {
 	switch {
 	case effect.Width > 0 && effect.Height > 0:
@@ -221,6 +243,7 @@ func sourceCropFilter(effect Effect, short ShortEdit) string {
 	}
 	filters = append(filters, gradeFilters(short.Effects)...)
 	filters = append(filters, "format=rgba")
+	filters = append(filters, overlayFadeFilters(effect)...)
 	return strings.Join(filters, ",")
 }
 
@@ -235,6 +258,39 @@ func sourceCropScaleFilter(effect Effect) string {
 	default:
 		return "scale=w=430:h=-1:flags=lanczos"
 	}
+}
+
+func overlayFadeFilters(effect Effect) []string {
+	fadeIn, fadeOut := normalizedFadeDurations(effect)
+	filters := []string{}
+	if fadeIn > 0 {
+		filters = append(filters, fmt.Sprintf("fade=t=in:st=%.3f:d=%.3f:alpha=1", effect.StartSeconds, fadeIn))
+	}
+	if fadeOut > 0 {
+		filters = append(filters, fmt.Sprintf("fade=t=out:st=%.3f:d=%.3f:alpha=1", effect.EndSeconds-fadeOut, fadeOut))
+	}
+	return filters
+}
+
+func hasEffectFade(effect Effect) bool {
+	return effect.FadeInSeconds > 0 || effect.FadeOutSeconds > 0
+}
+
+func normalizedFadeDurations(effect Effect) (float64, float64) {
+	fadeIn := effect.FadeInSeconds
+	fadeOut := effect.FadeOutSeconds
+	if fadeIn < 0 {
+		fadeIn = 0
+	}
+	if fadeOut < 0 {
+		fadeOut = 0
+	}
+	duration := effect.EndSeconds - effect.StartSeconds
+	if duration <= 0 || fadeIn+fadeOut <= duration {
+		return fadeIn, fadeOut
+	}
+	scale := duration / (fadeIn + fadeOut)
+	return fadeIn * scale, fadeOut * scale
 }
 
 func effectPosition(value, fallback string) string {
@@ -419,8 +475,8 @@ func scaleFilter(height string, short ShortEdit) string {
 	return filter
 }
 
-func fullFrameScaleFilter(short ShortEdit) string {
-	filter := "scale=w=1080:h=1920:force_original_aspect_ratio=decrease:eval=frame"
+func fullFrameBackgroundScaleFilter(short ShortEdit) string {
+	filter := "scale=w=1080:h=1920:force_original_aspect_ratio=increase:eval=frame"
 	if short.HQFilters {
 		filter += ":flags=" + hqScaleFlags(short)
 	}
@@ -554,7 +610,7 @@ func appendEffectFilters(filters []string, effects []Effect) []string {
 		if boxBorder == 0 {
 			boxBorder = 12
 		}
-		filters = append(filters, drawTextExpr(effect.Value, x, y, size, effect.StartSeconds, effect.EndSeconds, fontColor, boxColor, boxBorder))
+		filters = append(filters, drawTextExprWithFade(effect.Value, x, y, size, effect.StartSeconds, effect.EndSeconds, fontColor, boxColor, boxBorder, effect.FadeInSeconds, effect.FadeOutSeconds))
 	}
 	return filters
 }
@@ -587,12 +643,20 @@ func drawText(text string, x, y, size int, start, end float64, fontColor, boxCol
 }
 
 func drawTextExpr(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int) string {
+	return drawTextExprWithFade(text, x, y, size, start, end, fontColor, boxColor, boxBorder, 0, 0)
+}
+
+func drawTextExprWithFade(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int, fadeIn, fadeOut float64) string {
 	fontOption := ""
 	if fontFile := drawtextFontFile(); fontFile != "" {
 		fontOption = fmt.Sprintf(":fontfile='%s'", escapeDrawtextOption(filepath.ToSlash(fontFile)))
 	}
+	alphaOption := ""
+	if alpha := textAlphaExpression(start, end, fadeIn, fadeOut); alpha != "" {
+		alphaOption = fmt.Sprintf(":alpha='%s'", alpha)
+	}
 	return fmt.Sprintf(
-		"drawtext=text='%s'%s:x=%s:y=%s:fontsize=%d:fontcolor=%s:box=1:boxcolor=%s:boxborderw=%d:enable='%s'",
+		"drawtext=text='%s'%s:x=%s:y=%s:fontsize=%d:fontcolor=%s:box=1:boxcolor=%s:boxborderw=%d%s:enable='%s'",
 		escapeDrawtextText(text),
 		fontOption,
 		x,
@@ -601,8 +665,30 @@ func drawTextExpr(text, x, y string, size int, start, end float64, fontColor, bo
 		fontColor,
 		boxColor,
 		boxBorder,
+		alphaOption,
 		betweenExpression(start, end),
 	)
+}
+
+func textAlphaExpression(start, end, fadeIn, fadeOut float64) string {
+	effect := Effect{
+		StartSeconds:   start,
+		EndSeconds:     end,
+		FadeInSeconds:  fadeIn,
+		FadeOutSeconds: fadeOut,
+	}
+	fadeIn, fadeOut = normalizedFadeDurations(effect)
+	if fadeIn <= 0 && fadeOut <= 0 {
+		return ""
+	}
+	expr := "1"
+	if fadeIn > 0 {
+		expr = fmt.Sprintf("min(%s\\,((t-%.3f)/%.3f))", expr, start, fadeIn)
+	}
+	if fadeOut > 0 {
+		expr = fmt.Sprintf("min(%s\\,((%.3f-t)/%.3f))", expr, end, fadeOut)
+	}
+	return expr
 }
 
 func ffmpegColor(raw string) string {

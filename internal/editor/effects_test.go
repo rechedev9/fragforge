@@ -89,6 +89,63 @@ end)
 	}
 }
 
+func TestEvaluateEffectsTextFadeOptions(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_kill(function(k)
+  text({
+    value = "HEADSHOT",
+    at = k.time,
+    pre = 0.1,
+    post = 0.9,
+    fade_in = 0.08,
+    fade_out = 0.18
+  })
+end)
+`,
+	}
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortClean,
+		DurationSeconds: 5,
+		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AK-47", Headshot: true}},
+	}
+
+	effects, warnings, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
+	}
+	effect := effects[0]
+	if effect.Type != EffectText || effect.FadeInSeconds != 0.08 || effect.FadeOutSeconds != 0.18 {
+		t.Fatalf("text fade effect = %#v", effect)
+	}
+}
+
+func TestEvaluateEffectsRejectsInvalidFade(t *testing.T) {
+	_, _, err := evaluateEffects(effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_segment(function(s)
+  text({ value = "bad", start = 0, duration = 1, fade_in = -0.1 })
+end)
+`,
+	}, ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortClean,
+		DurationSeconds: 5,
+	})
+	if err == nil || !strings.Contains(err.Error(), "fade_in") {
+		t.Fatalf("evaluateEffects error = %v, want fade validation", err)
+	}
+}
+
 func TestValidateEffectPosition(t *testing.T) {
 	valid := []string{"48", "72", "140", "(W-w)/2", "(w-text_w)/2", "W-w-18", "(h-text_h)/2", "-5"}
 	for _, v := range valid {

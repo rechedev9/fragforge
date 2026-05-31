@@ -233,6 +233,72 @@ func TestVideoFilterEscapesDrawtextAndBuildsPunchIns(t *testing.T) {
 	}
 }
 
+func TestVideoFilterFadesLuaText(t *testing.T) {
+	filter := VideoFilter(ShortEdit{
+		Effects: []Effect{
+			{
+				Type:           EffectText,
+				Value:          "HEADSHOT",
+				StartSeconds:   1,
+				EndSeconds:     2,
+				FadeInSeconds:  0.12,
+				FadeOutSeconds: 0.20,
+			},
+		},
+	})
+
+	for _, want := range []string{
+		"drawtext=text='HEADSHOT'",
+		"alpha='min(min(1\\,((t-1.000)/0.120))\\,((2.000-t)/0.200))'",
+		"enable='between(t\\,1.000\\,2.000)'",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("filter missing %q:\n%s", want, filter)
+		}
+	}
+}
+
+func TestViralSquareFilterFadesOverlays(t *testing.T) {
+	filter := ViralSquareFilter(ShortEdit{
+		DurationSeconds: 4,
+		Effects: []Effect{
+			{
+				Type:           EffectKillfeed,
+				StartSeconds:   1,
+				EndSeconds:     2,
+				FadeInSeconds:  0.10,
+				FadeOutSeconds: 0.25,
+				Width:          430,
+				CropX:          1558,
+				CropY:          64,
+				CropWidth:      360,
+				CropHeight:     110,
+			},
+			{
+				Type:           EffectImage,
+				Path:           "assets/title.png",
+				StartSeconds:   0.5,
+				EndSeconds:     3,
+				FadeInSeconds:  0.20,
+				FadeOutSeconds: 0.30,
+				Width:          720,
+			},
+		},
+	})
+
+	for _, want := range []string{
+		"fade=t=in:st=1.000:d=0.100:alpha=1",
+		"fade=t=out:st=1.750:d=0.250:alpha=1",
+		"[1:v]format=rgba,scale=w=720:h=-1:flags=lanczos,loop=loop=-1:size=1:start=0,setpts=N/60/TB,trim=duration=4.000",
+		"fade=t=in:st=0.500:d=0.200:alpha=1",
+		"fade=t=out:st=2.700:d=0.300:alpha=1",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("viral-square filter missing %q:\n%s", want, filter)
+		}
+	}
+}
+
 func TestPremiumPlayerFilterSupportsChromakey(t *testing.T) {
 	filter := PremiumPlayerFilter(ShortEdit{
 		Label:          "MartinezSa | de_ancient | 2K",
@@ -476,9 +542,9 @@ func TestBuildManifestNaturalHQ2FullKeepsFullFrameWithVibrance(t *testing.T) {
 	}
 	filter := argAfter(first.FFmpegCommand, "-vf")
 	for _, want := range []string{
-		"scale=w=1080:h=1920:force_original_aspect_ratio=decrease:eval=frame:flags=lanczos",
+		"scale=w=1080:h=1920:force_original_aspect_ratio=increase:eval=frame:flags=lanczos",
+		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
 		"eq=saturation=1.120",
-		"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
 		"setsar=1",
 		"fps=60",
 		"format=yuv420p",
@@ -487,12 +553,14 @@ func TestBuildManifestNaturalHQ2FullKeepsFullFrameWithVibrance(t *testing.T) {
 			t.Fatalf("hq2-full filter missing %q:\n%s", want, filter)
 		}
 	}
-	if strings.Contains(filter, "crop=1080:1920") || strings.Contains(filter, "boxblur") {
-		t.Fatalf("hq2-full filter should preserve the full frame without blur/crop:\n%s", filter)
+	for _, forbidden := range []string{"split=2", "overlay=", "pad=1080:1920", "boxblur"} {
+		if strings.Contains(filter, forbidden) {
+			t.Fatalf("hq2-full filter should be one continuous gameplay crop without %q:\n%s", forbidden, filter)
+		}
 	}
 	qualityFilter := argAfter(first.QualityCommand, "-vf")
 	if strings.Contains(qualityFilter, "cropdetect") {
-		t.Fatalf("hq2-full quality check should not flag expected letterbox bars:\n%s", qualityFilter)
+		t.Fatalf("hq2-full quality check should not flag the full-frame foreground layout:\n%s", qualityFilter)
 	}
 }
 
@@ -518,18 +586,20 @@ func TestBuildManifestNaturalHQ2FullPlusAppliesEnhancedMastering(t *testing.T) {
 	}
 	filter := argAfter(first.FFmpegCommand, "-vf")
 	for _, want := range []string{
-		"scale=w=1080:h=1920:force_original_aspect_ratio=decrease:eval=frame:flags=lanczos+accurate_rnd",
+		"scale=w=1080:h=1920:force_original_aspect_ratio=increase:eval=frame:flags=lanczos+accurate_rnd",
+		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
 		"eq=contrast=1.020:saturation=1.160:gamma=1.000",
 		"unsharp=5:5:0.35:3:3:0.15",
-		"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
 		"format=yuv420p",
 	} {
 		if !strings.Contains(filter, want) {
 			t.Fatalf("hq2-full-plus filter missing %q:\n%s", want, filter)
 		}
 	}
-	if strings.Contains(filter, "crop=1080:1920") || strings.Contains(filter, "boxblur") {
-		t.Fatalf("hq2-full-plus filter should preserve the full frame without blur/crop:\n%s", filter)
+	for _, forbidden := range []string{"split=2", "overlay=", "pad=1080:1920", "boxblur"} {
+		if strings.Contains(filter, forbidden) {
+			t.Fatalf("hq2-full-plus filter should be one continuous gameplay crop without %q:\n%s", forbidden, filter)
+		}
 	}
 	if got := argAfter(first.FFmpegCommand, "-preset"); got != NaturalHQ2FullPlusVideoPreset {
 		t.Fatalf("-preset arg = %q, want %q", got, NaturalHQ2FullPlusVideoPreset)

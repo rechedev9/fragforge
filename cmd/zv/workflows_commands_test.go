@@ -1955,6 +1955,7 @@ func TestValidateLegacyPassThroughEntrypointsRejectsMissingEntrypoint(t *testing
 		"zv-orchestrator",
 		"zv-analysis-viewer",
 		"zv-pipeline",
+		"zv-rhythm",
 	}
 
 	issues := validateLegacyPassThroughEntrypoints(commands)

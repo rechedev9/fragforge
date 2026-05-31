@@ -40,6 +40,11 @@ func validateSkillCommand(command []string) string {
 			return `uses non-standard zv command "shorts"; expected "shorts render"`
 		}
 		return validateRequiredFlags(`"shorts render"`, command[2:], requiredFlagsForRunArgs("shorts", "render")...)
+	case "music":
+		if len(command) < 2 || command[1] != "analyze" {
+			return `uses non-standard zv command "music"; expected "music analyze"`
+		}
+		return validateRequiredFlags(`"music analyze"`, command[2:], requiredFlagsForRunArgs("music", "analyze")...)
 	case "analysis":
 		if len(command) < 2 || (command[1] != "tactical-data" && command[1] != "view") {
 			return `uses non-standard zv command "analysis"; expected "analysis tactical-data" or "analysis view"`
@@ -294,6 +299,17 @@ func commandValueFlags(commandName string, required []string) []string {
 			"--video-preset",
 			"--ffmpeg",
 			"--ffprobe",
+		)
+	case `"music analyze"`:
+		flags = append(flags,
+			"--killplan",
+			"--ffmpeg",
+			"--sample-rate",
+			"--min-bpm",
+			"--max-bpm",
+			"--kill-offset-ms",
+			"--max-beats",
+			"--max-onsets",
 		)
 	case `"analysis tactical-data"`:
 		flags = append(flags, "--sample")

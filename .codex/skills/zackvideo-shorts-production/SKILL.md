@@ -166,7 +166,9 @@ Expected warnings: source recordings at `120/1` may warn that the source is not 
 
 ## Natural/Utility Render
 
-Use `natural-hq2-full` as the current professional baseline for kill/highlight Shorts. It is FFmpeg-only, avoids Lua/scripted effects, preserves the complete captured gameplay frame and CS2 UI inside the vertical Shorts canvas, applies a mild saturation lift for a digital-vibrance feel, and keeps CRF 16 slow encode, Lanczos scaling, square-pixel normalization, audio loudness normalization, black/freeze checks, and cover sheets.
+Use `natural-hq2-full` as the current professional baseline for kill/highlight Shorts. It is FFmpeg-only, avoids Lua/scripted effects, uses one continuous 9:16 gameplay crop with no black bars and no stacked foreground/background bands, applies a mild saturation lift for a digital-vibrance feel, and keeps CRF 16 slow encode, Lanczos scaling, square-pixel normalization, audio loudness normalization, black/freeze checks, and cover sheets.
+
+Do not add `--temporal-smoothing` for realistic gameplay exports unless explicitly A/B testing it. The 120fps source already downsamples cleanly to 60fps; frame blending can create ghosting on fast camera/weapon movement.
 
 Use `natural-hq2-full-plus` only for explicit A/B tests. It keeps the same full-UI layout but adds stronger digital-vibrance color, light sharpening, CRF 15, x264 preset `slower`, and BT.709 mastering metadata.
 
