@@ -69,7 +69,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
-	hqFeaturesDefault := preset == PresetShortViralSquare || preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth || preset == PresetSmokeLineups
+	hqFeaturesDefault := preset == PresetShortViralSquare || preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ2Full || preset == PresetShortNaturalHQ2FullPlus || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth || preset == PresetSmokeLineups
 	hqFilters := opts.HQFilters || hqFeaturesDefault
 	audioNormalize := opts.AudioNormalize || hqFeaturesDefault
 	qualityChecks := opts.QualityChecks || hqFeaturesDefault
@@ -226,7 +226,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 }
 
 func isNaturalPreset(preset string) bool {
-	return preset == PresetShortNaturalHQ || preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth
+	return preset == PresetShortNaturalHQ || preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ2Full || preset == PresetShortNaturalHQ2FullPlus || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth
 }
 
 func uniqueSegmentIDs(ids []string) []string {
@@ -254,6 +254,9 @@ func normalizeVideoCRF(crf int) (int, error) {
 }
 
 func normalizeVideoCRFForPreset(preset string, crf int) (int, error) {
+	if crf == 0 && preset == PresetShortNaturalHQ2FullPlus {
+		return NaturalHQ2FullPlusVideoCRF, nil
+	}
 	if crf == 0 && (preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth) {
 		return NaturalHQ3VideoCRF, nil
 	}
@@ -277,6 +280,9 @@ func normalizeVideoPreset(preset string) (string, error) {
 }
 
 func normalizeVideoPresetForPreset(editPreset, videoPreset string) (string, error) {
+	if strings.TrimSpace(videoPreset) == "" && editPreset == PresetShortNaturalHQ2FullPlus {
+		return NaturalHQ2FullPlusVideoPreset, nil
+	}
 	if strings.TrimSpace(videoPreset) == "" && (editPreset == PresetShortNaturalHQ3 || editPreset == PresetShortNaturalHQ3Smooth) {
 		return NaturalHQ3VideoPreset, nil
 	}

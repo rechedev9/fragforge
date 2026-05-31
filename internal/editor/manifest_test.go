@@ -454,6 +454,103 @@ func TestBuildManifestNaturalHQ2EnablesQualityFeatures(t *testing.T) {
 	}
 }
 
+func TestBuildManifestNaturalHQ2FullKeepsFullFrameWithVibrance(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetShortNaturalHQ2Full
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.Preset != PresetShortNaturalHQ2Full || manifest.EffectsPreset != EffectsPresetNone {
+		t.Fatalf("preset metadata = %#v", manifest)
+	}
+	if !manifest.HQFilters || !manifest.AudioNormalize || !manifest.QualityChecks || !manifest.CoverSheets {
+		t.Fatalf("hq2-full feature flags missing: %#v", manifest)
+	}
+	first := manifest.Shorts[0]
+	if len(first.Effects) != 0 {
+		t.Fatalf("natural-hq2-full effects = %#v, want none", first.Effects)
+	}
+	filter := argAfter(first.FFmpegCommand, "-vf")
+	for _, want := range []string{
+		"scale=w=1080:h=1920:force_original_aspect_ratio=decrease:eval=frame:flags=lanczos",
+		"eq=saturation=1.120",
+		"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
+		"setsar=1",
+		"fps=60",
+		"format=yuv420p",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("hq2-full filter missing %q:\n%s", want, filter)
+		}
+	}
+	if strings.Contains(filter, "crop=1080:1920") || strings.Contains(filter, "boxblur") {
+		t.Fatalf("hq2-full filter should preserve the full frame without blur/crop:\n%s", filter)
+	}
+	qualityFilter := argAfter(first.QualityCommand, "-vf")
+	if strings.Contains(qualityFilter, "cropdetect") {
+		t.Fatalf("hq2-full quality check should not flag expected letterbox bars:\n%s", qualityFilter)
+	}
+}
+
+func TestBuildManifestNaturalHQ2FullPlusAppliesEnhancedMastering(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetShortNaturalHQ2FullPlus
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.Preset != PresetShortNaturalHQ2FullPlus || manifest.EffectsPreset != EffectsPresetNone {
+		t.Fatalf("preset metadata = %#v", manifest)
+	}
+	if manifest.VideoCRF != NaturalHQ2FullPlusVideoCRF || manifest.VideoPreset != NaturalHQ2FullPlusVideoPreset {
+		t.Fatalf("video encoding = crf %d preset %q", manifest.VideoCRF, manifest.VideoPreset)
+	}
+	first := manifest.Shorts[0]
+	if len(first.Effects) != 0 {
+		t.Fatalf("natural-hq2-full-plus effects = %#v, want none", first.Effects)
+	}
+	filter := argAfter(first.FFmpegCommand, "-vf")
+	for _, want := range []string{
+		"scale=w=1080:h=1920:force_original_aspect_ratio=decrease:eval=frame:flags=lanczos+accurate_rnd",
+		"eq=contrast=1.020:saturation=1.160:gamma=1.000",
+		"unsharp=5:5:0.35:3:3:0.15",
+		"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
+		"format=yuv420p",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("hq2-full-plus filter missing %q:\n%s", want, filter)
+		}
+	}
+	if strings.Contains(filter, "crop=1080:1920") || strings.Contains(filter, "boxblur") {
+		t.Fatalf("hq2-full-plus filter should preserve the full frame without blur/crop:\n%s", filter)
+	}
+	if got := argAfter(first.FFmpegCommand, "-preset"); got != NaturalHQ2FullPlusVideoPreset {
+		t.Fatalf("-preset arg = %q, want %q", got, NaturalHQ2FullPlusVideoPreset)
+	}
+	if got := argAfter(first.FFmpegCommand, "-crf"); got != "15" {
+		t.Fatalf("-crf arg = %q, want 15", got)
+	}
+	for _, key := range []string{"-color_primaries", "-color_trc", "-colorspace"} {
+		if got := argAfter(first.FFmpegCommand, key); got != "bt709" {
+			t.Fatalf("%s arg = %q, want bt709", key, got)
+		}
+	}
+	if got := argAfter(first.FFmpegCommand, "-x264-params"); got != "colorprim=bt709:transfer=bt709:colormatrix=bt709" {
+		t.Fatalf("-x264-params arg = %q, want bt709 params", got)
+	}
+	qualityFilter := argAfter(first.QualityCommand, "-vf")
+	if strings.Contains(qualityFilter, "cropdetect") {
+		t.Fatalf("hq2-full-plus quality check should not flag expected letterbox bars:\n%s", qualityFilter)
+	}
+}
+
 func TestBuildManifestSmokeLineupsMatchesCatalogAndAddsOverlay(t *testing.T) {
 	dir := t.TempDir()
 	result := testSmokeRecordingResult(dir)

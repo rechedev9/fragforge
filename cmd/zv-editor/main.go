@@ -24,7 +24,7 @@ func run() error {
 		killPlanPath        = flag.String("killplan", "", "optional path to kill plan JSON; auto-discovered from pipeline-result.json when omitted")
 		outDir              = flag.String("out", "", "shorts output directory")
 		publishDir          = flag.String("publish-dir", "", "publish pack output directory; defaults to <out>/publish")
-		preset              = flag.String("preset", editor.PresetShortClean, "editor preset: short-clean, short-premium-player, viral-square, natural-hq, natural-hq2, natural-hq3, natural-hq3-smooth, or smoke-lineups")
+		preset              = flag.String("preset", editor.PresetShortClean, "editor preset: short-clean, short-premium-player, viral-square, natural-hq, natural-hq2, natural-hq2-full, natural-hq2-full-plus, natural-hq3, natural-hq3-smooth, or smoke-lineups")
 		effectsPath         = flag.String("effects", "", "optional Lua effects script; overrides --effects-preset")
 		effectsPreset       = flag.String("effects-preset", "", "effects preset: builtin-clean, awpgod, smoke-lineups, or none; defaults by preset")
 		lineupCatalogPath   = flag.String("lineup-catalog", "", "optional directory with manual smoke lineup catalog JSON files")

@@ -18,6 +18,13 @@ import (
 // labels into a drawbox/drawtext colour argument.
 var effectColorPattern = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9]*|#[0-9A-Fa-f]{6}|0x[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)(?:@[0-9]+(?:\.[0-9]+)?)?$`)
 
+const (
+	naturalHQ2FullSaturation     = 1.12
+	naturalHQ2FullPlusContrast   = 1.02
+	naturalHQ2FullPlusSaturation = 1.16
+	naturalHQ2FullPlusGamma      = 1.00
+)
+
 // validateEffectColor rejects colour values that are not a plain FFmpeg colour
 // spec. It validates the value exactly as given (callers trim before storing),
 // so the validated form is the form that reaches the filtergraph. field is used
@@ -46,6 +53,9 @@ func validateEffectPosition(field, value string) error {
 }
 
 func VideoFilter(short ShortEdit) string {
+	if short.Preset == PresetShortNaturalHQ2Full || short.Preset == PresetShortNaturalHQ2FullPlus {
+		return FullFrameVideoFilter(short)
+	}
 	scaleHeight := "1920"
 	if expr := zoomHeightExpression(short.Effects); expr != "" {
 		scaleHeight = "'" + expr + "'"
@@ -60,6 +70,37 @@ func VideoFilter(short ShortEdit) string {
 	filters = appendEffectFilters(filters, short.Effects)
 	filters = append(filters, "format=yuv420p")
 	return strings.Join(filters, ",")
+}
+
+func FullFrameVideoFilter(short ShortEdit) string {
+	filters := []string{
+		fullFrameScaleFilter(short),
+		fullFrameGradeFilter(short),
+	}
+	if short.Preset == PresetShortNaturalHQ2FullPlus {
+		filters = append(filters, "unsharp=5:5:0.35:3:3:0.15")
+	}
+	filters = append(filters,
+		"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
+		"setsar=1",
+		"fps=60",
+	)
+	filters = appendTemporalSmoothingFilter(filters, short)
+	filters = appendEffectFilters(filters, short.Effects)
+	filters = append(filters, "format=yuv420p")
+	return strings.Join(filters, ",")
+}
+
+func fullFrameGradeFilter(short ShortEdit) string {
+	if short.Preset == PresetShortNaturalHQ2FullPlus {
+		return fmt.Sprintf(
+			"eq=contrast=%.3f:saturation=%.3f:gamma=%.3f",
+			naturalHQ2FullPlusContrast,
+			naturalHQ2FullPlusSaturation,
+			naturalHQ2FullPlusGamma,
+		)
+	}
+	return fmt.Sprintf("eq=saturation=%.3f", naturalHQ2FullSaturation)
 }
 
 func ViralSquareFilter(short ShortEdit) string {
@@ -378,8 +419,16 @@ func scaleFilter(height string, short ShortEdit) string {
 	return filter
 }
 
+func fullFrameScaleFilter(short ShortEdit) string {
+	filter := "scale=w=1080:h=1920:force_original_aspect_ratio=decrease:eval=frame"
+	if short.HQFilters {
+		filter += ":flags=" + hqScaleFlags(short)
+	}
+	return filter
+}
+
 func hqScaleFlags(short ShortEdit) string {
-	if short.Preset == PresetShortNaturalHQ3 || short.Preset == PresetShortNaturalHQ3Smooth {
+	if short.Preset == PresetShortNaturalHQ2FullPlus || short.Preset == PresetShortNaturalHQ3 || short.Preset == PresetShortNaturalHQ3Smooth {
 		return "lanczos+accurate_rnd"
 	}
 	return "lanczos"

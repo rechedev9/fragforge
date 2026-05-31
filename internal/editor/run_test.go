@@ -224,6 +224,42 @@ func TestRunNaturalHQ3AppliesStoredPresetDefaults(t *testing.T) {
 	}
 }
 
+func TestRunNaturalHQ2FullPlusAppliesStoredPresetDefaults(t *testing.T) {
+	dir := t.TempDir()
+	recordingResultPath := writeRecordingResultFixture(t, dir)
+	outDir := filepath.Join(dir, "shorts")
+
+	result, err := Run(context.Background(), Config{
+		RecordingResultPath: recordingResultPath,
+		OutputDir:           outDir,
+		Preset:              PresetShortNaturalHQ2FullPlus,
+		FFmpegPath:          filepath.Join(dir, "missing-ffmpeg"),
+		DryRun:              true,
+	})
+	if err != nil {
+		t.Fatalf("Run dry-run error = %v", err)
+	}
+	if result.Preset != PresetShortNaturalHQ2FullPlus || result.EffectsPreset != EffectsPresetNone {
+		t.Fatalf("result preset metadata = %#v", result)
+	}
+	if result.VideoCRF != NaturalHQ2FullPlusVideoCRF || result.VideoPreset != NaturalHQ2FullPlusVideoPreset {
+		t.Fatalf("result video encoding = crf %d preset %q", result.VideoCRF, result.VideoPreset)
+	}
+	if !result.HQFilters || !result.AudioNormalize || !result.QualityChecks || !result.CoverSheets {
+		t.Fatalf("result hq2 full plus flags missing: %#v", result)
+	}
+	if len(result.Shorts) == 0 || len(result.Shorts[0].Effects) != 0 {
+		t.Fatalf("natural-hq2-full-plus short effects = %#v", result.Shorts)
+	}
+	filter := argAfter(result.Shorts[0].FFmpegCommand, "-vf")
+	if !strings.Contains(filter, "eq=contrast=1.020:saturation=1.160:gamma=1.000") || !strings.Contains(filter, "unsharp=5:5:0.35:3:3:0.15") {
+		t.Fatalf("hq2 full plus filter missing enhanced mastering:\n%s", filter)
+	}
+	if got := argAfter(result.Shorts[0].FFmpegCommand, "-x264-params"); got != "colorprim=bt709:transfer=bt709:colormatrix=bt709" {
+		t.Fatalf("-x264-params arg = %q, want bt709 params", got)
+	}
+}
+
 func TestRunRejectsInvalidVideoEncodingOptions(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)

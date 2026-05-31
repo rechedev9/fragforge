@@ -28,6 +28,16 @@ const (
 	// no-effects gameplay style.
 	PresetShortNaturalHQ2 = "natural-hq2"
 
+	// PresetShortNaturalHQ2Full keeps the complete captured gameplay frame and
+	// full in-game UI inside a vertical Shorts canvas, with a mild FFmpeg-only
+	// saturation lift.
+	PresetShortNaturalHQ2Full = "natural-hq2-full"
+
+	// PresetShortNaturalHQ2FullPlus is an experimental higher-quality
+	// full-frame variant with stronger FFmpeg-only color, sharpening, and
+	// mastering settings for A/B tests.
+	PresetShortNaturalHQ2FullPlus = "natural-hq2-full-plus"
+
 	// PresetShortNaturalHQ3 is an experimental HQ2 variant with higher encode
 	// settings and stricter playback/color metadata.
 	PresetShortNaturalHQ3 = "natural-hq3"
@@ -80,6 +90,13 @@ const (
 
 	// NaturalHQ3VideoPreset is intentionally slower for cleaner local masters.
 	NaturalHQ3VideoPreset = "slower"
+
+	// NaturalHQ2FullPlusVideoCRF raises full-frame comparison renders one step
+	// beyond natural-hq2-full.
+	NaturalHQ2FullPlusVideoCRF = 15
+
+	// NaturalHQ2FullPlusVideoPreset spends more encode time on cleaner masters.
+	NaturalHQ2FullPlusVideoPreset = "slower"
 )
 
 type Config struct {

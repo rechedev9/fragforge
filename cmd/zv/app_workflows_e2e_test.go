@@ -335,6 +335,10 @@ func TestZVBinaryCanonicalWorkflowFlagsAreScopedEndToEnd(t *testing.T) {
 			args: []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts", "--killplan", "plan.json", "--publish-dir", "publish", "--preset", "smoke-lineups", "--effects", "effects.lua", "--effects-preset", "none", "--lineup-catalog", "lineups", "--segments", "seg-001", "--limit", "2", "--player-image", "player.png", "--player-key-color", "#000000", "--video-crf", "18", "--video-preset", "slow", "--ffmpeg", "ffmpeg.exe", "--ffprobe", "ffprobe.exe", "--hq-filters", "--audio-normalize", "--quality-checks", "--cover-sheets", "--temporal-smoothing", "--covers=false", "--no-covers", "--skip-existing", "--open-gallery", "--dry-run"},
 		},
 		{
+			name: "shorts render natural hq2 full plus",
+			args: []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts-natural-hq2-full-plus", "--preset", "natural-hq2-full-plus", "--dry-run"},
+		},
+		{
 			name: "analysis tactical data optional sample",
 			args: []string{"analysis", "tactical-data", "--demo", "inferno.dem", "--out", "tactical.json", "--start", "1000", "--end", "2000", "--sample", "8"},
 		},

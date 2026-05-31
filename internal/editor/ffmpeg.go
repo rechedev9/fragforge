@@ -135,7 +135,7 @@ func BuildPremiumPlayerFFmpegCommand(ffmpegPath string, short ShortEdit) []strin
 }
 
 func appendVideoEncodeArgs(command []string, short ShortEdit) []string {
-	if short.Preset != PresetShortNaturalHQ3 && short.Preset != PresetShortNaturalHQ3Smooth {
+	if short.Preset != PresetShortNaturalHQ2FullPlus && short.Preset != PresetShortNaturalHQ3 && short.Preset != PresetShortNaturalHQ3Smooth {
 		return command
 	}
 	return append(command,
@@ -203,13 +203,17 @@ func BuildQualityCheckFFmpegCommand(ffmpegPath string, short ShortEdit) []string
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
+	filters := []string{"blackdetect=d=0.40:pix_th=0.10", "freezedetect=n=-60dB:d=1"}
+	if short.Preset != PresetShortNaturalHQ2Full && short.Preset != PresetShortNaturalHQ2FullPlus {
+		filters = append(filters, "cropdetect=24:16:0")
+	}
 	return []string{
 		ffmpegPath,
 		"-hide_banner",
 		"-nostats",
 		"-v", "info",
 		"-i", short.Output,
-		"-vf", "blackdetect=d=0.40:pix_th=0.10,freezedetect=n=-60dB:d=1,cropdetect=24:16:0",
+		"-vf", strings.Join(filters, ","),
 		"-an",
 		"-f", "null",
 		"-",
