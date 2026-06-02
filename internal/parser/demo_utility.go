@@ -258,7 +258,7 @@ func runUtility(p demoinfocs.Parser, target string, r rules.Rules, m PlanMeta) (
 		c.RecordRoundEnd(RoundEnd{Round: gs.TotalRoundsPlayed() + 1, Tick: tick})
 	})
 
-	if err := p.ParseToEnd(); err != nil {
+	if err := parseToEnd(p); err != nil {
 		return killplan.Plan{}, fmt.Errorf("parsing demo: %w", err)
 	}
 

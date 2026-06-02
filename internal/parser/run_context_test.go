@@ -3,6 +3,7 @@ package parser
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,6 +28,7 @@ type blockingParser struct {
 	cancelOnce   sync.Once
 	cancelCalled atomic.Bool
 	block        bool
+	parseErr     error
 }
 
 func (p *blockingParser) RegisterEventHandler(any) dp.HandlerIdentifier      { return nil }
@@ -41,7 +43,7 @@ func (p *blockingParser) Cancel() {
 
 func (p *blockingParser) ParseToEnd() error {
 	if !p.block {
-		return nil
+		return p.parseErr
 	}
 	close(p.entered)
 	<-p.release
@@ -89,5 +91,18 @@ func TestRunWithContextReturnsUnderlyingResultWhenNotCancelled(t *testing.T) {
 	}
 	if p.cancelCalled.Load() {
 		t.Error("parser Cancel() was called on a run that was never cancelled")
+	}
+}
+
+func TestRunWithOptionsAllowsUnexpectedEndOfDemo(t *testing.T) {
+	p := &blockingParser{parseErr: fmt.Errorf("parse frame: %w", demoinfocs.ErrUnexpectedEndOfDemo)}
+
+	_, err := RunWithOptions(p, testTargetSteamID, rules.Default(), PlanMeta{}, RunOptions{})
+
+	if !errors.Is(err, ErrTargetNotFound) {
+		t.Fatalf("RunWithOptions err = %v, want target-not-found after recovering from unexpected EOF", err)
+	}
+	if errors.Is(err, demoinfocs.ErrUnexpectedEndOfDemo) {
+		t.Fatalf("RunWithOptions err = %v, want unexpected EOF treated as recoverable", err)
 	}
 }

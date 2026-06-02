@@ -193,7 +193,7 @@ func launchAndWait(ctx context.Context, hlaeExe, cs2Exe string, plan recording.R
 	if err != nil {
 		return err
 	}
-	cs2CmdLine := fmt.Sprintf(`-insecure -condebug -w %d -h %d +cl_demo_predict 0 +playdemo "%s" +mirv_script_load "%s"`, plan.Stream.Width, plan.Stream.Height, plan.DemoPath, scriptPath)
+	cs2CmdLine := cs2LaunchCommandLine(plan, scriptPath)
 	// #nosec G204 -- HLAE/CS2 paths are explicit local tool paths and args are not shell-interpolated.
 	cmd := exec.CommandContext(ctx, hlaeExe,
 		"-customLoader",
@@ -213,6 +213,10 @@ func launchAndWait(ctx context.Context, hlaeExe, cs2Exe string, plan recording.R
 		return nil
 	}
 	return waitForWindowsProcessRunAndExit(ctx, "cs2.exe")
+}
+
+func cs2LaunchCommandLine(plan recording.RecordingPlan, scriptPath string) string {
+	return fmt.Sprintf(`-insecure -condebug -windowed -w %d -h %d +cl_demo_predict 0 +playdemo "%s" +mirv_script_load "%s"`, plan.Stream.Width, plan.Stream.Height, plan.DemoPath, scriptPath)
 }
 
 func ensureHLAEFFmpegConfig(hlaeExe string) error {

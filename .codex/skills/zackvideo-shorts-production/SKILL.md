@@ -19,6 +19,9 @@ Use ZackVideo as the deterministic source of truth: parse demo segments, record 
 - Do not clean, delete, or overwrite existing run artifacts unless the user explicitly asks.
 - Use `C:\HLAE-2.190.1\HLAE.exe` for local capture. Do not use `C:\HLAE\HLAE.exe`.
 - Before any non-dry-run capture, verify `Test-Path C:\HLAE-2.190.1\HLAE.exe` and stop if any command references `C:\HLAE\HLAE.exe`.
+- CS2 must launch through HLAE in windowed mode for recording runs. The CS2
+  command line must include `-windowed`; do not record demos in fullscreen or
+  borderless fullscreen.
 - Use `--dry-run` before changing recording settings or when only inspecting planned commands/manifests.
 - Do not run HLAE/CS2 or long renders unless the user explicitly wants a capture/render run.
 
@@ -71,6 +74,8 @@ Generate the HLAE script first. Remove `--dry-run` only when the user wants an a
 ```
 
 For realistic kill Shorts, record with the full gameplay HUD visible and high source FPS so the editor preserves radar, killfeed, score, crosshair, health, ammo, and round context while delivering smoother 60fps output. Use `--hud gameplay` unless the user explicitly asks for a cleaner/deathnotice-only style. For a dry run, keep the same command shape but use `--dry-run` and omit `--hlae`/`--cs2`.
+
+The recorder adds `-windowed` to the CS2 command line passed through HLAE. If a manual HLAE launch is ever needed, include `-windowed` with the existing `-w 1920 -h 1080` flags.
 
 If CS2 crashes near the end, inspect `<run>\recording-...\segments` and `recording-result.json` before rerunning. Compare segment MP4 count against the plan, verify every listed segment with `ffprobe`, and confirm `recording-result.json` references those files. Continue from existing artifacts when the check passes; rerun only missing or corrupt segments when it fails.
 
@@ -173,6 +178,8 @@ Do not add `--temporal-smoothing` for realistic gameplay exports unless explicit
 Use `natural-hq2-full-plus` only for explicit A/B tests. It keeps the same full-UI layout but adds stronger digital-vibrance color, light sharpening, CRF 15, x264 preset `slower`, and BT.709 mastering metadata.
 
 For natural kill clips, use the same render workflow with `--preset natural-hq2-full`, the gameplay-HUD recording result, and an output such as `<run>\shorts-natural-hq2-full`. For utility clips, use `--killplan <run>\plan-utility.json --preset smoke-lineups --lineup-catalog data\lineups`. For fast iteration, add `--segments seg-001,seg-004 --limit 2 --dry-run`. Use `--skip-existing` only when burned-in video content will not change.
+
+For kill/highlight deliverables, treat the per-segment rendered Shorts as intermediate publish inputs. After the MP4s pass validation, concatenate all selected kills for each player/game into one long vertical upload-ready Short by default. Deliver individual per-kill Shorts only when the user explicitly asks for separate Shorts.
 
 ## Long Compilations
 

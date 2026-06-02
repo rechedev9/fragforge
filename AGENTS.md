@@ -123,6 +123,11 @@ Media output and cleanup:
   no Lua/scripted effects, complete gameplay frame preserved in the vertical
   canvas, high-quality encode, and a subtle saturation lift to approximate the
   digital-vibrance look many CS2 players expect.
+- For kill/highlight deliverables, default to one long vertical Short per
+  player/game containing all selected kills. Per-kill Shorts may be rendered as
+  intermediate publish inputs, but the upload-ready default should be the
+  concatenated all-kills long Short unless the user explicitly asks for
+  individual per-kill Shorts.
 - Use `natural-hq2-full-plus` only for explicit A/B tests: it keeps the same
   full-UI layout but adds stronger color, light sharpening, CRF 15, slower
   x264 encoding, and BT.709 metadata.
@@ -147,6 +152,9 @@ Local capture path:
 - Use `C:\HLAE-2.190.1\HLAE.exe` for HLAE capture on this machine.
 - Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for ZackVideo
   capture runs.
+- Always launch CS2 through HLAE in windowed mode for recording runs. The CS2
+  command line must include `-windowed`; do not record demos in fullscreen or
+  borderless fullscreen.
 
 Verification:
 

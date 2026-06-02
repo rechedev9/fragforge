@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -75,7 +76,7 @@ func run(demoPath, contains string) error {
 		}
 	})
 
-	if err := p.ParseToEnd(); err != nil {
+	if err := p.ParseToEnd(); err != nil && !errors.Is(err, demoinfocs.ErrUnexpectedEndOfDemo) {
 		return fmt.Errorf("parse demo: %w", err)
 	}
 
