@@ -3,7 +3,21 @@ package main
 func workflowDocs() []workflowDoc {
 	return []workflowDoc{
 		{
-			Path:              "README.md",
+			Path: "README.md",
+			Required: []string{
+				"./bin/zv demo parse",
+				"./bin/zv demo players",
+				"./bin/zv record",
+				"./bin/zv compose final",
+				"./bin/zv music analyze",
+				"./bin/zv shorts render",
+				"./bin/zv presets",
+				"./bin/zv check",
+				"./bin/zv serve",
+			},
+		},
+		{
+			Path:              "docs/workflows/catalog.md",
 			RequiredSkills:    true,
 			RequiredWorkflows: true,
 			Required: []string{

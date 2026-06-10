@@ -1002,14 +1002,14 @@ func TestZVBinaryProjectCheckRejectsWorkflowDocRunDocumentedOnlyAsHelpEndToEnd(t
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	readmePath := filepath.Join(tempDir, "README.md")
-	readme := readFileString(t, readmePath)
+	catalogPath := filepath.Join(tempDir, "docs", "workflows", "catalog.md")
+	catalog := readFileString(t, catalogPath)
 	old := "./bin/zv workflows run demo-parse -- --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json"
-	if !strings.Contains(readme, old) {
-		t.Fatalf("README fixture does not contain expected workflow run command")
+	if !strings.Contains(catalog, old) {
+		t.Fatalf("catalog fixture does not contain expected workflow run command")
 	}
-	readme = strings.ReplaceAll(readme, old, "./bin/zv workflows run demo-parse -- --help")
-	writeFile(t, readmePath, readme)
+	catalog = strings.ReplaceAll(catalog, old, "./bin/zv workflows run demo-parse -- --help")
+	writeFile(t, catalogPath, catalog)
 
 	stdout, stderr, code := runZVBinaryFailureSplit(t, exe, tempDir, "check", "--format", "json")
 
@@ -1023,7 +1023,7 @@ func TestZVBinaryProjectCheckRejectsWorkflowDocRunDocumentedOnlyAsHelpEndToEnd(t
 	if result.OK {
 		t.Fatalf("result.OK = true, want false")
 	}
-	want := "README.md: missing executable workflow run demo-parse"
+	want := "docs/workflows/catalog.md: missing executable workflow run demo-parse"
 	if !hasIssueContaining(result.Issues, want) {
 		t.Fatalf("issues = %#v, want %q", result.Issues, want)
 	}
@@ -1044,14 +1044,14 @@ func TestZVBinaryProjectCheckRejectsWorkflowDirectCommandDocumentedOnlyAsHelpEnd
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	readmePath := filepath.Join(tempDir, "README.md")
-	readme := readFileString(t, readmePath)
+	catalogPath := filepath.Join(tempDir, "docs", "workflows", "catalog.md")
+	catalog := readFileString(t, catalogPath)
 	old := "./bin/zv demo parse --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json"
-	if !strings.Contains(readme, old) {
-		t.Fatalf("README fixture does not contain expected direct workflow command")
+	if !strings.Contains(catalog, old) {
+		t.Fatalf("catalog fixture does not contain expected direct workflow command")
 	}
-	readme = strings.ReplaceAll(readme, old, "./bin/zv demo parse --help")
-	writeFile(t, readmePath, readme)
+	catalog = strings.ReplaceAll(catalog, old, "./bin/zv demo parse --help")
+	writeFile(t, catalogPath, catalog)
 
 	stdout, stderr, code := runZVBinaryFailureSplit(t, exe, tempDir, "check", "--format", "json")
 
@@ -1065,7 +1065,7 @@ func TestZVBinaryProjectCheckRejectsWorkflowDirectCommandDocumentedOnlyAsHelpEnd
 	if result.OK {
 		t.Fatalf("result.OK = true, want false")
 	}
-	want := "README.md: missing executable workflow command demo-parse"
+	want := "docs/workflows/catalog.md: missing executable workflow command demo-parse"
 	if !hasIssueContaining(result.Issues, want) {
 		t.Fatalf("issues = %#v, want %q", result.Issues, want)
 	}
@@ -1086,14 +1086,14 @@ func TestZVBinaryProjectCheckRejectsWorkflowDirectCommandMissingRequiredFlagEndT
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	readmePath := filepath.Join(tempDir, "README.md")
-	readme := readFileString(t, readmePath)
+	catalogPath := filepath.Join(tempDir, "docs", "workflows", "catalog.md")
+	catalog := readFileString(t, catalogPath)
 	old := "./bin/zv demo parse --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json"
-	if !strings.Contains(readme, old) {
-		t.Fatalf("README fixture does not contain expected direct workflow command")
+	if !strings.Contains(catalog, old) {
+		t.Fatalf("catalog fixture does not contain expected direct workflow command")
 	}
-	readme = strings.ReplaceAll(readme, old, "./bin/zv demo parse --demo testdata/foo.dem --out plan.json")
-	writeFile(t, readmePath, readme)
+	catalog = strings.ReplaceAll(catalog, old, "./bin/zv demo parse --demo testdata/foo.dem --out plan.json")
+	writeFile(t, catalogPath, catalog)
 
 	stdout, stderr, code := runZVBinaryFailureSplit(t, exe, tempDir, "check", "--format", "json")
 
@@ -1108,8 +1108,8 @@ func TestZVBinaryProjectCheckRejectsWorkflowDirectCommandMissingRequiredFlagEndT
 		t.Fatalf("result.OK = true, want false")
 	}
 	for _, want := range []string{
-		`README.md: missing required flag --steamid for "demo parse"`,
-		"README.md: missing executable workflow command demo-parse",
+		`docs/workflows/catalog.md: missing required flag --steamid for "demo parse"`,
+		"docs/workflows/catalog.md: missing executable workflow command demo-parse",
 	} {
 		if !hasIssueContaining(result.Issues, want) {
 			t.Fatalf("issues = %#v, want %q", result.Issues, want)
@@ -1132,10 +1132,10 @@ func TestZVBinaryProjectCheckRejectsWorkflowDocRunCommandsOutOfOrderEndToEnd(t *
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	readmePath := filepath.Join(tempDir, "README.md")
-	b, err := os.ReadFile(readmePath)
+	catalogPath := filepath.Join(tempDir, "docs", "workflows", "catalog.md")
+	b, err := os.ReadFile(catalogPath)
 	if err != nil {
-		t.Fatalf("read README fixture: %v", err)
+		t.Fatalf("read catalog fixture: %v", err)
 	}
 	old := strings.Join([]string{
 		"./bin/zv workflows run demo-parse -- --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json",
@@ -1147,9 +1147,9 @@ func TestZVBinaryProjectCheckRejectsWorkflowDocRunCommandsOutOfOrderEndToEnd(t *
 	}, "\n")
 	body := string(b)
 	if !strings.Contains(body, old) {
-		t.Fatalf("README fixture does not contain expected workflow run order")
+		t.Fatalf("catalog fixture does not contain expected workflow run order")
 	}
-	writeFile(t, readmePath, strings.Replace(body, old, replacement, 1))
+	writeFile(t, catalogPath, strings.Replace(body, old, replacement, 1))
 
 	stdout, stderr, code := runZVBinaryFailureSplit(t, exe, tempDir, "check", "--format", "json")
 
@@ -1163,7 +1163,7 @@ func TestZVBinaryProjectCheckRejectsWorkflowDocRunCommandsOutOfOrderEndToEnd(t *
 	if result.OK {
 		t.Fatalf("result.OK = true, want false")
 	}
-	want := "README.md: workflow run commands must appear in catalog order: demo-parse, demo-players, utility-audit"
+	want := "docs/workflows/catalog.md: workflow run commands must appear in catalog order: demo-parse, demo-players, utility-audit"
 	if !hasIssueContaining(result.Issues, want) {
 		t.Fatalf("issues = %#v, want %q", result.Issues, want)
 	}
@@ -1184,10 +1184,10 @@ func TestZVBinaryProjectCheckRejectsWorkflowDocShowCommandsOutOfOrderEndToEnd(t 
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	readmePath := filepath.Join(tempDir, "README.md")
-	b, err := os.ReadFile(readmePath)
+	catalogPath := filepath.Join(tempDir, "docs", "workflows", "catalog.md")
+	b, err := os.ReadFile(catalogPath)
 	if err != nil {
-		t.Fatalf("read README fixture: %v", err)
+		t.Fatalf("read catalog fixture: %v", err)
 	}
 	old := strings.Join([]string{
 		"./bin/zv workflows show demo-parse",
@@ -1203,9 +1203,9 @@ func TestZVBinaryProjectCheckRejectsWorkflowDocShowCommandsOutOfOrderEndToEnd(t 
 	}, "\n")
 	body := string(b)
 	if !strings.Contains(body, old) {
-		t.Fatalf("README fixture does not contain expected workflow show order")
+		t.Fatalf("catalog fixture does not contain expected workflow show order")
 	}
-	writeFile(t, readmePath, strings.Replace(body, old, replacement, 1))
+	writeFile(t, catalogPath, strings.Replace(body, old, replacement, 1))
 
 	stdout, stderr, code := runZVBinaryFailureSplit(t, exe, tempDir, "check", "--format", "json")
 
@@ -1219,7 +1219,7 @@ func TestZVBinaryProjectCheckRejectsWorkflowDocShowCommandsOutOfOrderEndToEnd(t 
 	if result.OK {
 		t.Fatalf("result.OK = true, want false")
 	}
-	want := "README.md: workflow show commands must appear in catalog order: demo-parse, demo-players, utility-audit"
+	want := "docs/workflows/catalog.md: workflow show commands must appear in catalog order: demo-parse, demo-players, utility-audit"
 	if !hasIssueContaining(result.Issues, want) {
 		t.Fatalf("issues = %#v, want %q", result.Issues, want)
 	}
@@ -1240,7 +1240,7 @@ func TestZVBinaryProjectCheckRejectsDuplicateWorkflowDocShowCommandsEndToEnd(t *
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	appendFile(t, filepath.Join(tempDir, "README.md"), strings.Join([]string{
+	appendFile(t, filepath.Join(tempDir, "docs", "workflows", "catalog.md"), strings.Join([]string{
 		"",
 		"```bash",
 		"./bin/zv workflows show demo-parse",
@@ -1262,8 +1262,8 @@ func TestZVBinaryProjectCheckRejectsDuplicateWorkflowDocShowCommandsEndToEnd(t *
 		t.Fatalf("result.OK = true, want false")
 	}
 	for _, want := range []string{
-		"README.md: duplicate workflow show demo-parse --format text",
-		"README.md: duplicate workflow show demo-parse --format json",
+		"docs/workflows/catalog.md: duplicate workflow show demo-parse --format text",
+		"docs/workflows/catalog.md: duplicate workflow show demo-parse --format json",
 	} {
 		if !hasIssueContaining(result.Issues, want) {
 			t.Fatalf("issues = %#v, want %q", result.Issues, want)
@@ -1286,7 +1286,7 @@ func TestZVBinaryProjectCheckRejectsDuplicateWorkflowDocListAndCheckCommandsEndT
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	appendFile(t, filepath.Join(tempDir, "README.md"), strings.Join([]string{
+	appendFile(t, filepath.Join(tempDir, "docs", "workflows", "catalog.md"), strings.Join([]string{
 		"",
 		"```bash",
 		"./bin/zv workflows list",
@@ -1310,10 +1310,10 @@ func TestZVBinaryProjectCheckRejectsDuplicateWorkflowDocListAndCheckCommandsEndT
 		t.Fatalf("result.OK = true, want false")
 	}
 	for _, want := range []string{
-		"README.md: duplicate workflows list --format text",
-		"README.md: duplicate workflows list --format json",
-		"README.md: duplicate workflows check --format text",
-		"README.md: duplicate workflows check --format json",
+		"docs/workflows/catalog.md: duplicate workflows list --format text",
+		"docs/workflows/catalog.md: duplicate workflows list --format json",
+		"docs/workflows/catalog.md: duplicate workflows check --format text",
+		"docs/workflows/catalog.md: duplicate workflows check --format json",
 	} {
 		if !hasIssueContaining(result.Issues, want) {
 			t.Fatalf("issues = %#v, want %q", result.Issues, want)
@@ -1336,7 +1336,7 @@ func TestZVBinaryProjectCheckRejectsDuplicateProjectCheckDocCommandsEndToEnd(t *
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	appendFile(t, filepath.Join(tempDir, "README.md"), strings.Join([]string{
+	appendFile(t, filepath.Join(tempDir, "docs", "workflows", "catalog.md"), strings.Join([]string{
 		"",
 		"```bash",
 		"./bin/zv check",
@@ -1358,8 +1358,8 @@ func TestZVBinaryProjectCheckRejectsDuplicateProjectCheckDocCommandsEndToEnd(t *
 		t.Fatalf("result.OK = true, want false")
 	}
 	for _, want := range []string{
-		"README.md: duplicate check --format text",
-		"README.md: duplicate check --format json",
+		"docs/workflows/catalog.md: duplicate check --format text",
+		"docs/workflows/catalog.md: duplicate check --format json",
 	} {
 		if !hasIssueContaining(result.Issues, want) {
 			t.Fatalf("issues = %#v, want %q", result.Issues, want)
@@ -1382,7 +1382,7 @@ func TestZVBinaryProjectCheckRejectsDuplicateSkillDocShowCommandsEndToEnd(t *tes
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	appendFile(t, filepath.Join(tempDir, "README.md"), strings.Join([]string{
+	appendFile(t, filepath.Join(tempDir, "docs", "workflows", "catalog.md"), strings.Join([]string{
 		"",
 		"```bash",
 		"./bin/zv skills show alpha",
@@ -1404,8 +1404,8 @@ func TestZVBinaryProjectCheckRejectsDuplicateSkillDocShowCommandsEndToEnd(t *tes
 		t.Fatalf("result.OK = true, want false")
 	}
 	for _, want := range []string{
-		"README.md: duplicate skill show alpha --format text",
-		"README.md: duplicate skill show alpha --format json",
+		"docs/workflows/catalog.md: duplicate skill show alpha --format text",
+		"docs/workflows/catalog.md: duplicate skill show alpha --format json",
 	} {
 		if !hasIssueContaining(result.Issues, want) {
 			t.Fatalf("issues = %#v, want %q", result.Issues, want)
@@ -1428,7 +1428,7 @@ func TestZVBinaryProjectCheckRejectsDuplicateSkillDocListAndCheckCommandsEndToEn
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	appendFile(t, filepath.Join(tempDir, "README.md"), strings.Join([]string{
+	appendFile(t, filepath.Join(tempDir, "docs", "workflows", "catalog.md"), strings.Join([]string{
 		"",
 		"```bash",
 		"./bin/zv skills list",
@@ -1453,10 +1453,10 @@ func TestZVBinaryProjectCheckRejectsDuplicateSkillDocListAndCheckCommandsEndToEn
 		t.Fatalf("result.OK = true, want false")
 	}
 	for _, want := range []string{
-		"README.md: duplicate skills list --format text",
-		"README.md: duplicate skills list --format json",
-		"README.md: duplicate skills check --format text",
-		"README.md: duplicate skills check --format json",
+		"docs/workflows/catalog.md: duplicate skills list --format text",
+		"docs/workflows/catalog.md: duplicate skills list --format json",
+		"docs/workflows/catalog.md: duplicate skills check --format text",
+		"docs/workflows/catalog.md: duplicate skills check --format json",
 	} {
 		if !hasIssueContaining(result.Issues, want) {
 			t.Fatalf("issues = %#v, want %q", result.Issues, want)
@@ -1482,8 +1482,8 @@ func TestZVBinaryProjectCheckRejectsSkillDocShowCommandsOutOfOrderEndToEnd(t *te
 	}
 	writeWorkflowDocs(t, tempDir)
 
-	readmePath := filepath.Join(tempDir, "README.md")
-	replaceSkillShowFixture(t, readmePath, strings.Join([]string{
+	catalogPath := filepath.Join(tempDir, "docs", "workflows", "catalog.md")
+	replaceSkillShowFixture(t, catalogPath, strings.Join([]string{
 		"./bin/zv skills show beta",
 		"./bin/zv skills show alpha",
 	}, "\n"), strings.Join([]string{
@@ -1511,7 +1511,7 @@ func TestZVBinaryProjectCheckRejectsSkillDocShowCommandsOutOfOrderEndToEnd(t *te
 	if result.OK {
 		t.Fatalf("result.OK = true, want false")
 	}
-	want := "README.md: skill show commands must appear in skill order: alpha, beta"
+	want := "docs/workflows/catalog.md: skill show commands must appear in skill order: alpha, beta"
 	if !hasIssueContaining(result.Issues, want) {
 		t.Fatalf("issues = %#v, want %q", result.Issues, want)
 	}
@@ -1532,7 +1532,7 @@ func TestZVBinaryProjectCheckRejectsDuplicateWorkflowDocRunCommandsEndToEnd(t *t
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	appendFile(t, filepath.Join(tempDir, "README.md"), strings.Join([]string{
+	appendFile(t, filepath.Join(tempDir, "docs", "workflows", "catalog.md"), strings.Join([]string{
 		"",
 		"```bash",
 		"./bin/zv workflows run demo-parse -- --demo testdata/other.dem --steamid 76561198000000000 --out other-plan.json",
@@ -1552,7 +1552,7 @@ func TestZVBinaryProjectCheckRejectsDuplicateWorkflowDocRunCommandsEndToEnd(t *t
 	if result.OK {
 		t.Fatalf("result.OK = true, want false")
 	}
-	if !hasIssueContaining(result.Issues, "README.md: duplicate workflow run demo-parse") {
+	if !hasIssueContaining(result.Issues, "docs/workflows/catalog.md: duplicate workflow run demo-parse") {
 		t.Fatalf("issues = %#v, want duplicate workflow run issue", result.Issues)
 	}
 }

@@ -663,7 +663,14 @@ func appendEffectFilters(filters []string, effects []Effect) []string {
 		if boxBorder == 0 {
 			boxBorder = 12
 		}
-		filters = append(filters, drawTextExprWithFade(effect.Value, x, y, size, effect.StartSeconds, effect.EndSeconds, fontColor, boxColor, boxBorder, effect.FontFile, effect.FadeInSeconds, effect.FadeOutSeconds))
+		styled := effect
+		styled.X = x
+		styled.Y = y
+		styled.Size = size
+		styled.FontColor = fontColor
+		styled.BoxColor = boxColor
+		styled.BoxBorder = boxBorder
+		filters = append(filters, drawTextEffect(styled))
 	}
 	return filters
 }
@@ -700,29 +707,58 @@ func drawTextExpr(text, x, y string, size int, start, end float64, fontColor, bo
 }
 
 func drawTextExprWithFade(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int, fontFile string, fadeIn, fadeOut float64) string {
+	return drawTextEffect(Effect{
+		Value:          text,
+		X:              x,
+		Y:              y,
+		Size:           size,
+		StartSeconds:   start,
+		EndSeconds:     end,
+		FontColor:      fontColor,
+		BoxColor:       boxColor,
+		BoxBorder:      boxBorder,
+		FontFile:       fontFile,
+		FadeInSeconds:  fadeIn,
+		FadeOutSeconds: fadeOut,
+	})
+}
+
+// drawTextEffect renders a text effect as a drawtext filter. BoxColor "none"
+// disables the backing box entirely; a non-empty ShadowColor adds a drop
+// shadow at the ShadowX/ShadowY offsets.
+func drawTextEffect(effect Effect) string {
 	fontOption := ""
-	if fontFile = strings.TrimSpace(fontFile); fontFile == "" {
+	fontFile := strings.TrimSpace(effect.FontFile)
+	if fontFile == "" {
 		fontFile = drawtextFontFile()
 	}
 	if fontFile != "" {
 		fontOption = fmt.Sprintf(":fontfile='%s'", escapeDrawtextOption(filepath.ToSlash(fontFile)))
 	}
+	boxOption := "box=0"
+	if effect.BoxColor != "none" {
+		boxOption = fmt.Sprintf("box=1:boxcolor=%s:boxborderw=%d", effect.BoxColor, effect.BoxBorder)
+	}
+	shadowOption := ""
+	if effect.ShadowColor != "" {
+		shadowOption = fmt.Sprintf(":shadowcolor=%s:shadowx=%d:shadowy=%d", effect.ShadowColor, effect.ShadowX, effect.ShadowY)
+	}
 	alphaOption := ""
-	if alpha := textAlphaExpression(start, end, fadeIn, fadeOut); alpha != "" {
+	if alpha := textAlphaExpression(effect.StartSeconds, effect.EndSeconds, effect.FadeInSeconds, effect.FadeOutSeconds); alpha != "" {
 		alphaOption = fmt.Sprintf(":alpha='%s'", alpha)
 	}
 	return fmt.Sprintf(
-		"drawtext=text='%s'%s:x=%s:y=%s:fontsize=%d:fontcolor=%s:box=1:boxcolor=%s:boxborderw=%d%s:enable='%s'",
-		escapeDrawtextText(text),
+		"drawtext=text='%s'%s:x=%s:y=%s:fontsize=%d:fontcolor=%s:%s%s%s:enable='%s'",
+		escapeDrawtextText(effect.Value),
 		fontOption,
-		x,
-		y,
-		size,
-		fontColor,
-		boxColor,
-		boxBorder,
+		effect.X,
+		effect.Y,
+		effect.Size,
+		effect.FontColor,
+		boxOption,
+		shadowOption,
 		alphaOption,
-		betweenExpression(start, end),
+		betweenExpression(effect.StartSeconds, effect.EndSeconds),
 	)
 }
 

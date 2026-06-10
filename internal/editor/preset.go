@@ -23,6 +23,10 @@ const (
 	// music, a rhythm analysis json, and compile-segments so cuts land on
 	// the detected beat grid.
 	PresetViralBeatsync = "viral-beatsync"
+
+	// PresetViral60Clean is viral-60 recorded without the gameplay HUD: a
+	// clean POV where only kill notices appear, plus the viral overlay pack.
+	PresetViral60Clean = "viral-60-clean"
 )
 
 // RenderPreset is one declarative entry in the render preset registry.
@@ -63,6 +67,11 @@ type RenderPreset struct {
 	// RhythmSync marks presets that require beat-synced compilation inputs
 	// (music path, rhythm json, compile-segments).
 	RhythmSync bool
+
+	// HUDMode is the recording-stage HUD hint passed to zv-recorder --hud.
+	// Empty means the recorder default (full gameplay HUD). The render
+	// stage never reads it; it only travels through `zv short`.
+	HUDMode string
 
 	// Grade is the FFmpeg-only base color grade applied by full-frame
 	// presets. The zero value means no grading.
@@ -116,6 +125,22 @@ var renderPresets = []RenderPreset{
 		QualityChecks:  true,
 		CoverSheets:    true,
 		RhythmSync:     true,
+	},
+	{
+		Name:           PresetViral60Clean,
+		Description:    "viral-60 on a clean HUD-less POV; only kill notices appear when kills happen",
+		FPS:            60,
+		Width:          1080,
+		Height:         1920,
+		VideoCRF:       NaturalHQVideoCRF,
+		VideoPreset:    NaturalHQVideoPreset,
+		EffectsPreset:  EffectsPresetViralUltraClean,
+		FilterKind:     FilterKindFullFrame,
+		HQFilters:      true,
+		AudioNormalize: true,
+		QualityChecks:  true,
+		CoverSheets:    true,
+		HUDMode:        "deathnotices",
 	},
 	{
 		Name:          PresetShortClean,

@@ -19,7 +19,7 @@ metadata. Everything runs locally on Windows.
 ## The one command
 
 ```powershell
-.\bin\zv short match.dem --prompt "las mejores kills de martinez" --target-steamid 76561198148986856
+zv short match.dem --prompt "las mejores kills de martinez" --target-steamid 76561198148986856
 ```
 
 `zv short` chains parse -> moments -> HLAE/CS2 recording -> render. The prompt
@@ -61,6 +61,7 @@ List them any time with `zv presets` (`--format json` for automation).
 |--------|--------------|
 | `viral-60` (default) | Full-UI gameplay with viral editing: hook text, kill punch-ins, kill counter, milestone labels. |
 | `viral-beatsync` | `viral-60` for montages with cuts on the detected beat grid. Needs `--music` plus rhythm analysis. |
+| `viral-60-clean` | `viral-60` recorded without the gameplay HUD: clean POV where only kill notices appear on kills. |
 | `natural-hq2-full` | Full-UI crop with a mild saturation lift, no scripted effects. Minimal-edit baseline. |
 | `natural-hq2-full-plus` | Stronger FFmpeg-only color and mastering for A/B comparisons. |
 | `natural-hq` / `natural-hq2` | Unmodified gameplay at higher encode quality; `hq2` adds quality checks and contact sheets. |
@@ -160,7 +161,7 @@ scripted use:
 
 ```bash
 ./bin/zv demo parse --demo match.dem --steamid 76561198000000000 --out plan.json
-./bin/zv demo players --demo match.dem                  # find SteamID64 values
+./bin/zv demo players --demo match.dem
 ./bin/zv record --killplan plan.json --demo match.dem --out run/recording --hlae <HLAE.exe> --cs2 <cs2.exe>
 ./bin/zv shorts render --recording-result run/recording/recording-result.json --out run/shorts --preset viral-60
 ./bin/zv compose final --recording-result run/recording/recording-result.json --out run/final.mp4
@@ -181,6 +182,8 @@ stay reachable through pass-throughs such as `zv parser`, `zv editor`,
 
 - `--segments seg-001,seg-004` / `--limit N` for fast partial iteration, plus
   `--skip-existing` and `--open-gallery`.
+- `--render-jobs N` caps how many shorts render concurrently (default 0 =
+  automatic CPU-based limit; pass 1 to force sequential rendering).
 - `--dry-run` writes planned manifests, captions, FFmpeg commands, and cover
   prompts without rendering.
 - `--music`, `--rhythm`, `--compile-segments` for music-scripted compilation

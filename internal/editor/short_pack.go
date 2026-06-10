@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 
 	"github.com/reche/zackvideo/internal/recording"
 )
@@ -17,6 +19,7 @@ type shortPackOptions struct {
 	CoversEnabled  bool
 	SkipExisting   bool
 	ValidateVideos bool
+	RenderJobs     int
 }
 
 func renderShortPack(ctx context.Context, manifest *Manifest, result *Result, opts shortPackOptions) error {
@@ -40,28 +43,77 @@ type shortPackRenderer struct {
 	opts     shortPackOptions
 }
 
+// normalizeRenderJobs resolves the configured concurrency: 0 means automatic.
+func normalizeRenderJobs(jobs int) int {
+	if jobs > 0 {
+		return jobs
+	}
+	auto := runtime.NumCPU() / 2
+	if auto < 1 {
+		return 1
+	}
+	if auto > 4 {
+		return 4
+	}
+	return auto
+}
+
 func (p *shortPackRenderer) render(ctx context.Context) error {
+	jobs := normalizeRenderJobs(p.opts.RenderJobs)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Each short writes only its own index in result.Shorts/manifest.Shorts;
+	// warnings are collected per short and merged in segment order afterwards
+	// so output stays deterministic regardless of scheduling.
+	warnings := make([][]string, len(p.manifest.Shorts))
+	var (
+		wg       sync.WaitGroup
+		once     sync.Once
+		firstErr error
+	)
+	sem := make(chan struct{}, jobs)
 	for i := range p.manifest.Shorts {
-		// Iterate by pointer: ShortEdit embeds several artifacts and slices, so
-		// ranging by value would copy the whole struct each iteration and again
-		// into every helper call.
-		short := &p.manifest.Shorts[i]
-		if err := p.renderShort(ctx, i, short); err != nil {
-			return err
+		if ctx.Err() != nil {
+			break
 		}
-		if err := p.publishShort(ctx, i, short); err != nil {
-			return err
-		}
-		p.runQualityCheck(ctx, short)
-		if p.opts.CoversEnabled {
-			p.renderCover(ctx, i, short)
-			p.renderCoverSheet(ctx, i, short)
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := p.renderOne(ctx, i, &warnings[i]); err != nil {
+				once.Do(func() {
+					firstErr = err
+					cancel()
+				})
+			}
+		}(i)
+	}
+	wg.Wait()
+	for _, w := range warnings {
+		p.result.Warnings = append(p.result.Warnings, w...)
+	}
+	return firstErr
+}
+
+func (p *shortPackRenderer) renderOne(ctx context.Context, i int, warn *[]string) error {
+	short := &p.manifest.Shorts[i]
+	if err := p.renderShort(ctx, i, short, warn); err != nil {
+		return err
+	}
+	if err := p.publishShort(ctx, i, short, warn); err != nil {
+		return err
+	}
+	p.runQualityCheck(ctx, short, warn)
+	if p.opts.CoversEnabled {
+		p.renderCover(ctx, i, short, warn)
+		p.renderCoverSheet(ctx, i, short, warn)
 	}
 	return nil
 }
 
-func (p *shortPackRenderer) renderShort(ctx context.Context, i int, short *ShortEdit) error {
+func (p *shortPackRenderer) renderShort(ctx context.Context, i int, short *ShortEdit, warn *[]string) error {
 	if err := os.MkdirAll(filepath.Dir(short.Output), 0o750); err != nil {
 		return err
 	}
@@ -74,12 +126,12 @@ func (p *shortPackRenderer) renderShort(ctx context.Context, i int, short *Short
 	p.result.Shorts[i].OutputArtifact = artifact
 	p.manifest.Shorts[i].OutputArtifact = artifact
 	if p.opts.ValidateVideos {
-		p.result.Warnings = append(p.result.Warnings, ValidateShortArtifactForFPS(artifact, outputFPS(*short))...)
+		*warn = append(*warn, ValidateShortArtifactForFPS(artifact, outputFPS(*short))...)
 	}
 	return nil
 }
 
-func (p *shortPackRenderer) publishShort(ctx context.Context, i int, short *ShortEdit) error {
+func (p *shortPackRenderer) publishShort(ctx context.Context, i int, short *ShortEdit, warn *[]string) error {
 	if err := publishShort(*short); err != nil {
 		return err
 	}
@@ -87,60 +139,60 @@ func (p *shortPackRenderer) publishShort(ctx context.Context, i int, short *Shor
 	p.result.Shorts[i].PublishArtifact = artifact
 	p.manifest.Shorts[i].PublishArtifact = artifact
 	if p.opts.ValidateVideos {
-		p.result.Warnings = append(p.result.Warnings, ValidateShortArtifactForFPS(artifact, outputFPS(*short))...)
+		*warn = append(*warn, ValidateShortArtifactForFPS(artifact, outputFPS(*short))...)
 	}
 	return nil
 }
 
-func (p *shortPackRenderer) runQualityCheck(ctx context.Context, short *ShortEdit) {
+func (p *shortPackRenderer) runQualityCheck(ctx context.Context, short *ShortEdit, warn *[]string) {
 	if len(short.QualityCommand) == 0 {
 		return
 	}
 	output, err := runFFmpegOutput(ctx, short.QualityCommand, "quality check")
 	if short.QualityLogPath != "" {
 		if writeErr := writeLogFile(short.QualityLogPath, output); writeErr != nil {
-			p.result.Warnings = append(p.result.Warnings, fmt.Sprintf("quality log %s: %v", short.SegmentID, writeErr))
+			*warn = append(*warn, fmt.Sprintf("quality log %s: %v", short.SegmentID, writeErr))
 		}
 	}
 	if err != nil {
-		p.result.Warnings = append(p.result.Warnings, fmt.Sprintf("quality check %s: %v", short.SegmentID, err))
+		*warn = append(*warn, fmt.Sprintf("quality check %s: %v", short.SegmentID, err))
 		return
 	}
-	p.result.Warnings = append(p.result.Warnings, QualityWarningsFromFFmpegLog(short.SegmentID, output)...)
+	*warn = append(*warn, QualityWarningsFromFFmpegLog(short.SegmentID, output)...)
 }
 
-func (p *shortPackRenderer) renderCover(ctx context.Context, i int, short *ShortEdit) {
+func (p *shortPackRenderer) renderCover(ctx context.Context, i int, short *ShortEdit, warn *[]string) {
 	if p.opts.SkipExisting && fileExistsNonEmpty(short.CoverPath) {
 		p.result.Shorts[i].CoverSkipped = true
-		p.result.Shorts[i].CoverArtifact = p.probeCover(ctx, short.SegmentID, "cover", short.CoverPath)
+		p.result.Shorts[i].CoverArtifact = p.probeCover(ctx, short.SegmentID, "cover", short.CoverPath, warn)
 		return
 	}
 	if err := runFFmpeg(ctx, short.CoverCommand, "cover extract"); err != nil {
-		p.result.Warnings = append(p.result.Warnings, fmt.Sprintf("cover %s: %v", short.SegmentID, err))
+		*warn = append(*warn, fmt.Sprintf("cover %s: %v", short.SegmentID, err))
 		return
 	}
-	p.result.Shorts[i].CoverArtifact = p.probeCover(ctx, short.SegmentID, "cover", short.CoverPath)
+	p.result.Shorts[i].CoverArtifact = p.probeCover(ctx, short.SegmentID, "cover", short.CoverPath, warn)
 }
 
-func (p *shortPackRenderer) renderCoverSheet(ctx context.Context, i int, short *ShortEdit) {
+func (p *shortPackRenderer) renderCoverSheet(ctx context.Context, i int, short *ShortEdit, warn *[]string) {
 	if short.CoverSheetPath == "" {
 		return
 	}
 	if p.opts.SkipExisting && fileExistsNonEmpty(short.CoverSheetPath) {
 		p.result.Shorts[i].CoverSheetSkipped = true
-		p.result.Shorts[i].CoverSheetArtifact = p.probeCover(ctx, short.SegmentID, "cover-sheet", short.CoverSheetPath)
+		p.result.Shorts[i].CoverSheetArtifact = p.probeCover(ctx, short.SegmentID, "cover-sheet", short.CoverSheetPath, warn)
 		return
 	}
 	if err := runFFmpeg(ctx, short.CoverSheetCommand, "cover sheet"); err != nil {
-		p.result.Warnings = append(p.result.Warnings, fmt.Sprintf("cover sheet %s: %v", short.SegmentID, err))
+		*warn = append(*warn, fmt.Sprintf("cover sheet %s: %v", short.SegmentID, err))
 		return
 	}
-	p.result.Shorts[i].CoverSheetArtifact = p.probeCover(ctx, short.SegmentID, "cover-sheet", short.CoverSheetPath)
+	p.result.Shorts[i].CoverSheetArtifact = p.probeCover(ctx, short.SegmentID, "cover-sheet", short.CoverSheetPath, warn)
 }
 
-func (p *shortPackRenderer) probeCover(ctx context.Context, segmentID, role, path string) recording.RecordingArtifact {
+func (p *shortPackRenderer) probeCover(ctx context.Context, segmentID, role, path string, warn *[]string) recording.RecordingArtifact {
 	artifact := p.probeArtifact(ctx, segmentID, role, "image", path)
-	p.result.Warnings = append(p.result.Warnings, ValidateCoverArtifact(artifact)...)
+	*warn = append(*warn, ValidateCoverArtifact(artifact)...)
 	return artifact
 }
 

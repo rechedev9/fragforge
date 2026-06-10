@@ -176,7 +176,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		if len(manifest.Shorts) == 0 {
 			manifest.Warnings = append(manifest.Warnings, "segment selection produced no shorts")
 		}
-		if err := applyEffectsToManifest(&manifest, effectsSource, opts.FFmpegPath); err != nil {
+		if err := applyEffectsToManifest(&manifest, effectsSource, opts.FFmpegPath, opts.KillfeedFrameProbe); err != nil {
 			return manifest, err
 		}
 		return manifest, nil
@@ -276,7 +276,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if len(manifest.Shorts) == 0 {
 		manifest.Warnings = append(manifest.Warnings, "segment selection produced no shorts")
 	}
-	if err := applyEffectsToManifest(&manifest, effectsSource, opts.FFmpegPath); err != nil {
+	if err := applyEffectsToManifest(&manifest, effectsSource, opts.FFmpegPath, opts.KillfeedFrameProbe); err != nil {
 		return manifest, err
 	}
 	return manifest, nil

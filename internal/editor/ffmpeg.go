@@ -246,16 +246,41 @@ func CompilationFilter(short ShortEdit) string {
 	}
 	clauses = append(clauses, fmt.Sprintf("%sconcat=n=%d:v=1:a=1[catv][gamea]", strings.Join(concatLabels, ""), concatCount))
 	images := imageEffects(short.Effects)
-	if len(images) == 0 {
+	killfeeds := killfeedEffects(short.Effects)
+	if len(images) == 0 && len(killfeeds) == 0 {
 		clauses = append(clauses, fmt.Sprintf("[catv]%s[v]", VideoFilter(short)))
 	} else {
 		clauses = append(clauses, fmt.Sprintf("[catv]%s[vbase]", VideoFilter(short)))
-		imageInputStart := len(short.Parts)
-		if short.MusicPath != "" {
-			imageInputStart++
+		current := "vbase"
+		for i, effect := range killfeeds {
+			partIndex, sampleSeconds := killfeedSamplePart(&short, effect)
+			if partIndex < 0 {
+				partIndex = 0
+			}
+			killfeedLabel := fmt.Sprintf("kf%d", i)
+			next := fmt.Sprintf("vkf%d", i)
+			clauses = append(clauses,
+				fmt.Sprintf("[%d:v]%s[%s]", partIndex, compilationKillfeedCropFilter(effect, short, sampleSeconds), killfeedLabel),
+				fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
+					current,
+					killfeedLabel,
+					effectPosition(effect.X, "W-w-18"),
+					effectPosition(effect.Y, "438"),
+					betweenExpression(effect.StartSeconds, effect.EndSeconds),
+					next,
+				),
+			)
+			current = next
 		}
-		clauses = appendImageOverlayClauses(clauses, "vbase", imageInputStart, images, short, "vimages")
-		clauses = append(clauses, "[vimages]format=yuv420p[v]")
+		if len(images) > 0 {
+			imageInputStart := len(short.Parts)
+			if short.MusicPath != "" {
+				imageInputStart++
+			}
+			clauses = appendImageOverlayClauses(clauses, current, imageInputStart, images, short, "vimages")
+			current = "vimages"
+		}
+		clauses = append(clauses, fmt.Sprintf("[%s]format=yuv420p[v]", current))
 	}
 	if short.MusicPath != "" {
 		musicInput := len(short.Parts)
@@ -270,6 +295,59 @@ func CompilationFilter(short ShortEdit) string {
 		clauses = append(clauses, "[gamea]anull[a]")
 	}
 	return strings.Join(clauses, ";")
+}
+
+// compilationPartIndexAt finds the part whose compiled-timeline window covers
+// the killfeed effect, so the overlay crops death notices from the source
+// footage that is actually on screen. Falls back to the last part started
+// before the effect (effects can outlive their segment into a gap).
+func compilationPartIndexAt(parts []ShortPart, effect Effect) int {
+	at := effect.AtSeconds
+	if at == 0 {
+		at = effect.StartSeconds
+	}
+	index := 0
+	for i, part := range parts {
+		if part.TimelineStartSeconds > at {
+			break
+		}
+		index = i
+	}
+	return index
+}
+
+// compilationKillfeedCropFilter crops the killfeed region from the probed
+// source frame and freezes it for the whole compiled timeline. The notice
+// background is translucent, so playing it live would carry moving source
+// footage inside the overlay; a frozen frame reads as a static badge.
+func compilationKillfeedCropFilter(effect Effect, short ShortEdit, sampleSeconds float64) string {
+	cropWidth := effect.CropWidth
+	if cropWidth == 0 {
+		cropWidth = 360
+	}
+	cropHeight := effect.CropHeight
+	if cropHeight == 0 {
+		cropHeight = 110
+	}
+	filters := []string{
+		scaleFilter("1080", short),
+		fmt.Sprintf("crop=%d:%d:%d:%d", cropWidth, cropHeight, effect.CropX, effect.CropY),
+		sourceCropScaleFilter(effect),
+		fmt.Sprintf("trim=start=%.3f:duration=0.050", sampleSeconds),
+		"loop=loop=-1:size=1:start=0",
+		fmt.Sprintf("setpts=N/%d/TB", outputFPS(short)),
+	}
+	if short.DurationSeconds > 0 {
+		filters = append(filters, fmt.Sprintf("trim=duration=%.3f", short.DurationSeconds))
+	}
+	filters = append(filters, gradeFilters(short.Effects)...)
+	// The notice background is translucent, so the frozen frame still bakes
+	// in source-world pixels. Crushing the shadows flattens them into a
+	// uniform dark backing while the bright text and icons stay untouched.
+	filters = append(filters, "curves=all='0/0 0.35/0.08 1/1'")
+	filters = append(filters, "format=rgba")
+	filters = append(filters, overlayFadeFilters(effect)...)
+	return strings.Join(filters, ",")
 }
 
 func appendVideoEncodeArgs(command []string, short ShortEdit) []string {

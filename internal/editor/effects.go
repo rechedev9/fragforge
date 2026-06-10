@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
+	"image"
 	"math"
 	"os"
 	"path/filepath"
@@ -299,10 +300,13 @@ on_segment(function(s)
     duration = 1.55,
     x = "(w-text_w)/2",
     y = 74,
-    size = 72,
-    color = "#ffffff@0.98",
-    box_color = "#000000@0.62",
-    box_border = 24,
+    size = 60,
+    color = "#ffffff@0.96",
+    box_color = "#000000@0.38",
+    box_border = 14,
+    shadow_color = "black@0.45",
+    shadow_x = 2,
+    shadow_y = 2,
     fade_in = 0.06,
     fade_out = 0.18
   })
@@ -316,11 +320,14 @@ on_segment(function(s)
     start = 0.10,
     duration = 1.35,
     x = "(w-text_w)/2",
-    y = 172,
-    size = 34,
-    color = "#f4f4f4@0.92",
-    box_color = "#111111@0.46",
-    box_border = 14,
+    y = 162,
+    size = 28,
+    color = "#e9e9e9@0.92",
+    box_color = "#000000@0.30",
+    box_border = 10,
+    shadow_color = "black@0.40",
+    shadow_x = 2,
+    shadow_y = 2,
     fade_in = 0.06,
     fade_out = 0.18
   })
@@ -331,10 +338,13 @@ on_segment(function(s)
     duration = 1.25,
     x = "(w-text_w)/2",
     y = 1510,
-    size = 52,
-    color = "#ffffff@0.96",
-    box_color = "#c1121f@0.58",
-    box_border = 20,
+    size = 38,
+    color = "#ffffff@0.94",
+    box_color = "#000000@0.34",
+    box_border = 12,
+    shadow_color = "black@0.45",
+    shadow_x = 2,
+    shadow_y = 2,
     fade_in = 0.08,
     fade_out = 0.18
   })
@@ -384,10 +394,13 @@ on_kill(function(k)
     post = 0.82,
     x = "(w-text_w)/2",
     y = 226,
-    size = 58,
-    color = "#ffffff@0.98",
-    box_color = "#000000@0.62",
-    box_border = 22,
+    size = 42,
+    color = "#ffffff@0.96",
+    box_color = "#000000@0.36",
+    box_border = 12,
+    shadow_color = "black@0.45",
+    shadow_x = 2,
+    shadow_y = 2,
     fade_in = 0.04,
     fade_out = 0.14
   })
@@ -399,10 +412,13 @@ on_kill(function(k)
     post = 0.82,
     x = "w-text_w-46",
     y = 330,
-    size = 40,
-    color = "#ffffff@0.96",
-    box_color = "#c1121f@0.56",
-    box_border = 16,
+    size = 30,
+    color = "#ffffff@0.94",
+    box_color = "#000000@0.36",
+    box_border = 10,
+    shadow_color = "black@0.40",
+    shadow_x = 2,
+    shadow_y = 2,
     fade_in = 0.04,
     fade_out = 0.14
   })
@@ -415,10 +431,13 @@ on_kill(function(k)
       post = 0.86,
       x = "(w-text_w)/2",
       y = 1410,
-      size = 64,
-      color = "#ffffff@0.98",
-      box_color = "#c1121f@0.62",
-      box_border = 24,
+      size = 46,
+      color = "#ffffff@0.96",
+      box_color = "#000000@0.36",
+      box_border = 12,
+      shadow_color = "black@0.45",
+      shadow_x = 2,
+      shadow_y = 2,
       fade_in = 0.06,
       fade_out = 0.16
     })
@@ -432,10 +451,13 @@ on_kill(function(k)
       post = 0.90,
       x = "(w-text_w)/2",
       y = 1328,
-      size = 62,
-      color = "#ffffff@0.98",
-      box_color = "#ff8c00@0.58",
-      box_border = 24,
+      size = 46,
+      color = "#ffffff@0.96",
+      box_color = "#000000@0.36",
+      box_border = 12,
+      shadow_color = "black@0.45",
+      shadow_x = 2,
+      shadow_y = 2,
       fade_in = 0.05,
       fade_out = 0.15
     })
@@ -450,10 +472,13 @@ on_kill(function(k)
       post = 1.05,
       x = "(w-text_w)/2",
       y = 1510,
-      size = 68,
-      color = "#ffffff@0.98",
-      box_color = "#c1121f@0.64",
-      box_border = 26,
+      size = 48,
+      color = "#ffffff@0.96",
+      box_color = "#000000@0.38",
+      box_border = 12,
+      shadow_color = "black@0.45",
+      shadow_x = 2,
+      shadow_y = 2,
       fade_in = 0.07,
       fade_out = 0.18
     })
@@ -472,10 +497,172 @@ on_kill(function(k)
       duration = 1.30,
       x = "(w-text_w)/2",
       y = 1440,
-      size = 74,
-      color = "#ffffff@0.98",
-      box_color = "#c1121f@0.66",
-      box_border = 28,
+      size = 56,
+      color = "#ffffff@0.96",
+      box_color = "#000000@0.40",
+      box_border = 14,
+      shadow_color = "black@0.45",
+      shadow_x = 2,
+      shadow_y = 2,
+      fade_in = 0.08,
+      fade_out = 0.22
+    })
+  end
+end)
+`
+
+// viralUltraCleanEffectsScript is viral-ultra adapted to HUD-less captures:
+// the cropped killfeed overlay narrates each kill, so the per-kill text
+// banners (weapon labels, wallbang/chain callouts, milestone pills) are
+// dropped and only the hook, punch-ins, kill counter, and finish card remain.
+const viralUltraCleanEffectsScript = `
+local segment = {}
+local kill_number = 0
+
+local function nonempty(value)
+  return value ~= nil and tostring(value) ~= ""
+end
+
+local function upper(value)
+  if value == nil then return "" end
+  return string.upper(tostring(value))
+end
+
+on_segment(function(s)
+  segment.player = s.player or ""
+  segment.map = s.map or ""
+  segment.kill_count = s.kill_count or 0
+  kill_number = 0
+
+  grade({
+    contrast = 1.18,
+    saturation = 1.28,
+    gamma = 1.02
+  })
+
+  flash({
+    start = 0,
+    duration = 0.16,
+    opacity = 0.18,
+    color = "white"
+  })
+
+  text({
+    value = upper(segment.player) .. " " .. tostring(segment.kill_count) .. "K",
+    start = 0,
+    duration = 1.55,
+    x = "(w-text_w)/2",
+    y = 74,
+    size = 60,
+    color = "#ffffff@0.96",
+    box_color = "#000000@0.38",
+    box_border = 14,
+    shadow_color = "black@0.45",
+    shadow_x = 2,
+    shadow_y = 2,
+    fade_in = 0.06,
+    fade_out = 0.18
+  })
+
+  local streak_label = "CS2 KILL STREAK"
+  if nonempty(segment.map) then
+    streak_label = upper(segment.map) .. " KILL STREAK"
+  end
+  text({
+    value = streak_label,
+    start = 0.10,
+    duration = 1.35,
+    x = "(w-text_w)/2",
+    y = 162,
+    size = 28,
+    color = "#e9e9e9@0.92",
+    box_color = "#000000@0.30",
+    box_border = 10,
+    shadow_color = "black@0.40",
+    shadow_x = 2,
+    shadow_y = 2,
+    fade_in = 0.06,
+    fade_out = 0.18
+  })
+end)
+
+on_kill(function(k)
+  kill_number = kill_number + 1
+
+  local scale = 1.085
+  local flash_opacity = 0.16
+  local flash_duration = 0.10
+
+  if k.weapon == "AWP" then
+    scale = 1.13
+    flash_opacity = 0.28
+    flash_duration = 0.14
+  elseif k.headshot then
+    scale = 1.115
+    flash_opacity = 0.23
+    flash_duration = 0.12
+  end
+
+  if k.wallbang then
+    scale = scale + 0.025
+  end
+
+  zoom({
+    at = k.time,
+    pre = 0.16,
+    post = 0.78,
+    scale = scale
+  })
+
+  flash({
+    at = k.time,
+    duration = flash_duration,
+    opacity = flash_opacity,
+    color = "white"
+  })
+
+  text({
+    value = tostring(kill_number) .. "/" .. tostring(segment.kill_count),
+    at = k.time,
+    pre = 0.05,
+    post = 0.82,
+    x = "w-text_w-46",
+    y = 330,
+    size = 30,
+    color = "#ffffff@0.94",
+    box_color = "#000000@0.36",
+    box_border = 10,
+    shadow_color = "black@0.40",
+    shadow_x = 2,
+    shadow_y = 2,
+    fade_in = 0.04,
+    fade_out = 0.14
+  })
+
+  killfeed({
+    at = k.time,
+    pre = 0.05,
+    post = 3.40,
+    x = "W-w-24",
+    y = 416,
+    fade_in = 0.08,
+    fade_out = 0.25
+  })
+
+  if segment.kill_count >= 2 and kill_number == segment.kill_count then
+    text({
+      value = tostring(segment.kill_count) .. "K FINISH",
+      start = k.time + 0.28,
+      duration = 1.30,
+      x = "(w-text_w)/2",
+      y = 1440,
+      size = 56,
+      color = "#ffffff@0.96",
+      box_color = "#000000@0.40",
+      box_border = 14,
+      shadow_color = "black@0.45",
+      shadow_x = 2,
+      shadow_y = 2,
       fade_in = 0.08,
       fade_out = 0.22
     })
@@ -526,6 +713,8 @@ func loadEffectsSource(path, preset string) (effectsSource, error) {
 		return effectsSource{Preset: preset, Script: smokeLineupsEffectsScript}, nil
 	case EffectsPresetViralUltra:
 		return effectsSource{Preset: preset, Script: viralUltraEffectsScript}, nil
+	case EffectsPresetViralUltraClean:
+		return effectsSource{Preset: preset, Script: viralUltraCleanEffectsScript}, nil
 	case EffectsPresetNone:
 		return effectsSource{Preset: preset}, nil
 	default:
@@ -541,7 +730,7 @@ func normalizeEffectsPreset(preset string) string {
 	return preset
 }
 
-func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath string) error {
+func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath string, killfeedProbe func(input string, atSeconds float64) (image.Image, error)) error {
 	manifest.EffectsPath = source.Path
 	manifest.EffectsPreset = source.Preset
 	// Compile the effects script once and reuse the bytecode for every short.
@@ -557,6 +746,7 @@ func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath
 			return fmt.Errorf("evaluate effects for %s: %w", short.SegmentID, err)
 		}
 		short.Effects = effects
+		manifest.Warnings = append(manifest.Warnings, refineKillfeedEffects(short, killfeedProbe)...)
 		short.FFmpegCommand = BuildFFmpegCommand(ffmpegPath, *short)
 		if short.CoverPath != "" {
 			short.CoverCommand = BuildCoverFFmpegCommand(ffmpegPath, *short)
@@ -777,6 +967,22 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 		e.BoxBorder = tableInt(tb, "box_border", 12)
 		if e.BoxBorder < 0 || e.BoxBorder > 128 {
 			return e, fmt.Errorf("box_border %d outside range 0..128", e.BoxBorder)
+		}
+		// shadow_color is optional; an absent or empty value means no shadow,
+		// so only validate (and read offsets) when one is set.
+		e.ShadowColor = strings.TrimSpace(tableString(tb, "shadow_color", ""))
+		if e.ShadowColor != "" {
+			if err := validateEffectColor("shadow_color", e.ShadowColor); err != nil {
+				return e, err
+			}
+			e.ShadowX = tableInt(tb, "shadow_x", 2)
+			if e.ShadowX < -32 || e.ShadowX > 32 {
+				return e, fmt.Errorf("shadow_x %d outside range -32..32", e.ShadowX)
+			}
+			e.ShadowY = tableInt(tb, "shadow_y", 2)
+			if e.ShadowY < -32 || e.ShadowY > 32 {
+				return e, fmt.Errorf("shadow_y %d outside range -32..32", e.ShadowY)
+			}
 		}
 		e.StartSeconds, e.EndSeconds, e.AtSeconds = effectWindow(tb, defaultEventTime(ctx), 0, 1, 1, ctx.short.DurationSeconds)
 		if err := setEffectFades(tb, &e); err != nil {

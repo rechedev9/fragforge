@@ -2,6 +2,8 @@
 package editor
 
 import (
+	"image"
+
 	"github.com/reche/zackvideo/internal/killplan"
 	"github.com/reche/zackvideo/internal/recording"
 )
@@ -73,6 +75,11 @@ const (
 	// milestone labels.
 	EffectsPresetViralUltra = "viral-ultra"
 
+	// EffectsPresetViralUltraClean is viral-ultra plus a killfeed overlay on
+	// every kill, for HUD-less recordings where the vertical crop would
+	// otherwise lose the death notices.
+	EffectsPresetViralUltraClean = "viral-ultra-clean"
+
 	// EffectsPresetExternal marks manifests rendered from a user script path.
 	EffectsPresetExternal = "external"
 )
@@ -133,6 +140,9 @@ type Config struct {
 	DisableCovers       bool
 	SkipExisting        bool
 	DryRun              bool
+	// RenderJobs caps how many shorts render concurrently; 0 selects an
+	// automatic limit based on available CPUs.
+	RenderJobs int
 }
 
 type ManifestOptions struct {
@@ -163,6 +173,9 @@ type ManifestOptions struct {
 	CoversEnabled       bool
 	SkipExisting        bool
 	KillPlan            *killplan.Plan
+	// KillfeedFrameProbe loads a source frame for per-kill killfeed crop
+	// measurement; nil keeps the static crop defaults.
+	KillfeedFrameProbe func(input string, atSeconds float64) (image.Image, error)
 }
 
 type Manifest struct {
@@ -483,6 +496,9 @@ type Effect struct {
 	FontColor          string     `json:"font_color,omitempty"`
 	BoxColor           string     `json:"box_color,omitempty"`
 	BoxBorder          int        `json:"box_border,omitempty"`
+	ShadowColor        string     `json:"shadow_color,omitempty"`
+	ShadowX            int        `json:"shadow_x,omitempty"`
+	ShadowY            int        `json:"shadow_y,omitempty"`
 	FadeInSeconds      float64    `json:"fade_in_seconds,omitempty"`
 	FadeOutSeconds     float64    `json:"fade_out_seconds,omitempty"`
 	Contrast           float64    `json:"contrast,omitempty"`

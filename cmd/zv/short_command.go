@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -43,6 +44,7 @@ type shortPlan struct {
 	outDir     string
 	shortsDir  string
 	publishDir string
+	stageDirs  []string // directories the stage binaries write into; created before stage 1
 	stages     []shortStage
 }
 
@@ -68,6 +70,16 @@ func runShort(args []string, stdout, stderr io.Writer, stdin io.Reader, runner c
 	if opts.DryRun {
 		printShortPlan(stdout, plan)
 		return exitSuccess
+	}
+	for _, dir := range plan.stageDirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fmt.Fprintf(stderr, "error: create stage output directory: %v\n", err)
+			return exitUnexpected
+		}
+	}
+	if err := preflightShortEditorPreset(plan.preset.Name, runner); err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return exitUnexpected
 	}
 	for i, stage := range plan.stages {
 		fmt.Fprintf(stdout, "[%d/%d] %s...\n", i+1, len(plan.stages), stage.label)
@@ -126,6 +138,7 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 	}
 
 	plan := shortPlan{preset: preset, intent: intent, outDir: shortOutDir(opts)}
+	plan.stageDirs = []string{plan.outDir}
 	plan.shortsDir = filepath.Join(plan.outDir, "shorts")
 	plan.publishDir = filepath.Join(plan.shortsDir, "publish")
 	plan.player = "from existing recording"
@@ -151,17 +164,22 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 		}
 		killPlanPath = filepath.Join(plan.outDir, "killplan.json")
 		recordingDir := filepath.Join(plan.outDir, "recording")
+		plan.stageDirs = append(plan.stageDirs, recordingDir)
 		recordingResult = filepath.Join(recordingDir, "recording-result.json")
+		plan.stages = append(plan.stages, shortStage{
+			label:  "parsing demo",
+			binary: "zv-parser",
+			args:   []string{"parse", "--demo", opts.DemoPath, "--steamid", steamID, "--out", killPlanPath},
+		})
+		recorderArgs := []string{"--killplan", killPlanPath, "--demo", opts.DemoPath, "--out", recordingDir, "--hlae", hlae, "--cs2", cs2}
+		if preset.HUDMode != "" {
+			recorderArgs = append(recorderArgs, "--hud", preset.HUDMode)
+		}
 		plan.stages = append(plan.stages,
-			shortStage{
-				label:  "parsing demo",
-				binary: "zv-parser",
-				args:   []string{"parse", "--demo", opts.DemoPath, "--steamid", steamID, "--out", killPlanPath},
-			},
 			shortStage{
 				label:  "recording segments with HLAE/CS2",
 				binary: "zv-recorder",
-				args:   []string{"--killplan", killPlanPath, "--demo", opts.DemoPath, "--out", recordingDir, "--hlae", hlae, "--cs2", cs2},
+				args:   recorderArgs,
 			},
 		)
 	}
@@ -207,6 +225,24 @@ func resolveShortPreset(opts shortOptions, intent shortIntent) (editor.RenderPre
 		return editor.RenderPreset{}, fmt.Errorf("unknown preset %q (valid presets: %s)", name, strings.Join(editor.PresetNames(), ", "))
 	}
 	return preset, nil
+}
+
+// preflightShortEditorPreset verifies that the resolved zv-editor binary knows
+// the chosen preset before any stage runs. Without it, a stale
+// bin/zv-editor.exe rejects newly added presets only at the final render
+// stage, after the expensive HLAE/CS2 recording.
+func preflightShortEditorPreset(preset string, runner commandRunner) error {
+	exe := resolveExecutable("zv-editor")
+	var out strings.Builder
+	if err := runner.Run(context.Background(), exe, []string{"--list-presets"}, nil, &out, io.Discard); err != nil {
+		return fmt.Errorf("preflight %s --list-presets failed: %v; the stage binaries look stale or missing, rebuild them (scripts/build.ps1) and re-run", exe, err)
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.TrimSpace(line) == preset {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s does not know preset %q; the stage binaries are stale, rebuild them (scripts/build.ps1) and re-run", exe, preset)
 }
 
 func resolveShortSteamID(opts shortOptions, intent shortIntent) (string, error) {

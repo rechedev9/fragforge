@@ -48,11 +48,17 @@ func run() error {
 		covers              = flag.Bool("covers", true, "generate local JPG covers for publish pack")
 		noCovers            = flag.Bool("no-covers", false, "disable local JPG cover generation")
 		skipExisting        = flag.Bool("skip-existing", false, "reuse existing short and cover files instead of rerendering them")
+		renderJobs          = flag.Int("render-jobs", 0, "max shorts rendered concurrently; 0 selects an automatic CPU-based limit")
 		openGallery         = flag.Bool("open-gallery", false, "open the publish gallery after a successful run")
 		dryRun              = flag.Bool("dry-run", false, "write manifests and prompts without running FFmpeg")
+		listPresets         = flag.Bool("list-presets", false, "print supported preset names, one per line, and exit; used by zv short to detect stale binaries")
 	)
 	flag.Parse()
 
+	if *listPresets {
+		fmt.Println(strings.Join(editor.PresetNames(), "\n"))
+		return nil
+	}
 	if *recordingResultPath == "" || *outDir == "" {
 		return fmt.Errorf("--recording-result and --out are required")
 	}
@@ -88,6 +94,7 @@ func run() error {
 		FFprobePath:         *ffprobePath,
 		DisableCovers:       !*covers || *noCovers,
 		SkipExisting:        *skipExisting,
+		RenderJobs:          *renderJobs,
 		DryRun:              *dryRun,
 	})
 	if err != nil {

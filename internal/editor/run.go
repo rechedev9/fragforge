@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,13 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 	coversEnabled := !cfg.DisableCovers
 
+	// Per-kill killfeed crop measurement extracts source frames with FFmpeg,
+	// so dry runs keep the static crop defaults.
+	var killfeedProbe func(input string, atSeconds float64) (image.Image, error)
+	if !cfg.DryRun {
+		killfeedProbe = ffmpegFrameProbe(commandFFmpeg)
+	}
+
 	manifest, err := buildManifest(recordingResult, ManifestOptions{
 		RecordingResultPath: recordingResultPath,
 		KillPlanPath:        killPlanPath,
@@ -132,6 +140,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		CoversEnabled:       coversEnabled,
 		SkipExisting:        cfg.SkipExisting,
 		KillPlan:            killPlan,
+		KillfeedFrameProbe:  killfeedProbe,
 	})
 	if err != nil {
 		return Result{}, err
@@ -190,6 +199,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		CoversEnabled:  coversEnabled,
 		SkipExisting:   cfg.SkipExisting,
 		ValidateVideos: true,
+		RenderJobs:     cfg.RenderJobs,
 	}); err != nil {
 		return result, err
 	}
@@ -205,6 +215,9 @@ func (c Config) validate() error {
 	}
 	if c.Limit < 0 {
 		return fmt.Errorf("limit must be >= 0")
+	}
+	if c.RenderJobs < 0 {
+		return fmt.Errorf("render jobs must be >= 0")
 	}
 	preset := c.Preset
 	if preset == "" {
@@ -247,7 +260,7 @@ func (c Config) validate() error {
 	}
 	if c.EffectsPath == "" && c.EffectsPreset != "" {
 		switch c.EffectsPreset {
-		case EffectsPresetBuiltinClean, EffectsPresetAWPGod, EffectsPresetSmokeLineups, EffectsPresetViralUltra, EffectsPresetNone:
+		case EffectsPresetBuiltinClean, EffectsPresetAWPGod, EffectsPresetSmokeLineups, EffectsPresetViralUltra, EffectsPresetViralUltraClean, EffectsPresetNone:
 		default:
 			return fmt.Errorf("unknown effects preset %q", c.EffectsPreset)
 		}

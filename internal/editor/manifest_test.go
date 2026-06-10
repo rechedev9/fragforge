@@ -261,6 +261,91 @@ func TestVideoFilterFadesLuaText(t *testing.T) {
 	}
 }
 
+func TestVideoFilterTextShadowAndBoxNone(t *testing.T) {
+	filter := VideoFilter(ShortEdit{
+		Effects: []Effect{
+			{
+				Type:         EffectText,
+				Value:        "HEADSHOT",
+				StartSeconds: 1,
+				EndSeconds:   2,
+				BoxColor:     "none",
+				ShadowColor:  "black@0.55",
+				ShadowX:      2,
+				ShadowY:      3,
+			},
+		},
+	})
+
+	for _, want := range []string{
+		"drawtext=text='HEADSHOT'",
+		"box=0",
+		"shadowcolor=black@0.55:shadowx=2:shadowy=3",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("filter missing %q:\n%s", want, filter)
+		}
+	}
+	for _, reject := range []string{"box=1", "boxcolor="} {
+		if strings.Contains(filter, reject) {
+			t.Fatalf("filter contains %q, want it omitted:\n%s", reject, filter)
+		}
+	}
+}
+
+func TestCompilationFilterOverlaysKillfeedFromSourcePart(t *testing.T) {
+	short := ShortEdit{
+		Output:          "compiled.mp4",
+		Preset:          PresetViral60Clean,
+		DurationSeconds: 12,
+		Effects: []Effect{
+			{
+				Type:           EffectKillfeed,
+				StartSeconds:   9.5,
+				EndSeconds:     12,
+				AtSeconds:      9.55,
+				X:              "W-w-24",
+				Y:              "416",
+				Width:          430,
+				CropX:          1558,
+				CropY:          64,
+				CropWidth:      360,
+				CropHeight:     110,
+				FadeInSeconds:  0.08,
+				FadeOutSeconds: 0.25,
+			},
+		},
+		Parts: []ShortPart{
+			{SegmentID: "seg-001", Input: "seg-001.mp4", DurationSeconds: 6, TimelineStartSeconds: 0},
+			{SegmentID: "seg-002", Input: "seg-002.mp4", DurationSeconds: 6, TimelineStartSeconds: 6},
+		},
+	}
+
+	filter := CompilationFilter(short)
+	for _, want := range []string{
+		"[1:v]",
+		"crop=360:110:1558:64",
+		"scale=w=430:h=-1:flags=lanczos",
+		// the notice is frozen at the probed frame so its translucent
+		// background does not carry moving source footage into the overlay
+		"trim=start=3.900:duration=0.050",
+		"loop=loop=-1:size=1:start=0",
+		"setpts=N/60/TB",
+		// shadow crush flattens the world baked into the translucent notice
+		// background; text and icons are bright and stay untouched
+		"curves=all='0/0 0.35/0.08 1/1'",
+		"overlay=x=W-w-24:y=416:format=auto:enable='between(t\\,9.500\\,12.000)'",
+		"format=yuv420p[v]",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("compilation filter missing %q:\n%s", want, filter)
+		}
+	}
+	if strings.Contains(filter, "setpts=PTS-STARTPTS+6.000/TB") {
+		t.Fatalf("compilation filter still time-shifts live footage instead of freezing the notice:\n%s", filter)
+	}
+}
+
 func TestViralSquareFilterFadesOverlays(t *testing.T) {
 	filter := ViralSquareFilter(ShortEdit{
 		DurationSeconds: 4,

@@ -287,7 +287,7 @@ func TestRunWorkflowsCheckRejectsDiscoveredLegacyCommandEntrypoint(t *testing.T)
 	}
 }
 
-func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkill(t *testing.T) {
+func TestRunWorkflowsCheckRejectsCatalogMissingDiscoveredRepoSkill(t *testing.T) {
 	tempDir := t.TempDir()
 	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
 		"---",
@@ -301,13 +301,13 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkill(t *testing.T) 
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	readmePath := filepath.Join(tempDir, "README.md")
-	b, err := os.ReadFile(readmePath)
+	catalogPath := filepath.Join(tempDir, "docs", "workflows", "catalog.md")
+	b, err := os.ReadFile(catalogPath)
 	if err != nil {
-		t.Fatalf("read README.md: %v", err)
+		t.Fatalf("read docs/workflows/catalog.md: %v", err)
 	}
 	body := strings.ReplaceAll(string(b), "alpha", "")
-	writeFile(t, readmePath, body)
+	writeFile(t, catalogPath, body)
 	withWorkingDir(t, tempDir)
 
 	var stdout, stderr strings.Builder
@@ -316,12 +316,12 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkill(t *testing.T) 
 	if got, want := code, exitInvalidArgs; got != want {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
-	if want := "README.md: missing repo skill alpha"; !strings.Contains(stderr.String(), want) {
+	if want := "docs/workflows/catalog.md: missing repo skill alpha"; !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
 
-func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowCommand(t *testing.T) {
+func TestRunWorkflowsCheckRejectsCatalogMissingDiscoveredRepoSkillShowCommand(t *testing.T) {
 	tempDir := t.TempDir()
 	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
 		"---",
@@ -335,7 +335,7 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowCommand(t *
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	writeFile(t, filepath.Join(tempDir, "README.md"), strings.Join([]string{
+	writeFile(t, filepath.Join(tempDir, "docs", "workflows", "catalog.md"), strings.Join([]string{
 		"# ZackVideo",
 		"",
 		"Repo-local skills currently exposed through `zv skills`:",
@@ -348,6 +348,7 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowCommand(t *
 		"./bin/zv utility audit --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv",
 		"./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\\HLAE-2.190.1\\HLAE.exe --cs2 \"C:\\Games\\Counter-Strike 2\\game\\bin\\win64\\cs2.exe\"",
 		"./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4",
+		"./bin/zv music analyze --input data/music/track.mp4 --out data/runs/run-004/rhythm.json",
 		"./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts",
 		"./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000",
 		"./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json",
@@ -372,6 +373,8 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowCommand(t *
 		"./bin/zv workflows show record --format json",
 		"./bin/zv workflows show compose-final",
 		"./bin/zv workflows show compose-final --format json",
+		"./bin/zv workflows show music-analyze",
+		"./bin/zv workflows show music-analyze --format json",
 		"./bin/zv workflows show shorts-render",
 		"./bin/zv workflows show shorts-render --format json",
 		"./bin/zv workflows show analysis-tactical-data",
@@ -395,6 +398,7 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowCommand(t *
 		"./bin/zv workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv",
 		"./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\\HLAE-2.190.1\\HLAE.exe --cs2 \"C:\\Games\\Counter-Strike 2\\game\\bin\\win64\\cs2.exe\"",
 		"./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4",
+		"./bin/zv workflows run music-analyze -- --input data/music/track.mp4 --out data/runs/run-004/rhythm.json",
 		"./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts",
 		"./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000",
 		"./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json",
@@ -420,12 +424,12 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowCommand(t *
 	if got, want := code, exitInvalidArgs; got != want {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
-	if want := "README.md: missing skill show command ./bin/zv skills show alpha"; !strings.Contains(stderr.String(), want) {
+	if want := "docs/workflows/catalog.md: missing skill show command ./bin/zv skills show alpha"; !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
 
-func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowJSONCommand(t *testing.T) {
+func TestRunWorkflowsCheckRejectsCatalogMissingDiscoveredRepoSkillShowJSONCommand(t *testing.T) {
 	tempDir := t.TempDir()
 	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
 		"---",
@@ -439,10 +443,10 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowJSONCommand
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	readmePath := filepath.Join(tempDir, "README.md")
-	body := readFileString(t, readmePath)
+	catalogPath := filepath.Join(tempDir, "docs", "workflows", "catalog.md")
+	body := readFileString(t, catalogPath)
 	body = strings.ReplaceAll(body, "./bin/zv skills show alpha --format json\n", "")
-	writeFile(t, readmePath, body)
+	writeFile(t, catalogPath, body)
 	withWorkingDir(t, tempDir)
 
 	var stdout, stderr strings.Builder
@@ -451,7 +455,7 @@ func TestRunWorkflowsCheckRejectsReadmeMissingDiscoveredRepoSkillShowJSONCommand
 	if got, want := code, exitInvalidArgs; got != want {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
-	if want := "README.md: missing skill show command ./bin/zv skills show alpha --format json"; !strings.Contains(stderr.String(), want) {
+	if want := "docs/workflows/catalog.md: missing skill show command ./bin/zv skills show alpha --format json"; !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
@@ -483,7 +487,7 @@ func TestRunWorkflowsCheckRejectsUndocumentedDiscoveredSkill(t *testing.T) {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
 	for _, want := range []string{
-		"README.md: missing repo skill bravo",
+		"docs/workflows/catalog.md: missing repo skill bravo",
 		".codex/README.md: missing repo skill bravo",
 	} {
 		if !strings.Contains(stderr.String(), want) {

@@ -200,6 +200,36 @@ func TestLegacyPresetsKeepHistoricalDefaults(t *testing.T) {
 	}
 }
 
+func TestViral60CleanRecordsDeathnoticesHUD(t *testing.T) {
+	preset, ok := PresetByName(PresetViral60Clean)
+	if !ok {
+		t.Fatalf("PresetByName(%q) ok = false, want true", PresetViral60Clean)
+	}
+	if got, want := preset.HUDMode, "deathnotices"; got != want {
+		t.Fatalf("hud mode = %q, want %q", got, want)
+	}
+	if preset.EffectsPreset != EffectsPresetViralUltraClean {
+		t.Fatalf("effects preset = %q, want %q", preset.EffectsPreset, EffectsPresetViralUltraClean)
+	}
+	if preset.FilterKind != FilterKindFullFrame {
+		t.Fatalf("filter kind = %q, want %q", preset.FilterKind, FilterKindFullFrame)
+	}
+}
+
+func TestOnlyCleanPresetsSetHUDMode(t *testing.T) {
+	for _, name := range PresetNames() {
+		t.Run(name, func(t *testing.T) {
+			preset, _ := PresetByName(name)
+			if name == PresetViral60Clean {
+				return
+			}
+			if preset.HUDMode != "" {
+				t.Fatalf("hud mode = %q, want empty (full-UI recording)", preset.HUDMode)
+			}
+		})
+	}
+}
+
 func TestViralBeatsyncRequiresRhythmInputs(t *testing.T) {
 	preset, ok := PresetByName(PresetViralBeatsync)
 	if !ok {

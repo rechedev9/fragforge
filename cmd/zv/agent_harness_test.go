@@ -158,7 +158,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 		"== shell syntax ==",
 		"== Codex sees AGENTS.md ==",
 		"== ZackVideo workflow contract ==",
-		"OK: 6 skills, 15 workflows, 14 workflow docs, and 19 agent prompt wrappers checked",
+		"OK: 6 skills, 15 workflows, 15 workflow docs, and 19 agent prompt wrappers checked",
 		"OK: Codex harness is wired",
 	} {
 		if !strings.Contains(body, want) {
@@ -679,6 +679,7 @@ func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
 		filepath.Join(root, "README.md"),
 		filepath.Join(root, "docs", "README.md"),
 		filepath.Join(root, "docs", "toolchain.md"),
+		filepath.Join(root, "docs", "workflows", "catalog.md"),
 	}
 	legacyCommands := legacyWorkflowCommands()
 	for _, path := range paths {
@@ -697,7 +698,26 @@ func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read README.md: %v", err)
 	}
-	body := string(readme)
+	for _, want := range []string{
+		"./bin/zv demo parse",
+		"./bin/zv demo players",
+		"./bin/zv record",
+		"./bin/zv compose final",
+		"./bin/zv music analyze",
+		"./bin/zv shorts render",
+		"./bin/zv presets",
+		"./bin/zv check",
+		"./bin/zv serve",
+	} {
+		if !strings.Contains(string(readme), want) {
+			t.Fatalf("README.md does not contain unified workflow command %q", want)
+		}
+	}
+	catalog, err := os.ReadFile(filepath.Join(root, "docs", "workflows", "catalog.md"))
+	if err != nil {
+		t.Fatalf("read docs/workflows/catalog.md: %v", err)
+	}
+	body := string(catalog)
 	for _, want := range []string{
 		"./bin/zv demo parse",
 		"./bin/zv demo players",
@@ -727,7 +747,7 @@ func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
 		"./bin/zv workflows check --format json",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("README.md does not contain unified workflow command %q", want)
+			t.Fatalf("docs/workflows/catalog.md does not contain unified workflow command %q", want)
 		}
 	}
 	skills, err := loadSkills()
@@ -739,7 +759,7 @@ func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
 	}
 	for _, skill := range skills {
 		if !strings.Contains(body, skill.Name) {
-			t.Fatalf("README.md does not document repo skill %q", skill.Name)
+			t.Fatalf("docs/workflows/catalog.md does not document repo skill %q", skill.Name)
 		}
 	}
 	toolchain, err := os.ReadFile(filepath.Join(root, "docs", "toolchain.md"))

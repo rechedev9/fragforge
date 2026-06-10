@@ -4,7 +4,11 @@
 !/data/lineups/*.json
 /.env
 
+# Built binaries
+*.exe
+
 # Generated media and overlay renders
+*.dem
 *.mp4
 *.mov
 *.webm
@@ -39,3 +43,8 @@ overlays/**/out/
 
 # Local git worktrees
 /.worktrees/
+/.claude/worktrees/
+
+# Logs
+*.log
+logs/

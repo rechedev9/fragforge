@@ -163,6 +163,213 @@ end)
 	}
 }
 
+func TestEvaluateEffectsTextShadowOptions(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_kill(function(k)
+  text({
+    value = "HEADSHOT",
+    at = k.time,
+    shadow_color = "black@0.55",
+    shadow_x = 2,
+    shadow_y = 3
+  })
+end)
+`,
+	}
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortClean,
+		DurationSeconds: 5,
+		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AK-47", Headshot: true}},
+	}
+
+	effects, warnings, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
+	}
+	effect := effects[0]
+	if effect.ShadowColor != "black@0.55" || effect.ShadowX != 2 || effect.ShadowY != 3 {
+		t.Fatalf("text shadow effect = %#v", effect)
+	}
+}
+
+func TestEvaluateEffectsTextShadowDefaultsOff(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_kill(function(k)
+  text({ value = "HEADSHOT", at = k.time })
+end)
+`,
+	}
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortClean,
+		DurationSeconds: 5,
+		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AK-47"}},
+	}
+
+	effects, _, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
+	}
+	if effects[0].ShadowColor != "" {
+		t.Fatalf("shadow color = %q, want empty (shadow off by default)", effects[0].ShadowColor)
+	}
+}
+
+func TestEvaluateEffectsRejectsInvalidShadow(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{
+			name: "bad color",
+			script: `
+on_segment(function(s)
+  text({ value = "bad", start = 0, duration = 1, shadow_color = "black:enable=1" })
+end)
+`,
+			want: "shadow_color",
+		},
+		{
+			name: "offset out of range",
+			script: `
+on_segment(function(s)
+  text({ value = "bad", start = 0, duration = 1, shadow_color = "black@0.5", shadow_x = 99 })
+end)
+`,
+			want: "shadow_x",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := evaluateEffects(effectsSource{
+				Preset: EffectsPresetExternal,
+				Script: tc.script,
+			}, ShortEdit{
+				SegmentID:       "seg-001",
+				Preset:          PresetShortClean,
+				DurationSeconds: 5,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("evaluateEffects error = %v, want %s validation", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestViralUltraCleanEmitsKillfeedPerKill(t *testing.T) {
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetViral60Clean,
+		DurationSeconds: 12,
+		Player:          "latto",
+		Map:             "de_mirage",
+		KillCount:       2,
+		Kills: []KillCue{
+			{Tick: 100, TimeSeconds: 1, Weapon: "AK-47"},
+			{Tick: 500, TimeSeconds: 7, Weapon: "AK-47", Headshot: true},
+		},
+	}
+
+	source, err := loadEffectsSource("", EffectsPresetViralUltraClean)
+	if err != nil {
+		t.Fatalf("loadEffectsSource error = %v", err)
+	}
+	effects, warnings, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	killfeeds := killfeedEffects(effects)
+	if got, want := len(killfeeds), len(short.Kills); got != want {
+		t.Fatalf("killfeed effects = %d, want %d (one per kill)", got, want)
+	}
+	for i, effect := range killfeeds {
+		if effect.AtSeconds != short.Kills[i].TimeSeconds {
+			t.Fatalf("killfeed[%d] at = %.3f, want %.3f", i, effect.AtSeconds, short.Kills[i].TimeSeconds)
+		}
+	}
+
+	ultra, err := loadEffectsSource("", EffectsPresetViralUltra)
+	if err != nil {
+		t.Fatalf("loadEffectsSource error = %v", err)
+	}
+	ultraEffects, _, err := evaluateEffects(ultra, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if got := len(killfeedEffects(ultraEffects)); got != 0 {
+		t.Fatalf("viral-ultra killfeed effects = %d, want 0 (full-UI preset keeps the HUD feed)", got)
+	}
+}
+
+func TestViralUltraCleanDropsPerKillTextBanners(t *testing.T) {
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetViral60Clean,
+		DurationSeconds: 20,
+		Player:          "latto",
+		Map:             "de_mirage",
+		KillCount:       5,
+		Kills: []KillCue{
+			{Tick: 100, TimeSeconds: 1, Weapon: "AK-47", Headshot: true},
+			{Tick: 160, TimeSeconds: 2, Weapon: "AK-47", Wallbang: true},
+			{Tick: 300, TimeSeconds: 6, Weapon: "AWP"},
+			{Tick: 400, TimeSeconds: 10, Weapon: "AK-47"},
+			{Tick: 500, TimeSeconds: 14, Weapon: "AK-47"},
+		},
+	}
+
+	source, err := loadEffectsSource("", EffectsPresetViralUltraClean)
+	if err != nil {
+		t.Fatalf("loadEffectsSource error = %v", err)
+	}
+	effects, _, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	// the killfeed overlay narrates the kills: no weapon labels, wallbang or
+	// chain banners, and no milestone pills on the clean preset
+	for _, effect := range effects {
+		if effect.Type != EffectText {
+			continue
+		}
+		for _, banned := range []string{"HEADSHOT", "THROUGH THE WALL", "FAST CHAIN", "KILLS", "AWP PICK"} {
+			if strings.Contains(effect.Value, banned) {
+				t.Fatalf("clean preset emits per-kill banner %q", effect.Value)
+			}
+		}
+	}
+	counters := 0
+	for _, effect := range effects {
+		if effect.Type == EffectText && strings.Contains(effect.Value, "/5") {
+			counters++
+		}
+	}
+	if counters != len(short.Kills) {
+		t.Fatalf("kill counter texts = %d, want %d", counters, len(short.Kills))
+	}
+	if got, want := len(killfeedEffects(effects)), len(short.Kills); got != want {
+		t.Fatalf("killfeed effects = %d, want %d", got, want)
+	}
+}
+
 func TestEvaluateEffectsRejectsInvalidFade(t *testing.T) {
 	_, _, err := evaluateEffects(effectsSource{
 		Preset: EffectsPresetExternal,

@@ -1159,10 +1159,11 @@ func replaceSkillShowFixture(t *testing.T, path, textReplacement, jsonReplacemen
 
 func writeWorkflowDocs(t *testing.T, root string) {
 	t.Helper()
-	writeFile(t, filepath.Join(root, "README.md"), strings.Join([]string{
+	catalogDoc := strings.Join([]string{
 		"# ZackVideo",
 		"",
 		"```bash",
+		"./bin/zv presets",
 		"./bin/zv demo parse --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json",
 		"./bin/zv demo players --demo testdata/foo.dem",
 		"./bin/zv utility audit --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv",
@@ -1237,7 +1238,9 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"./bin/zv workflows check --format json",
 		"```",
 		"",
-	}, "\n"))
+	}, "\n")
+	writeFile(t, filepath.Join(root, "README.md"), catalogDoc)
+	writeFile(t, filepath.Join(root, "docs", "workflows", "catalog.md"), catalogDoc)
 	writeFile(t, filepath.Join(root, "docs", "toolchain.md"), strings.Join([]string{
 		"# Toolchain",
 		"",
