@@ -418,6 +418,10 @@ func PackManifestFromManifest(manifest Manifest, result Result) PackManifest {
 		SkipExisting:      manifest.SkipExisting,
 		EffectsPath:       manifest.EffectsPath,
 		EffectsPreset:     manifest.EffectsPreset,
+		MusicPath:         manifest.MusicPath,
+		RhythmPath:        manifest.RhythmPath,
+		OutputFPS:         manifest.OutputFPS,
+		CompileSegments:   manifest.CompileSegments,
 		LineupCatalogPath: manifest.LineupCatalogPath,
 		UnmatchedSmokes:   manifest.UnmatchedSmokes,
 		PlayerImage:       manifest.PlayerImage,
@@ -447,6 +451,9 @@ func PackManifestFromManifest(manifest Manifest, result Result) PackManifest {
 			Video:              short.PublishPath,
 			SourceArtifact:     short.SourceArtifact,
 			PlayerImage:        short.PlayerImage,
+			MusicPath:          short.MusicPath,
+			RhythmPath:         short.RhythmPath,
+			OutputFPS:          short.OutputFPS,
 			VideoCRF:           short.VideoCRF,
 			VideoPreset:        short.VideoPreset,
 			HQFilters:          short.HQFilters,
@@ -462,6 +469,7 @@ func PackManifestFromManifest(manifest Manifest, result Result) PackManifest {
 			Hashtags:           append([]string(nil), short.Hashtags...),
 			Effects:            append([]Effect(nil), short.Effects...),
 			Smokes:             append([]SmokeCue(nil), short.Smokes...),
+			Parts:              append([]ShortPart(nil), short.Parts...),
 			DurationSeconds:    short.DurationSeconds,
 			Artifact:           artifacts[short.SegmentID],
 			CoverArtifact:      coverArtifacts[short.SegmentID],
@@ -656,6 +664,18 @@ func WritePublishSummary(path string, manifest Manifest) error {
 	sb.WriteString(fmt.Sprintf("- Preset: %s\n", manifest.Preset))
 	if manifest.VideoCRF > 0 || manifest.VideoPreset != "" {
 		sb.WriteString(fmt.Sprintf("- Video encoding: x264 CRF %d, preset %s\n", manifest.VideoCRF, manifest.VideoPreset))
+	}
+	if manifest.OutputFPS > 0 {
+		sb.WriteString(fmt.Sprintf("- Output FPS: %d\n", manifest.OutputFPS))
+	}
+	if manifest.CompileSegments {
+		sb.WriteString("- Output shape: compiled segments\n")
+	}
+	if manifest.MusicPath != "" {
+		sb.WriteString(fmt.Sprintf("- Music: %s\n", manifest.MusicPath))
+	}
+	if manifest.RhythmPath != "" {
+		sb.WriteString(fmt.Sprintf("- Rhythm sync: %s\n", manifest.RhythmPath))
 	}
 	if qualityFeatureEnabled(manifest) {
 		sb.WriteString(fmt.Sprintf("- HQ features: %s\n", featureSummary(manifest)))

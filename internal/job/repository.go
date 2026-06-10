@@ -121,6 +121,49 @@ func (r *Repository) GetMeta(ctx context.Context, id uuid.UUID) (Job, error) {
 	return j, nil
 }
 
+// List returns recent jobs without the large kill_plan payload.
+func (r *Repository) List(ctx context.Context, limit int) ([]Job, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, status, COALESCE(failure_reason,''), demo_path, demo_sha256,
+		        target_steamid, rules, created_at, updated_at
+		 FROM jobs ORDER BY updated_at DESC, created_at DESC LIMIT $1`, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query jobs: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := []Job{}
+	for rows.Next() {
+		var j Job
+		var statusStr string
+		var rulesJSON []byte
+		if err := rows.Scan(&j.ID, &statusStr, &j.FailureReason, &j.DemoPath, &j.DemoSHA256,
+			&j.TargetSteamID, &rulesJSON, &j.CreatedAt, &j.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan job: %w", err)
+		}
+		var err error
+		j.Status, err = ParseStatus(statusStr)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(rulesJSON, &j.Rules); err != nil {
+			return nil, fmt.Errorf("unmarshal rules: %w", err)
+		}
+		jobs = append(jobs, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate jobs: %w", err)
+	}
+	return jobs, nil
+}
+
 // UpdateStatus moves the job to a new status. failureReason is set when status=failed.
 func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status Status, failureReason string) error {
 	tag, err := r.pool.Exec(ctx,

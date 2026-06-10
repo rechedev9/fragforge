@@ -169,8 +169,8 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 	}
 	for _, want := range []string{
 		"../prompts/short-001-seg-001-cover.md",
-		"preset <span>short-clean</span>",
-		"video <span>crf 18 / fast</span>",
+		"preset <span>viral-60</span>",
+		"video <span>crf 16 / slow</span>",
 		"id=\"search\"",
 		"data-copy-target=\".caption\"",
 		"All weapons",
@@ -360,6 +360,8 @@ func TestRunSkipExistingReusesRenderedFiles(t *testing.T) {
 		filepath.Join(outDir, "short-002-seg-002.mp4"),
 		filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg"),
 		filepath.Join(outDir, "publish", "02_seg-002_martinezsa_de_ancient_1k_awp.cover.jpg"),
+		filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.sheet.jpg"),
+		filepath.Join(outDir, "publish", "02_seg-002_martinezsa_de_ancient_1k_awp.sheet.jpg"),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -686,6 +688,10 @@ func main() {
 		return
 	}
 	out := os.Args[len(os.Args)-1]
+	if out == "-" {
+		// Null-muxer runs (quality checks) produce no output file.
+		return
+	}
 	if ` + boolLiteral(failCovers) + ` && strings.HasSuffix(out, ".cover.jpg") {
 		os.Exit(2)
 	}
@@ -711,7 +717,7 @@ func main() {
 	if failCovers {
 		failScript = "case \"$last\" in *.cover.jpg) exit 2;; esac\n"
 	}
-	body := "#!/bin/sh\nlast=\nfor arg in \"$@\"; do last=\"$arg\"; done\n" + failScript + "mkdir -p \"$(dirname \"$last\")\"\nprintf fake > \"$last\"\n"
+	body := "#!/bin/sh\nlast=\nfor arg in \"$@\"; do last=\"$arg\"; done\ncase \"$last\" in -) exit 0;; esac\n" + failScript + "mkdir -p \"$(dirname \"$last\")\"\nprintf fake > \"$last\"\n"
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -1839,8 +1839,10 @@ func TestValidateSkillWorkflowRequirementCatalogRejectsUnknownWorkflow(t *testin
 
 func TestValidateSkillWorkflowRequirementSkillsCoversCurrentRequirements(t *testing.T) {
 	skills := []skillInfo{
+		{Name: "zackvideo-cheater-pov-reels"},
 		{Name: "zackvideo-cs2-utility-shorts"},
 		{Name: "zackvideo-lineup-audit"},
+		{Name: "zackvideo-music-scripted-shorts"},
 		{Name: "zackvideo-shorts-production"},
 		{Name: "zackvideo-youtube-shorts-publish"},
 	}

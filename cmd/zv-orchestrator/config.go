@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"time"
@@ -11,33 +12,62 @@ type config struct {
 	HTTPAddr          string
 	DatabaseURL       string
 	RedisAddr         string
+	QueueMode         string
 	DataDir           string
 	WorkerConcurrency int
 	MediaWorkDir      string
 	RecorderPath      string
 	ComposerPath      string
+	EditorPath        string
 	HLAEPath          string
 	CS2Path           string
 	FFmpegPath        string
+	FFprobePath       string
 	RecordTimeout     string
 	ComposeTimeout    string
+	RenderTimeout     string
+	MutationToken     string
+	CodexPath         string
+	CodexModel        string
+	AgentTimeout      string
 }
+
+const (
+	databaseURLMemory = "memory"
+	queueModeRedis    = "redis"
+	queueModeInline   = "inline"
+)
 
 func loadConfig() (config, error) {
 	c := config{
-		HTTPAddr:     envOr("ZV_HTTP_ADDR", ":8080"),
-		DatabaseURL:  os.Getenv("ZV_DATABASE_URL"),
-		RedisAddr:    envOr("ZV_REDIS_ADDR", "localhost:6379"),
-		DataDir:      envOr("ZV_DATA_DIR", "./data"),
-		MediaWorkDir: os.Getenv("ZV_MEDIA_WORK_DIR"),
-		RecorderPath: os.Getenv("ZV_RECORDER_PATH"),
-		ComposerPath: os.Getenv("ZV_COMPOSER_PATH"),
-		HLAEPath:     os.Getenv("ZV_HLAE_PATH"),
-		CS2Path:      os.Getenv("ZV_CS2_PATH"),
-		FFmpegPath:   os.Getenv("ZV_FFMPEG_PATH"),
+		HTTPAddr:      envOr("ZV_HTTP_ADDR", "127.0.0.1:8080"),
+		DatabaseURL:   os.Getenv("ZV_DATABASE_URL"),
+		RedisAddr:     envOr("ZV_REDIS_ADDR", "localhost:6379"),
+		QueueMode:     envOr("ZV_QUEUE_MODE", queueModeRedis),
+		DataDir:       envOr("ZV_DATA_DIR", "./data"),
+		MediaWorkDir:  os.Getenv("ZV_MEDIA_WORK_DIR"),
+		RecorderPath:  os.Getenv("ZV_RECORDER_PATH"),
+		ComposerPath:  os.Getenv("ZV_COMPOSER_PATH"),
+		EditorPath:    os.Getenv("ZV_EDITOR_PATH"),
+		HLAEPath:      os.Getenv("ZV_HLAE_PATH"),
+		CS2Path:       os.Getenv("ZV_CS2_PATH"),
+		FFmpegPath:    os.Getenv("ZV_FFMPEG_PATH"),
+		FFprobePath:   os.Getenv("ZV_FFPROBE_PATH"),
+		MutationToken: os.Getenv("ZV_MUTATION_TOKEN"),
+		CodexPath:     os.Getenv("ZV_CODEX_PATH"),
+		CodexModel:    os.Getenv("ZV_CODEX_MODEL"),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
+	}
+	if c.DatabaseURL == databaseURLMemory && c.QueueMode == queueModeRedis {
+		c.QueueMode = queueModeInline
+	}
+	if c.QueueMode != queueModeRedis && c.QueueMode != queueModeInline {
+		return c, fmt.Errorf("ZV_QUEUE_MODE must be %q or %q", queueModeRedis, queueModeInline)
+	}
+	if !isLoopbackHTTPAddr(c.HTTPAddr) && c.MutationToken == "" {
+		return c, fmt.Errorf("ZV_MUTATION_TOKEN is required when ZV_HTTP_ADDR is not loopback")
 	}
 
 	concRaw := envOr("ZV_WORKER_CONCURRENCY", "2")
@@ -55,6 +85,14 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return c, err
 	}
+	c.RenderTimeout, err = durationEnv("ZV_RENDER_TIMEOUT", "20m")
+	if err != nil {
+		return c, err
+	}
+	c.AgentTimeout, err = durationEnv("ZV_AGENT_TIMEOUT", "5m")
+	if err != nil {
+		return c, err
+	}
 	if err := c.validateMediaConfig(); err != nil {
 		return c, err
 	}
@@ -67,6 +105,18 @@ func (c config) recordWorkerEnabled() bool {
 
 func (c config) composeWorkerEnabled() bool {
 	return c.ComposerPath != ""
+}
+
+func (c config) renderWorkerEnabled() bool {
+	return c.EditorPath != ""
+}
+
+func (c config) streamRenderWorkerEnabled() bool {
+	return c.FFmpegPath != ""
+}
+
+func (c config) agentWorkerEnabled() bool {
+	return c.CodexPath != ""
 }
 
 func (c config) validateMediaConfig() error {
@@ -104,4 +154,16 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func isLoopbackHTTPAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

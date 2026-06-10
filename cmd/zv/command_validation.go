@@ -11,6 +11,12 @@ func validateSkillCommand(command []string) string {
 		return "missing zv command"
 	}
 	switch command[0] {
+	case "short":
+		return validateShortCommand(command[1:])
+	case "presets":
+		if issue := validateFormattedCommand("presets", command[1:]); issue != "" {
+			return issue
+		}
 	case "check":
 		if issue := validateFormattedCommand("check", command[1:]); issue != "" {
 			return issue
@@ -109,6 +115,24 @@ func validateSkillCommand(command []string) string {
 		}
 	default:
 		return fmt.Sprintf("uses non-standard zv command %q", command[0])
+	}
+	return ""
+}
+
+func validateShortCommand(args []string) string {
+	if isSingleHelp(args) {
+		return ""
+	}
+	rest := args
+	hasDemo := len(rest) > 0 && !strings.HasPrefix(rest[0], "-")
+	if hasDemo {
+		rest = rest[1:]
+	}
+	if issue := validateRequiredFlags(`"short"`, rest, "--prompt"); issue != "" {
+		return issue
+	}
+	if !hasDemo && !hasFlagValue(rest, "--from-recording") {
+		return `missing demo path for "short"; pass <demo.dem> or --from-recording <recording-result.json>`
 	}
 	return ""
 }
@@ -279,6 +303,8 @@ func commandValueFlags(commandName string, required []string) []string {
 		flags = append(flags, "--contains")
 	case `"utility audit"`:
 		flags = append(flags, "--format")
+	case `"short"`:
+		flags = append(flags, "--preset", "--out", "--music", "--target-steamid", "--hlae", "--cs2", "--from-recording")
 	case `"record"`:
 		flags = append(flags, "--hlae", "--cs2", "--hud", "--fps", "--video-crf", "--timeout")
 	case `"compose final"`:
@@ -290,6 +316,9 @@ func commandValueFlags(commandName string, required []string) []string {
 			"--preset",
 			"--effects",
 			"--effects-preset",
+			"--music",
+			"--rhythm",
+			"--fps",
 			"--lineup-catalog",
 			"--segments",
 			"--limit",
@@ -325,7 +354,7 @@ func commandBoolFlags(commandName string) []string {
 	switch commandName {
 	case `"demo parse"`:
 		return []string{"--verbose"}
-	case `"record"`, `"compose final"`:
+	case `"short"`, `"record"`, `"compose final"`:
 		return []string{"--dry-run"}
 	case `"shorts render"`:
 		return []string{
@@ -339,6 +368,7 @@ func commandBoolFlags(commandName string) []string {
 			"--quality-checks",
 			"--skip-existing",
 			"--temporal-smoothing",
+			"--compile-segments",
 		}
 	default:
 		return nil

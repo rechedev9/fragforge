@@ -10,6 +10,7 @@ import (
 	"github.com/reche/zackvideo/internal/killplan"
 	"github.com/reche/zackvideo/internal/lineups"
 	"github.com/reche/zackvideo/internal/recording"
+	"github.com/reche/zackvideo/internal/rhythm"
 )
 
 func BuildManifest(result recording.RecordingResult, opts ManifestOptions) Manifest {
@@ -42,16 +43,19 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	promptDir := filepath.Join(opts.OutputDir, "prompts")
 	preset := opts.Preset
 	if preset == "" {
-		preset = PresetShortClean
+		preset = DefaultPreset().Name
+	}
+	renderPreset, ok := PresetByName(preset)
+	if !ok {
+		return Manifest{Warnings: warnings}, unknownPresetError(preset)
 	}
 	effectsPreset := opts.EffectsPreset
-	if preset == PresetSmokeLineups && opts.EffectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
-		effectsPreset = EffectsPresetSmokeLineups
+	effectsPath := opts.EffectsPath
+	if effectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
+		effectsPreset = renderPreset.EffectsPreset
+		effectsPath = renderPreset.EffectsPath
 	}
-	if isNaturalPreset(preset) && opts.EffectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
-		effectsPreset = EffectsPresetNone
-	}
-	effectsSource, err := loadEffectsSource(opts.EffectsPath, effectsPreset)
+	effectsSource, err := loadEffectsSource(effectsPath, effectsPreset)
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
@@ -69,12 +73,15 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
-	hqFeaturesDefault := preset == PresetShortViralSquare || preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ2Full || preset == PresetShortNaturalHQ2FullPlus || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth || preset == PresetSmokeLineups
-	hqFilters := opts.HQFilters || hqFeaturesDefault
-	audioNormalize := opts.AudioNormalize || hqFeaturesDefault
-	qualityChecks := opts.QualityChecks || hqFeaturesDefault
-	coverSheets := opts.CoverSheets || hqFeaturesDefault
-	temporalSmoothing := opts.TemporalSmoothing || preset == PresetShortNaturalHQ3Smooth
+	outputFPS, err := normalizeOutputFPSForPreset(renderPreset, opts.OutputFPS)
+	if err != nil {
+		return Manifest{Warnings: warnings}, err
+	}
+	hqFilters := opts.HQFilters || renderPreset.HQFilters
+	audioNormalize := opts.AudioNormalize || renderPreset.AudioNormalize
+	qualityChecks := opts.QualityChecks || renderPreset.QualityChecks
+	coverSheets := opts.CoverSheets || renderPreset.CoverSheets
+	temporalSmoothing := opts.TemporalSmoothing || renderPreset.TemporalSmoothing
 	segmentFilter := uniqueSegmentIDs(opts.SegmentIDs)
 	lineupCatalog, err := lineups.LoadDir(opts.LineupCatalogPath)
 	if err != nil {
@@ -94,6 +101,10 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		SkipExisting:      opts.SkipExisting,
 		EffectsPath:       effectsSource.Path,
 		EffectsPreset:     effectsSource.Preset,
+		MusicPath:         opts.MusicPath,
+		RhythmPath:        opts.RhythmPath,
+		OutputFPS:         outputFPS,
+		CompileSegments:   opts.CompileSegments,
 		LineupCatalogPath: opts.LineupCatalogPath,
 		PlayerImage:       playerImagePath,
 		PlayerKeyColor:    playerKeyColor,
@@ -126,6 +137,49 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		case !availableClips[id]:
 			manifest.Warnings = append(manifest.Warnings, fmt.Sprintf("requested segment %q has no recorded clip", id))
 		}
+	}
+	if opts.CompileSegments {
+		rhythmSync, err := loadRhythmSync(opts.RhythmPath)
+		if err != nil {
+			return manifest, err
+		}
+		compiled, err := buildCompiledShort(result, opts, compiledShortOptions{
+			BaseDir:           baseDir,
+			PromptDir:         promptDir,
+			LogDir:            logDir,
+			Preset:            preset,
+			Player:            player,
+			MapName:           mapName,
+			ClipBySegment:     clipBySegment,
+			Selected:          selected,
+			RhythmSync:        rhythmSync,
+			PlayerImagePath:   playerImagePath,
+			PlayerKeyColor:    playerKeyColor,
+			VideoCRF:          videoCRF,
+			VideoPreset:       videoPreset,
+			OutputFPS:         outputFPS,
+			HQFilters:         hqFilters,
+			AudioNormalize:    audioNormalize,
+			TemporalSmoothing: temporalSmoothing,
+			CoverSheets:       coverSheets,
+			QualityChecks:     qualityChecks,
+		})
+		if err != nil {
+			return manifest, err
+		}
+		if compiled.SegmentID != "" {
+			for _, part := range compiled.Parts {
+				manifest.Warnings = append(manifest.Warnings, ValidateSourceArtifact(part.SourceArtifact)...)
+			}
+			manifest.Shorts = append(manifest.Shorts, compiled)
+		}
+		if len(manifest.Shorts) == 0 {
+			manifest.Warnings = append(manifest.Warnings, "segment selection produced no shorts")
+		}
+		if err := applyEffectsToManifest(&manifest, effectsSource, opts.FFmpegPath); err != nil {
+			return manifest, err
+		}
+		return manifest, nil
 	}
 	for i, segment := range result.Plan.Segments {
 		if len(selected) > 0 && !selected[segment.ID] {
@@ -187,6 +241,9 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			PublishPath:       filepath.Join(opts.PublishDir, publishBase+".mp4"),
 			PlayerImage:       playerImagePath,
 			PlayerKeyColor:    playerKeyColor,
+			MusicPath:         opts.MusicPath,
+			RhythmPath:        opts.RhythmPath,
+			OutputFPS:         outputFPS,
 			VideoCRF:          videoCRF,
 			VideoPreset:       videoPreset,
 			HQFilters:         hqFilters,
@@ -225,10 +282,6 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	return manifest, nil
 }
 
-func isNaturalPreset(preset string) bool {
-	return preset == PresetShortNaturalHQ || preset == PresetShortNaturalHQ2 || preset == PresetShortNaturalHQ2Full || preset == PresetShortNaturalHQ2FullPlus || preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth
-}
-
 func uniqueSegmentIDs(ids []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(ids))
@@ -243,6 +296,161 @@ func uniqueSegmentIDs(ids []string) []string {
 	return out
 }
 
+type compiledShortOptions struct {
+	BaseDir           string
+	PromptDir         string
+	LogDir            string
+	Preset            string
+	Player            string
+	MapName           string
+	ClipBySegment     map[string]composition.SegmentClip
+	Selected          map[string]bool
+	RhythmSync        map[string]rhythm.SegmentSync
+	PlayerImagePath   string
+	PlayerKeyColor    string
+	VideoCRF          int
+	VideoPreset       string
+	OutputFPS         int
+	HQFilters         bool
+	AudioNormalize    bool
+	TemporalSmoothing bool
+	CoverSheets       bool
+	QualityChecks     bool
+}
+
+func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, c compiledShortOptions) (ShortEdit, error) {
+	const segmentID = "demo-compilation"
+
+	var parts []ShortPart
+	var kills []KillCue
+	var allKills []killplan.Kill
+	cursor := 0.0
+	for _, segment := range result.Plan.Segments {
+		if len(c.Selected) > 0 && !c.Selected[segment.ID] {
+			continue
+		}
+		if opts.Limit > 0 && len(parts) >= opts.Limit {
+			break
+		}
+		clip, ok := c.ClipBySegment[segment.ID]
+		if !ok {
+			continue
+		}
+		duration := clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds)
+		if duration <= 0 {
+			continue
+		}
+		partStart := cursor
+		gapBefore := 0.0
+		if c.RhythmSync != nil && len(segment.Kills) > 0 {
+			entry, ok := c.RhythmSync[segment.ID]
+			if !ok {
+				return ShortEdit{}, fmt.Errorf("rhythm json has no segment_sync entry for %s", segment.ID)
+			}
+			partStart = entry.TimelineStartSeconds
+			gapBefore = entry.GapBeforeSeconds
+			if gapBefore == 0 && partStart > cursor {
+				gapBefore = partStart - cursor
+			}
+			if partStart < cursor-0.001 {
+				return ShortEdit{}, fmt.Errorf("rhythm sync for %s starts before previous segment", segment.ID)
+			}
+		}
+		partKills := killCues(segment, result.Plan.Tickrate)
+		for _, kill := range partKills {
+			kill.TimeSeconds += partStart
+			kills = append(kills, kill)
+		}
+		allKills = append(allKills, segment.Kills...)
+		parts = append(parts, ShortPart{
+			SegmentID:            segment.ID,
+			Input:                resolvePath(c.BaseDir, clip.Path),
+			SourceArtifact:       clip.Artifact,
+			DurationSeconds:      duration,
+			TimelineStartSeconds: partStart,
+			GapBeforeSeconds:     gapBefore,
+			Kills:                partKills,
+		})
+		cursor = partStart + duration
+	}
+	if len(parts) == 0 {
+		return ShortEdit{}, nil
+	}
+
+	primary := primaryWeapon(allKills)
+	killCount := len(allKills)
+	title, caption, hashtags := publishText(c.Player, c.MapName, killCount, primary)
+	publishBase := publishCompiledFileBase(1, c.Player, c.MapName, killCount, primary)
+	duration := cursor
+	coverTime := coverTimeSeconds(kills, duration)
+	short := ShortEdit{
+		Index:             1,
+		SegmentID:         segmentID,
+		Preset:            c.Preset,
+		Player:            c.Player,
+		Map:               c.MapName,
+		KillCount:         killCount,
+		PrimaryWeapon:     primary,
+		Input:             parts[0].Input,
+		Output:            filepath.Join(opts.OutputDir, "short-001-demo-compilation.mp4"),
+		SourceArtifact:    parts[0].SourceArtifact,
+		PromptPath:        filepath.Join(c.PromptDir, "short-001-demo-compilation-cover.md"),
+		PublishPath:       filepath.Join(opts.PublishDir, publishBase+".mp4"),
+		PlayerImage:       c.PlayerImagePath,
+		PlayerKeyColor:    c.PlayerKeyColor,
+		MusicPath:         opts.MusicPath,
+		RhythmPath:        opts.RhythmPath,
+		OutputFPS:         c.OutputFPS,
+		VideoCRF:          c.VideoCRF,
+		VideoPreset:       c.VideoPreset,
+		HQFilters:         c.HQFilters,
+		AudioNormalize:    c.AudioNormalize,
+		TemporalSmoothing: c.TemporalSmoothing,
+		CaptionPath:       filepath.Join(opts.PublishDir, publishBase+".caption.txt"),
+		CoverTimeSeconds:  coverTime,
+		DurationSeconds:   duration,
+		Label:             shortLabel(c.Player, c.MapName, killCount),
+		Title:             title,
+		Headline:          premiumHeadline(c.MapName, killCount, primary),
+		Caption:           caption,
+		Hashtags:          hashtags,
+		Kills:             kills,
+		Parts:             parts,
+		RenderLogPath:     filepath.Join(c.LogDir, "short-001-demo-compilation-render.log"),
+	}
+	if opts.CoversEnabled {
+		short.CoverPath = filepath.Join(opts.PublishDir, publishBase+".cover.jpg")
+		if c.CoverSheets {
+			short.CoverSheetPath = filepath.Join(opts.PublishDir, publishBase+".sheet.jpg")
+		}
+	}
+	if c.QualityChecks {
+		short.QualityLogPath = filepath.Join(c.LogDir, "short-001-demo-compilation-quality.log")
+	}
+	return short, nil
+}
+
+func publishCompiledFileBase(index int, player, mapName string, killCount int, weapon string) string {
+	parts := []string{
+		fmt.Sprintf("%02d", index),
+		"demo-compilation",
+		safeFilenameToken(player),
+		safeFilenameToken(mapName),
+	}
+	if killCount > 0 {
+		parts = append(parts, fmt.Sprintf("%dk", killCount))
+	}
+	parts = append(parts, safeFilenameToken(weapon))
+
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return strings.Join(out, "_")
+}
+
 func normalizeVideoCRF(crf int) (int, error) {
 	if crf == 0 {
 		return DefaultVideoCRF, nil
@@ -254,14 +462,10 @@ func normalizeVideoCRF(crf int) (int, error) {
 }
 
 func normalizeVideoCRFForPreset(preset string, crf int) (int, error) {
-	if crf == 0 && preset == PresetShortNaturalHQ2FullPlus {
-		return NaturalHQ2FullPlusVideoCRF, nil
-	}
-	if crf == 0 && (preset == PresetShortNaturalHQ3 || preset == PresetShortNaturalHQ3Smooth) {
-		return NaturalHQ3VideoCRF, nil
-	}
-	if crf == 0 && (preset == PresetShortViralSquare || isNaturalPreset(preset) || preset == PresetSmokeLineups) {
-		return NaturalHQVideoCRF, nil
+	if crf == 0 {
+		if renderPreset, ok := PresetByName(preset); ok {
+			return renderPreset.VideoCRF, nil
+		}
 	}
 	return normalizeVideoCRF(crf)
 }
@@ -280,16 +484,26 @@ func normalizeVideoPreset(preset string) (string, error) {
 }
 
 func normalizeVideoPresetForPreset(editPreset, videoPreset string) (string, error) {
-	if strings.TrimSpace(videoPreset) == "" && editPreset == PresetShortNaturalHQ2FullPlus {
-		return NaturalHQ2FullPlusVideoPreset, nil
-	}
-	if strings.TrimSpace(videoPreset) == "" && (editPreset == PresetShortNaturalHQ3 || editPreset == PresetShortNaturalHQ3Smooth) {
-		return NaturalHQ3VideoPreset, nil
-	}
-	if strings.TrimSpace(videoPreset) == "" && (editPreset == PresetShortViralSquare || isNaturalPreset(editPreset) || editPreset == PresetSmokeLineups) {
-		return NaturalHQVideoPreset, nil
+	if strings.TrimSpace(videoPreset) == "" {
+		if renderPreset, ok := PresetByName(editPreset); ok {
+			return renderPreset.VideoPreset, nil
+		}
 	}
 	return normalizeVideoPreset(videoPreset)
+}
+
+func normalizeOutputFPS(fps int) (int, error) {
+	return normalizeOutputFPSForPreset(DefaultPreset(), fps)
+}
+
+func normalizeOutputFPSForPreset(preset RenderPreset, fps int) (int, error) {
+	if fps == 0 {
+		return preset.FPS, nil
+	}
+	if fps < 1 || fps > 240 {
+		return 0, fmt.Errorf("output fps must be between 1 and 240")
+	}
+	return fps, nil
 }
 
 func segmentIDSet(ids []string) map[string]bool {

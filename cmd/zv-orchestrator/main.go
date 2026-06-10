@@ -14,6 +14,7 @@ import (
 	"github.com/reche/zackvideo/internal/httpapi"
 	"github.com/reche/zackvideo/internal/job"
 	"github.com/reche/zackvideo/internal/storage"
+	"github.com/reche/zackvideo/internal/streamclips"
 	"github.com/reche/zackvideo/internal/tasks"
 	"github.com/reche/zackvideo/internal/workers"
 )
@@ -27,54 +28,50 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
-	if err != nil {
-		log.Fatalf("postgres config: %v", err)
-	}
-	// The pool is shared by the Asynq workers (each in-flight task can hold a
-	// connection) and the HTTP server. Size it for worker concurrency plus
-	// request headroom so tasks and requests do not block acquiring a connection,
-	// and keep a couple of warm connections to avoid cold-start latency.
-	const httpConnHeadroom = 8
-	if want := int32(cfg.WorkerConcurrency + httpConnHeadroom); want > poolCfg.MaxConns {
-		poolCfg.MaxConns = want
-	}
-	poolCfg.MinConns = 2
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
-	if err != nil {
-		log.Fatalf("postgres: %v", err)
-	}
-	defer pool.Close()
-
-	pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
-	err = pool.Ping(pingCtx)
-	cancelPing()
-	if err != nil {
-		log.Fatalf("postgres ping: %v", err)
-	}
-
 	store, err := storage.NewLocal(cfg.DataDir)
 	if err != nil {
 		log.Fatalf("storage: %v", err)
 	}
 
-	repo := job.NewRepository(pool)
-	redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr}
-	client := asynq.NewClient(redisOpt)
-	defer client.Close()
+	var repo orchestratorJobRepository
+	var streamRepo httpapi.StreamJobRepository
+	if cfg.DatabaseURL == databaseURLMemory {
+		repo = newMemoryJobRepository()
+		log.Printf("postgres: using in-memory job repository")
+	} else {
+		poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+		if err != nil {
+			log.Fatalf("postgres config: %v", err)
+		}
+		// The pool is shared by the Asynq workers (each in-flight task can hold a
+		// connection) and the HTTP server. Size it for worker concurrency plus
+		// request headroom so tasks and requests do not block acquiring a connection,
+		// and keep a couple of warm connections to avoid cold-start latency.
+		const httpConnHeadroom = 8
+		if want := int32(cfg.WorkerConcurrency + httpConnHeadroom); want > poolCfg.MaxConns {
+			poolCfg.MaxConns = want
+		}
+		poolCfg.MinConns = 2
 
-	handlers := httpapi.NewHandlers(repo, store, client)
-	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.Routes(handlers),
-		ReadHeaderTimeout: 10 * time.Second,
+		pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+		if err != nil {
+			log.Fatalf("postgres: %v", err)
+		}
+		defer pool.Close()
+
+		pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
+		err = pool.Ping(pingCtx)
+		cancelPing()
+		if err != nil {
+			log.Fatalf("postgres ping: %v", err)
+		}
+		repo = job.NewRepository(pool)
+		streamRepo = streamclips.NewRepository(pool)
 	}
 
-	worker := workers.NewParserWorker(repo, store)
-	asynqSrv := asynq.NewServer(redisOpt, asynq.Config{Concurrency: cfg.WorkerConcurrency})
-	mux := asynq.NewServeMux()
-	mux.HandleFunc(tasks.TypeParseDemo, worker.HandleParseDemo)
+	taskHandlers := map[string]taskHandler{}
+	parserWorker := workers.NewParserWorker(repo, store)
+	taskHandlers[tasks.TypeParseDemo] = parserWorker.HandleParseDemo
 	if cfg.recordWorkerEnabled() {
 		recordWorker := workers.NewRecordWorker(repo, store, workers.RecordWorkerConfig{
 			WorkDir:      cfg.MediaWorkDir,
@@ -83,8 +80,8 @@ func main() {
 			CS2Path:      cfg.CS2Path,
 			Timeout:      cfg.RecordTimeout,
 		})
-		mux.HandleFunc(tasks.TypeRecordDemo, recordWorker.HandleRecordDemo)
-		log.Printf("asynq: record worker enabled")
+		taskHandlers[tasks.TypeRecordDemo] = recordWorker.HandleRecordDemo
+		log.Printf("worker: record enabled")
 	}
 	if cfg.composeWorkerEnabled() {
 		composeWorker := workers.NewComposeWorker(repo, store, workers.ComposeWorkerConfig{
@@ -93,8 +90,76 @@ func main() {
 			FFmpegPath:   cfg.FFmpegPath,
 			Timeout:      cfg.ComposeTimeout,
 		})
-		mux.HandleFunc(tasks.TypeComposeFinal, composeWorker.HandleComposeFinal)
-		log.Printf("asynq: compose worker enabled")
+		taskHandlers[tasks.TypeComposeFinal] = composeWorker.HandleComposeFinal
+		log.Printf("worker: compose enabled")
+	}
+	if cfg.renderWorkerEnabled() {
+		renderWorker := workers.NewRenderWorker(repo, store, workers.RenderWorkerConfig{
+			WorkDir:     cfg.MediaWorkDir,
+			EditorPath:  cfg.EditorPath,
+			FFmpegPath:  cfg.FFmpegPath,
+			FFprobePath: cfg.FFprobePath,
+			Timeout:     cfg.RenderTimeout,
+		})
+		taskHandlers[tasks.TypeRenderVariant] = renderWorker.HandleRenderVariant
+		log.Printf("worker: render enabled")
+	}
+	if cfg.streamRenderWorkerEnabled() && streamRepo != nil {
+		streamWorker := workers.NewStreamRenderWorker(streamRepo, store, workers.StreamRenderWorkerConfig{
+			WorkDir:    cfg.MediaWorkDir,
+			FFmpegPath: cfg.FFmpegPath,
+			Timeout:    cfg.RenderTimeout,
+		})
+		taskHandlers[tasks.TypeRenderStreamClip] = streamWorker.HandleRenderStreamClip
+		log.Printf("worker: stream render enabled")
+	}
+	if cfg.agentWorkerEnabled() {
+		agentWorker := workers.NewAgentWorker(store, workers.AgentWorkerConfig{
+			WorkDir:   cfg.MediaWorkDir,
+			CodexPath: cfg.CodexPath,
+			Model:     cfg.CodexModel,
+			Timeout:   cfg.AgentTimeout,
+		})
+		taskHandlers[tasks.TypeCodexAgent] = agentWorker.HandleCodexAgent
+		log.Printf("worker: codex agent enabled")
+	}
+
+	var queue httpapi.Enqueuer
+	var asynqSrv *asynq.Server
+	var inline *inlineQueue
+	if cfg.QueueMode == queueModeInline {
+		inline = newInlineQueue(taskHandlers, cfg.WorkerConcurrency)
+		inline.Start(ctx)
+		queue = inline
+		log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
+	} else {
+		redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr}
+		client := asynq.NewClient(redisOpt)
+		defer client.Close()
+		queue = client
+
+		asynqSrv = asynq.NewServer(redisOpt, asynq.Config{Concurrency: cfg.WorkerConcurrency})
+		mux := asynq.NewServeMux()
+		for taskType, handler := range taskHandlers {
+			mux.HandleFunc(taskType, handler)
+		}
+		go func() {
+			log.Printf("asynq: starting worker (concurrency=%d)", cfg.WorkerConcurrency)
+			if err := asynqSrv.Run(mux); err != nil {
+				log.Printf("asynq: %v", err)
+			}
+		}()
+	}
+
+	handlers := httpapi.NewHandlers(repo, store, queue,
+		httpapi.WithMutationToken(cfg.MutationToken),
+		httpapi.WithStreamRepository(streamRepo),
+		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
+	)
+	srv := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           httpapi.Routes(handlers),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	// Start HTTP
@@ -105,20 +170,17 @@ func main() {
 		}
 	}()
 
-	// Start Asynq (blocks until ctx is cancelled)
-	go func() {
-		log.Printf("asynq: starting worker (concurrency=%d)", cfg.WorkerConcurrency)
-		if err := asynqSrv.Run(mux); err != nil {
-			log.Printf("asynq: %v", err)
-		}
-	}()
-
 	<-ctx.Done()
 	log.Print("shutdown: received signal, draining")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
-	asynqSrv.Shutdown()
+	if asynqSrv != nil {
+		asynqSrv.Shutdown()
+	}
+	if inline != nil {
+		inline.Shutdown(shutdownCtx)
+	}
 	log.Print("shutdown: done")
 }

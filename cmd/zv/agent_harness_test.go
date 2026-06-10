@@ -158,7 +158,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 		"== shell syntax ==",
 		"== Codex sees AGENTS.md ==",
 		"== ZackVideo workflow contract ==",
-		"OK: 4 skills, 15 workflows, 13 workflow docs, and 19 agent prompt wrappers checked",
+		"OK: 6 skills, 15 workflows, 14 workflow docs, and 19 agent prompt wrappers checked",
 		"OK: Codex harness is wired",
 	} {
 		if !strings.Contains(body, want) {

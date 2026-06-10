@@ -3,6 +3,8 @@ package main
 const usage = `zv - deterministic CS2 demo-to-video workflows
 
 Usage:
+  zv short <demo.dem> --prompt "<instruction>" [--preset <name>] [--out <dir>] [--music <audio>] [--target-steamid <SteamID64>] [--from-recording <recording-result.json>] [--dry-run]
+  zv presets [--format text|json]
   zv demo parse [zv-parser parse flags]
   zv demo players [zv-demo-players flags]
   zv utility audit [zv-parser utility-audit flags]
@@ -35,6 +37,33 @@ Legacy pass-throughs:
   zv rhythm [zv-rhythm args]
 
 Use "zv <command> --help" for the underlying command help.
+`
+
+const shortUsage = `usage: zv short <demo.dem> --prompt "<instruction>" [flags]
+
+One command from demo to upload-ready vertical Short (always 1080x1920 @ 60fps):
+parse -> record (HLAE/CS2) -> [music analyze] -> render + publish pack.
+
+Flags:
+  --prompt <text>            editing instruction (Spanish or English); required
+  --preset <name>            render preset; overrides the prompt (see zv presets)
+  --out <dir>                run output directory; defaults under data/runs
+  --music <audio>            music file; required for beat-synced shorts
+  --target-steamid <id>      target player SteamID64 when the prompt only names a player
+  --hlae <HLAE.exe>          HLAE path; defaults to ZV_HLAE_PATH
+  --cs2 <cs2.exe>            CS2 path; defaults to ZV_CS2_PATH
+  --from-recording <json>    existing recording-result.json; skips parse and record
+  --dry-run                  print the resolved plan without launching HLAE/CS2 or FFmpeg
+
+Prompt rules (deterministic keywords, no model calls):
+  "todas las kills" / "all kills"        one compiled Short with every kill (default)
+  "mejores" / "best" / "highlights"      best-moments compilation (top segments)
+  "música" / "music" / "beat" / "ritmo"  beat-synced edit; uses preset viral-beatsync and needs --music
+  a SteamID64 in the prompt              selects the target player
+  a preset name in the prompt            selects that preset
+`
+
+const presetsUsage = `usage: zv presets [--format text|json]
 `
 
 const demoUsage = `usage: zv demo parse [zv-parser parse flags] | zv demo players [zv-demo-players flags]

@@ -39,7 +39,14 @@ export ZV_DATABASE_URL="postgres://zackvideo:zackvideo@localhost:5432/zackvideo?
 export ZV_REDIS_ADDR="localhost:6379"
 export ZV_DATA_DIR="./data"
 # Optional:
-# export ZV_HTTP_ADDR=":8080"
+# Defaults to 127.0.0.1:8080. Binding to 0.0.0.0 requires ZV_MUTATION_TOKEN.
+# export ZV_HTTP_ADDR="127.0.0.1:8080"
+# export ZV_MUTATION_TOKEN="local-random-token-for-non-loopback-bind"
+# Optional local editorial assistant. The worker runs `codex exec` in read-only
+# sandbox mode and stores JSON caption/title suggestions as render artifacts.
+# export ZV_CODEX_PATH="codex"
+# export ZV_CODEX_MODEL="gpt-5.4"
+# export ZV_AGENT_TIMEOUT="5m"
 # export ZV_WORKER_CONCURRENCY="2"
 # export ZV_RECORDER_PATH="/path/to/zv-recorder"
 # export ZV_HLAE_PATH="/path/to/HLAE.exe"
@@ -93,11 +100,40 @@ also checks for H.264, 1920x1080, 60fps video and an audio stream.
 | POST   | `/api/jobs/{id}/record`    | Enqueue recording after parse approval.    |
 | POST   | `/api/jobs/{id}/compose`   | Enqueue final composition after recording. |
 | GET    | `/api/jobs/{id}/final`     | Stream the composed MP4 when ready.         |
+| GET    | `/api/presets`             | Render preset registry as JSON (name, description, geometry, behavior flags, default). |
 
 `POST /record` is accepted for `parsed` and `recorded` jobs. `POST /compose`
 is accepted for `recorded` and `composed` jobs. These manual retries are
 idempotent: workers skip external media commands when the durable artifacts
 already exist.
+
+## Render presets
+
+All render presets live in one registry: `internal/editor/preset.go`. Adding a
+preset means adding one entry there; the loadout catalog
+(`internal/renderplan`), the HTTP API (`/api/presets`, `/api/loadouts`,
+`/renders/{variant}` validation), the workbench UI, and the render worker all
+derive from it. Every preset outputs 1080x1920 at 60fps. The product default is
+`viral-60`: drop a demo plus a prompt, get a viral-edited vertical Short. See
+`docs/research/11-viral-cs2-vertical-editing.md` for the rationale.
+
+- `viral-60` (default): full-UI 60fps gameplay with hook text, punch-ins, and kill counter overlays.
+- `viral-beatsync`: viral-60 for montages with cuts on the detected beat grid (needs music + rhythm json).
+- `short-clean`: restrained labels, vertical POV crop, subtle kill punch-ins.
+- `short-premium-player`: short-clean plus a player cutout overlay and larger headline.
+- `viral-square`: blurred vertical background with centered square gameplay.
+- `natural-hq`: unmodified gameplay at higher encode quality for clean local masters.
+- `natural-hq2`: natural-hq plus FFmpeg quality checks and contact sheets.
+- `natural-hq2-full`: continuous full-UI crop with a mild saturation lift, no scripted effects.
+- `natural-hq2-full-plus`: experimental full-frame variant with stronger FFmpeg-only color and mastering.
+- `natural-hq3` / `natural-hq3-smooth`: experimental high-encode comparison presets.
+- `smoke-lineups`: educational overlays and slow motion for utility throws.
+
+Demo+prompt-to-Short workflow at a high level: upload a demo (`POST /api/jobs`),
+the parser builds a kill plan and scored moments (default variant `viral-60`),
+recording captures segments, then `POST /api/jobs/{id}/renders/{variant}`
+renders upload-ready Shorts. Unknown variants are rejected with the valid
+preset list.
 
 ## Media artifacts and cleanup
 
@@ -154,8 +190,8 @@ available, but gives humans, scripts, and Codex skills one stable command tree:
 ./bin/zv utility audit --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
 ./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
-./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts-natural-hq2-full --preset natural-hq2-full
 ./bin/zv music analyze --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
+./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts-natural-hq2-full --preset natural-hq2-full
 ./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json
 ./bin/zv gallery open --path data/runs/run-004/shorts-natural-hq2-full/publish/index.html
@@ -164,14 +200,18 @@ available, but gives humans, scripts, and Codex skills one stable command tree:
 ./bin/zv serve
 ./bin/zv pipeline --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/pipeline --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv skills list
+./bin/zv skills show zackvideo-cheater-pov-reels
 ./bin/zv skills show zackvideo-cs2-utility-shorts
 ./bin/zv skills show zackvideo-lineup-audit
+./bin/zv skills show zackvideo-music-scripted-shorts
 ./bin/zv skills show zackvideo-shorts-production
 ./bin/zv skills show zackvideo-youtube-shorts-publish
 ./bin/zv skills check
 ./bin/zv skills list --format json
+./bin/zv skills show zackvideo-cheater-pov-reels --format json
 ./bin/zv skills show zackvideo-cs2-utility-shorts --format json
 ./bin/zv skills show zackvideo-lineup-audit --format json
+./bin/zv skills show zackvideo-music-scripted-shorts --format json
 ./bin/zv skills show zackvideo-shorts-production --format json
 ./bin/zv skills show zackvideo-youtube-shorts-publish --format json
 ./bin/zv skills check --format json
@@ -187,10 +227,10 @@ available, but gives humans, scripts, and Codex skills one stable command tree:
 ./bin/zv workflows show record --format json
 ./bin/zv workflows show compose-final
 ./bin/zv workflows show compose-final --format json
-./bin/zv workflows show shorts-render
-./bin/zv workflows show shorts-render --format json
 ./bin/zv workflows show music-analyze
 ./bin/zv workflows show music-analyze --format json
+./bin/zv workflows show shorts-render
+./bin/zv workflows show shorts-render --format json
 ./bin/zv workflows show analysis-tactical-data
 ./bin/zv workflows show analysis-tactical-data --format json
 ./bin/zv workflows show analysis-viewer
@@ -212,8 +252,8 @@ available, but gives humans, scripts, and Codex skills one stable command tree:
 ./bin/zv workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
 ./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
-./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts-natural-hq2-full --preset natural-hq2-full
 ./bin/zv workflows run music-analyze -- --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
+./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts-natural-hq2-full --preset natural-hq2-full
 ./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json
 ./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts-natural-hq2-full/publish/index.html
@@ -243,6 +283,7 @@ Repo-local skills currently exposed through `zv skills`:
 
 - `zackvideo-cs2-utility-shorts`
 - `zackvideo-lineup-audit`
+- `zackvideo-music-scripted-shorts`
 - `zackvideo-shorts-production`
 - `zackvideo-youtube-shorts-publish`
 
@@ -322,6 +363,10 @@ Use `--skip-existing` to reuse already rendered MP4/JPG files, and
 `--open-gallery` to open `shorts/publish/index.html` after a successful run.
 The gallery includes local search/filter controls and copy buttons for titles
 and captions; `publish-summary.md` gives a compact upload table.
+For music-scripted edits, use `--music`, `--rhythm`, `--fps 24`, and
+`--compile-segments` to render selected segments as one compiled Short. Analyze
+the CC0 music first with `zv music analyze --killplan <plan.json>` so Lua kill
+effects and cuts use the compiled rhythm timeline.
 The default x264 encode is `--video-crf 18 --video-preset fast`. For a larger,
 cleaner local master, use a lower CRF and slower preset, for example
 `--video-crf 16 --video-preset slow`.

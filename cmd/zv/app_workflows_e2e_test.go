@@ -332,7 +332,7 @@ func TestZVBinaryCanonicalWorkflowFlagsAreScopedEndToEnd(t *testing.T) {
 		},
 		{
 			name: "shorts render optional flags",
-			args: []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts", "--killplan", "plan.json", "--publish-dir", "publish", "--preset", "smoke-lineups", "--effects", "effects.lua", "--effects-preset", "none", "--lineup-catalog", "lineups", "--segments", "seg-001", "--limit", "2", "--player-image", "player.png", "--player-key-color", "#000000", "--video-crf", "18", "--video-preset", "slow", "--ffmpeg", "ffmpeg.exe", "--ffprobe", "ffprobe.exe", "--hq-filters", "--audio-normalize", "--quality-checks", "--cover-sheets", "--temporal-smoothing", "--covers=false", "--no-covers", "--skip-existing", "--open-gallery", "--dry-run"},
+			args: []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts", "--killplan", "plan.json", "--publish-dir", "publish", "--preset", "smoke-lineups", "--effects", "effects.lua", "--effects-preset", "none", "--music", "music.wav", "--rhythm", "rhythm.json", "--fps", "24", "--lineup-catalog", "lineups", "--segments", "seg-001", "--limit", "2", "--player-image", "player.png", "--player-key-color", "#000000", "--video-crf", "18", "--video-preset", "slow", "--ffmpeg", "ffmpeg.exe", "--ffprobe", "ffprobe.exe", "--hq-filters", "--audio-normalize", "--quality-checks", "--cover-sheets", "--temporal-smoothing", "--compile-segments", "--covers=false", "--no-covers", "--skip-existing", "--open-gallery", "--dry-run"},
 		},
 		{
 			name: "shorts render natural hq2 full plus",

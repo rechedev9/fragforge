@@ -27,6 +27,11 @@ func workflowCatalog() []workflowInfo {
 	return workflowCatalogOnce()
 }
 
+// buildWorkflowCatalog lists the delegated single-binary workflows. The
+// primary product flow is the composite built-in `zv short` (parse -> record
+// -> render -> publish pack in one command), documented in
+// docs/workflows/zv-short.md; it chains these stage workflows instead of
+// appearing as a catalog entry of its own.
 func buildWorkflowCatalog() []workflowInfo {
 	return withWorkflowRunCommands([]workflowInfo{
 		{
@@ -60,16 +65,16 @@ func buildWorkflowCatalog() []workflowInfo {
 			RunArgs:     []string{"compose", "final"},
 		},
 		{
-			Name:        "shorts-render",
-			Description: "Render vertical Shorts from a recording result.",
-			Command:     "zv shorts render --recording-result <recording-result.json> --out <shorts-dir>",
-			RunArgs:     []string{"shorts", "render"},
-		},
-		{
 			Name:        "music-analyze",
 			Description: "Analyze music beats and build optional kill-to-beat sync suggestions.",
 			Command:     "zv music analyze --input <audio-or-video> --out <rhythm.json>",
 			RunArgs:     []string{"music", "analyze"},
+		},
+		{
+			Name:        "shorts-render",
+			Description: "Render vertical Shorts from a recording result.",
+			Command:     "zv shorts render --recording-result <recording-result.json> --out <shorts-dir>",
+			RunArgs:     []string{"shorts", "render"},
 		},
 		{
 			Name:        "analysis-tactical-data",

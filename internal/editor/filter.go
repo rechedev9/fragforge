@@ -18,13 +18,6 @@ import (
 // labels into a drawbox/drawtext colour argument.
 var effectColorPattern = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9]*|#[0-9A-Fa-f]{6}|0x[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)(?:@[0-9]+(?:\.[0-9]+)?)?$`)
 
-const (
-	naturalHQ2FullSaturation     = 1.12
-	naturalHQ2FullPlusContrast   = 1.02
-	naturalHQ2FullPlusSaturation = 1.16
-	naturalHQ2FullPlusGamma      = 1.00
-)
-
 // validateEffectColor rejects colour values that are not a plain FFmpeg colour
 // spec. It validates the value exactly as given (callers trim before storing),
 // so the validated form is the form that reaches the filtergraph. field is used
@@ -53,7 +46,7 @@ func validateEffectPosition(field, value string) error {
 }
 
 func VideoFilter(short ShortEdit) string {
-	if short.Preset == PresetShortNaturalHQ2Full || short.Preset == PresetShortNaturalHQ2FullPlus {
+	if presetFilterKind(short.Preset) == FilterKindFullFrame {
 		return FullFrameVideoFilter(short)
 	}
 	scaleHeight := "1920"
@@ -64,7 +57,7 @@ func VideoFilter(short ShortEdit) string {
 		scaleFilter(scaleHeight, short),
 		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
 		"setsar=1",
-		"fps=60",
+		fpsFilter(short),
 	}
 	filters = appendTemporalSmoothingFilter(filters, short)
 	filters = appendEffectFilters(filters, short.Effects)
@@ -73,17 +66,20 @@ func VideoFilter(short ShortEdit) string {
 }
 
 func FullFrameVideoFilter(short ShortEdit) string {
+	grade := presetGradeFor(short.Preset)
 	filters := []string{
 		fullFrameBackgroundScaleFilter(short),
 		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
-		fullFrameGradeFilter(short),
-		"setsar=1",
 	}
-	if short.Preset == PresetShortNaturalHQ2FullPlus {
+	if gradeClause := baseGradeFilter(grade); gradeClause != "" {
+		filters = append(filters, gradeClause)
+	}
+	filters = append(filters, "setsar=1")
+	if grade.Unsharp {
 		filters = append(filters, "unsharp=5:5:0.35:3:3:0.15")
 	}
 	filters = append(filters,
-		"fps=60",
+		fpsFilter(short),
 	)
 	filters = appendTemporalSmoothingFilter(filters, short)
 	filters = appendEffectFilters(filters, short.Effects)
@@ -91,16 +87,34 @@ func FullFrameVideoFilter(short ShortEdit) string {
 	return strings.Join(filters, ",")
 }
 
-func fullFrameGradeFilter(short ShortEdit) string {
-	if short.Preset == PresetShortNaturalHQ2FullPlus {
-		return fmt.Sprintf(
-			"eq=contrast=%.3f:saturation=%.3f:gamma=%.3f",
-			naturalHQ2FullPlusContrast,
-			naturalHQ2FullPlusSaturation,
-			naturalHQ2FullPlusGamma,
-		)
+func presetGradeFor(name string) presetGrade {
+	if renderPreset, ok := PresetByName(name); ok {
+		return renderPreset.Grade
 	}
-	return fmt.Sprintf("eq=saturation=%.3f", naturalHQ2FullSaturation)
+	return presetGrade{}
+}
+
+// baseGradeFilter renders a registry grade as an FFmpeg eq clause. It keeps
+// the historical saturation-only form when only saturation is set and returns
+// "" when the grade carries no color change.
+func baseGradeFilter(grade presetGrade) string {
+	if grade.Saturation == 0 && grade.Contrast == 0 && grade.Gamma == 0 {
+		return ""
+	}
+	if grade.Contrast == 0 && grade.Gamma == 0 {
+		return fmt.Sprintf("eq=saturation=%.3f", grade.Saturation)
+	}
+	contrast, saturation, gamma := grade.Contrast, grade.Saturation, grade.Gamma
+	if contrast == 0 {
+		contrast = 1
+	}
+	if saturation == 0 {
+		saturation = 1
+	}
+	if gamma == 0 {
+		gamma = 1
+	}
+	return fmt.Sprintf("eq=contrast=%.3f:saturation=%.3f:gamma=%.3f", contrast, saturation, gamma)
 }
 
 func ViralSquareFilter(short ShortEdit) string {
@@ -120,7 +134,7 @@ func ViralSquareFilter(short ShortEdit) string {
 		"setsar=1",
 	}
 	foreground = appendTemporalSmoothingFilter(foreground, short)
-	final := []string{"fps=60"}
+	final := []string{fpsFilter(short)}
 	final = appendEffectFilters(final, short.Effects)
 	images := imageEffects(short.Effects)
 	killfeeds := killfeedEffects(short.Effects)
@@ -182,6 +196,30 @@ func imageEffects(effects []Effect) []Effect {
 	return out
 }
 
+func appendImageOverlayClauses(clauses []string, current string, imageInputStart int, images []Effect, short ShortEdit, outputLabel string) []string {
+	for i, effect := range images {
+		imageInput := imageInputStart + i
+		imageLabel := fmt.Sprintf("img%d", i)
+		next := fmt.Sprintf("vimg%d", i)
+		if i == len(images)-1 {
+			next = outputLabel
+		}
+		clauses = append(clauses,
+			fmt.Sprintf("[%d:v]%s[%s]", imageInput, imageOverlayFilter(effect, short), imageLabel),
+			fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
+				current,
+				imageLabel,
+				effectPosition(effect.X, "(W-w)/2"),
+				effectPosition(effect.Y, "72"),
+				betweenExpression(effect.StartSeconds, effect.EndSeconds),
+				next,
+			),
+		)
+		current = next
+	}
+	return clauses
+}
+
 func killfeedEffects(effects []Effect) []Effect {
 	out := []Effect{}
 	for _, effect := range effects {
@@ -204,7 +242,7 @@ func imageOverlayFilter(effect Effect, short ShortEdit) string {
 		}
 		filters = append(filters,
 			"loop=loop=-1:size=1:start=0",
-			"setpts=N/60/TB",
+			fmt.Sprintf("setpts=N/%d/TB", outputFPS(short)),
 		)
 		if duration > 0 {
 			filters = append(filters, fmt.Sprintf("trim=duration=%.3f", duration))
@@ -334,7 +372,7 @@ func SmokeLineupSlowMotionFilter(short ShortEdit) string {
 		)
 	}
 	clauses = append(clauses,
-		fmt.Sprintf("%sconcat=n=%d:v=1:a=0,fps=60,format=yuv420p[v]", strings.Join(videoParts, ""), len(videoParts)),
+		fmt.Sprintf("%sconcat=n=%d:v=1:a=0,%s,format=yuv420p[v]", strings.Join(videoParts, ""), len(videoParts), fpsFilter(short)),
 		fmt.Sprintf("%sconcat=n=%d:v=0:a=1%s", strings.Join(audioParts, ""), len(audioParts), smokeLineupAudioOutput(short)),
 	)
 	return strings.Join(clauses, ";")
@@ -435,7 +473,7 @@ func PremiumPlayerFilter(short ShortEdit) string {
 		scaleFilter("1920", short),
 		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
 		"setsar=1",
-		"fps=60",
+		fpsFilter(short),
 	}
 	base = appendTemporalSmoothingFilter(base, short)
 	if expr := zoomHeightExpression(short.Effects); expr != "" {
@@ -475,8 +513,23 @@ func scaleFilter(height string, short ShortEdit) string {
 	return filter
 }
 
+func fpsFilter(short ShortEdit) string {
+	return fmt.Sprintf("fps=%d", outputFPS(short))
+}
+
+func outputFPS(short ShortEdit) int {
+	if short.OutputFPS > 0 {
+		return short.OutputFPS
+	}
+	return 60
+}
+
 func fullFrameBackgroundScaleFilter(short ShortEdit) string {
-	filter := "scale=w=1080:h=1920:force_original_aspect_ratio=increase:eval=frame"
+	height := "1920"
+	if expr := zoomHeightExpression(short.Effects); expr != "" {
+		height = "'" + expr + "'"
+	}
+	filter := fmt.Sprintf("scale=w=1080:h=%s:force_original_aspect_ratio=increase:eval=frame", height)
 	if short.HQFilters {
 		filter += ":flags=" + hqScaleFlags(short)
 	}
@@ -484,7 +537,7 @@ func fullFrameBackgroundScaleFilter(short ShortEdit) string {
 }
 
 func hqScaleFlags(short ShortEdit) string {
-	if short.Preset == PresetShortNaturalHQ2FullPlus || short.Preset == PresetShortNaturalHQ3 || short.Preset == PresetShortNaturalHQ3Smooth {
+	if renderPreset, ok := PresetByName(short.Preset); ok && renderPreset.AccurateScaling {
 		return "lanczos+accurate_rnd"
 	}
 	return "lanczos"
@@ -610,7 +663,7 @@ func appendEffectFilters(filters []string, effects []Effect) []string {
 		if boxBorder == 0 {
 			boxBorder = 12
 		}
-		filters = append(filters, drawTextExprWithFade(effect.Value, x, y, size, effect.StartSeconds, effect.EndSeconds, fontColor, boxColor, boxBorder, effect.FadeInSeconds, effect.FadeOutSeconds))
+		filters = append(filters, drawTextExprWithFade(effect.Value, x, y, size, effect.StartSeconds, effect.EndSeconds, fontColor, boxColor, boxBorder, effect.FontFile, effect.FadeInSeconds, effect.FadeOutSeconds))
 	}
 	return filters
 }
@@ -643,12 +696,15 @@ func drawText(text string, x, y, size int, start, end float64, fontColor, boxCol
 }
 
 func drawTextExpr(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int) string {
-	return drawTextExprWithFade(text, x, y, size, start, end, fontColor, boxColor, boxBorder, 0, 0)
+	return drawTextExprWithFade(text, x, y, size, start, end, fontColor, boxColor, boxBorder, "", 0, 0)
 }
 
-func drawTextExprWithFade(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int, fadeIn, fadeOut float64) string {
+func drawTextExprWithFade(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int, fontFile string, fadeIn, fadeOut float64) string {
 	fontOption := ""
-	if fontFile := drawtextFontFile(); fontFile != "" {
+	if fontFile = strings.TrimSpace(fontFile); fontFile == "" {
+		fontFile = drawtextFontFile()
+	}
+	if fontFile != "" {
 		fontOption = fmt.Sprintf(":fontfile='%s'", escapeDrawtextOption(filepath.ToSlash(fontFile)))
 	}
 	alphaOption := ""
@@ -761,4 +817,15 @@ func escapeDrawtextOption(text string) string {
 		`%`, `\%`,
 	)
 	return replacer.Replace(text)
+}
+
+func validateEffectFontFile(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if strings.ContainsAny(value, "\r\n;") {
+		return fmt.Errorf("fontfile contains unsupported characters")
+	}
+	return nil
 }

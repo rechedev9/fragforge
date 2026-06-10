@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,9 +20,13 @@ import (
 	"github.com/hibiken/asynq"
 
 	"github.com/reche/zackvideo/internal/artifacts"
+	"github.com/reche/zackvideo/internal/editor"
 	"github.com/reche/zackvideo/internal/job"
+	"github.com/reche/zackvideo/internal/moments"
+	"github.com/reche/zackvideo/internal/renderplan"
 	"github.com/reche/zackvideo/internal/rules"
 	"github.com/reche/zackvideo/internal/storage"
+	"github.com/reche/zackvideo/internal/streamclips"
 	"github.com/reche/zackvideo/internal/tasks"
 )
 
@@ -29,13 +34,23 @@ const (
 	maxDemoBytes       = 500 << 20            // 500 MiB demo cap
 	maxMultipartBytes  = maxDemoBytes + 1<<20 // allow multipart headers around the demo
 	multipartMemBudget = 32 << 20             // 32 MiB in-memory; spill beyond
+	renderUniqueTTL    = 24 * time.Hour
 )
 
 // JobRepository is the subset of *job.Repository used by handlers.
 type JobRepository interface {
 	Create(ctx context.Context, j *job.Job) error
 	Get(ctx context.Context, id uuid.UUID) (job.Job, error)
+	List(ctx context.Context, limit int) ([]job.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
+}
+
+type StreamJobRepository interface {
+	Create(ctx context.Context, j *streamclips.Job) error
+	Get(ctx context.Context, id uuid.UUID) (streamclips.Job, error)
+	List(ctx context.Context, limit int) ([]streamclips.Job, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, s streamclips.Status, failureReason string) error
+	SetEditPlan(ctx context.Context, id uuid.UUID, plan streamclips.EditPlan) error
 }
 
 // Enqueuer is the subset of *asynq.Client used by handlers.
@@ -45,20 +60,60 @@ type Enqueuer interface {
 
 // Handlers bundles the dependencies needed by every endpoint.
 type Handlers struct {
-	repo    JobRepository
-	storage storage.Storage
-	queue   Enqueuer
+	repo          JobRepository
+	streamRepo    StreamJobRepository
+	storage       storage.Storage
+	queue         Enqueuer
+	mutationToken string
+	streamProber  streamclips.Prober
+}
+
+type Option func(*Handlers)
+
+// WithMutationToken requires mutating requests to send X-ZackVideo-Token.
+func WithMutationToken(token string) Option {
+	return func(h *Handlers) {
+		h.mutationToken = token
+	}
+}
+
+func WithStreamRepository(repo StreamJobRepository) Option {
+	return func(h *Handlers) {
+		h.streamRepo = repo
+	}
+}
+
+func WithStreamProber(prober streamclips.Prober) Option {
+	return func(h *Handlers) {
+		h.streamProber = prober
+	}
 }
 
 // NewHandlers constructs an HTTP handler set.
-func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer) *Handlers {
-	return &Handlers{repo: repo, storage: store, queue: queue}
+func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts ...Option) *Handlers {
+	h := &Handlers{repo: repo, storage: store, queue: queue}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // createJobConfig is the JSON document sent in the "config" multipart field.
 type createJobConfig struct {
 	TargetSteamID string       `json:"target_steamid"`
 	Rules         *rules.Rules `json:"rules,omitempty"`
+}
+
+type uploadStatusRequest struct {
+	Uploaded bool `json:"uploaded"`
+}
+
+type uploadStatusDocument struct {
+	SchemaVersion string    `json:"schema_version"`
+	JobID         uuid.UUID `json:"job_id"`
+	Variant       string    `json:"variant"`
+	Uploaded      bool      `json:"uploaded"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // CreateJob handles POST /api/jobs.
@@ -151,6 +206,82 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ListJobs handles GET /api/jobs.
+func (h *Handlers) ListJobs(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 || parsed > 100 {
+			writeError(w, http.StatusBadRequest, "limit must be an integer from 1 to 100")
+			return
+		}
+		limit = parsed
+	}
+	jobs, err := h.repo.List(r.Context(), limit)
+	if err != nil {
+		internalError(w, "list jobs", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+}
+
+// ListLoadouts handles GET /api/loadouts.
+func (h *Handlers) ListLoadouts(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"loadouts": renderplan.LoadoutCatalog()})
+}
+
+// presetSummary is the UI-facing view of one editor render preset.
+type presetSummary struct {
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Default           bool   `json:"default"`
+	FPS               int    `json:"fps"`
+	Width             int    `json:"width"`
+	Height            int    `json:"height"`
+	EffectsPreset     string `json:"effects_preset,omitempty"`
+	FilterKind        string `json:"filter_kind"`
+	HQFilters         bool   `json:"hq_filters"`
+	AudioNormalize    bool   `json:"audio_normalize"`
+	QualityChecks     bool   `json:"quality_checks"`
+	CoverSheets       bool   `json:"cover_sheets"`
+	TemporalSmoothing bool   `json:"temporal_smoothing"`
+	RhythmSync        bool   `json:"rhythm_sync"`
+}
+
+// ListPresets handles GET /api/presets. It exposes the editor preset registry
+// so UIs can derive their variant lists instead of hardcoding them.
+func (h *Handlers) ListPresets(w http.ResponseWriter, r *http.Request) {
+	defaultName := editor.DefaultPreset().Name
+	names := editor.PresetNames()
+	presets := make([]presetSummary, 0, len(names))
+	for _, name := range names {
+		preset, ok := editor.PresetByName(name)
+		if !ok {
+			continue
+		}
+		presets = append(presets, presetSummary{
+			Name:              preset.Name,
+			Description:       preset.Description,
+			Default:           preset.Name == defaultName,
+			FPS:               preset.FPS,
+			Width:             preset.Width,
+			Height:            preset.Height,
+			EffectsPreset:     preset.EffectsPreset,
+			FilterKind:        preset.FilterKind,
+			HQFilters:         preset.HQFilters,
+			AudioNormalize:    preset.AudioNormalize,
+			QualityChecks:     preset.QualityChecks,
+			CoverSheets:       preset.CoverSheets,
+			TemporalSmoothing: preset.TemporalSmoothing,
+			RhythmSync:        preset.RhythmSync,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"default": defaultName,
+		"presets": presets,
+	})
+}
+
 // GetJob handles GET /api/jobs/{id}.
 func (h *Handlers) GetJob(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
@@ -193,6 +324,29 @@ func (h *Handlers) GetPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, j.KillPlan)
+}
+
+// GetMoments handles GET /api/jobs/{id}/moments.
+func (h *Handlers) GetMoments(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	if rc, err := h.storage.Open(artifacts.MomentsKey(j.ID)); err == nil {
+		defer rc.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, rc)
+		return
+	} else if !storage.IsNotExist(err) {
+		internalError(w, "open moments artifact", err)
+		return
+	}
+	if j.KillPlan == nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job moments are not ready (status=%s)", j.Status))
+		return
+	}
+	writeJSON(w, http.StatusOK, moments.Build(j.ID, *j.KillPlan))
 }
 
 // GetFinal handles GET /api/jobs/{id}/final.
@@ -270,6 +424,527 @@ func (h *Handlers) StartComposition(w http.ResponseWriter, r *http.Request) {
 		"id":   j.ID,
 		"task": tasks.TypeComposeFinal,
 	})
+}
+
+// StartRenderVariant handles POST /api/jobs/{id}/renders/{variant}.
+func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	if j.Status != job.StatusRecorded && j.Status != job.StatusComposed && j.Status != job.StatusDone {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to render (status=%s)", j.Status))
+		return
+	}
+	loadout, err := renderplan.LoadoutForVariant(variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	task, err := tasks.NewRenderVariantTask(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	previous, _, err := h.readRenderVariantState(j.ID, variant)
+	if err != nil {
+		internalError(w, "read render state", err)
+		return
+	}
+	state, err := newRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusQueued, nil, "", previous)
+	if err != nil {
+		internalError(w, "build render state", err)
+		return
+	}
+	if err := h.writeRenderVariantState(state); err != nil {
+		internalError(w, "write render state", err)
+		return
+	}
+	if _, err := h.queue.Enqueue(task, asynq.Unique(renderUniqueTTL)); err != nil {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"id":         j.ID,
+				"task":       tasks.TypeRenderVariant,
+				"variant":    variant,
+				"status":     state.Status,
+				"status_key": mustRenderVariantStatusKey(j.ID, variant),
+				"duplicate":  true,
+			})
+			return
+		}
+		failedState, stateErr := newRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusFailed, nil, "enqueue render task: "+err.Error(), &state)
+		if stateErr == nil {
+			if writeErr := h.writeRenderVariantState(failedState); writeErr != nil {
+				log.Printf("httpapi: write failed render state for %s/%s: %v", j.ID, variant, writeErr)
+			}
+		}
+		internalError(w, "enqueue render task", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":         j.ID,
+		"task":       tasks.TypeRenderVariant,
+		"variant":    variant,
+		"status":     state.Status,
+		"status_key": mustRenderVariantStatusKey(j.ID, variant),
+	})
+}
+
+// GetRenderVariant handles GET /api/jobs/{id}/renders/{variant}.
+func (h *Handlers) GetRenderVariant(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	if _, err := renderplan.LoadoutForVariant(variant); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if state, ok, err := h.readRenderVariantState(j.ID, variant); err != nil {
+		internalError(w, "read render state", err)
+		return
+	} else if ok {
+		writeJSON(w, http.StatusOK, state)
+		return
+	}
+	resultKey, err := artifacts.RenderVariantResultKey(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rc, err := h.storage.Open(resultKey)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "render variant not found")
+		return
+	}
+	defer rc.Close()
+
+	var result editor.Result
+	if err := json.NewDecoder(rc).Decode(&result); err != nil {
+		internalError(w, "decode render result", err)
+		return
+	}
+	status := "ready"
+	if result.Error != "" {
+		status = "failed"
+	}
+	loadout, err := renderplan.LoadoutForVariant(variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	state, err := newRenderVariantState(j.ID, loadout, status, result.Warnings, result.Error, nil)
+	if err != nil {
+		internalError(w, "build render state", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
+func (h *Handlers) readRenderVariantState(id uuid.UUID, variant string) (*renderplan.RenderVariantState, bool, error) {
+	key, err := artifacts.RenderVariantStatusKey(id, variant)
+	if err != nil {
+		return nil, false, err
+	}
+	rc, err := h.storage.Open(key)
+	if err != nil {
+		if !storage.IsNotExist(err) {
+			return nil, false, err
+		}
+		return nil, false, nil
+	}
+	defer rc.Close()
+	var state renderplan.RenderVariantState
+	if err := json.NewDecoder(rc).Decode(&state); err != nil {
+		return nil, false, err
+	}
+	return &state, true, nil
+}
+
+func (h *Handlers) writeRenderVariantState(state renderplan.RenderVariantState) error {
+	key, err := artifacts.RenderVariantStatusKey(state.JobID, state.Variant)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return h.storage.Put(key, bytes.NewReader(b))
+}
+
+func newRenderVariantState(id uuid.UUID, loadout renderplan.Loadout, status string, warnings []string, errMsg string, previous *renderplan.RenderVariantState) (renderplan.RenderVariantState, error) {
+	prefix, err := artifacts.RenderVariantPrefix(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	resultKey, err := artifacts.RenderVariantResultKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	editManifestKey, err := artifacts.RenderVariantEditManifestKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	packKey, err := artifacts.RenderVariantPackManifestKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	galleryKey, err := artifacts.RenderVariantGalleryKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	return renderplan.NewRenderVariantState(renderplan.NewRenderVariantStateOptions{
+		JobID:             id,
+		Variant:           loadout.Variant,
+		Status:            status,
+		Preset:            loadout.Preset,
+		EditDocumentKey:   editDocumentKey,
+		EditManifestKey:   editManifestKey,
+		RenderResultKey:   resultKey,
+		PackManifestKey:   packKey,
+		GalleryKey:        galleryKey,
+		PublishSummaryKey: summaryKey,
+		ArtifactPrefix:    prefix,
+		Warnings:          warnings,
+		Error:             errMsg,
+		Previous:          previous,
+	}), nil
+}
+
+func mustRenderVariantStatusKey(id uuid.UUID, variant string) string {
+	key, err := artifacts.RenderVariantStatusKey(id, variant)
+	if err != nil {
+		return ""
+	}
+	return key
+}
+
+// GetRenderPublishBoard handles GET /api/jobs/{id}/renders/{variant}/publish.
+func (h *Handlers) GetRenderPublishBoard(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	result, resultKey, ok := h.loadRenderResult(w, j.ID, variant)
+	if !ok {
+		return
+	}
+	packKey, err := artifacts.RenderVariantPackManifestKey(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	galleryKey, err := artifacts.RenderVariantGalleryKey(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	items := make([]renderplan.PublishBoardItem, 0, len(result.Shorts))
+	for _, short := range result.Shorts {
+		if short.SegmentID == "" {
+			continue
+		}
+		videoKey, err := artifacts.RenderVariantVideoKey(j.ID, variant, short.SegmentID)
+		if err != nil {
+			internalError(w, "build video artifact key", err)
+			return
+		}
+		coverKey, err := artifacts.RenderVariantCoverKey(j.ID, variant, short.SegmentID)
+		if err != nil {
+			internalError(w, "build cover artifact key", err)
+			return
+		}
+		captionKey, err := artifacts.RenderVariantCaptionKey(j.ID, variant, short.SegmentID)
+		if err != nil {
+			internalError(w, "build caption artifact key", err)
+			return
+		}
+		videoReady, err := h.storage.Exists(videoKey)
+		if err != nil {
+			internalError(w, "check video artifact", err)
+			return
+		}
+		coverReady, err := h.storage.Exists(coverKey)
+		if err != nil {
+			internalError(w, "check cover artifact", err)
+			return
+		}
+		captionReady, err := h.storage.Exists(captionKey)
+		if err != nil {
+			internalError(w, "check caption artifact", err)
+			return
+		}
+		items = append(items, renderplan.PublishBoardItem{
+			SegmentID:    short.SegmentID,
+			VideoKey:     videoKey,
+			CoverKey:     coverKey,
+			CaptionKey:   captionKey,
+			VideoReady:   videoReady,
+			CoverReady:   coverReady,
+			CaptionReady: captionReady,
+		})
+	}
+	writeJSON(w, http.StatusOK, renderplan.NewPublishBoard(renderplan.NewPublishBoardOptions{
+		JobID:           j.ID,
+		Variant:         variant,
+		UploadReadyRoot: "shortslistosparasubir",
+		RenderResultKey: resultKey,
+		PackManifestKey: packKey,
+		GalleryKey:      galleryKey,
+		PublishSummary:  summaryKey,
+		Uploaded:        h.renderVariantUploaded(j.ID, variant),
+		Items:           items,
+		Warnings:        result.Warnings,
+		Error:           result.Error,
+	}))
+}
+
+// SetRenderUploaded handles POST /api/jobs/{id}/renders/{variant}/publish/uploaded.
+func (h *Handlers) SetRenderUploaded(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	if _, err := renderplan.LoadoutForVariant(variant); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var req uploadStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid upload status JSON")
+		return
+	}
+	key, err := artifacts.RenderVariantUploadStatusKey(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	doc := uploadStatusDocument{
+		SchemaVersion: "1.0",
+		JobID:         j.ID,
+		Variant:       variant,
+		Uploaded:      req.Uploaded,
+		UpdatedAt:     time.Now().UTC(),
+	}
+	b, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		internalError(w, "marshal upload status", err)
+		return
+	}
+	if err := h.storage.Put(key, bytes.NewReader(b)); err != nil {
+		internalError(w, "write upload status", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+// StartCaptionAgent handles POST /api/jobs/{id}/renders/{variant}/agent/captions.
+func (h *Handlers) StartCaptionAgent(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	if _, err := renderplan.LoadoutForVariant(variant); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	task, err := tasks.NewCodexAgentTask(j.ID, variant, renderplan.AgentKindCaptionCandidates)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := h.queue.Enqueue(task, asynq.Unique(renderUniqueTTL)); err != nil {
+		if !errors.Is(err, asynq.ErrDuplicateTask) {
+			internalError(w, "enqueue codex agent task", err)
+			return
+		}
+	}
+	resultKey, err := artifacts.RenderVariantAgentResultKey(j.ID, variant, renderplan.AgentKindCaptionCandidates)
+	if err != nil {
+		internalError(w, "build agent result key", err)
+		return
+	}
+	contextKey, err := artifacts.RenderVariantAgentContextKey(j.ID, variant, renderplan.AgentKindCaptionCandidates)
+	if err != nil {
+		internalError(w, "build agent context key", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":          j.ID,
+		"task":        tasks.TypeCodexAgent,
+		"variant":     variant,
+		"kind":        renderplan.AgentKindCaptionCandidates,
+		"context_key": contextKey,
+		"result_key":  resultKey,
+	})
+}
+
+// GetCaptionAgent handles GET /api/jobs/{id}/renders/{variant}/agent/captions.
+func (h *Handlers) GetCaptionAgent(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	key, err := artifacts.RenderVariantAgentResultKey(j.ID, variant, renderplan.AgentKindCaptionCandidates)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rc, err := h.storage.Open(key)
+	if err != nil {
+		if storage.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "agent result not found")
+			return
+		}
+		internalError(w, "open agent result", err)
+		return
+	}
+	defer rc.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, rc)
+}
+
+func (h *Handlers) renderVariantUploaded(id uuid.UUID, variant string) bool {
+	key, err := artifacts.RenderVariantUploadStatusKey(id, variant)
+	if err != nil {
+		return false
+	}
+	rc, err := h.storage.Open(key)
+	if err != nil {
+		return false
+	}
+	defer rc.Close()
+	var doc uploadStatusDocument
+	if err := json.NewDecoder(rc).Decode(&doc); err != nil {
+		return false
+	}
+	return doc.Uploaded
+}
+
+// GetRenderQuality handles GET /api/jobs/{id}/renders/{variant}/quality.
+func (h *Handlers) GetRenderQuality(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	result, _, ok := h.loadRenderResult(w, j.ID, variant)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, renderplan.NewQualityReport(j.ID, variant, result))
+}
+
+// GetRenderPack streams the render variant publish-pack manifest.
+func (h *Handlers) GetRenderPack(w http.ResponseWriter, r *http.Request) {
+	h.streamRenderVariantArtifact(w, r, "application/json", func(id uuid.UUID, variant string) (string, error) {
+		return artifacts.RenderVariantPackManifestKey(id, variant)
+	})
+}
+
+// GetRenderEditDocument streams the stable edit intent document.
+func (h *Handlers) GetRenderEditDocument(w http.ResponseWriter, r *http.Request) {
+	h.streamRenderVariantArtifact(w, r, "application/json", func(id uuid.UUID, variant string) (string, error) {
+		return artifacts.RenderVariantEditDocumentKey(id, variant)
+	})
+}
+
+// GetRenderGallery streams the render variant publish gallery.
+func (h *Handlers) GetRenderGallery(w http.ResponseWriter, r *http.Request) {
+	h.streamRenderVariantArtifact(w, r, "text/html; charset=utf-8", func(id uuid.UUID, variant string) (string, error) {
+		return artifacts.RenderVariantGalleryKey(id, variant)
+	})
+}
+
+// GetRenderVideo streams one render variant MP4 artifact.
+func (h *Handlers) GetRenderVideo(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	h.streamRenderVariantArtifact(w, r, "video/mp4", func(id uuid.UUID, variant string) (string, error) {
+		return artifacts.RenderVariantVideoKey(id, variant, name)
+	})
+}
+
+// GetRenderCover streams one render variant cover artifact.
+func (h *Handlers) GetRenderCover(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	h.streamRenderVariantArtifact(w, r, "image/jpeg", func(id uuid.UUID, variant string) (string, error) {
+		return artifacts.RenderVariantCoverKey(id, variant, name)
+	})
+}
+
+// GetRenderCaption streams one render variant caption artifact.
+func (h *Handlers) GetRenderCaption(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	h.streamRenderVariantArtifact(w, r, "text/plain; charset=utf-8", func(id uuid.UUID, variant string) (string, error) {
+		return artifacts.RenderVariantCaptionKey(id, variant, name)
+	})
+}
+
+func (h *Handlers) streamRenderVariantArtifact(w http.ResponseWriter, r *http.Request, contentType string, keyFn func(uuid.UUID, string) (string, error)) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	if _, err := renderplan.LoadoutForVariant(variant); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	key, err := keyFn(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rc, err := h.storage.Open(key)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "render artifact not found")
+		return
+	}
+	defer rc.Close()
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, rc)
+}
+
+func (h *Handlers) loadRenderResult(w http.ResponseWriter, id uuid.UUID, variant string) (editor.Result, string, bool) {
+	resultKey, err := artifacts.RenderVariantResultKey(id, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return editor.Result{}, "", false
+	}
+	rc, err := h.storage.Open(resultKey)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "render variant not found")
+		return editor.Result{}, "", false
+	}
+	defer rc.Close()
+	var result editor.Result
+	if err := json.NewDecoder(rc).Decode(&result); err != nil {
+		internalError(w, "decode render result", err)
+		return editor.Result{}, "", false
+	}
+	return result, resultKey, true
 }
 
 func (h *Handlers) loadJob(w http.ResponseWriter, r *http.Request) (job.Job, bool) {

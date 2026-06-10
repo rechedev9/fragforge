@@ -24,6 +24,10 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return exitSuccess
+	case "short":
+		return runShort(args[1:], stdout, stderr, stdin, runner)
+	case "presets":
+		return runPresets(args[1:], stdout, stderr)
 	case "demo":
 		return runDemo(args[1:], stdout, stderr, stdin, runner)
 	case "utility":

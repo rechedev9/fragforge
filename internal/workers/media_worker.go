@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,9 +18,12 @@ import (
 
 	"github.com/reche/zackvideo/internal/artifacts"
 	"github.com/reche/zackvideo/internal/composition"
+	"github.com/reche/zackvideo/internal/editor"
 	"github.com/reche/zackvideo/internal/job"
 	"github.com/reche/zackvideo/internal/recording"
+	"github.com/reche/zackvideo/internal/renderplan"
 	"github.com/reche/zackvideo/internal/storage"
+	"github.com/reche/zackvideo/internal/streamclips"
 	"github.com/reche/zackvideo/internal/tasks"
 )
 
@@ -122,6 +127,25 @@ type ComposeWorkerConfig struct {
 	ComposerPath string
 	FFmpegPath   string
 	Timeout      string
+}
+
+type RenderWorkerConfig struct {
+	WorkDir     string
+	EditorPath  string
+	FFmpegPath  string
+	FFprobePath string
+	Timeout     string
+}
+
+type StreamRenderRepository interface {
+	Get(ctx context.Context, id uuid.UUID) (streamclips.Job, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, s streamclips.Status, failureReason string) error
+}
+
+type StreamRenderWorkerConfig struct {
+	WorkDir    string
+	FFmpegPath string
+	Timeout    string
 }
 
 // RecordWorker handles the "record:demo" Asynq task.
@@ -388,6 +412,677 @@ func (c ComposeWorkerConfig) validate() error {
 	return nil
 }
 
+// RenderWorker handles the "render:variant" Asynq task.
+type RenderWorker struct {
+	repo    StatusRepository
+	storage storage.Storage
+	cfg     RenderWorkerConfig
+	runner  commandRunner
+}
+
+func NewRenderWorker(repo StatusRepository, store storage.Storage, cfg RenderWorkerConfig) *RenderWorker {
+	return &RenderWorker{
+		repo:    repo,
+		storage: store,
+		cfg:     cfg,
+		runner:  execCommandRunner{},
+	}
+}
+
+// StreamRenderWorker handles "render:stream-clip" tasks.
+type StreamRenderWorker struct {
+	repo    StreamRenderRepository
+	storage storage.Storage
+	cfg     StreamRenderWorkerConfig
+	runner  commandRunner
+}
+
+func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, cfg StreamRenderWorkerConfig) *StreamRenderWorker {
+	return &StreamRenderWorker{
+		repo:    repo,
+		storage: store,
+		cfg:     cfg,
+		runner:  execCommandRunner{},
+	}
+}
+
+func (w *StreamRenderWorker) HandleRenderStreamClip(ctx context.Context, t *asynq.Task) error {
+	var payload tasks.RenderStreamClipPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("decode payload: %w", err)
+	}
+	j, err := w.repo.Get(ctx, payload.JobID)
+	if err != nil {
+		return fmt.Errorf("load stream job %s: %w", payload.JobID, err)
+	}
+	if err := w.render(ctx, j, payload.Variant); err != nil {
+		markStreamFailed(w.repo, j.ID, err.Error())
+		if stateErr := w.writeStreamState(j.ID, payload.Variant, streamclips.StatusFailed, nil, err.Error(), nil); stateErr != nil {
+			logWorkerError(j.ID, "write failed stream render state", stateErr)
+		}
+		logWorkerError(j.ID, tasks.TypeRenderStreamClip, err)
+		return err
+	}
+	return nil
+}
+
+func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, variant string) error {
+	if variant != streamclips.VariantStreamerVerticalStack {
+		return fmt.Errorf("unsupported stream render variant %q", variant)
+	}
+	cfg := w.cfg.withDefaults()
+	if err := cfg.validate(); err != nil {
+		return err
+	}
+	if len(j.EditPlan) == 0 {
+		return fmt.Errorf("stream job %s has no edit plan", j.ID)
+	}
+	var plan streamclips.EditPlan
+	if err := json.Unmarshal(j.EditPlan, &plan); err != nil {
+		return fmt.Errorf("decode edit plan: %w", err)
+	}
+	plan = streamclips.NormalizeEditPlan(plan)
+	if err := plan.Validate(); err != nil {
+		return err
+	}
+	if len(plan.Clips) == 0 {
+		return fmt.Errorf("edit plan has no clips")
+	}
+
+	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendering, ""); err != nil {
+		return fmt.Errorf("mark stream rendering: %w", err)
+	}
+	if err := w.writeStreamState(j.ID, variant, streamclips.StatusRendering, nil, "", nil); err != nil {
+		return err
+	}
+
+	workDir, cleanup, err := prepareStageDir(cfg.WorkDir, j.ID, "stream-render")
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	sourcePath := filepath.Join(workDir, "source.mp4")
+	if err := copyStorageToFile(w.storage, j.SourcePath, sourcePath); err != nil {
+		return fmt.Errorf("materialize stream source: %w", err)
+	}
+	outDir := filepath.Join(workDir, "out", "shortslistosparasubir")
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
+		return err
+	}
+
+	runCtx, cancel := context.WithTimeout(ctx, cfg.timeoutDuration())
+	defer cancel()
+	var videos []streamclips.VideoEntry
+	for _, clip := range plan.Clips {
+		outPath := filepath.Join(outDir, clip.ID+".mp4")
+		args, err := streamclips.BuildFFmpegArgs(sourcePath, outPath, plan, clip)
+		if err != nil {
+			return err
+		}
+		if _, err := w.runner.Run(runCtx, cfg.FFmpegPath, args...); err != nil {
+			return fmt.Errorf("render clip %s: %w", clip.ID, err)
+		}
+		key, err := streamclips.RenderVideoKey(j.ID, variant, clip.ID)
+		if err != nil {
+			return err
+		}
+		if err := uploadFile(w.storage, key, outPath); err != nil {
+			return fmt.Errorf("upload stream clip %s: %w", clip.ID, err)
+		}
+		videos = append(videos, streamclips.VideoEntry{
+			ClipID:          clip.ID,
+			Title:           clip.Title,
+			Key:             key,
+			DurationSeconds: clip.EndSeconds - clip.StartSeconds,
+		})
+	}
+
+	result := streamclips.RenderResult{
+		SchemaVersion: "1.0",
+		JobID:         j.ID,
+		Variant:       variant,
+		Clips:         videos,
+		RenderedAt:    time.Now().UTC(),
+	}
+	resultKey, err := streamclips.RenderResultKey(j.ID, variant)
+	if err != nil {
+		return err
+	}
+	if err := putJSONToStorage(w.storage, resultKey, result); err != nil {
+		return fmt.Errorf("write stream render result: %w", err)
+	}
+	galleryKey, err := streamclips.RenderGalleryKey(j.ID, variant)
+	if err != nil {
+		return err
+	}
+	if err := w.storage.Put(galleryKey, strings.NewReader(streamGalleryHTML(j, videos))); err != nil {
+		return fmt.Errorf("write stream gallery: %w", err)
+	}
+	if err := w.writeStreamState(j.ID, variant, streamclips.StatusRendered, nil, "", videos); err != nil {
+		return err
+	}
+	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendered, ""); err != nil {
+		return fmt.Errorf("mark stream rendered: %w", err)
+	}
+	logWorkerArtifacts(j.ID, tasks.TypeRenderStreamClip, []string{resultKey, galleryKey})
+	return nil
+}
+
+func (w *StreamRenderWorker) writeStreamState(id uuid.UUID, variant string, status streamclips.Status, warnings []string, errMsg string, videos []streamclips.VideoEntry) error {
+	resultKey, err := streamclips.RenderResultKey(id, variant)
+	if err != nil {
+		return err
+	}
+	galleryKey, err := streamclips.RenderGalleryKey(id, variant)
+	if err != nil {
+		return err
+	}
+	prefix, err := streamclips.RenderPrefix(id, variant)
+	if err != nil {
+		return err
+	}
+	state := streamclips.RenderState{
+		JobID:       id,
+		Variant:     variant,
+		Status:      status,
+		ResultKey:   resultKey,
+		GalleryKey:  galleryKey,
+		ArtifactDir: prefix,
+		Warnings:    warnings,
+		Error:       errMsg,
+		Videos:      videos,
+		UpdatedAt:   time.Now().UTC(),
+	}
+	key, err := streamclips.RenderStateKey(id, variant)
+	if err != nil {
+		return err
+	}
+	return putJSONToStorage(w.storage, key, state)
+}
+
+func (c StreamRenderWorkerConfig) withDefaults() StreamRenderWorkerConfig {
+	if c.Timeout == "" {
+		c.Timeout = defaultMediaWorkerTimeout
+	}
+	return c
+}
+
+func (c StreamRenderWorkerConfig) validate() error {
+	if c.FFmpegPath == "" {
+		return fmt.Errorf("ffmpeg is required")
+	}
+	if _, err := time.ParseDuration(c.Timeout); err != nil {
+		return fmt.Errorf("timeout must be a duration: %w", err)
+	}
+	return nil
+}
+
+func (c StreamRenderWorkerConfig) timeoutDuration() time.Duration {
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return 20 * time.Minute
+	}
+	return d
+}
+
+func markStreamFailed(repo StreamRenderRepository, id uuid.UUID, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), failureWriteTimeout)
+	defer cancel()
+	if err := repo.UpdateStatus(ctx, id, streamclips.StatusFailed, reason); err != nil {
+		logWorkerError(id, "mark stream failed", err)
+	}
+}
+
+func streamGalleryHTML(j streamclips.Job, videos []streamclips.VideoEntry) string {
+	var b strings.Builder
+	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><title>Streamer clips</title></head><body>")
+	b.WriteString("<h1>")
+	b.WriteString(j.Title)
+	b.WriteString("</h1>")
+	for _, video := range videos {
+		b.WriteString("<section><h2>")
+		b.WriteString(video.ClipID)
+		b.WriteString("</h2><video controls src=\"videos/")
+		b.WriteString(video.ClipID)
+		b.WriteString("\"></video></section>")
+	}
+	b.WriteString("</body></html>")
+	return b.String()
+}
+
+func (w *RenderWorker) HandleRenderVariant(ctx context.Context, t *asynq.Task) error {
+	var payload tasks.RenderVariantPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("decode payload: %w", err)
+	}
+
+	j, err := w.repo.Get(ctx, payload.JobID)
+	if err != nil {
+		return fmt.Errorf("load job %s: %w", payload.JobID, err)
+	}
+	variant := payload.Variant
+	if variant == "" {
+		variant = editor.DefaultPreset().Name
+	}
+	if err := w.render(ctx, j, variant); err != nil {
+		logWorkerError(j.ID, tasks.TypeRenderVariant, err)
+		return err
+	}
+	return nil
+}
+
+func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (err error) {
+	loadout, err := renderplan.LoadoutForVariant(variant)
+	if err != nil {
+		return err
+	}
+	previousState, _, err := w.readRenderVariantState(j.ID, variant)
+	if err != nil {
+		return fmt.Errorf("read render state: %w", err)
+	}
+	ready, keys, err := renderVariantOutputsReady(w.storage, j.ID, variant)
+	if err != nil {
+		return err
+	}
+	if ready {
+		state, err := newWorkerRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusReady, nil, "", previousState)
+		if err != nil {
+			return err
+		}
+		if err := w.writeRenderVariantState(state); err != nil {
+			return fmt.Errorf("write ready render state: %w", err)
+		}
+		logWorkerSkip(j.ID, tasks.TypeRenderVariant, keys)
+		return nil
+	}
+	if j.KillPlan == nil {
+		return fmt.Errorf("job %s has no kill plan", j.ID)
+	}
+
+	cfg := w.cfg.withDefaults()
+	if err := cfg.validate(); err != nil {
+		return err
+	}
+	state, err := newWorkerRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusRendering, nil, "", previousState)
+	if err != nil {
+		return err
+	}
+	if err := w.writeRenderVariantState(state); err != nil {
+		return fmt.Errorf("write rendering state: %w", err)
+	}
+	currentState := &state
+	var result editor.Result
+	defer func() {
+		if err == nil {
+			return
+		}
+		failedState, stateErr := newWorkerRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusFailed, result.Warnings, renderVariantFailureMessage(result, err), currentState)
+		if stateErr != nil {
+			err = fmt.Errorf("%w; build failed render state: %v", err, stateErr)
+			return
+		}
+		if writeErr := w.writeRenderVariantState(failedState); writeErr != nil {
+			err = fmt.Errorf("%w; write failed render state: %v", err, writeErr)
+		}
+	}()
+
+	workDir, cleanup, err := prepareStageDir(cfg.WorkDir, j.ID, "render")
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	recordingResult, err := readStoredRecordingResult(w.storage, j.ID)
+	if err != nil {
+		return err
+	}
+	localRecordingResult := filepath.Join(workDir, "recording-result.json")
+	if err := localizeSegmentClips(w.storage, j.ID, workDir, &recordingResult); err != nil {
+		return err
+	}
+	if err := writeJSONFile(localRecordingResult, recordingResult); err != nil {
+		return fmt.Errorf("write localized recording result: %w", err)
+	}
+	localKillPlan := filepath.Join(workDir, "killplan.json")
+	if err := writeJSONFile(localKillPlan, j.KillPlan); err != nil {
+		return fmt.Errorf("write kill plan: %w", err)
+	}
+
+	outDir := filepath.Join(workDir, "out")
+	publishDir := filepath.Join(outDir, "shortslistosparasubir")
+	if err := w.writeEditDocument(outDir, j.ID, loadout, recordingResult); err != nil {
+		return err
+	}
+	args := []string{
+		"--recording-result", localRecordingResult,
+		"--killplan", localKillPlan,
+		"--out", outDir,
+		"--publish-dir", publishDir,
+		"--preset", loadout.Preset,
+	}
+	if cfg.FFmpegPath != "" {
+		args = append(args, "--ffmpeg", cfg.FFmpegPath)
+	}
+	if cfg.FFprobePath != "" {
+		args = append(args, "--ffprobe", cfg.FFprobePath)
+	}
+
+	runCtx, cancel := context.WithTimeout(ctx, cfg.timeoutDuration())
+	defer cancel()
+	_, runErr := w.runner.Run(runCtx, cfg.EditorPath, args...)
+
+	resultPath := filepath.Join(outDir, "shorts-result.json")
+	if err := readJSONFile(resultPath, &result); err != nil {
+		if runErr != nil {
+			return runErr
+		}
+		return fmt.Errorf("read render result: %w", err)
+	}
+	if cfg.FFprobePath != "" {
+		if err := probeRenderResult(runCtx, w.runner, cfg.FFprobePath, &result); err != nil {
+			result.Warnings = append(result.Warnings, "ffprobe quality metadata: "+err.Error())
+		}
+		if err := writeJSONFile(resultPath, result); err != nil {
+			return fmt.Errorf("write probed render result: %w", err)
+		}
+	}
+	keys, err = uploadRenderVariantOutputs(w.storage, j.ID, variant, outDir, publishDir, resultPath, result)
+	if err != nil {
+		return err
+	}
+	logWorkerArtifacts(j.ID, tasks.TypeRenderVariant, keys)
+	if runErr != nil {
+		return runErr
+	}
+	if result.Error != "" {
+		return fmt.Errorf("render result error: %s", result.Error)
+	}
+	readyState, err := newWorkerRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusReady, result.Warnings, "", currentState)
+	if err != nil {
+		return err
+	}
+	if err := w.writeRenderVariantState(readyState); err != nil {
+		return fmt.Errorf("write ready render state: %w", err)
+	}
+	return nil
+}
+
+func (w *RenderWorker) writeEditDocument(outDir string, id uuid.UUID, loadout renderplan.Loadout, result recording.RecordingResult) error {
+	prefix, err := artifacts.RenderVariantPrefix(id, loadout.Variant)
+	if err != nil {
+		return err
+	}
+	resultKey, err := artifacts.RenderVariantResultKey(id, loadout.Variant)
+	if err != nil {
+		return err
+	}
+	editManifestKey, err := artifacts.RenderVariantEditManifestKey(id, loadout.Variant)
+	if err != nil {
+		return err
+	}
+	packKey, err := artifacts.RenderVariantPackManifestKey(id, loadout.Variant)
+	if err != nil {
+		return err
+	}
+	galleryKey, err := artifacts.RenderVariantGalleryKey(id, loadout.Variant)
+	if err != nil {
+		return err
+	}
+	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(id, loadout.Variant)
+	if err != nil {
+		return err
+	}
+	doc := renderplan.NewEditDocument(renderplan.NewEditDocumentOptions{
+		JobID:              id,
+		Variant:            loadout.Variant,
+		Preset:             loadout.Preset,
+		EffectsPreset:      loadout.EffectsPreset,
+		Framing:            loadout.Framing,
+		VideoCRF:           loadout.VideoCRF,
+		VideoPreset:        loadout.VideoPreset,
+		HQFilters:          loadout.HQFilters,
+		AudioNormalize:     loadout.AudioNormalize,
+		QualityChecks:      loadout.QualityChecks,
+		CoverSheets:        loadout.CoverSheets,
+		CoversEnabled:      loadout.CoversEnabled,
+		CaptionsEnabled:    loadout.CaptionsEnabled,
+		Output:             loadout.Output,
+		UploadReadyRoot:    loadout.UploadReadyDir,
+		RecordingResultKey: artifacts.RecordingResultKey(id),
+		KillPlanSource:     "job.kill_plan",
+		OutputPrefix:       prefix,
+		RenderResultKey:    resultKey,
+		EditManifestKey:    editManifestKey,
+		PackManifestKey:    packKey,
+		GalleryKey:         galleryKey,
+		PublishSummaryKey:  summaryKey,
+		SegmentIDs:         recordingSegmentIDs(result),
+	})
+	return writeJSONFile(filepath.Join(outDir, "edit-document.json"), doc)
+}
+
+func (w *RenderWorker) readRenderVariantState(id uuid.UUID, variant string) (*renderplan.RenderVariantState, bool, error) {
+	key, err := artifacts.RenderVariantStatusKey(id, variant)
+	if err != nil {
+		return nil, false, err
+	}
+	rc, err := w.storage.Open(key)
+	if err != nil {
+		if !storage.IsNotExist(err) {
+			return nil, false, err
+		}
+		return nil, false, nil
+	}
+	defer rc.Close()
+	var state renderplan.RenderVariantState
+	if err := json.NewDecoder(rc).Decode(&state); err != nil {
+		return nil, false, err
+	}
+	return &state, true, nil
+}
+
+func (w *RenderWorker) writeRenderVariantState(state renderplan.RenderVariantState) error {
+	key, err := artifacts.RenderVariantStatusKey(state.JobID, state.Variant)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return w.storage.Put(key, bytes.NewReader(b))
+}
+
+func newWorkerRenderVariantState(id uuid.UUID, loadout renderplan.Loadout, status string, warnings []string, errMsg string, previous *renderplan.RenderVariantState) (renderplan.RenderVariantState, error) {
+	prefix, err := artifacts.RenderVariantPrefix(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	resultKey, err := artifacts.RenderVariantResultKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	editManifestKey, err := artifacts.RenderVariantEditManifestKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	packKey, err := artifacts.RenderVariantPackManifestKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	galleryKey, err := artifacts.RenderVariantGalleryKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(id, loadout.Variant)
+	if err != nil {
+		return renderplan.RenderVariantState{}, err
+	}
+	return renderplan.NewRenderVariantState(renderplan.NewRenderVariantStateOptions{
+		JobID:             id,
+		Variant:           loadout.Variant,
+		Status:            status,
+		Preset:            loadout.Preset,
+		EditDocumentKey:   editDocumentKey,
+		EditManifestKey:   editManifestKey,
+		RenderResultKey:   resultKey,
+		PackManifestKey:   packKey,
+		GalleryKey:        galleryKey,
+		PublishSummaryKey: summaryKey,
+		ArtifactPrefix:    prefix,
+		Warnings:          warnings,
+		Error:             errMsg,
+		Previous:          previous,
+	}), nil
+}
+
+func renderVariantFailureMessage(result editor.Result, err error) string {
+	if result.Error != "" {
+		return result.Error
+	}
+	return err.Error()
+}
+
+type ffprobeJSON struct {
+	Streams []struct {
+		CodecName  string `json:"codec_name"`
+		Width      int    `json:"width"`
+		Height     int    `json:"height"`
+		RFrameRate string `json:"r_frame_rate"`
+		Duration   string `json:"duration"`
+	} `json:"streams"`
+	Format struct {
+		Duration string `json:"duration"`
+		Size     string `json:"size"`
+	} `json:"format"`
+}
+
+func probeRenderResult(ctx context.Context, runner commandRunner, ffprobePath string, result *editor.Result) error {
+	var firstErr error
+	for i := range result.Shorts {
+		short := &result.Shorts[i]
+		path := short.PublishPath
+		role := "publish"
+		if path == "" {
+			path = short.Output
+			role = "short"
+		}
+		if path == "" {
+			continue
+		}
+		artifact, err := probeVideoArtifact(ctx, runner, ffprobePath, short.SegmentID, role, path)
+		if err != nil {
+			artifact = recording.RecordingArtifact{
+				SegmentID:  short.SegmentID,
+				Role:       role,
+				Type:       "video",
+				Path:       path,
+				ProbeError: err.Error(),
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+		if role == "publish" {
+			short.PublishArtifact = artifact
+		} else {
+			short.OutputArtifact = artifact
+		}
+	}
+	return firstErr
+}
+
+func probeVideoArtifact(ctx context.Context, runner commandRunner, ffprobePath, segmentID, role, path string) (recording.RecordingArtifact, error) {
+	out, err := runner.Run(ctx, ffprobePath,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_name,width,height,r_frame_rate,duration:format=duration,size",
+		"-of", "json",
+		path,
+	)
+	artifact := recording.RecordingArtifact{
+		SegmentID: segmentID,
+		Role:      role,
+		Type:      "video",
+		Path:      path,
+	}
+	if stat, statErr := os.Stat(path); statErr == nil {
+		artifact.SizeBytes = stat.Size()
+	}
+	if err != nil {
+		artifact.ProbeError = err.Error()
+		return artifact, err
+	}
+	var probe ffprobeJSON
+	if err := json.Unmarshal(out, &probe); err != nil {
+		artifact.ProbeError = err.Error()
+		return artifact, err
+	}
+	if len(probe.Streams) > 0 {
+		stream := probe.Streams[0]
+		artifact.Codec = stream.CodecName
+		artifact.Width = stream.Width
+		artifact.Height = stream.Height
+		artifact.FrameRate = stream.RFrameRate
+		if seconds := parseProbeFloat(stream.Duration); seconds > 0 {
+			artifact.DurationSeconds = seconds
+		}
+	}
+	if artifact.DurationSeconds == 0 {
+		artifact.DurationSeconds = parseProbeFloat(probe.Format.Duration)
+	}
+	if size := parseProbeInt(probe.Format.Size); size > 0 {
+		artifact.SizeBytes = size
+	}
+	return artifact, nil
+}
+
+func parseProbeFloat(value string) float64 {
+	f, _ := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	return f
+}
+
+func parseProbeInt(value string) int64 {
+	i, _ := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	return i
+}
+
+func (c RenderWorkerConfig) withDefaults() RenderWorkerConfig {
+	if c.Timeout == "" {
+		c.Timeout = defaultMediaWorkerTimeout
+	}
+	return c
+}
+
+func (c RenderWorkerConfig) validate() error {
+	required := map[string]string{
+		"editor":  c.EditorPath,
+		"timeout": c.Timeout,
+	}
+	for name, value := range required {
+		if value == "" {
+			return fmt.Errorf("%s is required", name)
+		}
+	}
+	if _, err := time.ParseDuration(c.Timeout); err != nil {
+		return fmt.Errorf("timeout must be a duration: %w", err)
+	}
+	return nil
+}
+
+func (c RenderWorkerConfig) timeoutDuration() time.Duration {
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return 20 * time.Minute
+	}
+	return d
+}
+
 func prepareStageDir(root string, id uuid.UUID, stage string) (string, func(), error) {
 	base := root
 	cleanup := func() {}
@@ -488,6 +1183,140 @@ func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultP
 	return keys, nil
 }
 
+func uploadRenderVariantOutputs(store storage.Storage, id uuid.UUID, variant, outDir, publishDir, resultPath string, result editor.Result) ([]string, error) {
+	resultKey, err := artifacts.RenderVariantResultKey(id, variant)
+	if err != nil {
+		return nil, err
+	}
+	keys := []string{resultKey}
+	if err := uploadFile(store, resultKey, resultPath); err != nil {
+		return nil, fmt.Errorf("upload render result: %w", err)
+	}
+
+	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(id, variant)
+	if err != nil {
+		return nil, err
+	}
+	if uploaded, err := uploadOptionalFile(store, editDocumentKey, filepath.Join(outDir, "edit-document.json")); err != nil {
+		return nil, fmt.Errorf("upload edit document: %w", err)
+	} else if uploaded {
+		keys = append(keys, editDocumentKey)
+	}
+
+	editManifestKey, err := artifacts.RenderVariantEditManifestKey(id, variant)
+	if err != nil {
+		return nil, err
+	}
+	if uploaded, err := uploadOptionalFile(store, editManifestKey, filepath.Join(outDir, "edit-manifest.json")); err != nil {
+		return nil, fmt.Errorf("upload edit manifest: %w", err)
+	} else if uploaded {
+		keys = append(keys, editManifestKey)
+	}
+
+	packKey, err := artifacts.RenderVariantPackManifestKey(id, variant)
+	if err != nil {
+		return nil, err
+	}
+	if uploaded, err := uploadOptionalFile(store, packKey, filepath.Join(publishDir, "pack-manifest.json")); err != nil {
+		return nil, fmt.Errorf("upload pack manifest: %w", err)
+	} else if uploaded {
+		keys = append(keys, packKey)
+	}
+
+	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(id, variant)
+	if err != nil {
+		return nil, err
+	}
+	if uploaded, err := uploadOptionalFile(store, summaryKey, result.SummaryPath); err != nil {
+		return nil, fmt.Errorf("upload publish summary: %w", err)
+	} else if uploaded {
+		keys = append(keys, summaryKey)
+	}
+
+	galleryKey, err := artifacts.RenderVariantGalleryKey(id, variant)
+	if err != nil {
+		return nil, err
+	}
+	if uploaded, err := uploadOptionalFile(store, galleryKey, result.GalleryPath); err != nil {
+		return nil, fmt.Errorf("upload gallery: %w", err)
+	} else if uploaded {
+		keys = append(keys, galleryKey)
+	}
+
+	for _, short := range result.Shorts {
+		name := short.SegmentID
+		if name == "" {
+			continue
+		}
+		videoPath := short.PublishPath
+		if videoPath == "" {
+			videoPath = short.Output
+		}
+		if videoPath != "" {
+			videoKey, err := artifacts.RenderVariantVideoKey(id, variant, name)
+			if err != nil {
+				return nil, err
+			}
+			if uploaded, err := uploadOptionalFile(store, videoKey, videoPath); err != nil {
+				return nil, fmt.Errorf("upload render video %s: %w", name, err)
+			} else if uploaded {
+				keys = append(keys, videoKey)
+			}
+		}
+		if short.CoverPath != "" {
+			coverKey, err := artifacts.RenderVariantCoverKey(id, variant, name)
+			if err != nil {
+				return nil, err
+			}
+			if uploaded, err := uploadOptionalFile(store, coverKey, short.CoverPath); err != nil {
+				return nil, fmt.Errorf("upload render cover %s: %w", name, err)
+			} else if uploaded {
+				keys = append(keys, coverKey)
+			}
+		}
+		if short.CaptionPath != "" {
+			captionKey, err := artifacts.RenderVariantCaptionKey(id, variant, name)
+			if err != nil {
+				return nil, err
+			}
+			if uploaded, err := uploadOptionalFile(store, captionKey, short.CaptionPath); err != nil {
+				return nil, fmt.Errorf("upload render caption %s: %w", name, err)
+			} else if uploaded {
+				keys = append(keys, captionKey)
+			}
+		}
+		if short.RenderLogPath != "" {
+			logKey, err := artifacts.RenderVariantLogKey(id, variant, name+"-render")
+			if err != nil {
+				return nil, err
+			}
+			if uploaded, err := uploadOptionalFile(store, logKey, short.RenderLogPath); err != nil {
+				return nil, fmt.Errorf("upload render log %s: %w", name, err)
+			} else if uploaded {
+				keys = append(keys, logKey)
+			}
+		}
+	}
+
+	if result.Error == "" && len(result.Shorts) == 0 {
+		return nil, fmt.Errorf("render result has no shorts")
+	}
+	return keys, nil
+}
+
+func recordingSegmentIDs(result recording.RecordingResult) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, segment := range result.Plan.Segments {
+		if segment.ID == "" || seen[segment.ID] {
+			continue
+		}
+		seen[segment.ID] = true
+		ids = append(ids, segment.ID)
+	}
+	return ids
+}
+
 func decodeStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.RecordingResult, error) {
 	rc, err := store.Open(artifacts.RecordingResultKey(id))
 	if err != nil {
@@ -577,6 +1406,45 @@ func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []strin
 	return true, []string{resultKey, finalKey}, nil
 }
 
+func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant string) (bool, []string, error) {
+	resultKey, err := artifacts.RenderVariantResultKey(id, variant)
+	if err != nil {
+		return false, nil, err
+	}
+	exists, err := store.Exists(resultKey)
+	if err != nil || !exists {
+		return false, nil, err
+	}
+	rc, err := store.Open(resultKey)
+	if err != nil {
+		return false, nil, fmt.Errorf("open render result: %w", err)
+	}
+	defer rc.Close()
+	var result editor.Result
+	if err := json.NewDecoder(rc).Decode(&result); err != nil {
+		return false, nil, fmt.Errorf("decode render result: %w", err)
+	}
+	if result.Error != "" {
+		return false, nil, nil
+	}
+	keys := []string{resultKey}
+	for _, keyFn := range []func(uuid.UUID, string) (string, error){
+		artifacts.RenderVariantPackManifestKey,
+		artifacts.RenderVariantGalleryKey,
+	} {
+		key, err := keyFn(id, variant)
+		if err != nil {
+			return false, nil, err
+		}
+		exists, err := store.Exists(key)
+		if err != nil || !exists {
+			return false, nil, err
+		}
+		keys = append(keys, key)
+	}
+	return true, keys, nil
+}
+
 func localizeSegmentClips(store storage.Storage, id uuid.UUID, workDir string, result *recording.RecordingResult) error {
 	localized := 0
 	for i := range result.Artifacts {
@@ -619,4 +1487,12 @@ func writeJSONFile(path string, value any) error {
 		return err
 	}
 	return os.WriteFile(path, append(b, '\n'), 0o600)
+}
+
+func putJSONToStorage(store storage.Storage, key string, value any) error {
+	b, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return store.Put(key, bytes.NewReader(append(b, '\n')))
 }

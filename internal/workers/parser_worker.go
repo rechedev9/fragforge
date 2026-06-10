@@ -5,6 +5,7 @@
 package workers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,8 +17,10 @@ import (
 	"github.com/hibiken/asynq"
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 
+	"github.com/reche/zackvideo/internal/artifacts"
 	"github.com/reche/zackvideo/internal/job"
 	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/reche/zackvideo/internal/moments"
 	"github.com/reche/zackvideo/internal/parser"
 	"github.com/reche/zackvideo/internal/storage"
 	"github.com/reche/zackvideo/internal/tasks"
@@ -67,7 +70,11 @@ func (w *ParserWorker) HandleParseDemo(ctx context.Context, t *asynq.Task) error
 	if err := w.repo.SetKillPlan(ctx, j.ID, plan); err != nil {
 		return fmt.Errorf("save plan: %w", err)
 	}
-	logWorkerArtifacts(j.ID, tasks.TypeParseDemo, []string{"kill_plan"})
+	momentsKey, err := w.writeMoments(j.ID, plan)
+	if err != nil {
+		return fmt.Errorf("write moments: %w", err)
+	}
+	logWorkerArtifacts(j.ID, tasks.TypeParseDemo, []string{"kill_plan", momentsKey})
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusParsed, ""); err != nil {
 		return fmt.Errorf("mark parsed: %w", err)
 	}
@@ -113,4 +120,17 @@ func (w *ParserWorker) parse(ctx context.Context, j job.Job) (killplan.Plan, err
 		return killplan.Plan{}, err
 	}
 	return plan, nil
+}
+
+func (w *ParserWorker) writeMoments(id uuid.UUID, plan killplan.Plan) (string, error) {
+	doc := moments.Build(id, plan)
+	b, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	key := artifacts.MomentsKey(id)
+	if err := w.storage.Put(key, bytes.NewReader(b)); err != nil {
+		return "", err
+	}
+	return key, nil
 }

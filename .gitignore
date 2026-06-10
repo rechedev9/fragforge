@@ -34,5 +34,8 @@ overlays/**/out/
 .vscode/
 *.swp
 
+# Local frontend toolchains
+/internal/httpapi/workbench_assets/node_modules/
+
 # Local git worktrees
 /.worktrees/

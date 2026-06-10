@@ -39,6 +39,22 @@ func TestValidateShortArtifactAcceptsUploadReadyShort(t *testing.T) {
 	}
 }
 
+func TestValidateShortArtifactAcceptsConfiguredFPS(t *testing.T) {
+	warnings := ValidateShortArtifactForFPS(recording.RecordingArtifact{
+		SegmentID:       "seg-ok",
+		Path:            "short.mp4",
+		SizeBytes:       1,
+		DurationSeconds: 60,
+		Codec:           "h264",
+		Width:           1080,
+		Height:          1920,
+		FrameRate:       "24/1",
+	}, 24)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+}
+
 func TestValidateSourceArtifactWarnsWhenSourceFormatIsUnexpected(t *testing.T) {
 	warnings := ValidateSourceArtifact(recording.RecordingArtifact{
 		SegmentID: "seg-source",

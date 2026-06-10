@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZackVideo Workbench</title>
+  <style>{{WORKBENCH_CSS}}</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">ZV</span>
+      <div>
+        <h1>ZackVideo Workbench</h1>
+        <p>Local CS2 demo-to-video production desk</p>
+      </div>
+    </div>
+    <div class="top-status" aria-label="System status">
+      <span class="chip">Env: local</span>
+      <span class="chip good" id="api-chip">API: checking</span>
+      <span class="chip">Workers: parser / record / render</span>
+    </div>
+    <div class="top-actions">
+      <input id="token" type="password" placeholder="Mutation token" autocomplete="off">
+      <button id="refresh" type="button" class="button secondary">Refresh</button>
+      <span id="health" class="health-text" role="status"></span>
+    </div>
+  </header>
+
+  <main class="workbench-shell">
+    <aside class="left-rail" aria-label="Intake and runs">
+      <section class="rail-section">
+        <div class="section-head">
+          <h2>Intake</h2>
+          <span class="meta-label">New run</span>
+        </div>
+        <label id="drop-zone" class="drop-zone" for="demo-file">
+          <input id="demo-file" type="file" accept=".dem">
+          <span class="drop-title">Drop .dem here</span>
+          <span id="demo-file-name" class="drop-meta">No file selected</span>
+        </label>
+        <label class="field">
+          <span>Target SteamID64</span>
+          <input id="target-steamid" inputmode="numeric" autocomplete="off" placeholder="76561198000000000">
+        </label>
+        <label class="field">
+          <span>Requested output</span>
+          <textarea id="run-prompt" placeholder="Describe requested output..."></textarea>
+        </label>
+        <button id="start-run" type="button" class="button primary full">Start New Run</button>
+      </section>
+
+      <section class="rail-section rail-fill">
+        <div class="section-head">
+          <h2>Run Queue</h2>
+          <span id="job-count" class="meta-label"></span>
+        </div>
+        <div id="jobs" class="run-list"></div>
+      </section>
+
+      <nav class="rail-footer" aria-label="Workbench links">
+        <button type="button" class="text-button">Job History</button>
+        <button type="button" class="text-button">Analytics</button>
+      </nav>
+    </aside>
+
+    <section class="workspace" aria-label="Production workspace">
+      <div id="workspace-status" class="workspace-status"></div>
+
+      <section class="preview-panel" aria-label="Preview">
+        <div class="preview-well">
+          <div class="preview-empty">
+            <span id="preview-title">No job selected</span>
+            <span id="preview-subtitle">Choose a run from the queue or create one from Intake.</span>
+          </div>
+          <div class="preview-controls">
+            <div class="control-group">
+              <button type="button" class="icon-button" aria-label="Previous moment">Prev</button>
+              <button type="button" class="icon-button" aria-label="Play preview">Play</button>
+              <button type="button" class="icon-button" aria-label="Next moment">Next</button>
+            </div>
+            <span id="preview-timecode" class="mono">00:00.00 / 00:00.00</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="timeline-panel" aria-label="Stage timeline">
+        <div id="stage-timeline" class="stage-timeline"></div>
+      </section>
+
+      <section class="moments-panel" aria-label="Detected moments">
+        <div class="panel-head compact">
+          <h2>Detected Moments</h2>
+          <span id="moment-count" class="meta-label">0 items</span>
+        </div>
+        <div id="moments" class="table-wrap"></div>
+      </section>
+
+      <section class="artifact-strip" aria-label="Artifacts">
+        <span class="meta-label">Artifacts</span>
+        <div id="artifact-links" class="artifact-links"></div>
+      </section>
+    </section>
+
+    <aside class="right-rail" aria-label="Codex operator">
+      <nav class="tabs" aria-label="Right rail tabs">
+        <button type="button" class="tab active" data-tab="codex">Codex</button>
+        <button type="button" class="tab" data-tab="inspector">Inspector</button>
+        <button type="button" class="tab" data-tab="artifacts">Artifacts</button>
+      </nav>
+
+      <section id="tab-codex" class="rail-tab active" aria-label="Codex">
+        <div id="codex-thread" class="codex-thread"></div>
+        <div id="action-proposal" class="action-proposal"></div>
+      </section>
+
+      <section id="tab-inspector" class="rail-tab" aria-label="Inspector">
+        <div class="panel-head compact">
+          <h2>Inspector</h2>
+          <span class="meta-label">JSON</span>
+        </div>
+        <pre id="inspector-json" class="json-panel">{}</pre>
+      </section>
+
+      <section id="tab-artifacts" class="rail-tab" aria-label="Artifacts">
+        <div class="panel-head compact">
+          <h2>Artifacts</h2>
+          <span class="meta-label">Selected run</span>
+        </div>
+        <div id="rail-artifacts" class="rail-artifacts"></div>
+      </section>
+
+      <form id="command-form" class="command-bar">
+        <input id="codex-command" placeholder="Type a command for Codex..." autocomplete="off">
+        <button type="submit" class="button send">Send</button>
+      </form>
+    </aside>
+  </main>
+
+  <script type="module">{{WORKBENCH_JS}}</script>
+</body>
+</html>

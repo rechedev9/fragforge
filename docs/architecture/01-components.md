@@ -136,6 +136,22 @@ Ver [`research/05-music-sync.md`](../research/05-music-sync.md).
 - Subir a object storage.
 - Devolver URL pre-firmada al frontend.
 
+## Render presets
+
+Todos los presets de render viven en un único registro: `internal/editor/preset.go`
+(`editor.RenderPreset`, `PresetByName`, `PresetNames`, `DefaultPreset`). Añadir
+un preset es añadir una entrada ahí; el catálogo de loadouts
+(`internal/renderplan`), el endpoint `GET /api/presets`, la validación de
+`/renders/{variant}`, el workbench y el render worker derivan de ese registro.
+
+Reglas de producto:
+
+- Toda salida es 1080×1920 a 60fps (vertical Shorts).
+- El default es `viral-60`: demo + prompt → Short con edición viral
+  (hook text, punch-ins, kill counter). Ver
+  [`research/11-viral-cs2-vertical-editing.md`](../research/11-viral-cs2-vertical-editing.md).
+- Una variante desconocida se rechaza con la lista de presets válidos.
+
 ## Tabla de límites entre componentes
 
 | Componente            | Entrada                       | Salida                         | Estado interno      |

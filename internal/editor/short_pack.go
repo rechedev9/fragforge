@@ -74,7 +74,7 @@ func (p *shortPackRenderer) renderShort(ctx context.Context, i int, short *Short
 	p.result.Shorts[i].OutputArtifact = artifact
 	p.manifest.Shorts[i].OutputArtifact = artifact
 	if p.opts.ValidateVideos {
-		p.result.Warnings = append(p.result.Warnings, ValidateShortArtifact(artifact)...)
+		p.result.Warnings = append(p.result.Warnings, ValidateShortArtifactForFPS(artifact, outputFPS(*short))...)
 	}
 	return nil
 }
@@ -87,7 +87,7 @@ func (p *shortPackRenderer) publishShort(ctx context.Context, i int, short *Shor
 	p.result.Shorts[i].PublishArtifact = artifact
 	p.manifest.Shorts[i].PublishArtifact = artifact
 	if p.opts.ValidateVideos {
-		p.result.Warnings = append(p.result.Warnings, ValidateShortArtifact(artifact)...)
+		p.result.Warnings = append(p.result.Warnings, ValidateShortArtifactForFPS(artifact, outputFPS(*short))...)
 	}
 	return nil
 }

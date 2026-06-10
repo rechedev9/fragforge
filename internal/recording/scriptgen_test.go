@@ -60,7 +60,7 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 		`cl_trueview_show_status 0`,
 		`mirv_panorama panelstyle panelId=trueview_row opacity=0`,
 		`spec_player \"maaryy\"`,
-		`spec_autodirector 0; spec_mode 1; spec_player \"maaryy\"`,
+		`spec_autodirector 0; spec_mode 2; spec_player \"maaryy\"`,
 		`camera-warmup-seg-001`,
 		`camera-lead-3s-seg-001`,
 		`camera-lead-2s-seg-001`,

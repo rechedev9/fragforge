@@ -58,10 +58,13 @@ func TestBuildManifestUsesSegmentOrderAndKillTimes(t *testing.T) {
 	if len(first.CoverCommand) == 0 {
 		t.Fatal("cover command is empty")
 	}
-	if manifest.VideoCRF != DefaultVideoCRF || manifest.VideoPreset != DefaultVideoPreset {
+	if manifest.Preset != DefaultPreset().Name {
+		t.Fatalf("preset = %q, want default %q", manifest.Preset, DefaultPreset().Name)
+	}
+	if manifest.VideoCRF != DefaultPreset().VideoCRF || manifest.VideoPreset != DefaultPreset().VideoPreset {
 		t.Fatalf("video encoding = crf %d preset %q", manifest.VideoCRF, manifest.VideoPreset)
 	}
-	if first.VideoCRF != DefaultVideoCRF || first.VideoPreset != DefaultVideoPreset {
+	if first.VideoCRF != DefaultPreset().VideoCRF || first.VideoPreset != DefaultPreset().VideoPreset {
 		t.Fatalf("short video encoding = crf %d preset %q", first.VideoCRF, first.VideoPreset)
 	}
 	if !strings.Contains(first.Caption, "MartinezSa turns this round on Ancient into a clean 2K with the AK-47.") {
@@ -448,6 +451,173 @@ func TestBuildManifestUsesVideoEncodingOptions(t *testing.T) {
 	}
 	if got := argAfter(first.FFmpegCommand, "-crf"); got != "16" {
 		t.Fatalf("-crf arg = %q, want 16", got)
+	}
+}
+
+func TestBuildManifestCarriesMusicRhythmAndOutputFPS(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.MusicPath = filepath.Join(dir, "music", "brightmelodicskippyedm.wav")
+	opts.OutputFPS = 24
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.MusicPath != opts.MusicPath {
+		t.Fatalf("manifest music path = %q, want %q", manifest.MusicPath, opts.MusicPath)
+	}
+	if manifest.OutputFPS != 24 {
+		t.Fatalf("manifest output fps = %d, want 24", manifest.OutputFPS)
+	}
+	first := manifest.Shorts[0]
+	if first.MusicPath != opts.MusicPath || first.OutputFPS != 24 {
+		t.Fatalf("short render controls = %#v", first)
+	}
+	filter := argAfter(first.FFmpegCommand, "-filter_complex")
+	for _, want := range []string{"fps=24", "[1:a]volume=1.00[music]", "amix=inputs=2:duration=first"} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("music filter missing %q:\n%s", want, filter)
+		}
+	}
+}
+
+func TestBuildFFmpegCommandUsesConfiguredOutputFPS(t *testing.T) {
+	command := BuildFFmpegCommand("ffmpeg", ShortEdit{
+		Input:     "clip.mp4",
+		Output:    "short.mp4",
+		OutputFPS: 24,
+	})
+	filter := argAfter(command, "-vf")
+	if !strings.Contains(filter, "fps=24") {
+		t.Fatalf("filter missing configured fps:\n%s", filter)
+	}
+	if strings.Contains(filter, "fps=60") {
+		t.Fatalf("filter should not contain default fps when configured:\n%s", filter)
+	}
+}
+
+func TestBuildManifestCompileSegmentsCreatesOneShort(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.CompileSegments = true
+	opts.MusicPath = filepath.Join(dir, "music", "brightmelodicskippyedm.wav")
+	opts.OutputFPS = 24
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if !manifest.CompileSegments {
+		t.Fatal("manifest compile_segments = false, want true")
+	}
+	if len(manifest.Shorts) != 1 {
+		t.Fatalf("shorts len = %d, want 1", len(manifest.Shorts))
+	}
+	short := manifest.Shorts[0]
+	if short.SegmentID != "demo-compilation" {
+		t.Fatalf("compiled segment id = %q", short.SegmentID)
+	}
+	if len(short.Parts) != 2 {
+		t.Fatalf("parts len = %d, want 2", len(short.Parts))
+	}
+	if short.Parts[0].SegmentID != "seg-001" || short.Parts[1].SegmentID != "seg-002" {
+		t.Fatalf("part order = %#v", short.Parts)
+	}
+	if len(short.Kills) != 3 {
+		t.Fatalf("compiled kills len = %d, want 3", len(short.Kills))
+	}
+	if short.OutputFPS != 24 || short.MusicPath != opts.MusicPath {
+		t.Fatalf("compiled short controls = %#v", short)
+	}
+}
+
+func TestBuildManifestAppliesRhythmSyncToCompiledParts(t *testing.T) {
+	dir := t.TempDir()
+	rhythmPath := filepath.Join(dir, "rhythm.json")
+	if err := os.WriteFile(rhythmPath, []byte(`{
+		"schema_version":"1.0",
+		"segment_sync":[
+			{"segment_id":"seg-001","timeline_start_seconds":0.500,"gap_before_seconds":0.500},
+			{"segment_id":"seg-002","timeline_start_seconds":9.000,"gap_before_seconds":1.000}
+		]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.CompileSegments = true
+	opts.MusicPath = filepath.Join(dir, "music", "brightmelodicskippyedm.wav")
+	opts.RhythmPath = rhythmPath
+	opts.OutputFPS = 24
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	short := manifest.Shorts[0]
+	if got := short.Parts[0].GapBeforeSeconds; got != 0.5 {
+		t.Fatalf("part[0] gap = %.3f, want 0.500", got)
+	}
+	if got := short.Parts[1].TimelineStartSeconds; got != 9.0 {
+		t.Fatalf("part[1] timeline start = %.3f, want 9.000", got)
+	}
+	if got := short.Kills[2].TimeSeconds; got <= 9.0 {
+		t.Fatalf("third kill time = %.3f, want shifted onto compiled timeline", got)
+	}
+}
+
+func TestBuildFFmpegCommandForCompilationShort(t *testing.T) {
+	short := ShortEdit{
+		Output:          "compiled.mp4",
+		MusicPath:       "music/brightmelodicskippyedm.wav",
+		OutputFPS:       24,
+		AudioNormalize:  true,
+		DurationSeconds: 8,
+		Effects: []Effect{
+			{
+				Type:           EffectImage,
+				Path:           "assets/donk.png",
+				StartSeconds:   0,
+				EndSeconds:     1.5,
+				X:              "W-w-34",
+				Y:              "1010",
+				Width:          430,
+				FadeInSeconds:  0.10,
+				FadeOutSeconds: 0.30,
+			},
+		},
+		Parts: []ShortPart{
+			{SegmentID: "seg-001", Input: "seg-001.mp4", DurationSeconds: 4.0, GapBeforeSeconds: 0.5},
+			{SegmentID: "seg-002", Input: "seg-002.mp4", DurationSeconds: 3.0},
+		},
+	}
+	command := BuildFFmpegCommand("ffmpeg", short)
+	filter := argAfter(command, "-filter_complex")
+	for _, want := range []string{
+		"[0:v]",
+		"[1:v]",
+		"color=c=black:s=1080x1920:r=24:d=0.500",
+		"anullsrc=channel_layout=stereo:sample_rate=48000:d=0.500",
+		"concat=n=3:v=1:a=1",
+		"fps=24",
+		"[2:a]volume=1.00[music]",
+		"[3:v]format=rgba,scale=w=430:h=-1:flags=lanczos,loop=loop=-1:size=1:start=0,setpts=N/24/TB,trim=duration=8.000",
+		"overlay=x=W-w-34:y=1010:format=auto:enable='between(t\\,0.000\\,1.500)'[vimages]",
+		"[vimages]format=yuv420p[v]",
+		"amix=inputs=2:duration=first:dropout_transition=0",
+		"loudnorm=I=-16:TP=-1.5:LRA=11[a]",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("compilation filter missing %q:\n%s", want, filter)
+		}
+	}
+	for _, want := range []string{"seg-001.mp4", "seg-002.mp4", "music/brightmelodicskippyedm.wav", "assets/donk.png"} {
+		if !containsArg(command, want) {
+			t.Fatalf("command missing %q: %#v", want, command)
+		}
 	}
 }
 

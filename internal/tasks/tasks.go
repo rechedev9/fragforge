@@ -4,6 +4,8 @@ package tasks
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +21,18 @@ const (
 
 	// TypeComposeFinal is the Asynq task type for building the first final MP4.
 	TypeComposeFinal = "compose:final"
+
+	// TypeRenderVariant is the Asynq task type for rendering a named output
+	// variant from an existing recording result.
+	TypeRenderVariant = "render:variant"
+
+	// TypeCodexAgent is the Asynq task type for local Codex CLI editorial
+	// assistance over already materialized render artifacts.
+	TypeCodexAgent = "agent:codex"
+
+	// TypeRenderStreamClip is the Asynq task type for rendering manually
+	// selected clips from a streamer MP4 upload.
+	TypeRenderStreamClip = "render:stream-clip"
 )
 
 const (
@@ -37,6 +51,8 @@ const (
 	parseDemoMaxRetry = 1
 )
 
+var renderVariantPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
 // ParseDemoPayload carries the inputs the worker needs to fetch from the DB.
 type ParseDemoPayload struct {
 	JobID uuid.UUID `json:"job_id"`
@@ -50,6 +66,24 @@ type RecordDemoPayload struct {
 // ComposeFinalPayload carries the job id for the composition worker.
 type ComposeFinalPayload struct {
 	JobID uuid.UUID `json:"job_id"`
+}
+
+// RenderVariantPayload carries the job id and render variant requested by the
+// orchestrator.
+type RenderVariantPayload struct {
+	JobID   uuid.UUID `json:"job_id"`
+	Variant string    `json:"variant"`
+}
+
+type CodexAgentPayload struct {
+	JobID   uuid.UUID `json:"job_id"`
+	Variant string    `json:"variant"`
+	Kind    string    `json:"kind"`
+}
+
+type RenderStreamClipPayload struct {
+	JobID   uuid.UUID `json:"job_id"`
+	Variant string    `json:"variant"`
 }
 
 // NewParseDemoTask returns an Asynq task that, when consumed, processes the
@@ -79,4 +113,42 @@ func NewComposeFinalTask(id uuid.UUID) (*asynq.Task, error) {
 		return nil, err
 	}
 	return asynq.NewTask(TypeComposeFinal, payload), nil
+}
+
+// NewRenderVariantTask returns an Asynq task for rendering one named output
+// variant for a job.
+func NewRenderVariantTask(id uuid.UUID, variant string) (*asynq.Task, error) {
+	if !renderVariantPattern.MatchString(variant) {
+		return nil, fmt.Errorf("invalid render variant %q", variant)
+	}
+	payload, err := json.Marshal(RenderVariantPayload{JobID: id, Variant: variant})
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(TypeRenderVariant, payload), nil
+}
+
+func NewCodexAgentTask(id uuid.UUID, variant, kind string) (*asynq.Task, error) {
+	if !renderVariantPattern.MatchString(variant) {
+		return nil, fmt.Errorf("invalid render variant %q", variant)
+	}
+	if !renderVariantPattern.MatchString(kind) {
+		return nil, fmt.Errorf("invalid agent kind %q", kind)
+	}
+	payload, err := json.Marshal(CodexAgentPayload{JobID: id, Variant: variant, Kind: kind})
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(TypeCodexAgent, payload), nil
+}
+
+func NewRenderStreamClipTask(id uuid.UUID, variant string) (*asynq.Task, error) {
+	if !renderVariantPattern.MatchString(variant) {
+		return nil, fmt.Errorf("invalid stream render variant %q", variant)
+	}
+	payload, err := json.Marshal(RenderStreamClipPayload{JobID: id, Variant: variant})
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(TypeRenderStreamClip, payload), nil
 }

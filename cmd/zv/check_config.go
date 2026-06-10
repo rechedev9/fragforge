@@ -195,8 +195,10 @@ func claudeCommandContentRules() []codexPromptContentRule {
 
 func skillWorkflowRequirementMap() map[string][]string {
 	return map[string][]string{
+		"zackvideo-cheater-pov-reels":      {"demo-players", "record", "shorts-render"},
 		"zackvideo-cs2-utility-shorts":     {"demo-parse", "utility-audit", "record", "shorts-render", "gallery-open"},
 		"zackvideo-lineup-audit":           {"utility-audit"},
+		"zackvideo-music-scripted-shorts":  {"demo-parse", "demo-players", "record", "music-analyze", "shorts-render", "gallery-open"},
 		"zackvideo-shorts-production":      {"demo-parse", "demo-players", "utility-audit", "record", "shorts-render", "gallery-open"},
 		"zackvideo-youtube-shorts-publish": {"gallery-open"},
 	}

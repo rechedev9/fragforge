@@ -68,6 +68,11 @@ const (
 	// tutorial labels.
 	EffectsPresetSmokeLineups = "smoke-lineups"
 
+	// EffectsPresetViralUltra is the aggressive viral overlay pack: cold-open
+	// hook text, kill punch-ins with flashes, a running kill counter, and
+	// milestone labels.
+	EffectsPresetViralUltra = "viral-ultra"
+
 	// EffectsPresetExternal marks manifests rendered from a user script path.
 	EffectsPresetExternal = "external"
 )
@@ -107,6 +112,10 @@ type Config struct {
 	Preset              string
 	EffectsPath         string
 	EffectsPreset       string
+	MusicPath           string
+	RhythmPath          string
+	OutputFPS           int
+	CompileSegments     bool
 	LineupCatalogPath   string
 	SegmentIDs          []string
 	Limit               int
@@ -134,6 +143,10 @@ type ManifestOptions struct {
 	Preset              string
 	EffectsPath         string
 	EffectsPreset       string
+	MusicPath           string
+	RhythmPath          string
+	OutputFPS           int
+	CompileSegments     bool
 	LineupCatalogPath   string
 	SegmentIDs          []string
 	Limit               int
@@ -165,6 +178,10 @@ type Manifest struct {
 	SkipExisting      bool        `json:"skip_existing,omitempty"`
 	EffectsPath       string      `json:"effects_path,omitempty"`
 	EffectsPreset     string      `json:"effects_preset,omitempty"`
+	MusicPath         string      `json:"music_path,omitempty"`
+	RhythmPath        string      `json:"rhythm_path,omitempty"`
+	OutputFPS         int         `json:"output_fps,omitempty"`
+	CompileSegments   bool        `json:"compile_segments,omitempty"`
 	LineupCatalogPath string      `json:"lineup_catalog_path,omitempty"`
 	UnmatchedSmokes   string      `json:"unmatched_smokes,omitempty"`
 	PlayerImage       string      `json:"player_image,omitempty"`
@@ -200,6 +217,9 @@ type ShortEdit struct {
 	PublishPath       string                      `json:"publish_path"`
 	PlayerImage       string                      `json:"player_image,omitempty"`
 	PlayerKeyColor    string                      `json:"player_key_color,omitempty"`
+	MusicPath         string                      `json:"music_path,omitempty"`
+	RhythmPath        string                      `json:"rhythm_path,omitempty"`
+	OutputFPS         int                         `json:"output_fps,omitempty"`
 	VideoCRF          int                         `json:"video_crf,omitempty"`
 	VideoPreset       string                      `json:"video_preset,omitempty"`
 	HQFilters         bool                        `json:"hq_filters,omitempty"`
@@ -217,6 +237,7 @@ type ShortEdit struct {
 	Hashtags          []string                    `json:"hashtags,omitempty"`
 	Kills             []KillCue                   `json:"kills,omitempty"`
 	Smokes            []SmokeCue                  `json:"smokes,omitempty"`
+	Parts             []ShortPart                 `json:"parts,omitempty"`
 	Effects           []Effect                    `json:"effects,omitempty"`
 	FFmpegCommand     []string                    `json:"ffmpeg_command"`
 	CoverCommand      []string                    `json:"cover_command,omitempty"`
@@ -224,6 +245,16 @@ type ShortEdit struct {
 	QualityCommand    []string                    `json:"quality_command,omitempty"`
 	RenderLogPath     string                      `json:"render_log_path,omitempty"`
 	QualityLogPath    string                      `json:"quality_log_path,omitempty"`
+}
+
+type ShortPart struct {
+	SegmentID            string                      `json:"segment_id"`
+	Input                string                      `json:"input"`
+	SourceArtifact       recording.RecordingArtifact `json:"source_artifact,omitempty"`
+	DurationSeconds      float64                     `json:"duration_seconds,omitempty"`
+	TimelineStartSeconds float64                     `json:"timeline_start_seconds,omitempty"`
+	GapBeforeSeconds     float64                     `json:"gap_before_seconds,omitempty"`
+	Kills                []KillCue                   `json:"kills,omitempty"`
 }
 
 type KillCue struct {
@@ -277,6 +308,10 @@ type Result struct {
 	SkipExisting      bool          `json:"skip_existing,omitempty"`
 	EffectsPath       string        `json:"effects_path,omitempty"`
 	EffectsPreset     string        `json:"effects_preset,omitempty"`
+	MusicPath         string        `json:"music_path,omitempty"`
+	RhythmPath        string        `json:"rhythm_path,omitempty"`
+	OutputFPS         int           `json:"output_fps,omitempty"`
+	CompileSegments   bool          `json:"compile_segments,omitempty"`
 	LineupCatalogPath string        `json:"lineup_catalog_path,omitempty"`
 	UnmatchedSmokes   string        `json:"unmatched_smokes,omitempty"`
 	PlayerImage       string        `json:"player_image,omitempty"`
@@ -306,6 +341,9 @@ type ShortResult struct {
 	PublishPath        string                      `json:"publish_path"`
 	PlayerImage        string                      `json:"player_image,omitempty"`
 	PlayerKeyColor     string                      `json:"player_key_color,omitempty"`
+	MusicPath          string                      `json:"music_path,omitempty"`
+	RhythmPath         string                      `json:"rhythm_path,omitempty"`
+	OutputFPS          int                         `json:"output_fps,omitempty"`
 	VideoCRF           int                         `json:"video_crf,omitempty"`
 	VideoPreset        string                      `json:"video_preset,omitempty"`
 	HQFilters          bool                        `json:"hq_filters,omitempty"`
@@ -323,6 +361,7 @@ type ShortResult struct {
 	SmokeCount         int                         `json:"smoke_count,omitempty"`
 	PrimarySmoke       string                      `json:"primary_smoke,omitempty"`
 	Smokes             []SmokeCue                  `json:"smokes,omitempty"`
+	Parts              []ShortPart                 `json:"parts,omitempty"`
 	Effects            []Effect                    `json:"effects,omitempty"`
 	OutputArtifact     recording.RecordingArtifact `json:"output_artifact,omitempty"`
 	PublishArtifact    recording.RecordingArtifact `json:"publish_artifact,omitempty"`
@@ -351,6 +390,10 @@ type PackManifest struct {
 	SkipExisting      bool          `json:"skip_existing,omitempty"`
 	EffectsPath       string        `json:"effects_path,omitempty"`
 	EffectsPreset     string        `json:"effects_preset,omitempty"`
+	MusicPath         string        `json:"music_path,omitempty"`
+	RhythmPath        string        `json:"rhythm_path,omitempty"`
+	OutputFPS         int           `json:"output_fps,omitempty"`
+	CompileSegments   bool          `json:"compile_segments,omitempty"`
 	LineupCatalogPath string        `json:"lineup_catalog_path,omitempty"`
 	UnmatchedSmokes   string        `json:"unmatched_smokes,omitempty"`
 	PlayerImage       string        `json:"player_image,omitempty"`
@@ -381,6 +424,9 @@ type PublishItem struct {
 	Video              string                      `json:"video"`
 	SourceArtifact     recording.RecordingArtifact `json:"source_artifact,omitempty"`
 	PlayerImage        string                      `json:"player_image,omitempty"`
+	MusicPath          string                      `json:"music_path,omitempty"`
+	RhythmPath         string                      `json:"rhythm_path,omitempty"`
+	OutputFPS          int                         `json:"output_fps,omitempty"`
 	VideoCRF           int                         `json:"video_crf,omitempty"`
 	VideoPreset        string                      `json:"video_preset,omitempty"`
 	HQFilters          bool                        `json:"hq_filters,omitempty"`
@@ -396,6 +442,7 @@ type PublishItem struct {
 	Hashtags           []string                    `json:"hashtags,omitempty"`
 	Effects            []Effect                    `json:"effects,omitempty"`
 	Smokes             []SmokeCue                  `json:"smokes,omitempty"`
+	Parts              []ShortPart                 `json:"parts,omitempty"`
 	DurationSeconds    float64                     `json:"duration_seconds,omitempty"`
 	Artifact           recording.RecordingArtifact `json:"artifact,omitempty"`
 	CoverArtifact      recording.RecordingArtifact `json:"cover_artifact,omitempty"`
@@ -432,6 +479,7 @@ type Effect struct {
 	CropWidth          int        `json:"crop_width,omitempty"`
 	CropHeight         int        `json:"crop_height,omitempty"`
 	Size               int        `json:"size,omitempty"`
+	FontFile           string     `json:"fontfile,omitempty"`
 	FontColor          string     `json:"font_color,omitempty"`
 	BoxColor           string     `json:"box_color,omitempty"`
 	BoxBorder          int        `json:"box_border,omitempty"`

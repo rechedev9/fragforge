@@ -12,6 +12,11 @@ import (
 	"strings"
 )
 
+// IsNotExist reports whether err means the requested storage key is absent.
+func IsNotExist(err error) bool {
+	return os.IsNotExist(err)
+}
+
 // Storage is the minimal contract for reading and writing artifact blobs.
 type Storage interface {
 	Put(key string, r io.Reader) error

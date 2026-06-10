@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:ts && npm run build:css",
+    "build:css": "tailwindcss -i ./styles.tailwind.css -o ./styles.css --minify",
+    "build:ts": "tsc ./app.ts --target ES2020 --module ES2020 --lib DOM,DOM.Iterable,ES2020 --strict --skipLibCheck --outDir ."
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.3"
+  }
+}

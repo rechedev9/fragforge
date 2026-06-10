@@ -3,6 +3,7 @@ package recording
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 )
@@ -51,7 +52,10 @@ func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 	sb.WriteString("        if (fired[item.key]) return;\n")
 	sb.WriteString("        fired[item.key] = true;\n")
 	sb.WriteString("        mirv.message(`[zackvideo] ${item.key}: ${item.cmd}\\n`);\n")
-	sb.WriteString("        mirv.exec(item.cmd);\n")
+	sb.WriteString("        for (const cmd of item.cmd.split(';')) {\n")
+	sb.WriteString("            const trimmed = cmd.trim();\n")
+	sb.WriteString("            if (trimmed.length > 0) mirv.exec(trimmed);\n")
+	sb.WriteString("        }\n")
 	sb.WriteString("    };\n\n")
 	sb.WriteString("    mirv.events.clientFrameStageNotify.on(id, (e) => {\n")
 	sb.WriteString("        if (e.isBefore) return;\n")
@@ -152,11 +156,14 @@ func buildSchedule(plan RecordingPlan) []scheduledCommand {
 }
 
 func cameraCommand(targetName string, accountID uint32) string {
+	if slot := strings.TrimSpace(os.Getenv("ZV_SPEC_PLAYER_SLOT")); slot != "" {
+		return fmt.Sprintf("spec_autodirector 0; spec_mode 2; spec_player %s; spec_player %s", slot, slot)
+	}
 	if targetName != "" {
 		target := quoteConsoleArg(targetName)
-		return fmt.Sprintf("spec_autodirector 0; spec_mode 1; spec_player %s; spec_mode 1; spec_player %s", target, target)
+		return fmt.Sprintf("spec_autodirector 0; spec_mode 2; spec_player %s; spec_mode 2; spec_player %s", target, target)
 	}
-	return fmt.Sprintf("spec_autodirector 0; spec_mode 1; spec_player_by_accountid %d; spec_player_by_accountid %d", accountID, accountID)
+	return fmt.Sprintf("spec_autodirector 0; spec_mode 2; spec_player_by_accountid %d; spec_player_by_accountid %d", accountID, accountID)
 }
 
 func quoteConsoleArg(value string) string {

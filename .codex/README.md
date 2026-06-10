@@ -104,8 +104,10 @@ scripts/go-gate.sh --race --security --build
 
 Repo-local skills live under `.codex/skills/`:
 
+- `zackvideo-cheater-pov-reels`: create suspected-cheater reels by pairing killer POV before each target death.
 - `zackvideo-cs2-utility-shorts`: parse, audit, record, render, and review CS2 utility Shorts.
 - `zackvideo-lineup-audit`: correct utility destinations through manual lineup catalogs.
+- `zackvideo-music-scripted-shorts`: create 24fps Lua-scripted Shorts with CC0 music and rhythm sync.
 - `zackvideo-shorts-production`: generate, polish, and QA professional CS2 Shorts packs.
 - `zackvideo-youtube-shorts-publish`: review publish packs and prepare YouTube Shorts metadata/uploads.
 
@@ -113,16 +115,20 @@ The unified CLI can discover the same repo-local skills:
 
 ```bash
 ./bin/zv skills list
+./bin/zv skills show zackvideo-cheater-pov-reels
 ./bin/zv skills show zackvideo-cs2-utility-shorts
 ./bin/zv skills show zackvideo-lineup-audit
+./bin/zv skills show zackvideo-music-scripted-shorts
 ./bin/zv skills show zackvideo-shorts-production
 ./bin/zv skills show zackvideo-youtube-shorts-publish
 ./bin/zv skills check
 ./bin/zv check
 ./bin/zv check --format json
 ./bin/zv skills list --format json
+./bin/zv skills show zackvideo-cheater-pov-reels --format json
 ./bin/zv skills show zackvideo-cs2-utility-shorts --format json
 ./bin/zv skills show zackvideo-lineup-audit --format json
+./bin/zv skills show zackvideo-music-scripted-shorts --format json
 ./bin/zv skills show zackvideo-shorts-production --format json
 ./bin/zv skills show zackvideo-youtube-shorts-publish --format json
 ./bin/zv skills check --format json
@@ -138,10 +144,10 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows show record --format json
 ./bin/zv workflows show compose-final
 ./bin/zv workflows show compose-final --format json
-./bin/zv workflows show shorts-render
-./bin/zv workflows show shorts-render --format json
 ./bin/zv workflows show music-analyze
 ./bin/zv workflows show music-analyze --format json
+./bin/zv workflows show shorts-render
+./bin/zv workflows show shorts-render --format json
 ./bin/zv workflows show analysis-tactical-data
 ./bin/zv workflows show analysis-tactical-data --format json
 ./bin/zv workflows show analysis-viewer
@@ -163,8 +169,8 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv utility audit --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
 ./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
-./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
 ./bin/zv music analyze --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
+./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
 ./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json
 ./bin/zv gallery open --path data/runs/run-004/shorts/publish/index.html
@@ -175,8 +181,8 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
 ./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
-./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
 ./bin/zv workflows run music-analyze -- --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
+./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts
 ./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json
 ./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts/publish/index.html

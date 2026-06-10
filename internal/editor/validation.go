@@ -13,6 +13,16 @@ import (
 const youtubeShortMaxSeconds = 180.0
 
 func ValidateShortArtifact(artifact recording.RecordingArtifact) []string {
+	return ValidateShortArtifactForFPS(artifact, DefaultPreset().FPS)
+}
+
+func ValidateShortArtifactForFPS(artifact recording.RecordingArtifact, fps int) []string {
+	// Every registered preset shares the same vertical output contract, so
+	// the resolution gate comes from the registry default entry.
+	preset := DefaultPreset()
+	if fps <= 0 {
+		fps = preset.FPS
+	}
 	var warnings []string
 	if artifact.ProbeError != "" {
 		return []string{fmt.Sprintf("short %s probe failed: %s", artifact.SegmentID, artifact.ProbeError)}
@@ -26,11 +36,11 @@ func ValidateShortArtifact(artifact recording.RecordingArtifact) []string {
 	if artifact.Codec != "" && artifact.Codec != "h264" {
 		warnings = append(warnings, fmt.Sprintf("short %s codec = %q, want h264", artifact.SegmentID, artifact.Codec))
 	}
-	if artifact.Width != 0 && artifact.Height != 0 && (artifact.Width != 1080 || artifact.Height != 1920) {
-		warnings = append(warnings, fmt.Sprintf("short %s resolution = %dx%d, want 1080x1920", artifact.SegmentID, artifact.Width, artifact.Height))
+	if artifact.Width != 0 && artifact.Height != 0 && (artifact.Width != preset.Width || artifact.Height != preset.Height) {
+		warnings = append(warnings, fmt.Sprintf("short %s resolution = %dx%d, want %dx%d", artifact.SegmentID, artifact.Width, artifact.Height, preset.Width, preset.Height))
 	}
-	if artifact.FrameRate != "" && !frameRateMatches(artifact.FrameRate, 60) {
-		warnings = append(warnings, fmt.Sprintf("short %s frame_rate = %q, want 60fps", artifact.SegmentID, artifact.FrameRate))
+	if artifact.FrameRate != "" && !frameRateMatches(artifact.FrameRate, float64(fps)) {
+		warnings = append(warnings, fmt.Sprintf("short %s frame_rate = %q, want %dfps", artifact.SegmentID, artifact.FrameRate, fps))
 	}
 	return warnings
 }
@@ -43,8 +53,9 @@ func ValidateCoverArtifact(artifact recording.RecordingArtifact) []string {
 	if artifact.Path == "" || artifact.SizeBytes == 0 {
 		warnings = append(warnings, fmt.Sprintf("cover %s output is missing or empty", artifact.SegmentID))
 	}
-	if artifact.Width != 0 && artifact.Height != 0 && (artifact.Width != 1080 || artifact.Height != 1920) {
-		warnings = append(warnings, fmt.Sprintf("cover %s resolution = %dx%d, want 1080x1920", artifact.SegmentID, artifact.Width, artifact.Height))
+	preset := DefaultPreset()
+	if artifact.Width != 0 && artifact.Height != 0 && (artifact.Width != preset.Width || artifact.Height != preset.Height) {
+		warnings = append(warnings, fmt.Sprintf("cover %s resolution = %dx%d, want %dx%d", artifact.SegmentID, artifact.Width, artifact.Height, preset.Width, preset.Height))
 	}
 	return warnings
 }

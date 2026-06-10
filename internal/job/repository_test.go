@@ -171,6 +171,42 @@ func TestRepositorySetKillPlanPersists(t *testing.T) {
 	}
 }
 
+func TestRepositoryListReturnsRecentJobsWithoutKillPlan(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+
+	j := Job{
+		ID:            uuid.New(),
+		Status:        StatusParsing,
+		DemoPath:      "/tmp/demo.dem",
+		DemoSHA256:    "abc",
+		TargetSteamID: "1",
+		Rules:         rules.Default(),
+	}
+	if err := repo.Create(context.Background(), &j); err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+	plan := killplan.NewPlan()
+	plan.Demo.Map = "de_nuke"
+	if err := repo.SetKillPlan(context.Background(), j.ID, plan); err != nil {
+		t.Fatalf("SetKillPlan error = %v", err)
+	}
+
+	jobs, err := repo.List(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("List error = %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("jobs len = %d, want 1", len(jobs))
+	}
+	if jobs[0].ID != j.ID {
+		t.Fatalf("job id = %s, want %s", jobs[0].ID, j.ID)
+	}
+	if jobs[0].KillPlan != nil {
+		t.Fatalf("KillPlan = %#v, want nil", jobs[0].KillPlan)
+	}
+}
+
 func TestRepositoryUpdateStatusOnMissingReturnsNotFound(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)

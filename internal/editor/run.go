@@ -45,7 +45,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 	preset := cfg.Preset
 	if preset == "" {
-		preset = PresetShortClean
+		preset = DefaultPreset().Name
 	}
 	videoCRF, err := normalizeVideoCRFForPreset(preset, cfg.VideoCRF)
 	if err != nil {
@@ -54,13 +54,6 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	videoPreset, err := normalizeVideoPresetForPreset(preset, cfg.VideoPreset)
 	if err != nil {
 		return Result{}, err
-	}
-	effectsPreset := cfg.EffectsPreset
-	if preset == PresetSmokeLineups && cfg.EffectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
-		effectsPreset = EffectsPresetSmokeLineups
-	}
-	if isNaturalPreset(preset) && cfg.EffectsPath == "" && strings.TrimSpace(effectsPreset) == "" {
-		effectsPreset = EffectsPresetNone
 	}
 	playerImagePath := cfg.PlayerImagePath
 	if playerImagePath != "" {
@@ -74,6 +67,26 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		effectsPath, err = filepath.Abs(effectsPath)
 		if err != nil {
 			return Result{}, fmt.Errorf("resolve effects script path: %w", err)
+		}
+	}
+	musicPath := cfg.MusicPath
+	if musicPath != "" {
+		musicPath, err = filepath.Abs(musicPath)
+		if err != nil {
+			return Result{}, fmt.Errorf("resolve music path: %w", err)
+		}
+		if _, err := os.Stat(musicPath); err != nil {
+			return Result{}, fmt.Errorf("music not found: %w", err)
+		}
+	}
+	rhythmPath := cfg.RhythmPath
+	if rhythmPath != "" {
+		rhythmPath, err = filepath.Abs(rhythmPath)
+		if err != nil {
+			return Result{}, fmt.Errorf("resolve rhythm path: %w", err)
+		}
+		if _, err := os.Stat(rhythmPath); err != nil {
+			return Result{}, fmt.Errorf("rhythm json not found: %w", err)
 		}
 	}
 
@@ -98,7 +111,11 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		PublishDir:          publishDir,
 		Preset:              preset,
 		EffectsPath:         effectsPath,
-		EffectsPreset:       effectsPreset,
+		EffectsPreset:       cfg.EffectsPreset,
+		MusicPath:           musicPath,
+		RhythmPath:          rhythmPath,
+		OutputFPS:           cfg.OutputFPS,
+		CompileSegments:     cfg.CompileSegments,
 		LineupCatalogPath:   cfg.LineupCatalogPath,
 		SegmentIDs:          cfg.SegmentIDs,
 		Limit:               cfg.Limit,
@@ -191,13 +208,37 @@ func (c Config) validate() error {
 	}
 	preset := c.Preset
 	if preset == "" {
-		preset = PresetShortClean
+		preset = DefaultPreset().Name
+	}
+	renderPreset, ok := PresetByName(preset)
+	if !ok {
+		return unknownPresetError(c.Preset)
 	}
 	if _, err := normalizeVideoCRFForPreset(preset, c.VideoCRF); err != nil {
 		return err
 	}
 	if _, err := normalizeVideoPresetForPreset(preset, c.VideoPreset); err != nil {
 		return err
+	}
+	if _, err := normalizeOutputFPS(c.OutputFPS); err != nil {
+		return err
+	}
+	if c.RhythmPath != "" && c.MusicPath == "" {
+		return fmt.Errorf("rhythm path requires music path")
+	}
+	if c.RhythmPath != "" && !c.CompileSegments {
+		return fmt.Errorf("rhythm path requires compile segments")
+	}
+	if renderPreset.RhythmSync {
+		if c.MusicPath == "" {
+			return fmt.Errorf("preset %q requires a music path", preset)
+		}
+		if c.RhythmPath == "" {
+			return fmt.Errorf("preset %q requires a rhythm json path", preset)
+		}
+		if !c.CompileSegments {
+			return fmt.Errorf("preset %q requires compile segments", preset)
+		}
 	}
 	for _, id := range c.SegmentIDs {
 		if strings.TrimSpace(id) == "" {
@@ -206,20 +247,12 @@ func (c Config) validate() error {
 	}
 	if c.EffectsPath == "" && c.EffectsPreset != "" {
 		switch c.EffectsPreset {
-		case EffectsPresetBuiltinClean, EffectsPresetAWPGod, EffectsPresetSmokeLineups, EffectsPresetNone:
+		case EffectsPresetBuiltinClean, EffectsPresetAWPGod, EffectsPresetSmokeLineups, EffectsPresetViralUltra, EffectsPresetNone:
 		default:
 			return fmt.Errorf("unknown effects preset %q", c.EffectsPreset)
 		}
 	}
-	switch preset {
-	case PresetShortClean, PresetShortViralSquare, PresetShortNaturalHQ, PresetShortNaturalHQ2, PresetShortNaturalHQ2Full, PresetShortNaturalHQ2FullPlus, PresetShortNaturalHQ3, PresetShortNaturalHQ3Smooth, PresetSmokeLineups:
-		if c.PlayerImagePath != "" {
-			return fmt.Errorf("--player-image requires --preset %q", PresetShortPremiumPlayer)
-		}
-		if c.PlayerKeyColor != "" {
-			return fmt.Errorf("--player-key-color requires --preset %q", PresetShortPremiumPlayer)
-		}
-	case PresetShortPremiumPlayer:
+	if preset == PresetShortPremiumPlayer {
 		if c.PlayerImagePath == "" {
 			return fmt.Errorf("--player-image is required for preset %q", PresetShortPremiumPlayer)
 		}
@@ -236,8 +269,13 @@ func (c Config) validate() error {
 				return err
 			}
 		}
-	default:
-		return fmt.Errorf("unknown preset %q", c.Preset)
+		return nil
+	}
+	if c.PlayerImagePath != "" {
+		return fmt.Errorf("--player-image requires --preset %q", PresetShortPremiumPlayer)
+	}
+	if c.PlayerKeyColor != "" {
+		return fmt.Errorf("--player-key-color requires --preset %q", PresetShortPremiumPlayer)
 	}
 	return nil
 }
@@ -302,6 +340,10 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 		SkipExisting:      manifest.SkipExisting,
 		EffectsPath:       manifest.EffectsPath,
 		EffectsPreset:     manifest.EffectsPreset,
+		MusicPath:         manifest.MusicPath,
+		RhythmPath:        manifest.RhythmPath,
+		OutputFPS:         manifest.OutputFPS,
+		CompileSegments:   manifest.CompileSegments,
 		LineupCatalogPath: manifest.LineupCatalogPath,
 		UnmatchedSmokes:   manifest.UnmatchedSmokes,
 		PlayerImage:       manifest.PlayerImage,
@@ -330,6 +372,9 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 			PublishPath:       short.PublishPath,
 			PlayerImage:       short.PlayerImage,
 			PlayerKeyColor:    short.PlayerKeyColor,
+			MusicPath:         short.MusicPath,
+			RhythmPath:        short.RhythmPath,
+			OutputFPS:         short.OutputFPS,
 			VideoCRF:          short.VideoCRF,
 			VideoPreset:       short.VideoPreset,
 			HQFilters:         short.HQFilters,
@@ -347,6 +392,7 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 			SmokeCount:        short.SmokeCount,
 			PrimarySmoke:      short.PrimarySmoke,
 			Smokes:            append([]SmokeCue(nil), short.Smokes...),
+			Parts:             append([]ShortPart(nil), short.Parts...),
 			Effects:           append([]Effect(nil), short.Effects...),
 			FFmpegCommand:     append([]string(nil), short.FFmpegCommand...),
 			CoverCommand:      append([]string(nil), short.CoverCommand...),

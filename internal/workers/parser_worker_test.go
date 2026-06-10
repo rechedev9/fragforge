@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,8 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
+	"github.com/reche/zackvideo/internal/artifacts"
 	"github.com/reche/zackvideo/internal/job"
 	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/reche/zackvideo/internal/moments"
 	"github.com/reche/zackvideo/internal/rules"
 	"github.com/reche/zackvideo/internal/tasks"
 )
@@ -71,7 +72,7 @@ func (f *fakeStorage) Put(key string, r io.Reader) error {
 func (f *fakeStorage) Open(key string) (io.ReadCloser, error) {
 	b, ok := f.files[key]
 	if !ok {
-		return nil, errors.New("not found")
+		return nil, os.ErrNotExist
 	}
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
@@ -162,5 +163,31 @@ func TestParserWorkerMarksJobFailedOnUnknownTarget(t *testing.T) {
 	}
 	if got.FailureReason == "" {
 		t.Errorf("FailureReason empty, want a message")
+	}
+}
+
+func TestParserWorkerWritesMomentsArtifact(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	w := NewParserWorker(repo, store)
+	id := uuid.New()
+	plan := minimalKillPlan()
+
+	key, err := w.writeMoments(id, plan)
+	if err != nil {
+		t.Fatalf("writeMoments error = %v", err)
+	}
+	if key != artifacts.MomentsKey(id) {
+		t.Fatalf("moments key = %q, want %q", key, artifacts.MomentsKey(id))
+	}
+	var doc moments.Document
+	if err := json.Unmarshal(store.files[key], &doc); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := doc.JobID, id; got != want {
+		t.Fatalf("JobID = %s, want %s", got, want)
+	}
+	if len(doc.Moments) != 1 {
+		t.Fatalf("moments len = %d, want 1", len(doc.Moments))
 	}
 }

@@ -128,6 +128,41 @@ end)
 	}
 }
 
+func TestEvaluateEffectsTextFontFileOption(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_kill(function(k)
+  text({
+    value = "FAST TRADE",
+    at = k.time,
+    fontfile = "C:/fonts/BebasNeue-Regular.ttf"
+  })
+end)
+`,
+	}
+	short := ShortEdit{
+		SegmentID:       "seg-001",
+		Preset:          PresetShortClean,
+		DurationSeconds: 5,
+		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AK-47"}},
+	}
+
+	effects, warnings, err := evaluateEffects(source, short)
+	if err != nil {
+		t.Fatalf("evaluateEffects error = %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
+	}
+	if got, want := effects[0].FontFile, "C:/fonts/BebasNeue-Regular.ttf"; got != want {
+		t.Fatalf("fontfile = %q, want %q", got, want)
+	}
+}
+
 func TestEvaluateEffectsRejectsInvalidFade(t *testing.T) {
 	_, _, err := evaluateEffects(effectsSource{
 		Preset: EffectsPresetExternal,
