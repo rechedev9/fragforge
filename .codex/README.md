@@ -1,6 +1,6 @@
-# Codex harness for ZackVideo
+# Codex harness for FragForge
 
-Repo-local harness for using Codex CLI safely on ZackVideo.
+Repo-local harness for using Codex CLI safely on FragForge.
 
 Codex should automatically load `AGENTS.md` from the repo root. That file holds
 project boundaries, Go style, safety rules, and verification expectations.
@@ -10,7 +10,7 @@ project boundaries, Go style, safety rules, and verification expectations.
 From WSL:
 
 ```bash
-cd /mnt/c/Users/reche/Documents/ZackVideo
+cd /mnt/c/Users/reche/Documents/FragForge
 
 scripts/codex-run.sh .codex/prompts/go-tdd.md "custom prompt run"
 scripts/codex-plan.sh "plan a small change"
@@ -207,7 +207,7 @@ standard workflow entrypoint automation should execute.
 ## Verify AGENTS.md loading
 
 ```bash
-codex --cd . debug prompt-input "test" | grep -i ZackVideo
+codex --cd . debug prompt-input "test" | grep -i FragForge
 ```
 
 Or run:

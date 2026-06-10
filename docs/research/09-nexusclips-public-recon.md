@@ -128,30 +128,30 @@ Clip/source type names:
 
 ## What To Borrow
 
-For ZackVideo, the strongest ideas are product and workflow contracts, not
+For FragForge, the strongest ideas are product and workflow contracts, not
 implementation details.
 
 1. Add a first-class `Moment` layer.
 
-   Today ZackVideo has strong kill/utility segment planning. Nexus suggests a
+   Today FragForge has strong kill/utility segment planning. Nexus suggests a
    more generic layer above raw segments: a ranked moment with source, time
    span, score, reason codes, transcript/context, and render readiness.
 
 2. Separate analysis from clip creation.
 
    Nexus treats video processing/marker generation as an async stage, then clip
-   creation as a separate action. For ZackVideo this maps cleanly to parser
+   creation as a separate action. For FragForge this maps cleanly to parser
    output, scoring, manual review, and render task creation.
 
 3. Model editor configuration as data.
 
    Their editor centers on templates plus layers: subtitles, hook, sticker,
-   framing, watermark, shots. ZackVideo can keep FFmpeg/HLAE deterministic but
+   framing, watermark, shots. FragForge can keep FFmpeg/HLAE deterministic but
    store a portable edit document for each render variant.
 
 4. Track render/export tasks explicitly.
 
-   Nexus has render task and record/export traces. ZackVideo already gained a
+   Nexus has render task and record/export traces. FragForge already gained a
    `render:variant` task type in the Allstar-inspired iteration; the next step
    is to connect it to actual render state and artifacts.
 
@@ -167,7 +167,7 @@ implementation details.
    selection, and metadata writing. The heavy work should remain in local,
    repeatable binaries and Go workers.
 
-## ZackVideo Candidate Slices
+## FragForge Candidate Slices
 
 Near-term slices that fit the current architecture:
 
@@ -189,11 +189,11 @@ Near-term slices that fit the current architecture:
 ## Security Notes
 
 The exposed sourcemaps are a defensive lesson: do not ship production source
-maps for ZackVideo cloud/UI builds unless they are intentionally public. If we
+maps for FragForge cloud/UI builds unless they are intentionally public. If we
 need production diagnostics, upload sourcemaps privately to the error tracker
 and keep the static `.map` files off the public CDN.
 
 Do not rely on frontend-only checks for auth, plans, or quotas. Nexus exposes
 many client-visible states and routes, but the important controls must live on
-the backend. ZackVideo's local-first model reduces this risk, but any future
+the backend. FragForge's local-first model reduces this risk, but any future
 HTTP/API surface should still treat the frontend as untrusted.

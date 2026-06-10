@@ -3,8 +3,8 @@ package parser
 import (
 	"strconv"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 const SmokeGrenadeType = "smokegrenade"

@@ -1,6 +1,6 @@
-# ZackVideo operational rule
+# FragForge operational rule
 
-ZackVideo has expensive/external boundaries. Do not cross them casually.
+FragForge has expensive/external boundaries. Do not cross them casually.
 
 Safe by default:
 

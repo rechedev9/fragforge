@@ -17,16 +17,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/reche/zackvideo/internal/artifacts"
-	"github.com/reche/zackvideo/internal/editor"
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/recording"
-	"github.com/reche/zackvideo/internal/renderplan"
-	"github.com/reche/zackvideo/internal/rules"
-	"github.com/reche/zackvideo/internal/storage"
-	"github.com/reche/zackvideo/internal/streamclips"
-	"github.com/reche/zackvideo/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/recording"
+	"github.com/rechedev9/fragforge/internal/renderplan"
+	"github.com/rechedev9/fragforge/internal/rules"
+	"github.com/rechedev9/fragforge/internal/storage"
+	"github.com/rechedev9/fragforge/internal/streamclips"
+	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 // fakeRepo implements JobRepository for tests.
@@ -325,7 +325,7 @@ func TestWorkbenchServesLocalApp(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rw.Code)
 	}
 	body := rw.Body.String()
-	for _, want := range []string{"ZackVideo Workbench", "Mutation token", "workbench-shell", "APPROVE_RECORDING", "/api/jobs", "/api/loadouts", "/agent/captions"} {
+	for _, want := range []string{"FragForge Workbench", "Mutation token", "workbench-shell", "APPROVE_RECORDING", "/api/jobs", "/api/loadouts", "/agent/captions"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("workbench missing %q", want)
 		}
@@ -1354,7 +1354,7 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		if token {
-			req.Header.Set("X-ZackVideo-Token", "secret")
+			req.Header.Set("X-FragForge-Token", "secret")
 		}
 		rw := httptest.NewRecorder()
 		r.ServeHTTP(rw, req)
@@ -1368,7 +1368,7 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 		path string
 		want string
 	}{
-		{"/", "ZackVideo Workbench"},
+		{"/", "FragForge Workbench"},
 		{"/api/jobs", j.ID.String()},
 		{"/api/loadouts", editor.PresetShortNaturalHQ2Full},
 		{"/api/jobs/" + j.ID.String() + "/moments", "MartinezSa"},

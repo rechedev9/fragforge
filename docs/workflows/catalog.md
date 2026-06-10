@@ -1,4 +1,4 @@
-# ZackVideo CLI command catalog
+# FragForge CLI command catalog
 
 Canonical, machine-checked catalog of every executable `zv` command, workflow,
 and skill exposed by the unified CLI. `zv check` and the `cmd/zv` end-to-end

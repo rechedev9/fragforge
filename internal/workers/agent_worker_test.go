@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/reche/zackvideo/internal/artifacts"
-	"github.com/reche/zackvideo/internal/editor"
-	"github.com/reche/zackvideo/internal/renderplan"
-	"github.com/reche/zackvideo/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/renderplan"
+	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 func TestAgentWorkerWritesCaptionCandidates(t *testing.T) {

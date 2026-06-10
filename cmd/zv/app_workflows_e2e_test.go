@@ -17,7 +17,7 @@ func TestZVBinaryWorkflowsCatalogEndToEnd(t *testing.T) {
 		"demo-parse\tParse a CS2 demo",
 		"pipeline\tRun the local recorder-to-composer pipeline.",
 		"workflows-check\tValidate skills, workflow catalog, and current workflow docs.",
-		"project-check\tRun the full ZackVideo CLI, workflow, docs, and skills contract.",
+		"project-check\tRun the full FragForge CLI, workflow, docs, and skills contract.",
 	} {
 		if !strings.Contains(listOut, want) {
 			t.Fatalf("list output = %q, want %q", listOut, want)

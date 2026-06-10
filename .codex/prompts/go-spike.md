@@ -1,4 +1,4 @@
-# Go spike playbook for ZackVideo
+# Go spike playbook for FragForge
 
 Follow `AGENTS.md`.
 

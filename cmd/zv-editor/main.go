@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/reche/zackvideo/internal/editor"
+	"github.com/rechedev9/fragforge/internal/editor"
 )
 
 func main() {

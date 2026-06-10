@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/killplan"
 )
 
 // ErrNotFound is returned by Get when no job has the requested id.

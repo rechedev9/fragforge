@@ -13,10 +13,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/reche/zackvideo/internal/artifacts"
-	"github.com/reche/zackvideo/internal/renderplan"
-	"github.com/reche/zackvideo/internal/storage"
-	"github.com/reche/zackvideo/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/renderplan"
+	"github.com/rechedev9/fragforge/internal/storage"
+	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 const defaultAgentWorkerTimeout = "5m"
@@ -123,7 +123,7 @@ func (w *AgentWorker) runCaptionCandidates(ctx context.Context, id uuid.UUID, va
 
 func captionCandidatePrompt(contextJSON string) string {
 	return strings.Join([]string{
-		"You are ZackVideo's local editorial assistant.",
+		"You are FragForge's local editorial assistant.",
 		"Use only the JSON context below. Do not read files, run commands, or ask questions.",
 		"Return strict JSON with keys: titles, captions, hashtags, notes.",
 		"Write 3 concise YouTube Shorts title candidates, 3 captions in Spanish, and 6 hashtags.",

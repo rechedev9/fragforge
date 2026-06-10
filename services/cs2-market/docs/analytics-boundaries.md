@@ -1,7 +1,7 @@
 # CS2 Market Analytics Boundaries
 
 This document defines the project boundary for CS2 market analytics and
-dashboards inside ZackVideo.
+dashboards inside FragForge.
 
 ## Scope
 

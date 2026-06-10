@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
 )
 
 type orchestratorJobRepository interface {

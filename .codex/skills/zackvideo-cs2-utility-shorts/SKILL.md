@@ -1,9 +1,9 @@
 ---
 name: zackvideo-cs2-utility-shorts
-description: "Create CS2 utility Shorts from a demo with ZackVideo: parse utility, audit destinations/actions, record, render smoke-lineup overlays, and open the gallery."
+description: "Create CS2 utility Shorts from a demo with FragForge: parse utility, audit destinations/actions, record, render smoke-lineup overlays, and open the gallery."
 ---
 
-# ZackVideo CS2 Utility Shorts
+# FragForge CS2 Utility Shorts
 
 Use this skill when the user wants Shorts about CS2 utility from a demo, especially smokes/flashes/molotovs for one player.
 

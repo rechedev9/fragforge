@@ -1,4 +1,4 @@
-ZackVideo media pipeline change. Task: $ARGUMENTS
+FragForge media pipeline change. Task: $ARGUMENTS
 
 Follow `CLAUDE.md`.
 

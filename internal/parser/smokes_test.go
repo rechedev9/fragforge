@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/killplan"
 )
 
 func mkSmoke(throwTick, popTick, round int) RawUtilityThrow {

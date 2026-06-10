@@ -1,4 +1,4 @@
-# Go bugfix playbook for ZackVideo
+# Go bugfix playbook for FragForge
 
 Follow `AGENTS.md`.
 

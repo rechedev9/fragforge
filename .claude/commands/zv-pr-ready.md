@@ -1,4 +1,4 @@
-Prepare the ZackVideo diff for review/PR. Optional focus: $ARGUMENTS
+Prepare the FragForge diff for review/PR. Optional focus: $ARGUMENTS
 
 Follow `CLAUDE.md`.
 

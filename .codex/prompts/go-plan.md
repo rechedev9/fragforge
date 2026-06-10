@@ -1,4 +1,4 @@
-# Go planning playbook for ZackVideo
+# Go planning playbook for FragForge
 
 Follow `AGENTS.md`.
 

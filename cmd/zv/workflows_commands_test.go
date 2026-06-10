@@ -336,7 +336,7 @@ func TestRunWorkflowsCheckRejectsCatalogMissingDiscoveredRepoSkillShowCommand(t 
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
 	writeFile(t, filepath.Join(tempDir, "docs", "workflows", "catalog.md"), strings.Join([]string{
-		"# ZackVideo",
+		"# FragForge",
 		"",
 		"Repo-local skills currently exposed through `zv skills`:",
 		"",
@@ -1157,7 +1157,7 @@ func TestRunWorkflowsCheckRejectsRelaxedClaudeOperationRule(t *testing.T) {
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
 	writeFile(t, filepath.Join(tempDir, ".claude", "rules", "zackvideo-operations.md"), strings.Join([]string{
-		"# ZackVideo operational rule",
+		"# FragForge operational rule",
 		"",
 		"Safe by default:",
 		"",
@@ -1872,7 +1872,7 @@ func TestValidateSkillWorkflowRequirementSkillsRejectsMissingSkill(t *testing.T)
 	}
 }
 
-func TestValidateSkillWorkflowRequirementSkillsRejectsZackVideoSkillWithoutRequirements(t *testing.T) {
+func TestValidateSkillWorkflowRequirementSkillsRejectsFragForgeSkillWithoutRequirements(t *testing.T) {
 	skills := []skillInfo{
 		{Name: "zackvideo-new-skill"},
 		{Name: "zackvideo-cs2-utility-shorts"},

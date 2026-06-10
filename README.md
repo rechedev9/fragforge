@@ -1,4 +1,4 @@
-# ZackVideo
+# FragForge
 
 Deterministic CS2 demo-to-video pipeline. Drop a `.dem`, describe the clip you
 want, and get an upload-ready vertical Short: always 1080x1920 at 60fps, with

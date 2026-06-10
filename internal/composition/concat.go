@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/reche/zackvideo/internal/recording"
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
 // SegmentClipsFromRecording resolves the composed input clip for each planned

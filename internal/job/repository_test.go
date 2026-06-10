@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {

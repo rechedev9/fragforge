@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reche/zackvideo/internal/editor"
+	"github.com/rechedev9/fragforge/internal/editor"
 )
 
 func TestLoadoutForVariantDerivesFromPresetRegistry(t *testing.T) {

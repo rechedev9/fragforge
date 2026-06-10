@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/killplan"
 )
 
 func TestAnalyzeSamplesDetectsBeatGrid(t *testing.T) {

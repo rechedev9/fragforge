@@ -11,12 +11,12 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/reche/zackvideo/internal/httpapi"
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/storage"
-	"github.com/reche/zackvideo/internal/streamclips"
-	"github.com/reche/zackvideo/internal/tasks"
-	"github.com/reche/zackvideo/internal/workers"
+	"github.com/rechedev9/fragforge/internal/httpapi"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/storage"
+	"github.com/rechedev9/fragforge/internal/streamclips"
+	"github.com/rechedev9/fragforge/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/workers"
 )
 
 func main() {

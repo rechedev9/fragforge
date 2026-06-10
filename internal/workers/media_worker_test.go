@@ -13,15 +13,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/reche/zackvideo/internal/artifacts"
-	"github.com/reche/zackvideo/internal/composition"
-	"github.com/reche/zackvideo/internal/editor"
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/recording"
-	"github.com/reche/zackvideo/internal/renderplan"
-	"github.com/reche/zackvideo/internal/rules"
-	"github.com/reche/zackvideo/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/composition"
+	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/recording"
+	"github.com/rechedev9/fragforge/internal/renderplan"
+	"github.com/rechedev9/fragforge/internal/rules"
+	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 type runnerCall struct {

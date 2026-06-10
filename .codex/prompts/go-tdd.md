@@ -1,4 +1,4 @@
-# Go TDD playbook for ZackVideo
+# Go TDD playbook for FragForge
 
 Follow `AGENTS.md`.
 

@@ -1,13 +1,13 @@
-# ZackVideo Codex Workbench Design
+# FragForge Codex Workbench Design
 
 Status: proposed
 Date: 2026-06-07
-Owner: ZackVideo
+Owner: FragForge
 Document type: product design + UX/UI specification
 
 ## 1. Vision
 
-ZackVideo should stop feeling like a terminal pipeline and start feeling like a
+FragForge should stop feeling like a terminal pipeline and start feeling like a
 local production desk for CS2 Shorts.
 
 The operator should open one visual Workbench, drop a `.dem`, write the same
@@ -17,7 +17,7 @@ with Codex as the visible operator assistant:
 ```text
 .dem + prompt
   -> Codex understands the intent
-  -> ZackVideo parses and explains the demo
+  -> FragForge parses and explains the demo
   -> the operator approves expensive steps
   -> HLAE/CS2 records the right footage
   -> FFmpeg renders the selected pack
@@ -58,7 +58,7 @@ work, less hidden state, and fewer repeated manual commands.
 
 ## 4. Target User
 
-Primary user: the local ZackVideo operator.
+Primary user: the local FragForge operator.
 
 They know the domain, understand CS2 demos, care about full HUD preservation,
 and want output ready for Shorts/Reels/TikTok. They do not want to remember
@@ -120,7 +120,7 @@ Purpose: global health and local setup.
 
 Content:
 
-- Product name: `ZackVideo Workbench`
+- Product name: `FragForge Workbench`
 - Environment badge: `local`
 - API health
 - worker health summary
@@ -208,7 +208,7 @@ The first screen must be usable immediately.
 
 ```text
 +--------------------------------------------------------------------------------+
-| ZackVideo Workbench       local | API ready | workers: parser, record, render   |
+| FragForge Workbench       local | API ready | workers: parser, record, render   |
 +---------------------+--------------------------------------+-------------------+
 | New run             | Codex Operator                       | Review            |
 |                     |                                      |                   |

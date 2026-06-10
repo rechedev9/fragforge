@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reche/zackvideo/internal/recording"
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
 func TestValidateShortArtifactWarnsWhenTooLongForYouTubeShorts(t *testing.T) {

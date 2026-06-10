@@ -221,10 +221,10 @@ func TestRunSkillsCheckRejectsKnownSkillMissingRequiredWorkflowRun(t *testing.T)
 	writeSkillBody(t, tempDir, "zackvideo-cs2-utility-shorts", strings.Join([]string{
 		"---",
 		"name: zackvideo-cs2-utility-shorts",
-		`description: "Create CS2 utility Shorts from a demo with ZackVideo."`,
+		`description: "Create CS2 utility Shorts from a demo with FragForge."`,
 		"---",
 		"",
-		"# ZackVideo CS2 Utility Shorts",
+		"# FragForge CS2 Utility Shorts",
 		"",
 		"```powershell",
 		`.\bin\zv.exe workflows run demo-parse -- --demo demo.dem --steamid 76561198000000000 --out plan.json`,

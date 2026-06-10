@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/reche/zackvideo/internal/pipeline"
+	"github.com/rechedev9/fragforge/internal/pipeline"
 )
 
 func main() {

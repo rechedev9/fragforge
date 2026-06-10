@@ -124,7 +124,7 @@ func TestCodexHarnessRunsProjectCheck(t *testing.T) {
 		"mapfile -t shell_scripts",
 		"find scripts -maxdepth 1 -type f -name '*.sh' | sort",
 		`bash -n "${shell_scripts[@]}"`,
-		"== ZackVideo workflow contract ==",
+		"== FragForge workflow contract ==",
 		"go run ./cmd/zv check",
 	} {
 		if !strings.Contains(body, want) {
@@ -140,7 +140,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 	writeFile(t, fakeCodex, strings.Join([]string{
 		"#!/usr/bin/env bash",
 		"set -euo pipefail",
-		`printf '%s\n' 'ZackVideo is a deterministic CS2 demo-to-video pipeline'`,
+		`printf '%s\n' 'FragForge is a deterministic CS2 demo-to-video pipeline'`,
 		`printf '%s\n' 'AGENTS.md'`,
 	}, "\n"))
 	if err := os.Chmod(fakeCodex, 0o755); err != nil {
@@ -157,7 +157,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 	for _, want := range []string{
 		"== shell syntax ==",
 		"== Codex sees AGENTS.md ==",
-		"== ZackVideo workflow contract ==",
+		"== FragForge workflow contract ==",
 		"OK: 6 skills, 15 workflows, 15 workflow docs, and 19 agent prompt wrappers checked",
 		"OK: Codex harness is wired",
 	} {

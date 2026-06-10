@@ -13,20 +13,20 @@ editing techniques used. This builds on:
 
 Those docs answer "what product objects should exist". This doc answers "what
 should the rendered video actually look like" — the editorial knowledge that
-should drive ZackVideo's `Moment` scoring, `EditDocument` layers, and editor
+should drive FragForge's `Moment` scoring, `EditDocument` layers, and editor
 presets.
 
 ## 1. Formats that work
 
 Ranked by apparent viability for an automated, demo-driven pipeline like
-ZackVideo (no facecam, no streamer personality).
+FragForge (no facecam, no streamer personality).
 
 1. **Ace / clutch POV clips (single continuous moment).** The single most
    reliable format. AI clip tools trained on CS specifically target "aces,
    clutches, multi-kills" as the viral moment classes
    ([Short AI](https://www.short.ai/ai-clip-maker/counter-strike-clip)).
    A 1v5 or last-alive clutch carries built-in narrative tension — the viewer
-   stays to see whether the player wins. This maps 1:1 to ZackVideo's
+   stays to see whether the player wins. This maps 1:1 to FragForge's
    multi-kill segments plus round-context reason codes (`multi_kill`,
    `clutch`).
 
@@ -45,7 +45,7 @@ ZackVideo (no facecam, no streamer personality).
    third-party fan clip channels reposting daily
    ([ohnePixel TikTok](https://www.tiktok.com/@ohnepixel/video/7621695228558232865),
    [OhnePixel CS2 Clips on Instagram](https://www.instagram.com/ohnecs2clip/)).
-   Hard for ZackVideo to detect automatically from demos; lower priority but
+   Hard for FragForge to detect automatically from demos; lower priority but
    note that "funny moments and fails" is explicitly listed as a viral class
    ([Short AI](https://www.short.ai/ai-clip-maker/counter-strike-clip)).
 
@@ -53,18 +53,18 @@ ZackVideo (no facecam, no streamer personality).
    (caster audio, crowd, unscripted reactions) is part of why gaming clips
    dominate Shorts/TikTok feeds in 2026
    ([TechTimes](https://www.techtimes.com/articles/313453/20251218/viral-gameplay-2026-why-live-gaming-clips-dominate-youtube-shorts-tiktok-feeds.htm)).
-   ZackVideo can serve this from public match demos, but rights/attribution
+   FragForge can serve this from public match demos, but rights/attribution
    need care.
 
 5. **Layout note (radar / split layouts).** For streamer content the dominant
    layout is facecam-top 40% / gameplay-bottom 60% ("CaseOh style")
    ([Clypse](https://clypse.ai/blog/how-to-make-vertical-gaming-clips-facecam-2026)).
-   For faceless demo-driven content like ZackVideo's, the winning layout is
+   For faceless demo-driven content like FragForge's, the winning layout is
    fullscreen vertical gameplay with the HUD intact. The repeated expert rule:
    **do not crop out the killfeed, health, ammo, or minimap — reposition
    rather than zoom**
    ([Clypse](https://clypse.ai/blog/how-to-make-vertical-gaming-clips-facecam-2026)).
-   This validates ZackVideo's existing full-UI HQ2 direction: HUD preservation
+   This validates FragForge's existing full-UI HQ2 direction: HUD preservation
    is a differentiator, not a compromise. A blurred-copy background fill is
    the accepted fallback when the source crop cannot fill 9:16; black bars
    "signal unprofessional content".
@@ -80,7 +80,7 @@ at **25–35s**, with 30–60s acceptable for highlights
 The algorithm weighs completion percentage, not raw watch time: "a 20-second
 Short with 90% completion dramatically outperforms a 3-minute Short with 15%"
 ([Veefly](https://blog.veefly.com/youtube/how-long-can-youtube-shorts-be/)).
-Practical rule for ZackVideo: target 20–40s for single moments, up to 60s for
+Practical rule for FragForge: target 20–40s for single moments, up to 60s for
 montages; never emit a 3-minute Short by default.
 
 ## 2. Editing playbook (ordered, actionable)
@@ -230,12 +230,12 @@ Known killers, each with the fix:
 - **Dragging ending.** Anything after the final killfeed line bleeds late
   retention. Fix: hard cut 1–2s after payoff; make it loop.
 - **Inconsistent audio levels.** Jarring loud game audio or music spikes
-  cause swipes from sound-on viewers. Fix: loudness normalization (ZackVideo
+  cause swipes from sound-on viewers. Fix: loudness normalization (FragForge
   already has audio normalize in loadouts) plus ducking.
 
-## 4. Implications for ZackVideo presets
+## 4. Implications for FragForge presets
 
-ZackVideo already has the right primitives: full-UI HQ2 presets, Lua effects
+FragForge already has the right primitives: full-UI HQ2 presets, Lua effects
 (`effects/viral_ultra.lua`), `internal/editor/rhythm_sync.go`, the approved
 beat-sync music design (clean-sync, fit-music-to-video), and the
 `Moment`/`EditDocument`/`RenderVariant` contracts from doc 10. The research

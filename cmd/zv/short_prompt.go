@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/reche/zackvideo/internal/editor"
+	"github.com/rechedev9/fragforge/internal/editor"
 )
 
 // shortIntent is the deterministic interpretation of a `zv short --prompt`

@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 func defaultTestRules() rules.Rules {

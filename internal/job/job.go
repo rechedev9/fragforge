@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 // Status is the lifecycle state of a Job.

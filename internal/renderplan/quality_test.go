@@ -5,8 +5,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/reche/zackvideo/internal/editor"
-	"github.com/reche/zackvideo/internal/recording"
+	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
 func TestNewQualityReportMarksReadyForUploadReadyArtifact(t *testing.T) {

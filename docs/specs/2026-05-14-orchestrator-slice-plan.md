@@ -357,8 +357,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 // Status is the lifecycle state of a Job.
@@ -459,8 +459,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -600,7 +600,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/killplan"
 )
 
 // ErrNotFound is returned by Get when no job has the requested id.
@@ -990,9 +990,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 // fakeRepo implements JobRepository for tests.
@@ -1157,10 +1157,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/rules"
-	"github.com/reche/zackvideo/internal/storage"
-	"github.com/reche/zackvideo/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/rules"
+	"github.com/rechedev9/fragforge/internal/storage"
+	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 const maxDemoBytes = 500 << 20 // 500 MiB
@@ -1629,10 +1629,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
-	"github.com/reche/zackvideo/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
+	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 // in-memory fakes -------------------------------------------------------
@@ -1785,11 +1785,11 @@ import (
 	"github.com/hibiken/asynq"
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/parser"
-	"github.com/reche/zackvideo/internal/storage"
-	"github.com/reche/zackvideo/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/parser"
+	"github.com/rechedev9/fragforge/internal/storage"
+	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 // JobRepository is the subset of *job.Repository the worker needs.
@@ -1960,11 +1960,11 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/reche/zackvideo/internal/httpapi"
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/storage"
-	"github.com/reche/zackvideo/internal/tasks"
-	"github.com/reche/zackvideo/internal/workers"
+	"github.com/rechedev9/fragforge/internal/httpapi"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/storage"
+	"github.com/rechedev9/fragforge/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/workers"
 )
 
 func main() {

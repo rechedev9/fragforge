@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/lineups"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/lineups"
 )
 
 type Row struct {

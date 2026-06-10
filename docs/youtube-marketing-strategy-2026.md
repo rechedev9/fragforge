@@ -1,10 +1,10 @@
-# YouTube Marketing Strategy for ZackVideo CS2
+# YouTube Marketing Strategy for FragForge CS2
 
 Updated: 2026-06-02
 
 ## Core Thesis
 
-ZackVideo should use Shorts as the discovery engine and long videos as the loyalty engine.
+FragForge should use Shorts as the discovery engine and long videos as the loyalty engine.
 
 For this channel, the strongest content pillars are:
 
@@ -34,7 +34,7 @@ Sources:
 
 ## Shorts Strategy
 
-Shorts are for fast discovery, replayable jokes, and emotional hooks. A ZackVideo Short should start immediately with the payoff context. No long intro.
+Shorts are for fast discovery, replayable jokes, and emotional hooks. A FragForge Short should start immediately with the payoff context. No long intro.
 
 Recommended formats:
 
@@ -172,7 +172,7 @@ Cheater reel description:
 ```text
 CS2 Premier match vs a suspected cheater on Dust2. Every block shows our killer POV first, then FREE SIL3A's POV dying.
 
-Full realistic gameplay HUD, recorded from demo with ZackVideo.
+Full realistic gameplay HUD, recorded from demo with FragForge.
 
 #CS2 #CounterStrike2 #CS2Highlights
 ```
@@ -196,7 +196,7 @@ We played a full CS2 Premier match against a suspected cheater around high ELO. 
 Shorts version / best deaths:
 <link when available>
 
-Recorded and edited with ZackVideo.
+Recorded and edited with FragForge.
 
 #CS2 #CounterStrike2 #CS2Premier
 ```

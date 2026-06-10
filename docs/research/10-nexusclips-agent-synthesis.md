@@ -1,4 +1,4 @@
-# Nexus Clips agent synthesis for ZackVideo
+# Nexus Clips agent synthesis for FragForge
 
 Date: 2026-06-03
 
@@ -6,7 +6,7 @@ Input material:
 
 - `docs/research/09-nexusclips-public-recon.md`
 - `docs/specs/2026-06-03-allstar-inspired-product-iteration.md`
-- Existing ZackVideo architecture and code contracts
+- Existing FragForge architecture and code contracts
 - Four read-only agent reviews: product/workflow, local AI, editor/render,
   and security/operation
 
@@ -18,7 +18,7 @@ The valuable pattern is:
 
 `source -> analysis -> moments -> edit document -> render variant -> publish pack`
 
-For ZackVideo this should stay local-first and CS2-specific:
+For FragForge this should stay local-first and CS2-specific:
 
 `demo -> killplan -> moments -> recording -> render variant -> shortslistosparasubir`
 
@@ -38,7 +38,7 @@ artifact produced from an `EditDocument`.
 
 ### Moment Before Clip
 
-Nexus separates markers/moments from rendered clips. ZackVideo should do the
+Nexus separates markers/moments from rendered clips. FragForge should do the
 same. The parser already produces strong raw material: kills, utility throws,
  rounds, ticks, map, target player, weapons, headshots, wallbangs, and smoke
 lineup metadata.
@@ -110,7 +110,7 @@ Recommended state document:
 ### Edit Document As Stable Intent
 
 Nexus exposes an editor model with subtitles, hook, sticker, framing, and
-watermark layers. ZackVideo should adopt the data-contract idea, not the heavy
+watermark layers. FragForge should adopt the data-contract idea, not the heavy
 browser editor.
 
 Recommended `EditDocument` fields:
@@ -152,7 +152,7 @@ Recommended `EditDocument` fields:
 
 ### Local Publish Pack
 
-Nexus has publication/calendar flows. ZackVideo should copy the operational
+Nexus has publication/calendar flows. FragForge should copy the operational
 status model, not direct cloud publishing.
 
 Keep the upload-ready default under `shortslistosparasubir` and track:
@@ -201,7 +201,7 @@ Do not copy:
 - opaque AI marker generation without reason codes
 - public sourcemaps or frontend-visible backend logic
 
-ZackVideo's advantage is CS2 demo intelligence: ticks, POV, HUD preservation,
+FragForge's advantage is CS2 demo intelligence: ticks, POV, HUD preservation,
 weapons, rounds, kills, utility, HLAE capture, and repeatable local renders.
 
 ## Implementation Order

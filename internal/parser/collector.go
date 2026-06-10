@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 // Collector accumulates the events the parser observes for the target player

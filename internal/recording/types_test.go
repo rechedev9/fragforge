@@ -3,7 +3,7 @@ package recording
 import (
 	"testing"
 
-	"github.com/reche/zackvideo/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/killplan"
 )
 
 func TestAccountIDFromSteamID64(t *testing.T) {

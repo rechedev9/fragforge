@@ -3,8 +3,8 @@
 Date: 2026-06-03
 
 This note captures public-product lessons from Allstar and translates them into
-ZackVideo slices. It is not a plan to clone Allstar. The goal is to keep
-ZackVideo's deterministic CS2 pipeline while borrowing the product primitives
+FragForge slices. It is not a plan to clone Allstar. The goal is to keep
+FragForge's deterministic CS2 pipeline while borrowing the product primitives
 that make automated clips reusable.
 
 ## Observed public product primitives
@@ -18,7 +18,7 @@ that make automated clips reusable.
 - Publish packs include more than MP4: cover, caption, gallery, and metadata.
 - Profiles, feeds, reactions, and ads are secondary to the core clip lifecycle.
 
-## ZackVideo target model
+## FragForge target model
 
 ```
 Match

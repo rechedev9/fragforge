@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/reche/zackvideo/internal/job"
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/rules"
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 func TestMemoryJobRepositoryStoresJobLifecycle(t *testing.T) {

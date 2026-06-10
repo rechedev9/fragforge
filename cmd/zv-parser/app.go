@@ -16,11 +16,11 @@ import (
 
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/lineups"
-	"github.com/reche/zackvideo/internal/parser"
-	"github.com/reche/zackvideo/internal/rules"
-	"github.com/reche/zackvideo/internal/utilityaudit"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/lineups"
+	"github.com/rechedev9/fragforge/internal/parser"
+	"github.com/rechedev9/fragforge/internal/rules"
+	"github.com/rechedev9/fragforge/internal/utilityaudit"
 )
 
 const (

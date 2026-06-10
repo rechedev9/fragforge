@@ -1,4 +1,4 @@
-# Go security review for ZackVideo
+# Go security review for FragForge
 
 Follow `AGENTS.md`.
 

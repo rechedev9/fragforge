@@ -136,7 +136,7 @@ func workflowDocs() []workflowDoc {
 		{
 			Path: "scripts/check-codex-harness.sh",
 			Required: []string{
-				"== ZackVideo workflow contract ==",
+				"== FragForge workflow contract ==",
 				"go run ./cmd/zv check",
 			},
 		},

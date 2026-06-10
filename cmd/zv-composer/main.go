@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/reche/zackvideo/internal/composition"
-	"github.com/reche/zackvideo/internal/recording"
+	"github.com/rechedev9/fragforge/internal/composition"
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
 func main() {

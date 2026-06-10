@@ -1,4 +1,4 @@
 interface:
-  display_name: "ZackVideo Music Scripted Shorts"
+  display_name: "FragForge Music Scripted Shorts"
   short_description: "Build 24fps Lua-scripted CS2 Shorts with CC0 music."
-  default_prompt: "Create a ZackVideo music-scripted CS2 Short from a demo: parse the target player's segments, record gameplay through HLAE/CS2, use only CC0 music, analyze rhythm, render one 24fps compiled vertical Short with effects/viral_premium.lua, place upload-ready assets under shortslistosparasubir, and QA the gallery."
+  default_prompt: "Create a FragForge music-scripted CS2 Short from a demo: parse the target player's segments, record gameplay through HLAE/CS2, use only CC0 music, analyze rhythm, render one 24fps compiled vertical Short with effects/viral_premium.lua, place upload-ready assets under shortslistosparasubir, and QA the gallery."

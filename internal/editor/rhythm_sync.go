@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/reche/zackvideo/internal/rhythm"
+	"github.com/rechedev9/fragforge/internal/rhythm"
 )
 
 func loadRhythmSync(path string) (map[string]rhythm.SegmentSync, error) {

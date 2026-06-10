@@ -35,7 +35,7 @@ type RenderPreset struct {
 	Name        string
 	Description string
 
-	// Output geometry. Every ZackVideo short renders at 1080x1920 / 60fps.
+	// Output geometry. Every FragForge short renders at 1080x1920 / 60fps.
 	FPS    int
 	Width  int
 	Height int

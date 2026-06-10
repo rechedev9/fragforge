@@ -53,7 +53,7 @@ func (h *Handlers) requireMutationToken(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.Header.Get("X-ZackVideo-Token") != h.mutationToken {
+		if r.Header.Get("X-FragForge-Token") != h.mutationToken {
 			writeError(w, http.StatusUnauthorized, "mutation token required")
 			return
 		}

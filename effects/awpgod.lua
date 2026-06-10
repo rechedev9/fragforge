@@ -1,4 +1,4 @@
--- Local ZackVideo effects preset for fast visual iteration.
+-- Local FragForge effects preset for fast visual iteration.
 -- Runs inside zv-editor, not HLAE.
 
 on_segment(function(s)

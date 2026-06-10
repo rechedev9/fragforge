@@ -1,10 +1,10 @@
 # Zack Replay Shorts
 
-Produce one vertical CS2 Short per demo from `C:\Users\reche\Downloads\replays`, focused on every kill by Zack. The production path should be deterministic, rhythm-aware, and traceable through ZackVideo manifests and logs.
+Produce one vertical CS2 Short per demo from `C:\Users\reche\Downloads\replays`, focused on every kill by Zack. The production path should be deterministic, rhythm-aware, and traceable through FragForge manifests and logs.
 
 ## Decision
 
-Use the existing ZackVideo pipeline, with a small renderer extension so Shorts can consume external music, 24 FPS output, and `zv-rhythm` beat timing.
+Use the existing FragForge pipeline, with a small renderer extension so Shorts can consume external music, 24 FPS output, and `zv-rhythm` beat timing.
 
 ## Inputs
 

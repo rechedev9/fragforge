@@ -1,6 +1,6 @@
 package composition
 
-import "github.com/reche/zackvideo/internal/recording"
+import "github.com/rechedev9/fragforge/internal/recording"
 
 type SegmentClip struct {
 	SegmentID       string                      `json:"segment_id"`

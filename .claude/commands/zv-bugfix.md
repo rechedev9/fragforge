@@ -1,4 +1,4 @@
-Fix a ZackVideo bug with a regression test. Bug: $ARGUMENTS
+Fix a FragForge bug with a regression test. Bug: $ARGUMENTS
 
 Follow `CLAUDE.md`.
 

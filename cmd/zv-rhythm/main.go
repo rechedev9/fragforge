@@ -9,7 +9,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/reche/zackvideo/internal/rhythm"
+	"github.com/rechedev9/fragforge/internal/rhythm"
 )
 
 func main() {

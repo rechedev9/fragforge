@@ -1,15 +1,15 @@
 ---
 name: zackvideo-youtube-shorts-publish
-description: "Prepare or upload ZackVideo YouTube Shorts publish packs with titles, captions, hashtags, covers, and optional YouTube Data API upload."
+description: "Prepare or upload FragForge YouTube Shorts publish packs with titles, captions, hashtags, covers, and optional YouTube Data API upload."
 ---
 
-# ZackVideo YouTube Shorts Publish
+# FragForge YouTube Shorts Publish
 
 Use this skill when the user asks for YouTube titles, captions, Shorts upload packs, or uploads.
 
 ## Publish Pack
 
-ZackVideo writes publish assets under:
+FragForge writes publish assets under:
 
 ```text
 <shorts>\publish\

@@ -1,4 +1,4 @@
-ZackVideo generated artifact audit. Optional focus: $ARGUMENTS
+FragForge generated artifact audit. Optional focus: $ARGUMENTS
 
 Read-only. Do not edit or delete files.
 

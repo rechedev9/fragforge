@@ -1,4 +1,4 @@
-Plan a ZackVideo change. Task: $ARGUMENTS
+Plan a FragForge change. Task: $ARGUMENTS
 
 Read-only. Do not edit files.
 

@@ -1,8 +1,8 @@
-ZackVideo local toolchain diagnosis. Optional focus: $ARGUMENTS
+FragForge local toolchain diagnosis. Optional focus: $ARGUMENTS
 
 Read-only diagnosis. Do not install tools or edit files unless the user asks.
 
-Goal: diagnose whether the local machine is ready for ZackVideo development and
+Goal: diagnose whether the local machine is ready for FragForge development and
 capture/edit workflows.
 
 Process:

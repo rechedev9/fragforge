@@ -35,7 +35,7 @@ $env:ZV_CS2_PATH = "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike
 $env:ZV_FFMPEG_PATH = "ffmpeg"
 ```
 
-On this workstation, `C:\HLAE\HLAE.exe` is not the ZackVideo capture install.
+On this workstation, `C:\HLAE\HLAE.exe` is not the FragForge capture install.
 Use the versioned `C:\HLAE-2.190.1\HLAE.exe` path explicitly.
 
 Check the local machine:

@@ -1,4 +1,4 @@
-module github.com/reche/zackvideo
+module github.com/rechedev9/fragforge
 
 go 1.26.1
 

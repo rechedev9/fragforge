@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/reche/zackvideo/internal/editor"
+	"github.com/rechedev9/fragforge/internal/editor"
 )
 
 // shortOptions are the parsed `zv short` command-line options.

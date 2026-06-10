@@ -1,4 +1,4 @@
-# Go PR-ready playbook for ZackVideo
+# Go PR-ready playbook for FragForge
 
 Follow `AGENTS.md`.
 

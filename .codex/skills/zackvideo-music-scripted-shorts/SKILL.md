@@ -1,9 +1,9 @@
 ---
 name: zackvideo-music-scripted-shorts
-description: "Create Lua-scripted, music-synced ZackVideo CS2 Shorts: parse demos, record target-player segments, analyze CC0 music, render one 24fps compiled vertical Short per demo with external music, rhythm JSON, effects/viral_premium.lua, publish assets, gallery review, and upload-ready outputs under shortslistosparasubir."
+description: "Create Lua-scripted, music-synced FragForge CS2 Shorts: parse demos, record target-player segments, analyze CC0 music, render one 24fps compiled vertical Short per demo with external music, rhythm JSON, effects/viral_premium.lua, publish assets, gallery review, and upload-ready outputs under shortslistosparasubir."
 ---
 
-# ZackVideo Music Scripted Shorts
+# FragForge Music Scripted Shorts
 
 Use this skill when the user wants CS2 Shorts with Lua scripting, external music, beat/rhythm sync, 24 FPS output, or one music-edited compilation per demo. Keep the normal realistic `natural-hq2-full` skill as the default for non-musical gameplay exports.
 

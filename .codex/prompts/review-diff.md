@@ -1,4 +1,4 @@
-# Review current diff for ZackVideo
+# Review current diff for FragForge
 
 Follow `AGENTS.md`.
 

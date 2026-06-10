@@ -198,7 +198,7 @@ func claudeRuleRequiredText(path string) []string {
 		}
 	default:
 		return []string{
-			"ZackVideo",
+			"FragForge",
 		}
 	}
 }

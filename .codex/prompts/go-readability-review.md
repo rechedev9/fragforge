@@ -1,4 +1,4 @@
-# Go readability review for ZackVideo
+# Go readability review for FragForge
 
 Follow `AGENTS.md`.
 

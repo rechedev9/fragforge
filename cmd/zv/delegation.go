@@ -19,7 +19,7 @@ type commandRunner interface {
 type osCommandRunner struct{}
 
 func (osCommandRunner) Run(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	// #nosec G204 -- this CLI delegates only to fixed ZackVideo subcommand binaries.
+	// #nosec G204 -- this CLI delegates only to fixed FragForge subcommand binaries.
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/reche/zackvideo/internal/recording"
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
 func publishFileBase(index int, segmentID, player, mapName string, killCount int, weapon string) string {
@@ -490,11 +490,11 @@ func WritePublishGallery(path string, manifest Manifest) error {
 	sb.WriteString("<!doctype html>\n<html lang=\"en\">\n<head>\n")
 	sb.WriteString("  <meta charset=\"utf-8\">\n")
 	sb.WriteString("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
-	sb.WriteString("  <title>ZackVideo Publish Pack</title>\n")
+	sb.WriteString("  <title>FragForge Publish Pack</title>\n")
 	sb.WriteString("  <style>\n")
 	sb.WriteString("    :root{color-scheme:dark;font-family:Arial,Helvetica,sans-serif;background:#101010;color:#f4f4f4}body{margin:0;padding:24px;background:#101010}header,main{max-width:1500px;margin:0 auto}header{margin-bottom:20px}h1{font-size:24px;margin:0 0 6px}.summary{margin:0;color:#bbb;font-size:14px}.summary span{color:#f4f4f4}.filters{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;align-items:center}.filters input,.filters select,.filters button{height:34px;border:1px solid #353535;border-radius:6px;background:#181818;color:#f4f4f4;padding:0 10px;font-size:13px}.filters input{min-width:260px}.filters button{cursor:pointer;background:#242424}.filters button:hover{background:#303030}.count{color:#bbb;font-size:13px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:18px}.item{background:#1a1a1a;border:1px solid #2c2c2c;border-radius:8px;overflow:hidden}.item[hidden]{display:none}.media{background:#000}.media video{display:block;width:100%;aspect-ratio:9/16;object-fit:contain;background:#000}.body{padding:12px}.title{font-size:15px;font-weight:700;margin-bottom:7px}.meta{color:#c8c8c8;font-size:12px;margin-bottom:8px}.diag{color:#aeb6bd;font-size:11px;line-height:1.35;margin-bottom:4px}.path{color:#999;font-size:12px;word-break:break-all}.tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.tools a,.tools button{color:#f4f4f4;text-decoration:none;border:1px solid #3a3a3a;border-radius:6px;padding:5px 8px;font-size:12px;background:#242424;line-height:1.2;cursor:pointer}.tools a:hover,.tools button:hover{background:#303030}details{margin-top:10px;color:#ddd;font-size:13px;line-height:1.4}summary{cursor:pointer;color:#cfcfcf}.caption{white-space:pre-wrap;margin-top:8px}\n")
 	sb.WriteString("  </style>\n</head>\n<body>\n")
-	sb.WriteString("  <header><h1>ZackVideo publish pack</h1><p class=\"summary\">")
+	sb.WriteString("  <header><h1>FragForge publish pack</h1><p class=\"summary\">")
 	sb.WriteString(html.EscapeString(fmt.Sprintf("%d shorts ready for upload", len(manifest.Shorts))))
 	sb.WriteString(" · preset <span>")
 	sb.WriteString(html.EscapeString(manifest.Preset))
@@ -652,7 +652,7 @@ func WritePublishSummary(path string, manifest Manifest) error {
 			effectCounts[effect.Type]++
 		}
 	}
-	sb.WriteString("# ZackVideo Publish Summary\n\n")
+	sb.WriteString("# FragForge Publish Summary\n\n")
 	sb.WriteString(fmt.Sprintf("- Shorts: %d\n", len(manifest.Shorts)))
 	sb.WriteString(fmt.Sprintf("- Total kills: %d\n", totalKills))
 	if totalSmokes > 0 {

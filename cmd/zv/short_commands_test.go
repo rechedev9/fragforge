@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reche/zackvideo/internal/editor"
+	"github.com/rechedev9/fragforge/internal/editor"
 )
 
 // multiRunner records every delegated call and can fail a specific stage. It

@@ -1,4 +1,4 @@
--- Natural ZackVideo preset for smoke lineup clips.
+-- Natural FragForge preset for smoke lineup clips.
 -- Runs inside zv-editor, not HLAE.
 
 on_segment(function(s)

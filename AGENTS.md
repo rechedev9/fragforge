@@ -1,16 +1,16 @@
-# Codex instructions for ZackVideo
+# Codex instructions for FragForge
 
 These instructions apply to the whole repository unless a deeper AGENTS.md
 overrides them.
 
 ## Project
 
-ZackVideo is a deterministic CS2 demo-to-video pipeline written primarily in Go.
+FragForge is a deterministic CS2 demo-to-video pipeline written primarily in Go.
 It parses `.dem` files, builds kill/smoke segment plans, records gameplay with
 HLAE/CS2 on Windows, and post-processes clips with FFmpeg, Lua effects, overlays,
 and publishing metadata.
 
-Module: `github.com/reche/zackvideo`
+Module: `github.com/rechedev9/fragforge`
 Go version: `1.26.1`
 
 Important boundaries:
@@ -150,7 +150,7 @@ Media output and cleanup:
 Local capture path:
 
 - Use `C:\HLAE-2.190.1\HLAE.exe` for HLAE capture on this machine.
-- Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for ZackVideo
+- Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for FragForge
   capture runs.
 - Always launch CS2 through HLAE in windowed mode for recording runs. The CS2
   command line must include `-windowed`; do not record demos in fullscreen or

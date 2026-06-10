@@ -1,4 +1,4 @@
-# Go concurrency review for ZackVideo
+# Go concurrency review for FragForge
 
 Follow `AGENTS.md`.
 

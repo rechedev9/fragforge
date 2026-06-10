@@ -1,4 +1,4 @@
-# Claude Code instructions for ZackVideo
+# Claude Code instructions for FragForge
 
 These instructions apply to the whole repository unless a deeper `CLAUDE.md`
 overrides them. `AGENTS.md` mirrors most of this for Codex; keep both in sync
@@ -6,12 +6,12 @@ when changing project-wide agent behavior.
 
 ## Project
 
-ZackVideo is a deterministic CS2 demo-to-video pipeline written primarily in Go.
+FragForge is a deterministic CS2 demo-to-video pipeline written primarily in Go.
 It parses `.dem` files, builds kill/smoke segment plans, records gameplay with
 HLAE/CS2 on Windows, and post-processes clips with FFmpeg, Lua effects,
 overlays, and publishing metadata.
 
-Module: `github.com/reche/zackvideo`
+Module: `github.com/rechedev9/fragforge`
 Go version: `1.26.1`
 
 Important boundaries:
@@ -120,7 +120,7 @@ During edits:
 Local capture path:
 
 - Use `C:\HLAE-2.190.1\HLAE.exe` for HLAE capture on this machine.
-- Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for ZackVideo
+- Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for FragForge
   capture runs.
 
 Verification:

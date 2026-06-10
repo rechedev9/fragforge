@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/recording"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
 const SchemaVersion = "1.0"

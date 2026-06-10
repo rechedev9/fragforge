@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/reche/zackvideo/internal/editor"
+	"github.com/rechedev9/fragforge/internal/editor"
 )
 
 type presetListEntry struct {

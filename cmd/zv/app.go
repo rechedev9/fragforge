@@ -11,7 +11,7 @@ const (
 	exitInvalidArgs = 2
 )
 
-// Run executes the unified ZackVideo CLI. It is intentionally thin: current
+// Run executes the unified FragForge CLI. It is intentionally thin: current
 // feature binaries remain the behavioral owners while zv provides one stable
 // command surface for humans, scripts, and agent skills.
 func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner commandRunner) int {

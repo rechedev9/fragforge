@@ -1,4 +1,4 @@
-Implement a ZackVideo behavior change with TDD. Task: $ARGUMENTS
+Implement a FragForge behavior change with TDD. Task: $ARGUMENTS
 
 Follow `CLAUDE.md`.
 

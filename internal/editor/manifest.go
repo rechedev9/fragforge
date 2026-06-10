@@ -6,11 +6,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/reche/zackvideo/internal/composition"
-	"github.com/reche/zackvideo/internal/killplan"
-	"github.com/reche/zackvideo/internal/lineups"
-	"github.com/reche/zackvideo/internal/recording"
-	"github.com/reche/zackvideo/internal/rhythm"
+	"github.com/rechedev9/fragforge/internal/composition"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/lineups"
+	"github.com/rechedev9/fragforge/internal/recording"
+	"github.com/rechedev9/fragforge/internal/rhythm"
 )
 
 func BuildManifest(result recording.RecordingResult, opts ManifestOptions) Manifest {
