@@ -66,35 +66,61 @@ type NewRenderVariantStateForLoadoutOptions struct {
 	Previous *RenderVariantState
 }
 
+type renderVariantArtifacts struct {
+	Prefix            string
+	RenderResultKey   string
+	EditDocumentKey   string
+	EditManifestKey   string
+	PackManifestKey   string
+	GalleryKey        string
+	PublishSummaryKey string
+}
+
+func renderVariantArtifactsFor(jobID uuid.UUID, variant string) (renderVariantArtifacts, error) {
+	prefix, err := artifacts.RenderVariantPrefix(jobID, variant)
+	if err != nil {
+		return renderVariantArtifacts{}, err
+	}
+	resultKey, err := artifacts.RenderVariantResultKey(jobID, variant)
+	if err != nil {
+		return renderVariantArtifacts{}, err
+	}
+	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(jobID, variant)
+	if err != nil {
+		return renderVariantArtifacts{}, err
+	}
+	editManifestKey, err := artifacts.RenderVariantEditManifestKey(jobID, variant)
+	if err != nil {
+		return renderVariantArtifacts{}, err
+	}
+	packKey, err := artifacts.RenderVariantPackManifestKey(jobID, variant)
+	if err != nil {
+		return renderVariantArtifacts{}, err
+	}
+	galleryKey, err := artifacts.RenderVariantGalleryKey(jobID, variant)
+	if err != nil {
+		return renderVariantArtifacts{}, err
+	}
+	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(jobID, variant)
+	if err != nil {
+		return renderVariantArtifacts{}, err
+	}
+	return renderVariantArtifacts{
+		Prefix:            prefix,
+		RenderResultKey:   resultKey,
+		EditDocumentKey:   editDocumentKey,
+		EditManifestKey:   editManifestKey,
+		PackManifestKey:   packKey,
+		GalleryKey:        galleryKey,
+		PublishSummaryKey: summaryKey,
+	}, nil
+}
+
 // NewRenderVariantStateForLoadout derives artifact keys from the loadout's
 // variant and returns the durable render state document for API and worker
 // boundaries.
 func NewRenderVariantStateForLoadout(opts NewRenderVariantStateForLoadoutOptions) (RenderVariantState, error) {
-	prefix, err := artifacts.RenderVariantPrefix(opts.JobID, opts.Loadout.Variant)
-	if err != nil {
-		return RenderVariantState{}, err
-	}
-	resultKey, err := artifacts.RenderVariantResultKey(opts.JobID, opts.Loadout.Variant)
-	if err != nil {
-		return RenderVariantState{}, err
-	}
-	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(opts.JobID, opts.Loadout.Variant)
-	if err != nil {
-		return RenderVariantState{}, err
-	}
-	editManifestKey, err := artifacts.RenderVariantEditManifestKey(opts.JobID, opts.Loadout.Variant)
-	if err != nil {
-		return RenderVariantState{}, err
-	}
-	packKey, err := artifacts.RenderVariantPackManifestKey(opts.JobID, opts.Loadout.Variant)
-	if err != nil {
-		return RenderVariantState{}, err
-	}
-	galleryKey, err := artifacts.RenderVariantGalleryKey(opts.JobID, opts.Loadout.Variant)
-	if err != nil {
-		return RenderVariantState{}, err
-	}
-	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(opts.JobID, opts.Loadout.Variant)
+	refs, err := renderVariantArtifactsFor(opts.JobID, opts.Loadout.Variant)
 	if err != nil {
 		return RenderVariantState{}, err
 	}
@@ -103,13 +129,13 @@ func NewRenderVariantStateForLoadout(opts NewRenderVariantStateForLoadoutOptions
 		Variant:           opts.Loadout.Variant,
 		Status:            opts.Status,
 		Preset:            opts.Loadout.Preset,
-		EditDocumentKey:   editDocumentKey,
-		EditManifestKey:   editManifestKey,
-		RenderResultKey:   resultKey,
-		PackManifestKey:   packKey,
-		GalleryKey:        galleryKey,
-		PublishSummaryKey: summaryKey,
-		ArtifactPrefix:    prefix,
+		EditDocumentKey:   refs.EditDocumentKey,
+		EditManifestKey:   refs.EditManifestKey,
+		RenderResultKey:   refs.RenderResultKey,
+		PackManifestKey:   refs.PackManifestKey,
+		GalleryKey:        refs.GalleryKey,
+		PublishSummaryKey: refs.PublishSummaryKey,
+		ArtifactPrefix:    refs.Prefix,
 		Warnings:          opts.Warnings,
 		Error:             opts.Error,
 		Now:               opts.Now,

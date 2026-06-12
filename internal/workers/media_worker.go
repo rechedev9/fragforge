@@ -832,56 +832,14 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (e
 }
 
 func (w *RenderWorker) writeEditDocument(outDir string, id uuid.UUID, loadout renderplan.Loadout, result recording.RecordingResult) error {
-	prefix, err := artifacts.RenderVariantPrefix(id, loadout.Variant)
-	if err != nil {
-		return err
-	}
-	resultKey, err := artifacts.RenderVariantResultKey(id, loadout.Variant)
-	if err != nil {
-		return err
-	}
-	editManifestKey, err := artifacts.RenderVariantEditManifestKey(id, loadout.Variant)
-	if err != nil {
-		return err
-	}
-	packKey, err := artifacts.RenderVariantPackManifestKey(id, loadout.Variant)
-	if err != nil {
-		return err
-	}
-	galleryKey, err := artifacts.RenderVariantGalleryKey(id, loadout.Variant)
-	if err != nil {
-		return err
-	}
-	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(id, loadout.Variant)
-	if err != nil {
-		return err
-	}
-	doc := renderplan.NewEditDocument(renderplan.NewEditDocumentOptions{
-		JobID:              id,
-		Variant:            loadout.Variant,
-		Preset:             loadout.Preset,
-		EffectsPreset:      loadout.EffectsPreset,
-		Framing:            loadout.Framing,
-		VideoCRF:           loadout.VideoCRF,
-		VideoPreset:        loadout.VideoPreset,
-		HQFilters:          loadout.HQFilters,
-		AudioNormalize:     loadout.AudioNormalize,
-		QualityChecks:      loadout.QualityChecks,
-		CoverSheets:        loadout.CoverSheets,
-		CoversEnabled:      loadout.CoversEnabled,
-		CaptionsEnabled:    loadout.CaptionsEnabled,
-		Output:             loadout.Output,
-		UploadReadyRoot:    loadout.UploadReadyDir,
-		RecordingResultKey: artifacts.RecordingResultKey(id),
-		KillPlanSource:     "job.kill_plan",
-		OutputPrefix:       prefix,
-		RenderResultKey:    resultKey,
-		EditManifestKey:    editManifestKey,
-		PackManifestKey:    packKey,
-		GalleryKey:         galleryKey,
-		PublishSummaryKey:  summaryKey,
-		SegmentIDs:         recordingSegmentIDs(result),
+	doc, err := renderplan.NewEditDocumentForLoadout(renderplan.NewEditDocumentForLoadoutOptions{
+		JobID:      id,
+		Loadout:    loadout,
+		SegmentIDs: recordingSegmentIDs(result),
 	})
+	if err != nil {
+		return err
+	}
 	return writeJSONFile(filepath.Join(outDir, "edit-document.json"), doc)
 }
 

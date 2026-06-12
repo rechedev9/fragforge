@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/rechedev9/fragforge/internal/artifacts"
 )
 
 const EditDocumentSchemaVersion = "1.0"
@@ -94,6 +96,54 @@ type NewEditDocumentOptions struct {
 	GalleryKey         string
 	PublishSummaryKey  string
 	SegmentIDs         []string
+}
+
+// NewEditDocumentForLoadoutOptions carries the render loadout plus the current
+// source selection needed to write a stable edit intent document.
+type NewEditDocumentForLoadoutOptions struct {
+	JobID          uuid.UUID
+	Loadout        Loadout
+	KillPlanSource string
+	SegmentIDs     []string
+}
+
+// NewEditDocumentForLoadout derives storage keys from the loadout's variant
+// and snapshots the render intent used by the worker.
+func NewEditDocumentForLoadout(opts NewEditDocumentForLoadoutOptions) (EditDocument, error) {
+	refs, err := renderVariantArtifactsFor(opts.JobID, opts.Loadout.Variant)
+	if err != nil {
+		return EditDocument{}, err
+	}
+	killPlanSource := opts.KillPlanSource
+	if killPlanSource == "" {
+		killPlanSource = "job.kill_plan"
+	}
+	return NewEditDocument(NewEditDocumentOptions{
+		JobID:              opts.JobID,
+		Variant:            opts.Loadout.Variant,
+		Preset:             opts.Loadout.Preset,
+		EffectsPreset:      opts.Loadout.EffectsPreset,
+		Framing:            opts.Loadout.Framing,
+		VideoCRF:           opts.Loadout.VideoCRF,
+		VideoPreset:        opts.Loadout.VideoPreset,
+		HQFilters:          opts.Loadout.HQFilters,
+		AudioNormalize:     opts.Loadout.AudioNormalize,
+		QualityChecks:      opts.Loadout.QualityChecks,
+		CoverSheets:        opts.Loadout.CoverSheets,
+		CoversEnabled:      opts.Loadout.CoversEnabled,
+		CaptionsEnabled:    opts.Loadout.CaptionsEnabled,
+		Output:             opts.Loadout.Output,
+		UploadReadyRoot:    opts.Loadout.UploadReadyDir,
+		RecordingResultKey: artifacts.RecordingResultKey(opts.JobID),
+		KillPlanSource:     killPlanSource,
+		OutputPrefix:       refs.Prefix,
+		RenderResultKey:    refs.RenderResultKey,
+		EditManifestKey:    refs.EditManifestKey,
+		PackManifestKey:    refs.PackManifestKey,
+		GalleryKey:         refs.GalleryKey,
+		PublishSummaryKey:  refs.PublishSummaryKey,
+		SegmentIDs:         opts.SegmentIDs,
+	}), nil
 }
 
 func NewEditDocument(opts NewEditDocumentOptions) EditDocument {
