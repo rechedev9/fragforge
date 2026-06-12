@@ -110,6 +110,33 @@ type VideoEntry struct {
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 }
 
+func NewRenderState(id uuid.UUID, variant string, status Status, warnings []string, errMsg string, videos []VideoEntry) (RenderState, error) {
+	resultKey, err := RenderResultKey(id, variant)
+	if err != nil {
+		return RenderState{}, err
+	}
+	galleryKey, err := RenderGalleryKey(id, variant)
+	if err != nil {
+		return RenderState{}, err
+	}
+	prefix, err := RenderPrefix(id, variant)
+	if err != nil {
+		return RenderState{}, err
+	}
+	return RenderState{
+		JobID:       id,
+		Variant:     variant,
+		Status:      status,
+		ResultKey:   resultKey,
+		GalleryKey:  galleryKey,
+		ArtifactDir: prefix,
+		Warnings:    append([]string(nil), warnings...),
+		Error:       errMsg,
+		Videos:      append([]VideoEntry(nil), videos...),
+		UpdatedAt:   time.Now().UTC(),
+	}, nil
+}
+
 func DefaultEditPlan() EditPlan {
 	return EditPlan{
 		SchemaVersion: "1.0",

@@ -570,29 +570,9 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 }
 
 func (w *StreamRenderWorker) writeStreamState(id uuid.UUID, variant string, status streamclips.Status, warnings []string, errMsg string, videos []streamclips.VideoEntry) error {
-	resultKey, err := streamclips.RenderResultKey(id, variant)
+	state, err := streamclips.NewRenderState(id, variant, status, warnings, errMsg, videos)
 	if err != nil {
 		return err
-	}
-	galleryKey, err := streamclips.RenderGalleryKey(id, variant)
-	if err != nil {
-		return err
-	}
-	prefix, err := streamclips.RenderPrefix(id, variant)
-	if err != nil {
-		return err
-	}
-	state := streamclips.RenderState{
-		JobID:       id,
-		Variant:     variant,
-		Status:      status,
-		ResultKey:   resultKey,
-		GalleryKey:  galleryKey,
-		ArtifactDir: prefix,
-		Warnings:    warnings,
-		Error:       errMsg,
-		Videos:      videos,
-		UpdatedAt:   time.Now().UTC(),
 	}
 	key, err := streamclips.RenderStateKey(id, variant)
 	if err != nil {

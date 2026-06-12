@@ -246,7 +246,11 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	state := h.newStreamRenderState(j.ID, variant, streamclips.StatusRendering, nil, "", nil)
+	state, err := streamclips.NewRenderState(j.ID, variant, streamclips.StatusRendering, nil, "", nil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.writeStreamRenderState(state); err != nil {
 		internalError(w, "write stream render state", err)
 		return
@@ -295,7 +299,11 @@ func (h *Handlers) GetStreamRender(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "open stream render state", err)
 		return
 	}
-	state := h.newStreamRenderState(j.ID, variant, j.Status, nil, j.FailureReason, nil)
+	state, err := streamclips.NewRenderState(j.ID, variant, j.Status, nil, j.FailureReason, nil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, state)
 }
 
@@ -371,24 +379,6 @@ func (h *Handlers) writeStreamEditPlanArtifact(id uuid.UUID, plan streamclips.Ed
 		return err
 	}
 	return h.storage.Put(streamclips.EditPlanKey(id), bytes.NewReader(append(b, '\n')))
-}
-
-func (h *Handlers) newStreamRenderState(id uuid.UUID, variant string, status streamclips.Status, warnings []string, errMsg string, videos []streamclips.VideoEntry) streamclips.RenderState {
-	resultKey, _ := streamclips.RenderResultKey(id, variant)
-	galleryKey, _ := streamclips.RenderGalleryKey(id, variant)
-	prefix, _ := streamclips.RenderPrefix(id, variant)
-	return streamclips.RenderState{
-		JobID:       id,
-		Variant:     variant,
-		Status:      status,
-		ResultKey:   resultKey,
-		GalleryKey:  galleryKey,
-		ArtifactDir: prefix,
-		Warnings:    warnings,
-		Error:       errMsg,
-		Videos:      videos,
-		UpdatedAt:   time.Now().UTC(),
-	}
 }
 
 func (h *Handlers) writeStreamRenderState(state streamclips.RenderState) error {
