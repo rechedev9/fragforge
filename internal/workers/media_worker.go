@@ -249,8 +249,8 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job) error {
 	if runErr != nil {
 		return runErr
 	}
-	if result.Error != "" {
-		return fmt.Errorf("recording result error: %s", result.Error)
+	if err := recording.ValidateRunResult(result); err != nil {
+		return err
 	}
 	return nil
 }
@@ -766,8 +766,8 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (e
 	if runErr != nil {
 		return runErr
 	}
-	if result.Error != "" {
-		return fmt.Errorf("render result error: %s", result.Error)
+	if err := renderplan.ValidateRenderVariantRunResult(result); err != nil {
+		return err
 	}
 	readyState, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
 		JobID:    j.ID,
@@ -1073,8 +1073,8 @@ func readStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.R
 	if err != nil {
 		return recording.RecordingResult{}, err
 	}
-	if result.Error != "" {
-		return recording.RecordingResult{}, fmt.Errorf("recording result error: %s", result.Error)
+	if err := recording.ValidateRunResult(result); err != nil {
+		return recording.RecordingResult{}, err
 	}
 	return result, nil
 }

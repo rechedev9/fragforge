@@ -5,6 +5,23 @@ import (
 	"testing"
 )
 
+func TestValidateRunResultAcceptsSuccessfulResult(t *testing.T) {
+	err := ValidateRunResult(RecordingResult{})
+	if err != nil {
+		t.Fatalf("ValidateRunResult error = %v", err)
+	}
+}
+
+func TestValidateRunResultRejectsFailedResult(t *testing.T) {
+	err := ValidateRunResult(RecordingResult{Error: "recorder failed"})
+	if err == nil {
+		t.Fatal("ValidateRunResult error = nil, want recording result error")
+	}
+	if !strings.Contains(err.Error(), "recording result error: recorder failed") {
+		t.Fatalf("error = %q, want recording result error", err.Error())
+	}
+}
+
 func TestValidateUploadResultAcceptsSegmentClip(t *testing.T) {
 	err := ValidateUploadResult(RecordingResult{
 		Artifacts: []RecordingArtifact{{
