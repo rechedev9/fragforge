@@ -529,20 +529,12 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		if err := uploadFile(w.storage, key, outPath); err != nil {
 			return fmt.Errorf("upload stream clip %s: %w", clip.ID, err)
 		}
-		videos = append(videos, streamclips.VideoEntry{
-			ClipID:          clip.ID,
-			Title:           clip.Title,
-			Key:             key,
-			DurationSeconds: clip.EndSeconds - clip.StartSeconds,
-		})
+		videos = append(videos, streamclips.NewVideoEntry(clip, key))
 	}
 
-	result := streamclips.RenderResult{
-		SchemaVersion: "1.0",
-		JobID:         j.ID,
-		Variant:       variant,
-		Clips:         videos,
-		RenderedAt:    time.Now().UTC(),
+	result, err := streamclips.NewRenderResult(j.ID, variant, videos, time.Now())
+	if err != nil {
+		return err
 	}
 	resultKey, err := streamclips.RenderResultKey(j.ID, variant)
 	if err != nil {

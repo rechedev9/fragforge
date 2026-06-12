@@ -110,6 +110,31 @@ type VideoEntry struct {
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 }
 
+func NewVideoEntry(clip ClipRange, key string) VideoEntry {
+	return VideoEntry{
+		ClipID:          clip.ID,
+		Title:           clip.Title,
+		Key:             key,
+		DurationSeconds: clip.EndSeconds - clip.StartSeconds,
+	}
+}
+
+func NewRenderResult(id uuid.UUID, variant string, videos []VideoEntry, renderedAt time.Time) (RenderResult, error) {
+	if _, err := RenderPrefix(id, variant); err != nil {
+		return RenderResult{}, err
+	}
+	if renderedAt.IsZero() {
+		renderedAt = time.Now()
+	}
+	return RenderResult{
+		SchemaVersion: "1.0",
+		JobID:         id,
+		Variant:       variant,
+		Clips:         append([]VideoEntry(nil), videos...),
+		RenderedAt:    renderedAt.UTC(),
+	}, nil
+}
+
 func NewRenderState(id uuid.UUID, variant string, status Status, warnings []string, errMsg string, videos []VideoEntry) (RenderState, error) {
 	resultKey, err := RenderResultKey(id, variant)
 	if err != nil {
