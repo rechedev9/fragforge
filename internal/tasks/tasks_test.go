@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const testRenderVariant = "viral-60-clean"
+
 func TestNewParseDemoTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
 	tk, err := NewParseDemoTask(id)
@@ -66,7 +68,7 @@ func TestNewComposeFinalTaskRoundtrip(t *testing.T) {
 
 func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	tk, err := NewRenderVariantTask(id, "natural-hq2-full")
+	tk, err := NewRenderVariantTask(id, testRenderVariant)
 	if err != nil {
 		t.Fatalf("NewRenderVariantTask error = %v", err)
 	}
@@ -81,8 +83,8 @@ func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	if payload.JobID != id {
 		t.Errorf("JobID = %v, want %v", payload.JobID, id)
 	}
-	if payload.Variant != "natural-hq2-full" {
-		t.Errorf("Variant = %q, want natural-hq2-full", payload.Variant)
+	if payload.Variant != testRenderVariant {
+		t.Errorf("Variant = %q, want %q", payload.Variant, testRenderVariant)
 	}
 }
 
@@ -97,7 +99,7 @@ func TestNewRenderVariantTaskRejectsUnsafeVariant(t *testing.T) {
 
 func TestNewCodexAgentTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	tk, err := NewCodexAgentTask(id, "natural-hq2-full", "caption-candidates")
+	tk, err := NewCodexAgentTask(id, testRenderVariant, "caption-candidates")
 	if err != nil {
 		t.Fatalf("NewCodexAgentTask error = %v", err)
 	}
@@ -108,7 +110,7 @@ func TestNewCodexAgentTaskRoundtrip(t *testing.T) {
 	if err := json.Unmarshal(tk.Payload(), &payload); err != nil {
 		t.Fatalf("Unmarshal payload error = %v", err)
 	}
-	if payload.JobID != id || payload.Variant != "natural-hq2-full" || payload.Kind != "caption-candidates" {
+	if payload.JobID != id || payload.Variant != testRenderVariant || payload.Kind != "caption-candidates" {
 		t.Fatalf("payload = %#v", payload)
 	}
 }
