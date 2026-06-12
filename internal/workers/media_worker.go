@@ -556,7 +556,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if err != nil {
 		return err
 	}
-	if err := w.storage.Put(galleryKey, strings.NewReader(streamGalleryHTML(j, videos))); err != nil {
+	if err := w.storage.Put(galleryKey, strings.NewReader(streamclips.RenderGalleryHTML(j, videos))); err != nil {
 		return fmt.Errorf("write stream gallery: %w", err)
 	}
 	if err := w.writeStreamState(j.ID, variant, streamclips.StatusRendered, nil, "", videos); err != nil {
@@ -612,23 +612,6 @@ func markStreamFailed(repo StreamRenderRepository, id uuid.UUID, reason string) 
 	if err := repo.UpdateStatus(ctx, id, streamclips.StatusFailed, reason); err != nil {
 		logWorkerError(id, "mark stream failed", err)
 	}
-}
-
-func streamGalleryHTML(j streamclips.Job, videos []streamclips.VideoEntry) string {
-	var b strings.Builder
-	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><title>Streamer clips</title></head><body>")
-	b.WriteString("<h1>")
-	b.WriteString(j.Title)
-	b.WriteString("</h1>")
-	for _, video := range videos {
-		b.WriteString("<section><h2>")
-		b.WriteString(video.ClipID)
-		b.WriteString("</h2><video controls src=\"videos/")
-		b.WriteString(video.ClipID)
-		b.WriteString("\"></video></section>")
-	}
-	b.WriteString("</body></html>")
-	return b.String()
 }
 
 func (w *RenderWorker) HandleRenderVariant(ctx context.Context, t *asynq.Task) error {
