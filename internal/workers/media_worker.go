@@ -1181,30 +1181,19 @@ func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string,
 		return false, nil, err
 	}
 
-	scriptKey := recording.ScriptArtifactKey(id)
-	scriptExists, err := store.Exists(scriptKey)
-	if err != nil || !scriptExists {
+	readyArtifacts, err := recording.NewReadyArtifacts(id, result)
+	if err != nil {
 		return false, nil, err
 	}
-
-	keys := []string{resultKey, scriptKey}
-	segments := 0
-	for _, artifact := range result.Artifacts {
-		if artifact.Role != "segment" || artifact.Type != "video" || artifact.SegmentID == "" {
-			continue
-		}
-		key, err := recording.SegmentClipArtifactKey(id, artifact.SegmentID)
-		if err != nil {
-			return false, nil, err
-		}
+	keys := []string{readyArtifacts.ResultKey}
+	for _, key := range readyArtifacts.RequiredKeys {
 		exists, err := store.Exists(key)
 		if err != nil || !exists {
 			return false, nil, err
 		}
 		keys = append(keys, key)
-		segments++
 	}
-	return segments > 0, keys, nil
+	return readyArtifacts.SegmentCount > 0, keys, nil
 }
 
 func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string, error) {
