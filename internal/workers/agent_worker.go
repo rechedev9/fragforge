@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/renderplan"
 	"github.com/rechedev9/fragforge/internal/storage"
 	"github.com/rechedev9/fragforge/internal/tasks"
@@ -58,33 +57,24 @@ func (w *AgentWorker) HandleCodexAgent(ctx context.Context, t *asynq.Task) error
 }
 
 func (w *AgentWorker) runCaptionCandidates(ctx context.Context, id uuid.UUID, variant, kind string, cfg AgentWorkerConfig) error {
-	contextKey, err := artifacts.RenderVariantAgentContextKey(id, variant, kind)
-	if err != nil {
-		return err
-	}
-	resultKey, err := artifacts.RenderVariantAgentResultKey(id, variant, kind)
-	if err != nil {
-		return err
-	}
-	momentsKey := artifacts.MomentsKey(id)
-	packKey, err := artifacts.RenderVariantPackManifestKey(id, variant)
+	agentArtifacts, err := renderplan.NewAgentArtifacts(id, variant, kind)
 	if err != nil {
 		return err
 	}
 	var momentsDoc any
-	if err := readStoredJSON(w.storage, momentsKey, &momentsDoc); err != nil {
+	if err := readStoredJSON(w.storage, agentArtifacts.MomentsKey, &momentsDoc); err != nil {
 		return fmt.Errorf("read moments: %w", err)
 	}
 	var packManifest any
-	if err := readStoredJSON(w.storage, packKey, &packManifest); err != nil {
+	if err := readStoredJSON(w.storage, agentArtifacts.PackManifestKey, &packManifest); err != nil {
 		return fmt.Errorf("read pack manifest: %w", err)
 	}
-	agentContext := renderplan.NewAgentContext(id, variant, kind, momentsKey, packKey, momentsDoc, packManifest)
+	agentContext := renderplan.NewAgentContext(id, variant, kind, agentArtifacts, momentsDoc, packManifest)
 	contextBytes, err := json.MarshalIndent(agentContext, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := w.storage.Put(contextKey, bytes.NewReader(contextBytes)); err != nil {
+	if err := w.storage.Put(agentArtifacts.ContextKey, bytes.NewReader(contextBytes)); err != nil {
 		return fmt.Errorf("upload agent context: %w", err)
 	}
 
@@ -108,17 +98,17 @@ func (w *AgentWorker) runCaptionCandidates(ctx context.Context, id uuid.UUID, va
 	runCtx, cancel := context.WithTimeout(ctx, cfg.timeoutDuration())
 	defer cancel()
 	if _, err := w.runner.Run(runCtx, cfg.CodexPath, args...); err != nil {
-		return w.writeAgentFailure(id, variant, kind, contextKey, resultKey, err)
+		return w.writeAgentFailure(id, variant, kind, agentArtifacts, err)
 	}
 	resultBytes, err := os.ReadFile(outputPath)
 	if err != nil {
 		return fmt.Errorf("read codex output: %w", err)
 	}
-	result, err := parseAgentResult(id, variant, kind, contextKey, resultKey, resultBytes)
+	result, err := parseAgentResult(id, variant, kind, agentArtifacts, resultBytes)
 	if err != nil {
-		return w.writeAgentFailure(id, variant, kind, contextKey, resultKey, err)
+		return w.writeAgentFailure(id, variant, kind, agentArtifacts, err)
 	}
-	return w.writeAgentResult(resultKey, result)
+	return w.writeAgentResult(agentArtifacts.ResultKey, result)
 }
 
 func captionCandidatePrompt(contextJSON string) string {
@@ -132,7 +122,7 @@ func captionCandidatePrompt(contextJSON string) string {
 	}, "\n")
 }
 
-func parseAgentResult(id uuid.UUID, variant, kind, contextKey, resultKey string, b []byte) (renderplan.AgentResult, error) {
+func parseAgentResult(id uuid.UUID, variant, kind string, agentArtifacts renderplan.AgentArtifacts, b []byte) (renderplan.AgentResult, error) {
 	var payload struct {
 		Titles   []string `json:"titles"`
 		Captions []string `json:"captions"`
@@ -142,7 +132,7 @@ func parseAgentResult(id uuid.UUID, variant, kind, contextKey, resultKey string,
 	if err := json.Unmarshal(bytes.TrimSpace(b), &payload); err != nil {
 		return renderplan.AgentResult{}, fmt.Errorf("decode codex JSON: %w", err)
 	}
-	result := renderplan.NewAgentResult(id, variant, kind, "ready", contextKey, resultKey)
+	result := renderplan.NewAgentResult(id, variant, kind, "ready", agentArtifacts)
 	result.Titles = payload.Titles
 	result.Captions = payload.Captions
 	result.Hashtags = payload.Hashtags
@@ -151,10 +141,10 @@ func parseAgentResult(id uuid.UUID, variant, kind, contextKey, resultKey string,
 	return result, nil
 }
 
-func (w *AgentWorker) writeAgentFailure(id uuid.UUID, variant, kind, contextKey, resultKey string, cause error) error {
-	result := renderplan.NewAgentResult(id, variant, kind, "failed", contextKey, resultKey)
+func (w *AgentWorker) writeAgentFailure(id uuid.UUID, variant, kind string, agentArtifacts renderplan.AgentArtifacts, cause error) error {
+	result := renderplan.NewAgentResult(id, variant, kind, "failed", agentArtifacts)
 	result.Error = cause.Error()
-	if err := w.writeAgentResult(resultKey, result); err != nil {
+	if err := w.writeAgentResult(agentArtifacts.ResultKey, result); err != nil {
 		return fmt.Errorf("%w; write agent failure: %v", cause, err)
 	}
 	return cause

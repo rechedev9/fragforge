@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/renderplan"
 	"github.com/rechedev9/fragforge/internal/tasks"
@@ -20,12 +19,12 @@ import (
 func TestAgentWorkerWritesCaptionCandidates(t *testing.T) {
 	store := newFakeStorage()
 	id := uuid.New()
-	_ = store.Put(artifacts.MomentsKey(id), bytes.NewReader([]byte(`{"moments":[{"id":"mom-001"}]}`)))
-	packKey, err := artifacts.RenderVariantPackManifestKey(id, editor.PresetViral60Clean)
+	agentArtifacts, err := renderplan.NewAgentArtifacts(id, editor.PresetViral60Clean, renderplan.AgentKindCaptionCandidates)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.Put(packKey, bytes.NewReader([]byte(`{"items":[{"segment_id":"seg-001"}]}`)))
+	_ = store.Put(agentArtifacts.MomentsKey, bytes.NewReader([]byte(`{"moments":[{"id":"mom-001"}]}`)))
+	_ = store.Put(agentArtifacts.PackManifestKey, bytes.NewReader([]byte(`{"items":[{"segment_id":"seg-001"}]}`)))
 
 	runner := &fakeRunner{fn: func(_ context.Context, exe string, args ...string) ([]byte, error) {
 		if exe != "codex" {
@@ -61,23 +60,15 @@ func TestAgentWorkerWritesCaptionCandidates(t *testing.T) {
 	if err := w.HandleCodexAgent(context.Background(), task); err != nil {
 		t.Fatalf("HandleCodexAgent error = %v", err)
 	}
-	resultKey, err := artifacts.RenderVariantAgentResultKey(id, editor.PresetViral60Clean, renderplan.AgentKindCaptionCandidates)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var result renderplan.AgentResult
-	if err := json.Unmarshal(store.files[resultKey], &result); err != nil {
+	if err := json.Unmarshal(store.files[agentArtifacts.ResultKey], &result); err != nil {
 		t.Fatal(err)
 	}
 	if result.Status != "ready" || len(result.Titles) != 1 || result.Titles[0] != "t1" {
 		t.Fatalf("result = %#v", result)
 	}
-	contextKey, err := artifacts.RenderVariantAgentContextKey(id, editor.PresetViral60Clean, renderplan.AgentKindCaptionCandidates)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := store.files[contextKey]; !ok {
-		t.Fatalf("missing context key %s", contextKey)
+	if _, ok := store.files[agentArtifacts.ContextKey]; !ok {
+		t.Fatalf("missing context key %s", agentArtifacts.ContextKey)
 	}
 }
 

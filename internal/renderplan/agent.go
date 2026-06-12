@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/rechedev9/fragforge/internal/artifacts"
 )
 
 const AgentSchemaVersion = "1.0"
@@ -42,21 +44,52 @@ type AgentResultKeys struct {
 	Result  string `json:"result"`
 }
 
-func NewAgentContext(jobID uuid.UUID, variant, kind, momentsKey, packManifestKey string, moments, packManifest any) AgentContext {
+// AgentArtifacts names the durable inputs and outputs for one render-variant
+// editorial agent run.
+type AgentArtifacts struct {
+	ContextKey      string
+	ResultKey       string
+	MomentsKey      string
+	PackManifestKey string
+}
+
+// NewAgentArtifacts derives the durable storage keys used by one agent run.
+func NewAgentArtifacts(jobID uuid.UUID, variant, kind string) (AgentArtifacts, error) {
+	contextKey, err := artifacts.RenderVariantAgentContextKey(jobID, variant, kind)
+	if err != nil {
+		return AgentArtifacts{}, err
+	}
+	resultKey, err := artifacts.RenderVariantAgentResultKey(jobID, variant, kind)
+	if err != nil {
+		return AgentArtifacts{}, err
+	}
+	packKey, err := artifacts.RenderVariantPackManifestKey(jobID, variant)
+	if err != nil {
+		return AgentArtifacts{}, err
+	}
+	return AgentArtifacts{
+		ContextKey:      contextKey,
+		ResultKey:       resultKey,
+		MomentsKey:      artifacts.MomentsKey(jobID),
+		PackManifestKey: packKey,
+	}, nil
+}
+
+func NewAgentContext(jobID uuid.UUID, variant, kind string, agentArtifacts AgentArtifacts, moments, packManifest any) AgentContext {
 	return AgentContext{
 		SchemaVersion:   AgentSchemaVersion,
 		JobID:           jobID,
 		Variant:         variant,
 		Kind:            kind,
-		MomentsKey:      momentsKey,
-		PackManifestKey: packManifestKey,
+		MomentsKey:      agentArtifacts.MomentsKey,
+		PackManifestKey: agentArtifacts.PackManifestKey,
 		Moments:         moments,
 		PackManifest:    packManifest,
 		CreatedAt:       time.Now().UTC(),
 	}
 }
 
-func NewAgentResult(jobID uuid.UUID, variant, kind, status, contextKey, resultKey string) AgentResult {
+func NewAgentResult(jobID uuid.UUID, variant, kind, status string, agentArtifacts AgentArtifacts) AgentResult {
 	return AgentResult{
 		SchemaVersion: AgentSchemaVersion,
 		JobID:         jobID,
@@ -64,8 +97,8 @@ func NewAgentResult(jobID uuid.UUID, variant, kind, status, contextKey, resultKe
 		Kind:          kind,
 		Status:        status,
 		Artifacts: AgentResultKeys{
-			Context: contextKey,
-			Result:  resultKey,
+			Context: agentArtifacts.ContextKey,
+			Result:  agentArtifacts.ResultKey,
 		},
 		GeneratedAt: time.Now().UTC(),
 	}

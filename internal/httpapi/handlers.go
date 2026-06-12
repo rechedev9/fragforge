@@ -701,14 +701,9 @@ func (h *Handlers) StartCaptionAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	resultKey, err := artifacts.RenderVariantAgentResultKey(j.ID, variant, renderplan.AgentKindCaptionCandidates)
+	agentArtifacts, err := renderplan.NewAgentArtifacts(j.ID, variant, renderplan.AgentKindCaptionCandidates)
 	if err != nil {
-		internalError(w, "build agent result key", err)
-		return
-	}
-	contextKey, err := artifacts.RenderVariantAgentContextKey(j.ID, variant, renderplan.AgentKindCaptionCandidates)
-	if err != nil {
-		internalError(w, "build agent context key", err)
+		internalError(w, "build agent artifact keys", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -716,8 +711,8 @@ func (h *Handlers) StartCaptionAgent(w http.ResponseWriter, r *http.Request) {
 		"task":        tasks.TypeCodexAgent,
 		"variant":     variant,
 		"kind":        renderplan.AgentKindCaptionCandidates,
-		"context_key": contextKey,
-		"result_key":  resultKey,
+		"context_key": agentArtifacts.ContextKey,
+		"result_key":  agentArtifacts.ResultKey,
 	})
 }
 
@@ -728,12 +723,12 @@ func (h *Handlers) GetCaptionAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	variant := chi.URLParam(r, "variant")
-	key, err := artifacts.RenderVariantAgentResultKey(j.ID, variant, renderplan.AgentKindCaptionCandidates)
+	agentArtifacts, err := renderplan.NewAgentArtifacts(j.ID, variant, renderplan.AgentKindCaptionCandidates)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rc, err := h.storage.Open(key)
+	rc, err := h.storage.Open(agentArtifacts.ResultKey)
 	if err != nil {
 		if storage.IsNotExist(err) {
 			writeError(w, http.StatusNotFound, "agent result not found")
