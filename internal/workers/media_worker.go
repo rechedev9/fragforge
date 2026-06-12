@@ -378,8 +378,8 @@ func (w *ComposeWorker) compose(ctx context.Context, j job.Job) error {
 	if runErr != nil {
 		return runErr
 	}
-	if result.Error != "" {
-		return fmt.Errorf("composition result error: %s", result.Error)
+	if err := composition.ValidateUploadResult(result); err != nil {
+		return err
 	}
 	if err := uploadFile(w.storage, composition.FinalArtifactKey(j.ID), finalPath); err != nil {
 		return fmt.Errorf("upload final mp4: %w", err)
