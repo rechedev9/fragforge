@@ -798,7 +798,7 @@ func (w *RenderWorker) writeEditDocument(outDir string, id uuid.UUID, loadout re
 	doc, err := renderplan.NewEditDocumentForLoadout(renderplan.NewEditDocumentForLoadoutOptions{
 		JobID:      id,
 		Loadout:    loadout,
-		SegmentIDs: recordingSegmentIDs(result),
+		SegmentIDs: recording.SegmentIDs(result),
 	})
 	if err != nil {
 		return err
@@ -1102,19 +1102,6 @@ func uploadRenderVariantOutputs(store storage.Storage, id uuid.UUID, variant, ou
 		return nil, err
 	}
 	return keys, nil
-}
-
-func recordingSegmentIDs(result recording.RecordingResult) []string {
-	seen := map[string]bool{}
-	var ids []string
-	for _, segment := range result.Plan.Segments {
-		if segment.ID == "" || seen[segment.ID] {
-			continue
-		}
-		seen[segment.ID] = true
-		ids = append(ids, segment.ID)
-	}
-	return ids
 }
 
 func decodeStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.RecordingResult, error) {
