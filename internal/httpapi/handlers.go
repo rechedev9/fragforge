@@ -563,7 +563,7 @@ func (h *Handlers) GetRenderVariant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) readRenderVariantState(id uuid.UUID, variant string) (*renderplan.RenderVariantState, bool, error) {
-	key, err := artifacts.RenderVariantStatusKey(id, variant)
+	key, err := renderplan.RenderVariantStateKey(id, variant)
 	if err != nil {
 		return nil, false, err
 	}
@@ -583,7 +583,7 @@ func (h *Handlers) readRenderVariantState(id uuid.UUID, variant string) (*render
 }
 
 func (h *Handlers) writeRenderVariantState(state renderplan.RenderVariantState) error {
-	key, err := artifacts.RenderVariantStatusKey(state.JobID, state.Variant)
+	key, err := renderplan.RenderVariantStateKey(state.JobID, state.Variant)
 	if err != nil {
 		return err
 	}
@@ -595,7 +595,7 @@ func (h *Handlers) writeRenderVariantState(state renderplan.RenderVariantState) 
 }
 
 func mustRenderVariantStatusKey(id uuid.UUID, variant string) string {
-	key, err := artifacts.RenderVariantStatusKey(id, variant)
+	key, err := renderplan.RenderVariantStateKey(id, variant)
 	if err != nil {
 		return ""
 	}

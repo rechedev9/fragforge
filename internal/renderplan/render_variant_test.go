@@ -81,3 +81,17 @@ func TestNewRenderVariantStateForLoadoutDerivesArtifactKeys(t *testing.T) {
 		t.Fatalf("warnings = %#v", got.Warnings)
 	}
 }
+
+func TestRenderVariantStateKeyDerivesStatusKey(t *testing.T) {
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	got, err := RenderVariantStateKey(id, editor.PresetViral60Clean)
+	if err != nil {
+		t.Fatalf("RenderVariantStateKey error = %v", err)
+	}
+
+	want := "jobs/11111111-1111-1111-1111-111111111111/renders/viral-60-clean/status.json"
+	if got != want {
+		t.Fatalf("status key = %q, want %q", got, want)
+	}
+}

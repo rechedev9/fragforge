@@ -844,7 +844,7 @@ func (w *RenderWorker) writeEditDocument(outDir string, id uuid.UUID, loadout re
 }
 
 func (w *RenderWorker) readRenderVariantState(id uuid.UUID, variant string) (*renderplan.RenderVariantState, bool, error) {
-	key, err := artifacts.RenderVariantStatusKey(id, variant)
+	key, err := renderplan.RenderVariantStateKey(id, variant)
 	if err != nil {
 		return nil, false, err
 	}
@@ -864,7 +864,7 @@ func (w *RenderWorker) readRenderVariantState(id uuid.UUID, variant string) (*re
 }
 
 func (w *RenderWorker) writeRenderVariantState(state renderplan.RenderVariantState) error {
-	key, err := artifacts.RenderVariantStatusKey(state.JobID, state.Variant)
+	key, err := renderplan.RenderVariantStateKey(state.JobID, state.Variant)
 	if err != nil {
 		return err
 	}

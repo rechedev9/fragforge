@@ -116,6 +116,12 @@ func renderVariantArtifactsFor(jobID uuid.UUID, variant string) (renderVariantAr
 	}, nil
 }
 
+// RenderVariantStateKey returns the durable storage key for the render
+// variant state document.
+func RenderVariantStateKey(jobID uuid.UUID, variant string) (string, error) {
+	return artifacts.RenderVariantStatusKey(jobID, variant)
+}
+
 // NewRenderVariantStateForLoadout derives artifact keys from the loadout's
 // variant and returns the durable render state document for API and worker
 // boundaries.
