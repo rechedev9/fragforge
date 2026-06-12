@@ -1118,117 +1118,30 @@ func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultP
 }
 
 func uploadRenderVariantOutputs(store storage.Storage, id uuid.UUID, variant, outDir, publishDir, resultPath string, result editor.Result) ([]string, error) {
-	resultKey, err := artifacts.RenderVariantResultKey(id, variant)
+	targets, err := renderplan.NewRenderVariantUploadTargets(renderplan.NewRenderVariantUploadTargetsOptions{
+		JobID:      id,
+		Variant:    variant,
+		OutDir:     outDir,
+		PublishDir: publishDir,
+		ResultPath: resultPath,
+		Result:     result,
+	})
 	if err != nil {
 		return nil, err
 	}
-	keys := []string{resultKey}
-	if err := uploadFile(store, resultKey, resultPath); err != nil {
-		return nil, fmt.Errorf("upload render result: %w", err)
-	}
-
-	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(id, variant)
-	if err != nil {
-		return nil, err
-	}
-	if uploaded, err := uploadOptionalFile(store, editDocumentKey, filepath.Join(outDir, "edit-document.json")); err != nil {
-		return nil, fmt.Errorf("upload edit document: %w", err)
-	} else if uploaded {
-		keys = append(keys, editDocumentKey)
-	}
-
-	editManifestKey, err := artifacts.RenderVariantEditManifestKey(id, variant)
-	if err != nil {
-		return nil, err
-	}
-	if uploaded, err := uploadOptionalFile(store, editManifestKey, filepath.Join(outDir, "edit-manifest.json")); err != nil {
-		return nil, fmt.Errorf("upload edit manifest: %w", err)
-	} else if uploaded {
-		keys = append(keys, editManifestKey)
-	}
-
-	packKey, err := artifacts.RenderVariantPackManifestKey(id, variant)
-	if err != nil {
-		return nil, err
-	}
-	if uploaded, err := uploadOptionalFile(store, packKey, filepath.Join(publishDir, "pack-manifest.json")); err != nil {
-		return nil, fmt.Errorf("upload pack manifest: %w", err)
-	} else if uploaded {
-		keys = append(keys, packKey)
-	}
-
-	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(id, variant)
-	if err != nil {
-		return nil, err
-	}
-	if uploaded, err := uploadOptionalFile(store, summaryKey, result.SummaryPath); err != nil {
-		return nil, fmt.Errorf("upload publish summary: %w", err)
-	} else if uploaded {
-		keys = append(keys, summaryKey)
-	}
-
-	galleryKey, err := artifacts.RenderVariantGalleryKey(id, variant)
-	if err != nil {
-		return nil, err
-	}
-	if uploaded, err := uploadOptionalFile(store, galleryKey, result.GalleryPath); err != nil {
-		return nil, fmt.Errorf("upload gallery: %w", err)
-	} else if uploaded {
-		keys = append(keys, galleryKey)
-	}
-
-	for _, short := range result.Shorts {
-		name := short.SegmentID
-		if name == "" {
+	keys := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if target.Required {
+			if err := uploadFile(store, target.Key, target.Path); err != nil {
+				return nil, fmt.Errorf("upload %s: %w", target.Label, err)
+			}
+			keys = append(keys, target.Key)
 			continue
 		}
-		videoPath := short.PublishPath
-		if videoPath == "" {
-			videoPath = short.Output
-		}
-		if videoPath != "" {
-			videoKey, err := artifacts.RenderVariantVideoKey(id, variant, name)
-			if err != nil {
-				return nil, err
-			}
-			if uploaded, err := uploadOptionalFile(store, videoKey, videoPath); err != nil {
-				return nil, fmt.Errorf("upload render video %s: %w", name, err)
-			} else if uploaded {
-				keys = append(keys, videoKey)
-			}
-		}
-		if short.CoverPath != "" {
-			coverKey, err := artifacts.RenderVariantCoverKey(id, variant, name)
-			if err != nil {
-				return nil, err
-			}
-			if uploaded, err := uploadOptionalFile(store, coverKey, short.CoverPath); err != nil {
-				return nil, fmt.Errorf("upload render cover %s: %w", name, err)
-			} else if uploaded {
-				keys = append(keys, coverKey)
-			}
-		}
-		if short.CaptionPath != "" {
-			captionKey, err := artifacts.RenderVariantCaptionKey(id, variant, name)
-			if err != nil {
-				return nil, err
-			}
-			if uploaded, err := uploadOptionalFile(store, captionKey, short.CaptionPath); err != nil {
-				return nil, fmt.Errorf("upload render caption %s: %w", name, err)
-			} else if uploaded {
-				keys = append(keys, captionKey)
-			}
-		}
-		if short.RenderLogPath != "" {
-			logKey, err := artifacts.RenderVariantLogKey(id, variant, name+"-render")
-			if err != nil {
-				return nil, err
-			}
-			if uploaded, err := uploadOptionalFile(store, logKey, short.RenderLogPath); err != nil {
-				return nil, fmt.Errorf("upload render log %s: %w", name, err)
-			} else if uploaded {
-				keys = append(keys, logKey)
-			}
+		if uploaded, err := uploadOptionalFile(store, target.Key, target.Path); err != nil {
+			return nil, fmt.Errorf("upload %s: %w", target.Label, err)
+		} else if uploaded {
+			keys = append(keys, target.Key)
 		}
 	}
 
@@ -1341,10 +1254,11 @@ func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []strin
 }
 
 func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant string) (bool, []string, error) {
-	resultKey, err := artifacts.RenderVariantResultKey(id, variant)
+	readyArtifacts, err := renderplan.NewRenderVariantReadyArtifacts(id, variant)
 	if err != nil {
 		return false, nil, err
 	}
+	resultKey := readyArtifacts.ResultKey
 	exists, err := store.Exists(resultKey)
 	if err != nil || !exists {
 		return false, nil, err
@@ -1362,14 +1276,7 @@ func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant stri
 		return false, nil, nil
 	}
 	keys := []string{resultKey}
-	for _, keyFn := range []func(uuid.UUID, string) (string, error){
-		artifacts.RenderVariantPackManifestKey,
-		artifacts.RenderVariantGalleryKey,
-	} {
-		key, err := keyFn(id, variant)
-		if err != nil {
-			return false, nil, err
-		}
+	for _, key := range readyArtifacts.RequiredKeys {
 		exists, err := store.Exists(key)
 		if err != nil || !exists {
 			return false, nil, err
