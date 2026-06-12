@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/moments"
 )
 
 const AgentSchemaVersion = "1.0"
@@ -70,7 +71,7 @@ func NewAgentArtifacts(jobID uuid.UUID, variant, kind string) (AgentArtifacts, e
 	return AgentArtifacts{
 		ContextKey:      contextKey,
 		ResultKey:       resultKey,
-		MomentsKey:      artifacts.MomentsKey(jobID),
+		MomentsKey:      moments.ArtifactKey(jobID),
 		PackManifestKey: packKey,
 	}, nil
 }

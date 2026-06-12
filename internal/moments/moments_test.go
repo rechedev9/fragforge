@@ -116,6 +116,16 @@ func TestBuildWarnsOnInvalidSegments(t *testing.T) {
 	}
 }
 
+func TestArtifactKeyDerivesMomentsKey(t *testing.T) {
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	got := ArtifactKey(id)
+	want := "jobs/11111111-1111-1111-1111-111111111111/moments/moments.json"
+	if got != want {
+		t.Fatalf("artifact key = %q, want %q", got, want)
+	}
+}
+
 func hasReason(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

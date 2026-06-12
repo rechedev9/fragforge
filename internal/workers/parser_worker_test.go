@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/moments"
@@ -177,8 +176,8 @@ func TestParserWorkerWritesMomentsArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeMoments error = %v", err)
 	}
-	if key != artifacts.MomentsKey(id) {
-		t.Fatalf("moments key = %q, want %q", key, artifacts.MomentsKey(id))
+	if key != moments.ArtifactKey(id) {
+		t.Fatalf("moments key = %q, want %q", key, moments.ArtifactKey(id))
 	}
 	var doc moments.Document
 	if err := json.Unmarshal(store.files[key], &doc); err != nil {

@@ -10,11 +10,16 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/killplan"
 )
 
 const SchemaVersion = "1.0"
+
+func ArtifactKey(jobID uuid.UUID) string {
+	return artifacts.MomentsKey(jobID)
+}
 
 type Document struct {
 	SchemaVersion string    `json:"schema_version"`

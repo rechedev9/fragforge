@@ -22,6 +22,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/moments"
 	"github.com/rechedev9/fragforge/internal/recording"
 	"github.com/rechedev9/fragforge/internal/renderplan"
 	"github.com/rechedev9/fragforge/internal/rules"
@@ -975,7 +976,7 @@ func TestGetMomentsPrefersStoredArtifact(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	_ = store.Put(artifacts.MomentsKey(j.ID), bytes.NewReader([]byte(`{"schema_version":"stored"}`)))
+	_ = store.Put(moments.ArtifactKey(j.ID), bytes.NewReader([]byte(`{"schema_version":"stored"}`)))
 	h := NewHandlers(repo, store, &fakeQueue{})
 
 	r := chi.NewRouter()
@@ -1384,7 +1385,7 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 	}}
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, DemoPath: "demos/demo.dem", TargetSteamID: "76561198000000000", Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	_ = store.Put(artifacts.MomentsKey(j.ID), bytes.NewReader([]byte(`{"schema_version":"1.0","moments":[{"id":"mom-001","player":"MartinezSa"}]}`)))
+	_ = store.Put(moments.ArtifactKey(j.ID), bytes.NewReader([]byte(`{"schema_version":"1.0","moments":[{"id":"mom-001","player":"MartinezSa"}]}`)))
 	h := NewHandlers(repo, store, queue, WithMutationToken("secret"))
 	r := Routes(h)
 

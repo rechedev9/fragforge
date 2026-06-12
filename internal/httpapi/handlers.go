@@ -326,7 +326,7 @@ func (h *Handlers) GetMoments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if rc, err := h.storage.Open(artifacts.MomentsKey(j.ID)); err == nil {
+	if rc, err := h.storage.Open(moments.ArtifactKey(j.ID)); err == nil {
 		defer rc.Close()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

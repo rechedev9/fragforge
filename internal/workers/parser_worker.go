@@ -17,7 +17,6 @@ import (
 	"github.com/hibiken/asynq"
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/moments"
@@ -128,7 +127,7 @@ func (w *ParserWorker) writeMoments(id uuid.UUID, plan killplan.Plan) (string, e
 	if err != nil {
 		return "", err
 	}
-	key := artifacts.MomentsKey(id)
+	key := moments.ArtifactKey(id)
 	if err := w.storage.Put(key, bytes.NewReader(b)); err != nil {
 		return "", err
 	}
