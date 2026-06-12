@@ -53,8 +53,8 @@ func TestDefaultPresetIsViral60Clean(t *testing.T) {
 	if preset.EffectsPreset != EffectsPresetViralUltraClean {
 		t.Fatalf("default effects preset = %q, want %q", preset.EffectsPreset, EffectsPresetViralUltraClean)
 	}
-	if preset.FilterKind != FilterKindFullFrame {
-		t.Fatalf("default filter kind = %q, want %q", preset.FilterKind, FilterKindFullFrame)
+	if !presetUsesFullFrame(preset.Name) {
+		t.Fatalf("default preset should use full-frame layout")
 	}
 	if got, want := preset.HUDMode, "deathnotices"; got != want {
 		t.Fatalf("default hud mode = %q, want %q", got, want)
@@ -79,8 +79,8 @@ func TestViral60CleanRecordsDeathnoticesHUD(t *testing.T) {
 	if preset.EffectsPreset != EffectsPresetViralUltraClean {
 		t.Fatalf("effects preset = %q, want %q", preset.EffectsPreset, EffectsPresetViralUltraClean)
 	}
-	if preset.FilterKind != FilterKindFullFrame {
-		t.Fatalf("filter kind = %q, want %q", preset.FilterKind, FilterKindFullFrame)
+	if !presetUsesFullFrame(preset.Name) {
+		t.Fatalf("viral-60-clean should use full-frame layout")
 	}
 }
 

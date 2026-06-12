@@ -46,7 +46,7 @@ func validateEffectPosition(field, value string) error {
 }
 
 func VideoFilter(short ShortEdit) string {
-	if presetFilterKind(short.Preset) == FilterKindFullFrame {
+	if presetUsesFullFrame(short.Preset) {
 		return FullFrameVideoFilter(short)
 	}
 	scaleHeight := "1920"

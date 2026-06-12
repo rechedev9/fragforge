@@ -60,7 +60,7 @@ func LoadoutForVariant(variant string) (Loadout, error) {
 		Variant:         preset.Name,
 		Preset:          preset.Name,
 		EffectsPreset:   preset.EffectsPreset,
-		Framing:         loadoutFraming(preset.FilterKind),
+		Framing:         "full-ui",
 		VideoCRF:        preset.VideoCRF,
 		VideoPreset:     preset.VideoPreset,
 		HQFilters:       preset.HQFilters,
@@ -72,15 +72,6 @@ func LoadoutForVariant(variant string) (Loadout, error) {
 		Output:          presetOutput(preset),
 		UploadReadyDir:  "shortslistosparasubir",
 	}, nil
-}
-
-func loadoutFraming(filterKind string) string {
-	switch filterKind {
-	case editor.FilterKindFullFrame:
-		return "full-ui"
-	default:
-		return "center-crop"
-	}
 }
 
 func presetOutput(preset editor.RenderPreset) OutputShape {

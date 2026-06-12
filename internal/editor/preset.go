@@ -5,12 +5,6 @@ import (
 	"strings"
 )
 
-// FilterKind values select how a preset builds its 9:16 filtergraph.
-const (
-	FilterKindCropCenter = "crop-center"
-	FilterKindFullFrame  = "full-frame"
-)
-
 const (
 	// PresetViral60Clean is the sole registered render preset.
 	PresetViral60Clean = "viral-60-clean"
@@ -37,9 +31,6 @@ type RenderPreset struct {
 	EffectsPreset string
 	EffectsPath   string
 
-	// FilterKind is one of the FilterKind* constants.
-	FilterKind string
-
 	HQFilters         bool
 	AudioNormalize    bool
 	QualityChecks     bool
@@ -65,7 +56,6 @@ var renderPresets = []RenderPreset{
 		VideoCRF:       StandardVideoCRF,
 		VideoPreset:    StandardVideoPreset,
 		EffectsPreset:  EffectsPresetViralUltraClean,
-		FilterKind:     FilterKindFullFrame,
 		HQFilters:      true,
 		AudioNormalize: true,
 		QualityChecks:  true,
@@ -105,14 +95,12 @@ func DefaultPreset() RenderPreset {
 	return preset
 }
 
-// presetFilterKind resolves the filtergraph layout for a preset name. Unknown
-// or empty names keep the historical centered-crop layout so filter helpers
-// stay usable on bare ShortEdit values.
-func presetFilterKind(name string) string {
-	if preset, ok := PresetByName(name); ok {
-		return preset.FilterKind
-	}
-	return FilterKindCropCenter
+// presetUsesFullFrame reports whether a preset uses the production full-frame
+// vertical layout. Unknown or empty names keep the historical centered-crop
+// layout so filter helpers stay usable on bare ShortEdit values.
+func presetUsesFullFrame(name string) bool {
+	_, ok := PresetByName(name)
+	return ok
 }
 
 func unknownPresetError(name string) error {

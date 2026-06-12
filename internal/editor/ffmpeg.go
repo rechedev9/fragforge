@@ -313,7 +313,7 @@ func BuildQualityCheckFFmpegCommand(ffmpegPath string, short ShortEdit) []string
 		ffmpegPath = "ffmpeg"
 	}
 	filters := []string{"blackdetect=d=0.40:pix_th=0.10", "freezedetect=n=-60dB:d=1"}
-	if presetFilterKind(short.Preset) != FilterKindFullFrame {
+	if !presetUsesFullFrame(short.Preset) {
 		filters = append(filters, "cropdetect=24:16:0")
 	}
 	return []string{

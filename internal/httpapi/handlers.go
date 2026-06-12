@@ -245,7 +245,6 @@ type presetSummary struct {
 	Width             int    `json:"width"`
 	Height            int    `json:"height"`
 	EffectsPreset     string `json:"effects_preset,omitempty"`
-	FilterKind        string `json:"filter_kind"`
 	HQFilters         bool   `json:"hq_filters"`
 	AudioNormalize    bool   `json:"audio_normalize"`
 	QualityChecks     bool   `json:"quality_checks"`
@@ -272,7 +271,6 @@ func (h *Handlers) ListPresets(w http.ResponseWriter, r *http.Request) {
 			Width:             preset.Width,
 			Height:            preset.Height,
 			EffectsPreset:     preset.EffectsPreset,
-			FilterKind:        preset.FilterKind,
 			HQFilters:         preset.HQFilters,
 			AudioNormalize:    preset.AudioNormalize,
 			QualityChecks:     preset.QualityChecks,
