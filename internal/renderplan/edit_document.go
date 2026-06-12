@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
 const EditDocumentSchemaVersion = "1.0"
@@ -134,7 +134,7 @@ func NewEditDocumentForLoadout(opts NewEditDocumentForLoadoutOptions) (EditDocum
 		CaptionsEnabled:    opts.Loadout.CaptionsEnabled,
 		Output:             opts.Loadout.Output,
 		UploadReadyRoot:    opts.Loadout.UploadReadyDir,
-		RecordingResultKey: artifacts.RecordingResultKey(opts.JobID),
+		RecordingResultKey: recording.ResultArtifactKey(opts.JobID),
 		KillPlanSource:     killPlanSource,
 		OutputPrefix:       refs.Prefix,
 		RenderResultKey:    refs.RenderResultKey,

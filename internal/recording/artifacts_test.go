@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestCollectArtifactsMapsTakeFoldersToSegments(t *testing.T) {
@@ -73,6 +75,29 @@ func TestCollectArtifactsLeavesUnmappedExtraTakes(t *testing.T) {
 	if got[0].SegmentID != "" {
 		t.Fatalf("SegmentID = %q, want empty", got[0].SegmentID)
 	}
+}
+
+func TestArtifactKeysDeriveRecordingStorageKeys(t *testing.T) {
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	if got, want := ResultArtifactKey(id), "jobs/11111111-1111-1111-1111-111111111111/recording/recording-result.json"; got != want {
+		t.Fatalf("result artifact key = %q, want %q", got, want)
+	}
+	if got, want := ScriptArtifactKey(id), "jobs/11111111-1111-1111-1111-111111111111/recording/recording.js"; got != want {
+		t.Fatalf("script artifact key = %q, want %q", got, want)
+	}
+	if got, want := mustSegmentClipArtifactKey(t, id, "seg-001"), "jobs/11111111-1111-1111-1111-111111111111/recording/segments/seg-001.mp4"; got != want {
+		t.Fatalf("segment clip artifact key = %q, want %q", got, want)
+	}
+}
+
+func mustSegmentClipArtifactKey(t *testing.T, id uuid.UUID, segmentID string) string {
+	t.Helper()
+	key, err := SegmentClipArtifactKey(id, segmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
 }
 
 func TestApplyProbeOutputVideo(t *testing.T) {

@@ -95,8 +95,8 @@ func TestRecordWorkerStoresOutputsAndMarksRecorded(t *testing.T) {
 		t.Fatalf("Status = %s, want recorded", repo.jobs[id].Status)
 	}
 	for _, key := range []string{
-		artifacts.RecordingResultKey(id),
-		artifacts.RecordingScriptKey(id),
+		recording.ResultArtifactKey(id),
+		recording.ScriptArtifactKey(id),
 		mustSegmentClipKey(t, id, "seg-001"),
 	} {
 		if _, ok := store.files[key]; !ok {
@@ -149,8 +149,8 @@ func TestRecordWorkerSkipsWhenOutputsAlreadyExist(t *testing.T) {
 		Rules:    rules.Default(),
 		KillPlan: &plan,
 	}
-	putJSON(t, store, artifacts.RecordingResultKey(id), recordingResultWithSegment("", "stale-local.mp4"))
-	_ = store.Put(artifacts.RecordingScriptKey(id), bytes.NewReader([]byte("script")))
+	putJSON(t, store, recording.ResultArtifactKey(id), recordingResultWithSegment("", "stale-local.mp4"))
+	_ = store.Put(recording.ScriptArtifactKey(id), bytes.NewReader([]byte("script")))
 	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
 
 	runner := &fakeRunner{fn: func(context.Context, string, ...string) ([]byte, error) {
@@ -207,7 +207,7 @@ func TestComposeWorkerLocalizesSegmentsAndStoresFinal(t *testing.T) {
 	store := newFakeStorage()
 	id := uuid.New()
 	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default()}
-	putJSON(t, store, artifacts.RecordingResultKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
+	putJSON(t, store, recording.ResultArtifactKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
 	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
 
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -270,7 +270,7 @@ func TestComposeWorkerMarksFailedOnResultError(t *testing.T) {
 	store := newFakeStorage()
 	id := uuid.New()
 	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default()}
-	putJSON(t, store, artifacts.RecordingResultKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
+	putJSON(t, store, recording.ResultArtifactKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
 	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
 
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -331,7 +331,7 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	id := uuid.New()
 	plan := minimalKillPlan()
 	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
-	putJSON(t, store, artifacts.RecordingResultKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
+	putJSON(t, store, recording.ResultArtifactKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
 	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
 
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -449,7 +449,7 @@ func TestRenderWorkerWritesFailedStateWhenEditorFails(t *testing.T) {
 	id := uuid.New()
 	plan := minimalKillPlan()
 	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
-	putJSON(t, store, artifacts.RecordingResultKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
+	putJSON(t, store, recording.ResultArtifactKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
 	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
 
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -733,7 +733,7 @@ func putJSON(t *testing.T, store *fakeStorage, key string, value any) {
 
 func mustSegmentClipKey(t *testing.T, id uuid.UUID, segmentID string) string {
 	t.Helper()
-	key, err := artifacts.SegmentClipKey(id, segmentID)
+	key, err := recording.SegmentClipArtifactKey(id, segmentID)
 	if err != nil {
 		t.Fatal(err)
 	}

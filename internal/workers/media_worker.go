@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
@@ -1057,8 +1056,9 @@ func uploadOptionalFile(store storage.Storage, key, path string) (bool, error) {
 }
 
 func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultPath string, result recording.RecordingResult) ([]string, error) {
-	keys := []string{artifacts.RecordingResultKey(id)}
-	if err := uploadFile(store, artifacts.RecordingResultKey(id), resultPath); err != nil {
+	resultKey := recording.ResultArtifactKey(id)
+	keys := []string{resultKey}
+	if err := uploadFile(store, resultKey, resultPath); err != nil {
 		return nil, fmt.Errorf("upload recording result: %w", err)
 	}
 
@@ -1066,12 +1066,13 @@ func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultP
 	if scriptPath == "" {
 		scriptPath = filepath.Join(outDir, "recording.js")
 	}
-	uploadedScript, err := uploadOptionalFile(store, artifacts.RecordingScriptKey(id), scriptPath)
+	scriptKey := recording.ScriptArtifactKey(id)
+	uploadedScript, err := uploadOptionalFile(store, scriptKey, scriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("upload recording script: %w", err)
 	}
 	if uploadedScript {
-		keys = append(keys, artifacts.RecordingScriptKey(id))
+		keys = append(keys, scriptKey)
 	} else if result.Error == "" {
 		return nil, fmt.Errorf("recording script not found at %s", scriptPath)
 	}
@@ -1081,7 +1082,7 @@ func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultP
 		if artifact.Role != "segment" || artifact.Type != "video" || artifact.SegmentID == "" {
 			continue
 		}
-		key, err := artifacts.SegmentClipKey(id, artifact.SegmentID)
+		key, err := recording.SegmentClipArtifactKey(id, artifact.SegmentID)
 		if err != nil {
 			return nil, err
 		}
@@ -1145,7 +1146,7 @@ func recordingSegmentIDs(result recording.RecordingResult) []string {
 }
 
 func decodeStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.RecordingResult, error) {
-	rc, err := store.Open(artifacts.RecordingResultKey(id))
+	rc, err := store.Open(recording.ResultArtifactKey(id))
 	if err != nil {
 		return recording.RecordingResult{}, fmt.Errorf("open recording result: %w", err)
 	}
@@ -1170,7 +1171,7 @@ func readStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.R
 }
 
 func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string, error) {
-	resultKey := artifacts.RecordingResultKey(id)
+	resultKey := recording.ResultArtifactKey(id)
 	exists, err := store.Exists(resultKey)
 	if err != nil || !exists {
 		return false, nil, err
@@ -1180,7 +1181,7 @@ func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string,
 		return false, nil, err
 	}
 
-	scriptKey := artifacts.RecordingScriptKey(id)
+	scriptKey := recording.ScriptArtifactKey(id)
 	scriptExists, err := store.Exists(scriptKey)
 	if err != nil || !scriptExists {
 		return false, nil, err
@@ -1192,7 +1193,7 @@ func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string,
 		if artifact.Role != "segment" || artifact.Type != "video" || artifact.SegmentID == "" {
 			continue
 		}
-		key, err := artifacts.SegmentClipKey(id, artifact.SegmentID)
+		key, err := recording.SegmentClipArtifactKey(id, artifact.SegmentID)
 		if err != nil {
 			return false, nil, err
 		}
@@ -1274,7 +1275,7 @@ func localizeSegmentClips(store storage.Storage, id uuid.UUID, workDir string, r
 			continue
 		}
 		localPath := filepath.Join(workDir, "segments", artifact.SegmentID+".mp4")
-		key, err := artifacts.SegmentClipKey(id, artifact.SegmentID)
+		key, err := recording.SegmentClipArtifactKey(id, artifact.SegmentID)
 		if err != nil {
 			return err
 		}

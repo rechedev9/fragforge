@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/recording"
 	"github.com/rechedev9/fragforge/internal/rules"
 	"github.com/rechedev9/fragforge/internal/tasks"
 )
@@ -80,7 +80,7 @@ func TestComposeWorkerMarksFailedWhenHandlerContextCanceled(t *testing.T) {
 	id := uuid.New()
 	base.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default()}
 	store := newFakeStorage()
-	putJSON(t, store, artifacts.RecordingResultKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
+	putJSON(t, store, recording.ResultArtifactKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
 	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
 
 	ctx, cancel := context.WithCancel(context.Background())
