@@ -1068,7 +1068,6 @@ func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultP
 	}
 
 	keys := make([]string, 0, len(targets))
-	uploadedSegments := 0
 	for _, target := range targets {
 		uploaded := false
 		if target.Required {
@@ -1088,12 +1087,9 @@ func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultP
 			continue
 		}
 		keys = append(keys, target.Key)
-		if target.SegmentID != "" {
-			uploadedSegments++
-		}
 	}
-	if result.Error == "" && uploadedSegments == 0 {
-		return nil, fmt.Errorf("recording result has no segment clips")
+	if err := recording.ValidateUploadResult(result); err != nil {
+		return nil, err
 	}
 	return keys, nil
 }
