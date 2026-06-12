@@ -258,7 +258,7 @@ func TestComposeWorkerLocalizesSegmentsAndStoresFinal(t *testing.T) {
 	if repo.jobs[id].Status != job.StatusComposed {
 		t.Fatalf("Status = %s, want composed", repo.jobs[id].Status)
 	}
-	for _, key := range []string{artifacts.CompositionResultKey(id), artifacts.FinalMP4Key(id)} {
+	for _, key := range []string{composition.ResultArtifactKey(id), composition.FinalArtifactKey(id)} {
 		if _, ok := store.files[key]; !ok {
 			t.Fatalf("storage missing %s", key)
 		}
@@ -294,7 +294,7 @@ func TestComposeWorkerMarksFailedOnResultError(t *testing.T) {
 	if repo.jobs[id].Status != job.StatusFailed {
 		t.Fatalf("Status = %s, want failed", repo.jobs[id].Status)
 	}
-	if _, ok := store.files[artifacts.CompositionResultKey(id)]; !ok {
+	if _, ok := store.files[composition.ResultArtifactKey(id)]; !ok {
 		t.Fatalf("storage missing failed composition result")
 	}
 }
@@ -304,8 +304,8 @@ func TestComposeWorkerSkipsWhenOutputsAlreadyExist(t *testing.T) {
 	store := newFakeStorage()
 	id := uuid.New()
 	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default()}
-	putJSON(t, store, artifacts.CompositionResultKey(id), composition.Result{Output: "final.mp4"})
-	_ = store.Put(artifacts.FinalMP4Key(id), bytes.NewReader([]byte("final")))
+	putJSON(t, store, composition.ResultArtifactKey(id), composition.Result{Output: "final.mp4"})
+	_ = store.Put(composition.FinalArtifactKey(id), bytes.NewReader([]byte("final")))
 
 	runner := &fakeRunner{fn: func(context.Context, string, ...string) ([]byte, error) {
 		t.Fatal("runner should not be called when composition outputs already exist")

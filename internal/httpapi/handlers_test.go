@@ -19,6 +19,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
@@ -1310,7 +1311,7 @@ func TestGetFinalStreamsFinalArtifactWhenComposed(t *testing.T) {
 	store := newFakeStorage()
 	j := job.Job{ID: uuid.New(), Status: job.StatusComposed, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	_ = store.Put(artifacts.FinalMP4Key(j.ID), bytes.NewReader([]byte("mp4-bytes")))
+	_ = store.Put(composition.FinalArtifactKey(j.ID), bytes.NewReader([]byte("mp4-bytes")))
 	h := NewHandlers(repo, store, &fakeQueue{})
 
 	r := chi.NewRouter()

@@ -19,7 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/moments"
@@ -353,7 +353,7 @@ func (h *Handlers) GetFinal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, fmt.Sprintf("job final is not ready (status=%s)", j.Status))
 		return
 	}
-	rc, err := h.storage.Open(artifacts.FinalMP4Key(j.ID))
+	rc, err := h.storage.Open(composition.FinalArtifactKey(j.ID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "final artifact not found")
 		return

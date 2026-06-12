@@ -373,7 +373,7 @@ func (w *ComposeWorker) compose(ctx context.Context, j job.Job) error {
 		}
 		return fmt.Errorf("read composition result: %w", err)
 	}
-	if err := uploadFile(w.storage, artifacts.CompositionResultKey(j.ID), resultPath); err != nil {
+	if err := uploadFile(w.storage, composition.ResultArtifactKey(j.ID), resultPath); err != nil {
 		return fmt.Errorf("upload composition result: %w", err)
 	}
 	if runErr != nil {
@@ -382,12 +382,12 @@ func (w *ComposeWorker) compose(ctx context.Context, j job.Job) error {
 	if result.Error != "" {
 		return fmt.Errorf("composition result error: %s", result.Error)
 	}
-	if err := uploadFile(w.storage, artifacts.FinalMP4Key(j.ID), finalPath); err != nil {
+	if err := uploadFile(w.storage, composition.FinalArtifactKey(j.ID), finalPath); err != nil {
 		return fmt.Errorf("upload final mp4: %w", err)
 	}
 	logWorkerArtifacts(j.ID, tasks.TypeComposeFinal, []string{
-		artifacts.CompositionResultKey(j.ID),
-		artifacts.FinalMP4Key(j.ID),
+		composition.ResultArtifactKey(j.ID),
+		composition.FinalArtifactKey(j.ID),
 	})
 	return nil
 }
@@ -1207,8 +1207,8 @@ func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string,
 }
 
 func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string, error) {
-	resultKey := artifacts.CompositionResultKey(id)
-	finalKey := artifacts.FinalMP4Key(id)
+	resultKey := composition.ResultArtifactKey(id)
+	finalKey := composition.FinalArtifactKey(id)
 	resultExists, err := store.Exists(resultKey)
 	if err != nil || !resultExists {
 		return false, nil, err
