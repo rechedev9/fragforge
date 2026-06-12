@@ -1198,13 +1198,8 @@ func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string,
 
 func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string, error) {
 	resultKey := composition.ResultArtifactKey(id)
-	finalKey := composition.FinalArtifactKey(id)
 	resultExists, err := store.Exists(resultKey)
 	if err != nil || !resultExists {
-		return false, nil, err
-	}
-	finalExists, err := store.Exists(finalKey)
-	if err != nil || !finalExists {
 		return false, nil, err
 	}
 
@@ -1220,7 +1215,16 @@ func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []strin
 	if result.Error != "" {
 		return false, nil, nil
 	}
-	return true, []string{resultKey, finalKey}, nil
+	readyArtifacts := composition.NewReadyArtifacts(id, result)
+	keys := []string{readyArtifacts.ResultKey}
+	for _, key := range readyArtifacts.RequiredKeys {
+		exists, err := store.Exists(key)
+		if err != nil || !exists {
+			return false, nil, err
+		}
+		keys = append(keys, key)
+	}
+	return true, keys, nil
 }
 
 func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant string) (bool, []string, error) {
