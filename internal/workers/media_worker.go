@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1056,41 +1057,40 @@ func uploadOptionalFile(store storage.Storage, key, path string) (bool, error) {
 }
 
 func uploadRecordingOutputs(store storage.Storage, id uuid.UUID, outDir, resultPath string, result recording.RecordingResult) ([]string, error) {
-	resultKey := recording.ResultArtifactKey(id)
-	keys := []string{resultKey}
-	if err := uploadFile(store, resultKey, resultPath); err != nil {
-		return nil, fmt.Errorf("upload recording result: %w", err)
-	}
-
-	scriptPath := result.Script
-	if scriptPath == "" {
-		scriptPath = filepath.Join(outDir, "recording.js")
-	}
-	scriptKey := recording.ScriptArtifactKey(id)
-	uploadedScript, err := uploadOptionalFile(store, scriptKey, scriptPath)
+	targets, err := recording.NewUploadTargets(recording.NewUploadTargetsOptions{
+		JobID:      id,
+		OutDir:     outDir,
+		ResultPath: resultPath,
+		Result:     result,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("upload recording script: %w", err)
-	}
-	if uploadedScript {
-		keys = append(keys, scriptKey)
-	} else if result.Error == "" {
-		return nil, fmt.Errorf("recording script not found at %s", scriptPath)
+		return nil, err
 	}
 
+	keys := make([]string, 0, len(targets))
 	uploadedSegments := 0
-	for _, artifact := range result.Artifacts {
-		if artifact.Role != "segment" || artifact.Type != "video" || artifact.SegmentID == "" {
+	for _, target := range targets {
+		uploaded := false
+		if target.Required {
+			if err := uploadFile(store, target.Key, target.Path); err != nil {
+				if target.MissingMessage != "" && os.IsNotExist(err) {
+					return nil, errors.New(target.MissingMessage)
+				}
+				return nil, fmt.Errorf("upload %s: %w", target.Label, err)
+			}
+			uploaded = true
+		} else if ok, err := uploadOptionalFile(store, target.Key, target.Path); err != nil {
+			return nil, fmt.Errorf("upload %s: %w", target.Label, err)
+		} else {
+			uploaded = ok
+		}
+		if !uploaded {
 			continue
 		}
-		key, err := recording.SegmentClipArtifactKey(id, artifact.SegmentID)
-		if err != nil {
-			return nil, err
+		keys = append(keys, target.Key)
+		if target.SegmentID != "" {
+			uploadedSegments++
 		}
-		if err := uploadFile(store, key, artifact.Path); err != nil {
-			return nil, fmt.Errorf("upload segment %s: %w", artifact.SegmentID, err)
-		}
-		keys = append(keys, key)
-		uploadedSegments++
 	}
 	if result.Error == "" && uploadedSegments == 0 {
 		return nil, fmt.Errorf("recording result has no segment clips")
