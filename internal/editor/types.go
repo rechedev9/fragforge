@@ -9,30 +9,16 @@ import (
 )
 
 const (
-	// EffectsPresetBuiltinClean reproduces the original local editor look
-	// through the Lua effects layer.
-	EffectsPresetBuiltinClean = "builtin-clean"
-
 	// EffectsPresetNone disables scripted effects and leaves only the base
 	// vertical layout.
 	EffectsPresetNone = "none"
-
-	// EffectsPresetAWPGod is a more aggressive local iteration preset with
-	// grade, AWP flashes, and stronger punch-ins.
-	EffectsPresetAWPGod = "awpgod"
 
 	// EffectsPresetSmokeLineups annotates utility clips with restrained
 	// tutorial labels.
 	EffectsPresetSmokeLineups = "smoke-lineups"
 
-	// EffectsPresetViralUltra is the aggressive viral overlay pack: cold-open
-	// hook text, kill punch-ins with flashes, a running kill counter, and
-	// milestone labels.
-	EffectsPresetViralUltra = "viral-ultra"
-
-	// EffectsPresetViralUltraClean is viral-ultra plus a killfeed overlay on
-	// every kill, for HUD-less recordings where the vertical crop would
-	// otherwise lose the death notices.
+	// EffectsPresetViralUltraClean is the standard kill/highlight effects
+	// preset for HUD-less recordings.
 	EffectsPresetViralUltraClean = "viral-ultra-clean"
 
 	// EffectsPresetExternal marks manifests rendered from a user script path.

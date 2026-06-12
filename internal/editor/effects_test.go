@@ -305,17 +305,18 @@ func TestViralUltraCleanEmitsKillfeedPerKill(t *testing.T) {
 			t.Fatalf("killfeed[%d] at = %.3f, want %.3f", i, effect.AtSeconds, short.Kills[i].TimeSeconds)
 		}
 	}
+}
 
-	ultra, err := loadEffectsSource("", EffectsPresetViralUltra)
+func TestLoadEffectsSourceDefaultsToViralUltraClean(t *testing.T) {
+	source, err := loadEffectsSource("", "")
 	if err != nil {
 		t.Fatalf("loadEffectsSource error = %v", err)
 	}
-	ultraEffects, _, err := evaluateEffects(ultra, short)
-	if err != nil {
-		t.Fatalf("evaluateEffects error = %v", err)
+	if source.Preset != EffectsPresetViralUltraClean {
+		t.Fatalf("default effects preset = %q, want %q", source.Preset, EffectsPresetViralUltraClean)
 	}
-	if got := len(killfeedEffects(ultraEffects)); got != 0 {
-		t.Fatalf("viral-ultra killfeed effects = %d, want 0 (full-UI preset keeps the HUD feed)", got)
+	if source.Script == "" {
+		t.Fatal("default effects source is empty")
 	}
 }
 
@@ -670,31 +671,6 @@ func TestBuildManifestEffectsPresetNoneLeavesBaseFilter(t *testing.T) {
 	}
 }
 
-func TestBuildManifestAWPGodPresetAddsGradeAndAWPFlash(t *testing.T) {
-	dir := t.TempDir()
-	result := testRecordingResult(dir)
-	opts := testManifestOptions(dir, nil)
-	opts.EffectsPreset = EffectsPresetAWPGod
-
-	manifest := BuildManifest(result, opts)
-	if manifest.EffectsPreset != EffectsPresetAWPGod {
-		t.Fatalf("effects preset = %q", manifest.EffectsPreset)
-	}
-	if len(manifest.Shorts) != 2 {
-		t.Fatalf("shorts len = %d", len(manifest.Shorts))
-	}
-	if !hasEffect(manifest.Shorts[0].Effects, EffectGrade) || !hasEffect(manifest.Shorts[0].Effects, EffectZoom) {
-		t.Fatalf("first short missing grade/zoom effects: %#v", manifest.Shorts[0].Effects)
-	}
-	if !hasEffect(manifest.Shorts[1].Effects, EffectFlash) {
-		t.Fatalf("AWP short missing flash effect: %#v", manifest.Shorts[1].Effects)
-	}
-	filter := argAfter(manifest.Shorts[1].FFmpegCommand, "-vf")
-	if !strings.Contains(filter, "drawbox") || !strings.Contains(filter, "eq=contrast=1.080") {
-		t.Fatalf("awpgod filter missing flash/grade:\n%s", filter)
-	}
-}
-
 func TestRunDryRunExternalEffectsWritesMetadata(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
@@ -738,13 +714,4 @@ end)
 	if manifest.EffectsPreset != EffectsPresetExternal || manifest.EffectsPath == "" {
 		t.Fatalf("manifest effects metadata missing: %#v", manifest)
 	}
-}
-
-func hasEffect(effects []Effect, typ EffectType) bool {
-	for _, effect := range effects {
-		if effect.Type == typ {
-			return true
-		}
-	}
-	return false
 }

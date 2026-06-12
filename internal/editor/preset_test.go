@@ -119,3 +119,22 @@ func TestUnknownPresetErrorListsValidNames(t *testing.T) {
 		}
 	}
 }
+
+func TestRetiredEffectsPresetsAreRejected(t *testing.T) {
+	for _, preset := range []string{"builtin-clean", "awpgod", "viral-ultra"} {
+		t.Run(preset, func(t *testing.T) {
+			cfg := Config{
+				RecordingResultPath: "recording-result.json",
+				OutputDir:           "out",
+				EffectsPreset:       preset,
+			}
+			err := cfg.validate()
+			if err == nil {
+				t.Fatal("validate error = nil, want unknown effects preset error")
+			}
+			if !strings.Contains(err.Error(), "unknown effects preset") {
+				t.Fatalf("error = %q, want unknown effects preset", err.Error())
+			}
+		})
+	}
+}

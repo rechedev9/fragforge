@@ -26,7 +26,7 @@ func run() error {
 		publishDir          = flag.String("publish-dir", "", "publish pack output directory; defaults to <out>/publish")
 		preset              = flag.String("preset", editor.DefaultPreset().Name, "editor preset: "+strings.Join(editor.PresetNames(), ", "))
 		effectsPath         = flag.String("effects", "", "optional Lua effects script; overrides --effects-preset")
-		effectsPreset       = flag.String("effects-preset", "", "effects preset: builtin-clean, awpgod, smoke-lineups, viral-ultra, or none; defaults by preset")
+		effectsPreset       = flag.String("effects-preset", "", "effects preset: viral-ultra-clean, smoke-lineups, or none; defaults by preset")
 		musicPath           = flag.String("music", "", "optional external music file to mix into rendered shorts")
 		rhythmPath          = flag.String("rhythm", "", "optional rhythm JSON with segment_sync entries for compiled shorts")
 		outputFPS           = flag.Int("fps", 0, "optional final output FPS; defaults to 60")
