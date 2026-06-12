@@ -55,12 +55,8 @@ func NewRenderVariantArtifactRef(jobID uuid.UUID, variant string, kind RenderVar
 		if err == nil {
 			key = refs.GalleryKey
 		}
-	case RenderVariantArtifactVideo:
-		key, err = artifacts.RenderVariantVideoKey(jobID, variant, segmentID)
-	case RenderVariantArtifactCover:
-		key, err = artifacts.RenderVariantCoverKey(jobID, variant, segmentID)
-	case RenderVariantArtifactCaption:
-		key, err = artifacts.RenderVariantCaptionKey(jobID, variant, segmentID)
+	case RenderVariantArtifactVideo, RenderVariantArtifactCover, RenderVariantArtifactCaption:
+		key, err = renderVariantSegmentArtifactKey(jobID, variant, kind, segmentID)
 	default:
 		err = fmt.Errorf("unknown render artifact kind %q", kind)
 	}
@@ -72,4 +68,21 @@ func NewRenderVariantArtifactRef(jobID uuid.UUID, variant string, kind RenderVar
 		Key:       key,
 		SegmentID: segmentID,
 	}, nil
+}
+
+func renderVariantSegmentArtifactKey(jobID uuid.UUID, variant string, kind RenderVariantArtifactKind, segmentID string) (string, error) {
+	switch kind {
+	case RenderVariantArtifactVideo:
+		return artifacts.RenderVariantVideoKey(jobID, variant, segmentID)
+	case RenderVariantArtifactCover:
+		return artifacts.RenderVariantCoverKey(jobID, variant, segmentID)
+	case RenderVariantArtifactCaption:
+		return artifacts.RenderVariantCaptionKey(jobID, variant, segmentID)
+	default:
+		return "", fmt.Errorf("unknown render segment artifact kind %q", kind)
+	}
+}
+
+func renderVariantLogArtifactKey(jobID uuid.UUID, variant, segmentID string) (string, error) {
+	return artifacts.RenderVariantLogKey(jobID, variant, segmentID+"-render")
 }

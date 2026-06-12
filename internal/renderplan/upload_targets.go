@@ -5,7 +5,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/editor"
 )
 
@@ -79,7 +78,7 @@ func NewRenderVariantUploadTargets(opts NewRenderVariantUploadTargetsOptions) ([
 			videoPath = short.Output
 		}
 		if videoPath != "" {
-			key, err := artifacts.RenderVariantVideoKey(opts.JobID, opts.Variant, short.SegmentID)
+			key, err := renderVariantSegmentArtifactKey(opts.JobID, opts.Variant, RenderVariantArtifactVideo, short.SegmentID)
 			if err != nil {
 				return nil, err
 			}
@@ -90,7 +89,7 @@ func NewRenderVariantUploadTargets(opts NewRenderVariantUploadTargetsOptions) ([
 			})
 		}
 		if short.CoverPath != "" {
-			key, err := artifacts.RenderVariantCoverKey(opts.JobID, opts.Variant, short.SegmentID)
+			key, err := renderVariantSegmentArtifactKey(opts.JobID, opts.Variant, RenderVariantArtifactCover, short.SegmentID)
 			if err != nil {
 				return nil, err
 			}
@@ -101,7 +100,7 @@ func NewRenderVariantUploadTargets(opts NewRenderVariantUploadTargetsOptions) ([
 			})
 		}
 		if short.CaptionPath != "" {
-			key, err := artifacts.RenderVariantCaptionKey(opts.JobID, opts.Variant, short.SegmentID)
+			key, err := renderVariantSegmentArtifactKey(opts.JobID, opts.Variant, RenderVariantArtifactCaption, short.SegmentID)
 			if err != nil {
 				return nil, err
 			}
@@ -112,7 +111,7 @@ func NewRenderVariantUploadTargets(opts NewRenderVariantUploadTargetsOptions) ([
 			})
 		}
 		if short.RenderLogPath != "" {
-			key, err := artifacts.RenderVariantLogKey(opts.JobID, opts.Variant, short.SegmentID+"-render")
+			key, err := renderVariantLogArtifactKey(opts.JobID, opts.Variant, short.SegmentID)
 			if err != nil {
 				return nil, err
 			}

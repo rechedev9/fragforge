@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/rechedev9/fragforge/internal/artifacts"
 )
 
 const PublishBoardSchemaVersion = "1.0"
@@ -86,15 +84,15 @@ func NewPublishBoardForVariant(opts NewPublishBoardForVariantOptions) (PublishBo
 		if segmentID == "" {
 			continue
 		}
-		videoKey, err := artifacts.RenderVariantVideoKey(opts.JobID, opts.Variant, segmentID)
+		videoKey, err := renderVariantSegmentArtifactKey(opts.JobID, opts.Variant, RenderVariantArtifactVideo, segmentID)
 		if err != nil {
 			return PublishBoard{}, err
 		}
-		coverKey, err := artifacts.RenderVariantCoverKey(opts.JobID, opts.Variant, segmentID)
+		coverKey, err := renderVariantSegmentArtifactKey(opts.JobID, opts.Variant, RenderVariantArtifactCover, segmentID)
 		if err != nil {
 			return PublishBoard{}, err
 		}
-		captionKey, err := artifacts.RenderVariantCaptionKey(opts.JobID, opts.Variant, segmentID)
+		captionKey, err := renderVariantSegmentArtifactKey(opts.JobID, opts.Variant, RenderVariantArtifactCaption, segmentID)
 		if err != nil {
 			return PublishBoard{}, err
 		}

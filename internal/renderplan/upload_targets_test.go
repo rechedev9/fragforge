@@ -2,6 +2,7 @@ package renderplan
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -98,6 +99,26 @@ func TestNewRenderVariantUploadTargetsDerivesKeysAndPaths(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("target[%d] = %#v, want %#v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestNewRenderVariantUploadTargetsRejectsUnsafeSegmentID(t *testing.T) {
+	_, err := NewRenderVariantUploadTargets(NewRenderVariantUploadTargetsOptions{
+		JobID:      uuid.New(),
+		Variant:    editor.PresetViral60Clean,
+		OutDir:     "out",
+		PublishDir: "publish",
+		ResultPath: "shorts-result.json",
+		Result: editor.Result{Shorts: []editor.ShortResult{{
+			SegmentID:   "../seg-001",
+			PublishPath: "publish/seg-001.mp4",
+		}}},
+	})
+	if err == nil {
+		t.Fatal("NewRenderVariantUploadTargets error = nil, want unsafe segment id error")
+	}
+	if !strings.Contains(err.Error(), "invalid artifact name") {
+		t.Fatalf("error = %q, want invalid artifact name", err.Error())
 	}
 }
 
