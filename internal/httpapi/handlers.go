@@ -514,12 +514,12 @@ func (h *Handlers) GetRenderVariant(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, state)
 		return
 	}
-	resultKey, err := artifacts.RenderVariantResultKey(j.ID, variant)
+	resultRef, err := renderplan.NewRenderVariantArtifactRef(j.ID, variant, renderplan.RenderVariantArtifactResult, "")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rc, err := h.storage.Open(resultKey)
+	rc, err := h.storage.Open(resultRef.Key)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "render variant not found")
 		return
@@ -762,50 +762,38 @@ func (h *Handlers) GetRenderQuality(w http.ResponseWriter, r *http.Request) {
 
 // GetRenderPack streams the render variant publish-pack manifest.
 func (h *Handlers) GetRenderPack(w http.ResponseWriter, r *http.Request) {
-	h.streamRenderVariantArtifact(w, r, "application/json", func(id uuid.UUID, variant string) (string, error) {
-		return artifacts.RenderVariantPackManifestKey(id, variant)
-	})
+	h.streamRenderVariantArtifact(w, r, "application/json", renderplan.RenderVariantArtifactPackManifest, "")
 }
 
 // GetRenderEditDocument streams the stable edit intent document.
 func (h *Handlers) GetRenderEditDocument(w http.ResponseWriter, r *http.Request) {
-	h.streamRenderVariantArtifact(w, r, "application/json", func(id uuid.UUID, variant string) (string, error) {
-		return artifacts.RenderVariantEditDocumentKey(id, variant)
-	})
+	h.streamRenderVariantArtifact(w, r, "application/json", renderplan.RenderVariantArtifactEditDocument, "")
 }
 
 // GetRenderGallery streams the render variant publish gallery.
 func (h *Handlers) GetRenderGallery(w http.ResponseWriter, r *http.Request) {
-	h.streamRenderVariantArtifact(w, r, "text/html; charset=utf-8", func(id uuid.UUID, variant string) (string, error) {
-		return artifacts.RenderVariantGalleryKey(id, variant)
-	})
+	h.streamRenderVariantArtifact(w, r, "text/html; charset=utf-8", renderplan.RenderVariantArtifactGallery, "")
 }
 
 // GetRenderVideo streams one render variant MP4 artifact.
 func (h *Handlers) GetRenderVideo(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	h.streamRenderVariantArtifact(w, r, "video/mp4", func(id uuid.UUID, variant string) (string, error) {
-		return artifacts.RenderVariantVideoKey(id, variant, name)
-	})
+	h.streamRenderVariantArtifact(w, r, "video/mp4", renderplan.RenderVariantArtifactVideo, name)
 }
 
 // GetRenderCover streams one render variant cover artifact.
 func (h *Handlers) GetRenderCover(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	h.streamRenderVariantArtifact(w, r, "image/jpeg", func(id uuid.UUID, variant string) (string, error) {
-		return artifacts.RenderVariantCoverKey(id, variant, name)
-	})
+	h.streamRenderVariantArtifact(w, r, "image/jpeg", renderplan.RenderVariantArtifactCover, name)
 }
 
 // GetRenderCaption streams one render variant caption artifact.
 func (h *Handlers) GetRenderCaption(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	h.streamRenderVariantArtifact(w, r, "text/plain; charset=utf-8", func(id uuid.UUID, variant string) (string, error) {
-		return artifacts.RenderVariantCaptionKey(id, variant, name)
-	})
+	h.streamRenderVariantArtifact(w, r, "text/plain; charset=utf-8", renderplan.RenderVariantArtifactCaption, name)
 }
 
-func (h *Handlers) streamRenderVariantArtifact(w http.ResponseWriter, r *http.Request, contentType string, keyFn func(uuid.UUID, string) (string, error)) {
+func (h *Handlers) streamRenderVariantArtifact(w http.ResponseWriter, r *http.Request, contentType string, kind renderplan.RenderVariantArtifactKind, segmentID string) {
 	j, ok := h.loadJob(w, r)
 	if !ok {
 		return
@@ -815,12 +803,12 @@ func (h *Handlers) streamRenderVariantArtifact(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	key, err := keyFn(j.ID, variant)
+	ref, err := renderplan.NewRenderVariantArtifactRef(j.ID, variant, kind, segmentID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rc, err := h.storage.Open(key)
+	rc, err := h.storage.Open(ref.Key)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "render artifact not found")
 		return
@@ -832,12 +820,12 @@ func (h *Handlers) streamRenderVariantArtifact(w http.ResponseWriter, r *http.Re
 }
 
 func (h *Handlers) loadRenderResult(w http.ResponseWriter, id uuid.UUID, variant string) (editor.Result, string, bool) {
-	resultKey, err := artifacts.RenderVariantResultKey(id, variant)
+	resultRef, err := renderplan.NewRenderVariantArtifactRef(id, variant, renderplan.RenderVariantArtifactResult, "")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return editor.Result{}, "", false
 	}
-	rc, err := h.storage.Open(resultKey)
+	rc, err := h.storage.Open(resultRef.Key)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "render variant not found")
 		return editor.Result{}, "", false
@@ -848,7 +836,7 @@ func (h *Handlers) loadRenderResult(w http.ResponseWriter, id uuid.UUID, variant
 		internalError(w, "decode render result", err)
 		return editor.Result{}, "", false
 	}
-	return result, resultKey, true
+	return result, resultRef.Key, true
 }
 
 func (h *Handlers) loadJob(w http.ResponseWriter, r *http.Request) (job.Job, bool) {
