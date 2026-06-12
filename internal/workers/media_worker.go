@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -838,20 +837,6 @@ func (w *RenderWorker) writeRenderVariantState(state renderplan.RenderVariantSta
 	return w.storage.Put(key, bytes.NewReader(b))
 }
 
-type ffprobeJSON struct {
-	Streams []struct {
-		CodecName  string `json:"codec_name"`
-		Width      int    `json:"width"`
-		Height     int    `json:"height"`
-		RFrameRate string `json:"r_frame_rate"`
-		Duration   string `json:"duration"`
-	} `json:"streams"`
-	Format struct {
-		Duration string `json:"duration"`
-		Size     string `json:"size"`
-	} `json:"format"`
-}
-
 func probeRenderResult(ctx context.Context, runner commandRunner, ffprobePath string, result *editor.Result) error {
 	var firstErr error
 	for i := range result.Shorts {
@@ -908,38 +893,11 @@ func probeVideoArtifact(ctx context.Context, runner commandRunner, ffprobePath, 
 		artifact.ProbeError = err.Error()
 		return artifact, err
 	}
-	var probe ffprobeJSON
-	if err := json.Unmarshal(out, &probe); err != nil {
+	if err := recording.ApplyProbeOutput(&artifact, out); err != nil {
 		artifact.ProbeError = err.Error()
 		return artifact, err
 	}
-	if len(probe.Streams) > 0 {
-		stream := probe.Streams[0]
-		artifact.Codec = stream.CodecName
-		artifact.Width = stream.Width
-		artifact.Height = stream.Height
-		artifact.FrameRate = stream.RFrameRate
-		if seconds := parseProbeFloat(stream.Duration); seconds > 0 {
-			artifact.DurationSeconds = seconds
-		}
-	}
-	if artifact.DurationSeconds == 0 {
-		artifact.DurationSeconds = parseProbeFloat(probe.Format.Duration)
-	}
-	if size := parseProbeInt(probe.Format.Size); size > 0 {
-		artifact.SizeBytes = size
-	}
 	return artifact, nil
-}
-
-func parseProbeFloat(value string) float64 {
-	f, _ := strconv.ParseFloat(strings.TrimSpace(value), 64)
-	return f
-}
-
-func parseProbeInt(value string) int64 {
-	i, _ := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-	return i
 }
 
 func (c RenderWorkerConfig) withDefaults() RenderWorkerConfig {

@@ -102,19 +102,20 @@ func mustSegmentClipArtifactKey(t *testing.T, id uuid.UUID, segmentID string) st
 
 func TestApplyProbeOutputVideo(t *testing.T) {
 	artifact := RecordingArtifact{Type: "video"}
-	err := applyProbeOutput(&artifact, []byte(`{
+	err := ApplyProbeOutput(&artifact, []byte(`{
 		"streams": [{
 			"codec_type": "video",
 			"codec_name": "h264",
 			"width": 1920,
 			"height": 1080,
 			"duration": "8.016667",
-			"nb_frames": "481"
+			"nb_frames": "481",
+			"r_frame_rate": "60/1"
 		}],
-		"format": {"duration": "8.016667"}
+		"format": {"duration": "8.016667", "size": "12345"}
 	}`))
 	if err != nil {
-		t.Fatalf("applyProbeOutput error = %v", err)
+		t.Fatalf("ApplyProbeOutput error = %v", err)
 	}
 	if artifact.Codec != "h264" || artifact.Type != "video" {
 		t.Fatalf("artifact codec/type = %q/%q", artifact.Codec, artifact.Type)
@@ -125,17 +126,20 @@ func TestApplyProbeOutputVideo(t *testing.T) {
 	if artifact.FrameCount != 481 {
 		t.Fatalf("FrameCount = %d, want 481", artifact.FrameCount)
 	}
-	if artifact.FrameRate != "" {
-		t.Fatalf("FrameRate = %q, want empty because fixture omits avg_frame_rate", artifact.FrameRate)
+	if artifact.FrameRate != "60/1" {
+		t.Fatalf("FrameRate = %q, want r_frame_rate fallback", artifact.FrameRate)
 	}
 	if artifact.DurationSeconds != 8.016667 {
 		t.Fatalf("DurationSeconds = %f, want 8.016667", artifact.DurationSeconds)
+	}
+	if artifact.SizeBytes != 12345 {
+		t.Fatalf("SizeBytes = %d, want 12345", artifact.SizeBytes)
 	}
 }
 
 func TestApplyProbeOutputAudio(t *testing.T) {
 	artifact := RecordingArtifact{Type: "audio"}
-	err := applyProbeOutput(&artifact, []byte(`{
+	err := ApplyProbeOutput(&artifact, []byte(`{
 		"streams": [{
 			"codec_type": "audio",
 			"codec_name": "pcm_s16le",
@@ -145,7 +149,7 @@ func TestApplyProbeOutputAudio(t *testing.T) {
 		}]
 	}`))
 	if err != nil {
-		t.Fatalf("applyProbeOutput error = %v", err)
+		t.Fatalf("ApplyProbeOutput error = %v", err)
 	}
 	if artifact.Codec != "pcm_s16le" || artifact.Type != "audio" {
 		t.Fatalf("artifact codec/type = %q/%q", artifact.Codec, artifact.Type)

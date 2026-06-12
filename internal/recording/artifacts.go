@@ -214,9 +214,11 @@ type ffprobeOutput struct {
 		SampleRate   string `json:"sample_rate"`
 		Channels     int    `json:"channels"`
 		AvgFrameRate string `json:"avg_frame_rate"`
+		RFrameRate   string `json:"r_frame_rate"`
 	} `json:"streams"`
 	Format struct {
 		Duration string `json:"duration"`
+		Size     string `json:"size"`
 	} `json:"format"`
 }
 
@@ -234,12 +236,13 @@ func probeArtifact(ctx context.Context, ffprobePath string, artifact *RecordingA
 		artifact.ProbeError = fmt.Sprintf("ffprobe: %v", err)
 		return
 	}
-	if err := applyProbeOutput(artifact, out); err != nil {
+	if err := ApplyProbeOutput(artifact, out); err != nil {
 		artifact.ProbeError = err.Error()
 	}
 }
 
-func applyProbeOutput(artifact *RecordingArtifact, out []byte) error {
+// ApplyProbeOutput populates artifact media metadata from ffprobe JSON output.
+func ApplyProbeOutput(artifact *RecordingArtifact, out []byte) error {
 	var probe ffprobeOutput
 	if err := json.Unmarshal(out, &probe); err != nil {
 		return fmt.Errorf("parse ffprobe: %v", err)
@@ -250,6 +253,9 @@ func applyProbeOutput(artifact *RecordingArtifact, out []byte) error {
 	stream := probe.Streams[0]
 	artifact.Codec = stream.CodecName
 	artifact.FrameRate = stream.AvgFrameRate
+	if artifact.FrameRate == "" {
+		artifact.FrameRate = stream.RFrameRate
+	}
 	if stream.CodecType != "" {
 		artifact.Type = stream.CodecType
 	}
@@ -273,6 +279,11 @@ func applyProbeOutput(artifact *RecordingArtifact, out []byte) error {
 	if duration != "" {
 		if v, err := strconv.ParseFloat(duration, 64); err == nil {
 			artifact.DurationSeconds = v
+		}
+	}
+	if probe.Format.Size != "" {
+		if v, err := strconv.ParseInt(probe.Format.Size, 10, 64); err == nil {
+			artifact.SizeBytes = v
 		}
 	}
 	return nil
