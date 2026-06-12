@@ -1,9 +1,12 @@
 package renderplan
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/rechedev9/fragforge/internal/artifacts"
 )
 
 const PublishBoardSchemaVersion = "1.0"
@@ -49,6 +52,87 @@ type NewPublishBoardOptions struct {
 	Items           []PublishBoardItem
 	Warnings        []string
 	Error           string
+}
+
+// ArtifactExistsFunc reports whether an artifact key currently exists.
+type ArtifactExistsFunc func(key string) (bool, error)
+
+// NewPublishBoardForVariantOptions carries the render result summary plus the
+// storage readiness probe needed to build a publish board.
+type NewPublishBoardForVariantOptions struct {
+	JobID           uuid.UUID
+	Variant         string
+	UploadReadyRoot string
+	SegmentIDs      []string
+	Uploaded        bool
+	Warnings        []string
+	Error           string
+	ArtifactExists  ArtifactExistsFunc
+}
+
+// NewPublishBoardForVariant derives the publish-board artifact keys for a
+// render variant and probes each upload-ready item for storage readiness.
+func NewPublishBoardForVariant(opts NewPublishBoardForVariantOptions) (PublishBoard, error) {
+	refs, err := renderVariantArtifactsFor(opts.JobID, opts.Variant)
+	if err != nil {
+		return PublishBoard{}, err
+	}
+	exists := opts.ArtifactExists
+	if exists == nil {
+		exists = func(string) (bool, error) { return false, nil }
+	}
+	items := make([]PublishBoardItem, 0, len(opts.SegmentIDs))
+	for _, segmentID := range opts.SegmentIDs {
+		if segmentID == "" {
+			continue
+		}
+		videoKey, err := artifacts.RenderVariantVideoKey(opts.JobID, opts.Variant, segmentID)
+		if err != nil {
+			return PublishBoard{}, err
+		}
+		coverKey, err := artifacts.RenderVariantCoverKey(opts.JobID, opts.Variant, segmentID)
+		if err != nil {
+			return PublishBoard{}, err
+		}
+		captionKey, err := artifacts.RenderVariantCaptionKey(opts.JobID, opts.Variant, segmentID)
+		if err != nil {
+			return PublishBoard{}, err
+		}
+		videoReady, err := exists(videoKey)
+		if err != nil {
+			return PublishBoard{}, fmt.Errorf("check video artifact %s: %w", segmentID, err)
+		}
+		coverReady, err := exists(coverKey)
+		if err != nil {
+			return PublishBoard{}, fmt.Errorf("check cover artifact %s: %w", segmentID, err)
+		}
+		captionReady, err := exists(captionKey)
+		if err != nil {
+			return PublishBoard{}, fmt.Errorf("check caption artifact %s: %w", segmentID, err)
+		}
+		items = append(items, PublishBoardItem{
+			SegmentID:    segmentID,
+			VideoKey:     videoKey,
+			CoverKey:     coverKey,
+			CaptionKey:   captionKey,
+			VideoReady:   videoReady,
+			CoverReady:   coverReady,
+			CaptionReady: captionReady,
+		})
+	}
+	return NewPublishBoard(NewPublishBoardOptions{
+		JobID:           opts.JobID,
+		Variant:         opts.Variant,
+		UploadReadyRoot: opts.UploadReadyRoot,
+		RenderResultKey: refs.RenderResultKey,
+		PackManifestKey: refs.PackManifestKey,
+		GalleryKey:      refs.GalleryKey,
+		PublishSummary:  refs.PublishSummaryKey,
+		Uploaded:        opts.Uploaded,
+		Items:           items,
+		Warnings:        opts.Warnings,
+		Error:           opts.Error,
+	}), nil
 }
 
 func NewPublishBoard(opts NewPublishBoardOptions) PublishBoard {

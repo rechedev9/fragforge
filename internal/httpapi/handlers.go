@@ -609,83 +609,28 @@ func (h *Handlers) GetRenderPublishBoard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	variant := chi.URLParam(r, "variant")
-	result, resultKey, ok := h.loadRenderResult(w, j.ID, variant)
+	result, _, ok := h.loadRenderResult(w, j.ID, variant)
 	if !ok {
 		return
 	}
-	packKey, err := artifacts.RenderVariantPackManifestKey(j.ID, variant)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	galleryKey, err := artifacts.RenderVariantGalleryKey(j.ID, variant)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(j.ID, variant)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	items := make([]renderplan.PublishBoardItem, 0, len(result.Shorts))
+	segmentIDs := make([]string, 0, len(result.Shorts))
 	for _, short := range result.Shorts {
-		if short.SegmentID == "" {
-			continue
-		}
-		videoKey, err := artifacts.RenderVariantVideoKey(j.ID, variant, short.SegmentID)
-		if err != nil {
-			internalError(w, "build video artifact key", err)
-			return
-		}
-		coverKey, err := artifacts.RenderVariantCoverKey(j.ID, variant, short.SegmentID)
-		if err != nil {
-			internalError(w, "build cover artifact key", err)
-			return
-		}
-		captionKey, err := artifacts.RenderVariantCaptionKey(j.ID, variant, short.SegmentID)
-		if err != nil {
-			internalError(w, "build caption artifact key", err)
-			return
-		}
-		videoReady, err := h.storage.Exists(videoKey)
-		if err != nil {
-			internalError(w, "check video artifact", err)
-			return
-		}
-		coverReady, err := h.storage.Exists(coverKey)
-		if err != nil {
-			internalError(w, "check cover artifact", err)
-			return
-		}
-		captionReady, err := h.storage.Exists(captionKey)
-		if err != nil {
-			internalError(w, "check caption artifact", err)
-			return
-		}
-		items = append(items, renderplan.PublishBoardItem{
-			SegmentID:    short.SegmentID,
-			VideoKey:     videoKey,
-			CoverKey:     coverKey,
-			CaptionKey:   captionKey,
-			VideoReady:   videoReady,
-			CoverReady:   coverReady,
-			CaptionReady: captionReady,
-		})
+		segmentIDs = append(segmentIDs, short.SegmentID)
 	}
-	writeJSON(w, http.StatusOK, renderplan.NewPublishBoard(renderplan.NewPublishBoardOptions{
-		JobID:           j.ID,
-		Variant:         variant,
-		UploadReadyRoot: "shortslistosparasubir",
-		RenderResultKey: resultKey,
-		PackManifestKey: packKey,
-		GalleryKey:      galleryKey,
-		PublishSummary:  summaryKey,
-		Uploaded:        h.renderVariantUploaded(j.ID, variant),
-		Items:           items,
-		Warnings:        result.Warnings,
-		Error:           result.Error,
-	}))
+	board, err := renderplan.NewPublishBoardForVariant(renderplan.NewPublishBoardForVariantOptions{
+		JobID:          j.ID,
+		Variant:        variant,
+		SegmentIDs:     segmentIDs,
+		Uploaded:       h.renderVariantUploaded(j.ID, variant),
+		Warnings:       result.Warnings,
+		Error:          result.Error,
+		ArtifactExists: h.storage.Exists,
+	})
+	if err != nil {
+		internalError(w, "build publish board", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, board)
 }
 
 // SetRenderUploaded handles POST /api/jobs/{id}/renders/{variant}/publish/uploaded.
