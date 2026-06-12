@@ -1,6 +1,6 @@
 param(
     [string]$RunDir = "data\tries\faceit-288b1d33-martinez\run-004",
-    [string]$KeepShortsDir = "shorts-natural-hq-full,shorts-natural-hq2-full",
+    [string]$KeepShortsDir = "shorts-viral60-clean,shortslistosparasubir",
     [switch]$Apply
 )
 
