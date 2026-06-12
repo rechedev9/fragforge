@@ -1927,7 +1927,26 @@ func runAgentRunnerDryRunWithInput(t *testing.T, root, env, runner, prompt, task
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("%s dry run failed: %v\nstdout:\n%s\nstderr:\n%s", runner, err, stdout.String(), stderr.String())
 	}
-	return stdout.String(), stderr.String()
+	return stdout.String(), stripHostShellWarnings(stderr.String())
+}
+
+func stripHostShellWarnings(stderr string) string {
+	lines := strings.Split(stderr, "\n")
+	out := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "wsl: Failed to mount ") && strings.HasSuffix(trimmed, "see dmesg for more details.") {
+			continue
+		}
+		out = append(out, line)
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return strings.Join(out, "\n") + "\n"
 }
 
 func shellQuote(value string) string {

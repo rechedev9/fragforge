@@ -199,7 +199,7 @@ function mutationHeaders(json = false): Headers {
   const headers = new Headers();
   const token = dom.token.value.trim();
   if (token) {
-    headers.set("X-ZackVideo-Token", token);
+    headers.set("X-FragForge-Token", token);
     localStorage.setItem("zv_mutation_token", token);
   }
   if (json) {

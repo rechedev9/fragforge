@@ -43,6 +43,11 @@ func (h *Handlers) CreateStreamJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "parsing multipart form: "+err.Error())
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	file, _, err := r.FormFile("video")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing video file: "+err.Error())
@@ -190,8 +195,14 @@ func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	var plan streamclips.EditPlan
 	if err := json.NewDecoder(r.Body).Decode(&plan); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "edit plan JSON is too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid edit plan JSON")
 		return
 	}

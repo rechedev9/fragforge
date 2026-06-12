@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -227,6 +228,26 @@ func TestPostJobsCreatesJobAndEnqueues(t *testing.T) {
 	}
 }
 
+func TestPostJobsRemovesMultipartTempFiles(t *testing.T) {
+	withIsolatedTempDir(t)
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	h := NewHandlers(repo, store, queue)
+
+	body, ct := multipartBody(t, bytes.Repeat([]byte("d"), multipartMemBudget+1), `{"target_steamid":"76561198000000000"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+	req.Header.Set("Content-Type", ct)
+	rw := httptest.NewRecorder()
+
+	h.CreateJob(rw, req)
+
+	if rw.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rw.Code, rw.Body.String())
+	}
+	assertMultipartTempDirEmpty(t)
+}
+
 func TestListJobsReturnsRecentJobsWithoutKillPlan(t *testing.T) {
 	repo := newFakeRepo()
 	id := uuid.New()
@@ -329,6 +350,19 @@ func TestWorkbenchServesLocalApp(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("workbench missing %q", want)
 		}
+	}
+	if !strings.Contains(body, `"X-FragForge-Token"`) {
+		t.Fatalf("workbench missing mutation token header")
+	}
+	if strings.Contains(body, "X-ZackVideo-Token") {
+		t.Fatalf("workbench uses stale mutation token header")
+	}
+	source, err := os.ReadFile("workbench_assets/app.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), `"X-FragForge-Token"`) || strings.Contains(string(source), "X-ZackVideo-Token") {
+		t.Fatalf("workbench TypeScript mutation token header is out of sync")
 	}
 }
 
@@ -1073,6 +1107,23 @@ func TestSetRenderUploadedWritesLocalMarker(t *testing.T) {
 	}
 }
 
+func TestSetRenderUploadedRejectsLargeJSONBody(t *testing.T) {
+	repo := newFakeRepo()
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/renders/{variant}/publish/uploaded", h.SetRenderUploaded)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/publish/uploaded", strings.NewReader(`{`+strings.Repeat(" ", maxJSONBodyBytes+1)))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", rw.Code, rw.Body.String())
+	}
+}
+
 func TestStartCaptionAgentEnqueuesCodexTask(t *testing.T) {
 	repo := newFakeRepo()
 	queue := &fakeQueue{}
@@ -1522,6 +1573,49 @@ func TestStreamJobFlowSavesPlanAndEnqueuesRender(t *testing.T) {
 	}
 }
 
+func TestStreamJobRemovesMultipartTempFiles(t *testing.T) {
+	withIsolatedTempDir(t)
+	streamRepo := newFakeStreamRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	h := NewHandlers(newFakeRepo(), store, queue, WithStreamRepository(streamRepo))
+
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	videoPart, _ := mw.CreateFormFile("video", "stream.mp4")
+	_, _ = videoPart.Write(bytes.Repeat([]byte("m"), multipartMemBudget+1))
+	_ = mw.WriteField("config", `{"title":"match stream"}`)
+	_ = mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rw := httptest.NewRecorder()
+
+	h.CreateStreamJob(rw, req)
+
+	if rw.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rw.Code, rw.Body.String())
+	}
+	assertMultipartTempDirEmpty(t)
+}
+
+func TestPutStreamEditPlanRejectsLargeJSONBody(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusUploaded, SourcePath: streamclips.SourceKey(id)}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{}, WithStreamRepository(streamRepo))
+
+	r := chi.NewRouter()
+	r.Put("/api/stream-jobs/{id}/edit-plan", h.PutStreamEditPlan)
+	req := httptest.NewRequest(http.MethodPut, "/api/stream-jobs/"+id.String()+"/edit-plan", strings.NewReader(`{`+strings.Repeat(" ", maxJSONBodyBytes+1)))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", rw.Code, rw.Body.String())
+	}
+}
+
 func TestStreamVideoRejectsUnsafeClipID(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	id := uuid.New()
@@ -1558,4 +1652,26 @@ func hasAsynqOption(opts []asynq.Option, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func withIsolatedTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, dir)
+	}
+	return dir
+}
+
+func assertMultipartTempDirEmpty(t *testing.T) {
+	t.Helper()
+	entries, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "multipart-") || strings.HasPrefix(entry.Name(), "zv-stream-upload-") {
+			t.Fatalf("temporary upload file still exists: %s", filepath.Join(os.TempDir(), entry.Name()))
+		}
+	}
 }

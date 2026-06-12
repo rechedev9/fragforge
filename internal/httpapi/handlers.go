@@ -34,6 +34,7 @@ const (
 	maxDemoBytes       = 500 << 20            // 500 MiB demo cap
 	maxMultipartBytes  = maxDemoBytes + 1<<20 // allow multipart headers around the demo
 	multipartMemBudget = 32 << 20             // 32 MiB in-memory; spill beyond
+	maxJSONBodyBytes   = 1 << 20              // JSON control documents are small
 	renderUniqueTTL    = 24 * time.Hour
 )
 
@@ -125,6 +126,11 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "parsing multipart form: "+err.Error())
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	file, _, err := r.FormFile("demo")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing demo file: "+err.Error())
@@ -727,8 +733,14 @@ func (h *Handlers) SetRenderUploaded(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	var req uploadStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "upload status JSON is too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid upload status JSON")
 		return
 	}
