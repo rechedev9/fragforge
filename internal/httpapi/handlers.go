@@ -454,7 +454,12 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "read render state", err)
 		return
 	}
-	state, err := newRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusQueued, nil, "", previous)
+	state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:    j.ID,
+		Loadout:  loadout,
+		Status:   renderplan.RenderVariantStatusQueued,
+		Previous: previous,
+	})
 	if err != nil {
 		internalError(w, "build render state", err)
 		return
@@ -475,7 +480,13 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		failedState, stateErr := newRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusFailed, nil, "enqueue render task: "+err.Error(), &state)
+		failedState, stateErr := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+			JobID:    j.ID,
+			Loadout:  loadout,
+			Status:   renderplan.RenderVariantStatusFailed,
+			Error:    "enqueue render task: " + err.Error(),
+			Previous: &state,
+		})
 		if stateErr == nil {
 			if writeErr := h.writeRenderVariantState(failedState); writeErr != nil {
 				log.Printf("httpapi: write failed render state for %s/%s: %v", j.ID, variant, writeErr)
@@ -537,7 +548,13 @@ func (h *Handlers) GetRenderVariant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	state, err := newRenderVariantState(j.ID, loadout, status, result.Warnings, result.Error, nil)
+	state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:    j.ID,
+		Loadout:  loadout,
+		Status:   status,
+		Warnings: result.Warnings,
+		Error:    result.Error,
+	})
 	if err != nil {
 		internalError(w, "build render state", err)
 		return
@@ -575,53 +592,6 @@ func (h *Handlers) writeRenderVariantState(state renderplan.RenderVariantState) 
 		return err
 	}
 	return h.storage.Put(key, bytes.NewReader(b))
-}
-
-func newRenderVariantState(id uuid.UUID, loadout renderplan.Loadout, status string, warnings []string, errMsg string, previous *renderplan.RenderVariantState) (renderplan.RenderVariantState, error) {
-	prefix, err := artifacts.RenderVariantPrefix(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	resultKey, err := artifacts.RenderVariantResultKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	editManifestKey, err := artifacts.RenderVariantEditManifestKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	packKey, err := artifacts.RenderVariantPackManifestKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	galleryKey, err := artifacts.RenderVariantGalleryKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	return renderplan.NewRenderVariantState(renderplan.NewRenderVariantStateOptions{
-		JobID:             id,
-		Variant:           loadout.Variant,
-		Status:            status,
-		Preset:            loadout.Preset,
-		EditDocumentKey:   editDocumentKey,
-		EditManifestKey:   editManifestKey,
-		RenderResultKey:   resultKey,
-		PackManifestKey:   packKey,
-		GalleryKey:        galleryKey,
-		PublishSummaryKey: summaryKey,
-		ArtifactPrefix:    prefix,
-		Warnings:          warnings,
-		Error:             errMsg,
-		Previous:          previous,
-	}), nil
 }
 
 func mustRenderVariantStatusKey(id uuid.UUID, variant string) string {

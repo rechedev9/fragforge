@@ -686,7 +686,12 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (e
 		return err
 	}
 	if ready {
-		state, err := newWorkerRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusReady, nil, "", previousState)
+		state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+			JobID:    j.ID,
+			Loadout:  loadout,
+			Status:   renderplan.RenderVariantStatusReady,
+			Previous: previousState,
+		})
 		if err != nil {
 			return err
 		}
@@ -704,7 +709,12 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (e
 	if err := cfg.validate(); err != nil {
 		return err
 	}
-	state, err := newWorkerRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusRendering, nil, "", previousState)
+	state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:    j.ID,
+		Loadout:  loadout,
+		Status:   renderplan.RenderVariantStatusRendering,
+		Previous: previousState,
+	})
 	if err != nil {
 		return err
 	}
@@ -717,7 +727,14 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (e
 		if err == nil {
 			return
 		}
-		failedState, stateErr := newWorkerRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusFailed, result.Warnings, renderVariantFailureMessage(result, err), currentState)
+		failedState, stateErr := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+			JobID:    j.ID,
+			Loadout:  loadout,
+			Status:   renderplan.RenderVariantStatusFailed,
+			Warnings: result.Warnings,
+			Error:    renderVariantFailureMessage(result, err),
+			Previous: currentState,
+		})
 		if stateErr != nil {
 			err = fmt.Errorf("%w; build failed render state: %v", err, stateErr)
 			return
@@ -798,7 +815,13 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (e
 	if result.Error != "" {
 		return fmt.Errorf("render result error: %s", result.Error)
 	}
-	readyState, err := newWorkerRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusReady, result.Warnings, "", currentState)
+	readyState, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:    j.ID,
+		Loadout:  loadout,
+		Status:   renderplan.RenderVariantStatusReady,
+		Warnings: result.Warnings,
+		Previous: currentState,
+	})
 	if err != nil {
 		return err
 	}
@@ -892,53 +915,6 @@ func (w *RenderWorker) writeRenderVariantState(state renderplan.RenderVariantSta
 		return err
 	}
 	return w.storage.Put(key, bytes.NewReader(b))
-}
-
-func newWorkerRenderVariantState(id uuid.UUID, loadout renderplan.Loadout, status string, warnings []string, errMsg string, previous *renderplan.RenderVariantState) (renderplan.RenderVariantState, error) {
-	prefix, err := artifacts.RenderVariantPrefix(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	resultKey, err := artifacts.RenderVariantResultKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	editManifestKey, err := artifacts.RenderVariantEditManifestKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	packKey, err := artifacts.RenderVariantPackManifestKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	galleryKey, err := artifacts.RenderVariantGalleryKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(id, loadout.Variant)
-	if err != nil {
-		return renderplan.RenderVariantState{}, err
-	}
-	return renderplan.NewRenderVariantState(renderplan.NewRenderVariantStateOptions{
-		JobID:             id,
-		Variant:           loadout.Variant,
-		Status:            status,
-		Preset:            loadout.Preset,
-		EditDocumentKey:   editDocumentKey,
-		EditManifestKey:   editManifestKey,
-		RenderResultKey:   resultKey,
-		PackManifestKey:   packKey,
-		GalleryKey:        galleryKey,
-		PublishSummaryKey: summaryKey,
-		ArtifactPrefix:    prefix,
-		Warnings:          warnings,
-		Error:             errMsg,
-		Previous:          previous,
-	}), nil
 }
 
 func renderVariantFailureMessage(result editor.Result, err error) string {

@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/rechedev9/fragforge/internal/artifacts"
 )
 
 const (
@@ -50,6 +52,69 @@ type NewRenderVariantStateOptions struct {
 	Error             string
 	Now               time.Time
 	Previous          *RenderVariantState
+}
+
+// NewRenderVariantStateForLoadoutOptions carries the product loadout and
+// mutable status fields needed to materialize a durable render state.
+type NewRenderVariantStateForLoadoutOptions struct {
+	JobID    uuid.UUID
+	Loadout  Loadout
+	Status   string
+	Warnings []string
+	Error    string
+	Now      time.Time
+	Previous *RenderVariantState
+}
+
+// NewRenderVariantStateForLoadout derives artifact keys from the loadout's
+// variant and returns the durable render state document for API and worker
+// boundaries.
+func NewRenderVariantStateForLoadout(opts NewRenderVariantStateForLoadoutOptions) (RenderVariantState, error) {
+	prefix, err := artifacts.RenderVariantPrefix(opts.JobID, opts.Loadout.Variant)
+	if err != nil {
+		return RenderVariantState{}, err
+	}
+	resultKey, err := artifacts.RenderVariantResultKey(opts.JobID, opts.Loadout.Variant)
+	if err != nil {
+		return RenderVariantState{}, err
+	}
+	editDocumentKey, err := artifacts.RenderVariantEditDocumentKey(opts.JobID, opts.Loadout.Variant)
+	if err != nil {
+		return RenderVariantState{}, err
+	}
+	editManifestKey, err := artifacts.RenderVariantEditManifestKey(opts.JobID, opts.Loadout.Variant)
+	if err != nil {
+		return RenderVariantState{}, err
+	}
+	packKey, err := artifacts.RenderVariantPackManifestKey(opts.JobID, opts.Loadout.Variant)
+	if err != nil {
+		return RenderVariantState{}, err
+	}
+	galleryKey, err := artifacts.RenderVariantGalleryKey(opts.JobID, opts.Loadout.Variant)
+	if err != nil {
+		return RenderVariantState{}, err
+	}
+	summaryKey, err := artifacts.RenderVariantPublishSummaryKey(opts.JobID, opts.Loadout.Variant)
+	if err != nil {
+		return RenderVariantState{}, err
+	}
+	return NewRenderVariantState(NewRenderVariantStateOptions{
+		JobID:             opts.JobID,
+		Variant:           opts.Loadout.Variant,
+		Status:            opts.Status,
+		Preset:            opts.Loadout.Preset,
+		EditDocumentKey:   editDocumentKey,
+		EditManifestKey:   editManifestKey,
+		RenderResultKey:   resultKey,
+		PackManifestKey:   packKey,
+		GalleryKey:        galleryKey,
+		PublishSummaryKey: summaryKey,
+		ArtifactPrefix:    prefix,
+		Warnings:          opts.Warnings,
+		Error:             opts.Error,
+		Now:               opts.Now,
+		Previous:          opts.Previous,
+	}), nil
 }
 
 func NewRenderVariantState(opts NewRenderVariantStateOptions) RenderVariantState {

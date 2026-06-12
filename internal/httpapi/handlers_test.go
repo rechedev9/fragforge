@@ -812,7 +812,11 @@ func TestGetRenderVariantReturnsQueuedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := newRenderVariantState(j.ID, loadout, renderplan.RenderVariantStatusQueued, nil, "", nil)
+	state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:   j.ID,
+		Loadout: loadout,
+		Status:  renderplan.RenderVariantStatusQueued,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
