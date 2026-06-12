@@ -3,7 +3,7 @@ const state = {
     jobs: [],
     loadouts: [],
     selectedJobId: null,
-    selectedVariant: "viral-60",
+    selectedVariant: "viral-60-clean",
     moments: [],
     selectedMomentIds: new Set(),
     renderState: null,
@@ -108,7 +108,7 @@ function selectedVariant() {
         return state.selectedVariant;
     }
     const first = state.loadouts[0]?.variant;
-    return first || "viral-60";
+    return first || "viral-60-clean";
 }
 function shortID(id) {
     return id ? id.slice(0, 8) : "--------";
@@ -206,7 +206,7 @@ function momentEventLabel(moment) {
 function renderStatusChips(job) {
     dom.workspaceStatus.replaceChildren();
     if (!job) {
-        dom.workspaceStatus.append(text("span", "chip", "No run selected"), text("span", "chip", "Preset: viral-60"), text("span", "chip good", "OK"));
+        dom.workspaceStatus.append(text("span", "chip", "No run selected"), text("span", "chip", "Preset: viral-60-clean"), text("span", "chip good", "OK"));
         return;
     }
     const variantSelect = document.createElement("select");
@@ -578,7 +578,7 @@ async function refresh(options = {}) {
         state.jobs = jobsResponse.jobs || [];
         state.loadouts = loadoutsResponse.loadouts || [];
         if (!state.loadouts.some((loadout) => loadout.variant === state.selectedVariant)) {
-            state.selectedVariant = state.loadouts[0]?.variant || "viral-60";
+            state.selectedVariant = state.loadouts[0]?.variant || "viral-60-clean";
         }
         if (!state.selectedJobId || !state.jobs.some((job) => job.id === state.selectedJobId)) {
             state.selectedJobId = state.jobs[0]?.id || null;

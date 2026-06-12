@@ -1,20 +1,20 @@
 ---
 name: zackvideo-music-scripted-shorts
-description: "Create Lua-scripted, music-synced FragForge CS2 Shorts: parse demos, record target-player segments, analyze CC0 music, render one 24fps compiled vertical Short per demo with external music, rhythm JSON, effects/viral_premium.lua, publish assets, gallery review, and upload-ready outputs under shortslistosparasubir."
+description: "Create music-synced FragForge CS2 Shorts: parse demos, record target-player segments, analyze CC0 music BPM, render one 60fps compiled vertical Short per demo with external music, rhythm JSON, viral-60-clean effects, publish assets, gallery review, and upload-ready outputs under shortslistosparasubir."
 ---
 
 # FragForge Music Scripted Shorts
 
-Use this skill when the user wants CS2 Shorts with Lua scripting, external music, beat/rhythm sync, 24 FPS output, or one music-edited compilation per demo. Keep the normal realistic `natural-hq2-full` skill as the default for non-musical gameplay exports.
+Use this skill when the user wants CS2 Shorts with external music, beat/rhythm sync, BPM-based cuts, or one music-edited compilation per demo. Keep `viral-60-clean` as the visual standard.
 
 ## Defaults
 
 - Output shape: one compiled vertical Short per demo.
-- Visual style: `--preset short-clean --effects effects\viral_premium.lua`.
-- Final FPS: `--fps 24`.
+- Visual style: `--preset viral-60-clean`.
+- Final FPS: `--fps 60` by preset default.
 - Music policy: CC0 only. Do not use royalty-free, Pixabay Content License, CC-BY, NC, or unclear-license tracks unless the user explicitly changes the policy.
-- Default track source: OpenGameArt `Melodic EDM Loops` by Fupi, CC0, 140 BPM.
-- Default file: `https://opengameart.org/sites/default/files/brightmelodicskippyedm.wav`.
+- Prefer CC0 MP3 tracks when the user asks for MP3. A proven option is OpenGameArt `Black Diamond` by Joth, CC0, 143 BPM.
+- Proven MP3 file: `https://opengameart.org/sites/default/files/Black%20Diamond.mp3`.
 - Store final upload-ready MP4s, covers, captions, manifests, and review notes under `<run>\shortslistosparasubir\...`.
 
 ## Workflow
@@ -41,10 +41,10 @@ Record with HLAE/CS2 only when the user has authorized capture:
 .\bin\zv.exe workflows run record -- `
   --killplan <run>\plan.json `
   --demo <demo.dem> `
-  --out <run>\recording-gameplay-120 `
+  --out <run>\recording-deathnotices-120 `
   --hlae C:\HLAE-2.190.1\HLAE.exe `
   --cs2 "<cs2.exe>" `
-  --hud gameplay `
+  --hud deathnotices `
   --fps 120 `
   --video-crf 16 `
   --timeout 45m
@@ -56,11 +56,11 @@ Analyze the music against the kill plan before rendering:
 
 ```powershell
 .\bin\zv.exe workflows run music-analyze -- `
-  --input <run>\music\brightmelodicskippyedm.wav `
+  --input <run>\music\black-diamond-joth-cc0-143bpm.mp3 `
   --killplan <run>\plan.json `
   --out <run>\rhythm.json `
-  --min-bpm 130 `
-  --max-bpm 150 `
+  --min-bpm 138 `
+  --max-bpm 148 `
   --kill-offset-ms 100 `
   --max-beats 512
 ```
@@ -69,15 +69,14 @@ Render the compiled music Short:
 
 ```powershell
 .\bin\zv.exe workflows run shorts-render -- `
-  --recording-result <run>\recording-gameplay-120\recording-result.json `
+  --recording-result <run>\recording-deathnotices-120\recording-result.json `
   --killplan <run>\plan.json `
-  --out <run>\shorts-scripted-music `
+  --out <run>\shorts-viral60-clean-music `
   --publish-dir <run>\shortslistosparasubir\scripted-music `
-  --preset short-clean `
-  --effects effects\viral_premium.lua `
-  --music <run>\music\brightmelodicskippyedm.wav `
+  --preset viral-60-clean `
+  --music <run>\music\black-diamond-joth-cc0-143bpm.mp3 `
   --rhythm <run>\rhythm.json `
-  --fps 24 `
+  --fps 60 `
   --compile-segments `
   --video-crf 16 `
   --video-preset slow `
@@ -96,7 +95,7 @@ Open the gallery for review:
 ## QA
 
 - Verify exactly one compiled publish MP4 per demo unless the user requested a different shape.
-- Confirm `ffprobe` reports H.264, AAC audio, `1080x1920`, and `24/1` or equivalent frame rate.
+- Confirm `ffprobe` reports H.264, AAC audio, `1080x1920`, and `60/1` or equivalent frame rate.
 - Confirm Lua text/flash/zoom effects land on kill moments in the compiled timeline.
 - Confirm music is present, game audio is audible but secondary, and no section is silent unless it is an intentional rhythm gap.
 - Confirm `pack-manifest.json`, `publish-summary.md`, captions, covers, and review assets are under `shortslistosparasubir`.

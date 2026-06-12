@@ -67,15 +67,15 @@ Prefer exact `name_in_demo` plus SteamID64. If the target name is fuzzy, list li
 
 CS2 must launch through HLAE in windowed mode. The recorder should pass `-windowed`; verify the real `cs2.exe` command line if capture behavior changes.
 
-5. Render with the realistic preset:
+5. Render with the standard preset:
 
 ```powershell
 .\bin\zv.exe workflows run shorts-render -- `
   --recording-result <run>\recording-<plan>-gameplay-120\recording-result.json `
   --killplan <run>\plans\<plan>.json `
-  --out <run>\renders\<plan>-natural-hq2-full `
+  --out <run>\renders\<plan>-viral-60-clean `
   --publish-dir <run>\shortslistosparasubir\<plan> `
-  --preset natural-hq2-full `
+  --preset viral-60-clean `
   --video-crf 16 `
   --video-preset slow `
   --hq-filters `

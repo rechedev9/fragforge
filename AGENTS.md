@@ -119,18 +119,18 @@ Media output and cleanup:
   (HUD, radar, killfeed, score, crosshair, health, ammo, and round context).
   Avoid blurred top/bottom layouts, cinematic crops, or stylized framing unless
   the user explicitly asks for that style for a specific run.
-- For kill/highlight Shorts, prefer the `natural-hq2-full` preset: FFmpeg-only,
-  no Lua/scripted effects, complete gameplay frame preserved in the vertical
-  canvas, high-quality encode, and a subtle saturation lift to approximate the
-  digital-vibrance look many CS2 players expect.
+- For kill/highlight Shorts, use the latest designed standard preset:
+  `viral-60-clean`. It is the product default for clean HUD-less 60fps POV with
+  kill notices, the viral-ultra-clean overlay pack, hook text, kill punch-ins,
+  counters, quality checks, cover sheets, CRF 16 slow encode, and audio
+  normalization.
 - For kill/highlight deliverables, default to one long vertical Short per
   player/game containing all selected kills. Per-kill Shorts may be rendered as
   intermediate publish inputs, but the upload-ready default should be the
   concatenated all-kills long Short unless the user explicitly asks for
   individual per-kill Shorts.
-- Use `natural-hq2-full-plus` only for explicit A/B tests: it keeps the same
-  full-UI layout but adds stronger color, light sharpening, CRF 15, slower
-  x264 encoding, and BT.709 metadata.
+- Do not use or advertise alternate render presets. `viral-60-clean` is the
+  only supported preset.
 - Put every final, upload-ready recording, Shorts pack, long compilation, cover,
   caption, manifest, and review sheet under a folder named
   `shortslistosparasubir` inside the run output directory. Intermediate capture,

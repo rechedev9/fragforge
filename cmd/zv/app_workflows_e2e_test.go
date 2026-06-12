@@ -332,11 +332,11 @@ func TestZVBinaryCanonicalWorkflowFlagsAreScopedEndToEnd(t *testing.T) {
 		},
 		{
 			name: "shorts render optional flags",
-			args: []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts", "--killplan", "plan.json", "--publish-dir", "publish", "--preset", "smoke-lineups", "--effects", "effects.lua", "--effects-preset", "none", "--music", "music.wav", "--rhythm", "rhythm.json", "--fps", "24", "--lineup-catalog", "lineups", "--segments", "seg-001", "--limit", "2", "--player-image", "player.png", "--player-key-color", "#000000", "--video-crf", "18", "--video-preset", "slow", "--ffmpeg", "ffmpeg.exe", "--ffprobe", "ffprobe.exe", "--hq-filters", "--audio-normalize", "--quality-checks", "--cover-sheets", "--temporal-smoothing", "--compile-segments", "--covers=false", "--no-covers", "--skip-existing", "--open-gallery", "--dry-run"},
+			args: []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts", "--killplan", "plan.json", "--publish-dir", "publish", "--preset", "viral-60-clean", "--effects", "effects.lua", "--effects-preset", "none", "--music", "music.wav", "--rhythm", "rhythm.json", "--fps", "24", "--lineup-catalog", "lineups", "--segments", "seg-001", "--limit", "2", "--video-crf", "18", "--video-preset", "slow", "--ffmpeg", "ffmpeg.exe", "--ffprobe", "ffprobe.exe", "--hq-filters", "--audio-normalize", "--quality-checks", "--cover-sheets", "--temporal-smoothing", "--compile-segments", "--covers=false", "--no-covers", "--skip-existing", "--open-gallery", "--dry-run"},
 		},
 		{
-			name: "shorts render natural hq2 full plus",
-			args: []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts-natural-hq2-full-plus", "--preset", "natural-hq2-full-plus", "--dry-run"},
+			name: "shorts render standard preset",
+			args: []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts-viral-60-clean", "--preset", "viral-60-clean", "--dry-run"},
 		},
 		{
 			name: "analysis tactical data optional sample",
@@ -1986,9 +1986,9 @@ func TestZVBinaryCanonicalWorkflowDelegatesEndToEnd(t *testing.T) {
 		},
 		{
 			name:           "shorts render",
-			args:           []string{"shorts", "render", "--recording-result", "run/recording/recording-result.json", "--killplan", "run/plan.json", "--out", "run/shorts", "--preset", "smoke-lineups"},
+			args:           []string{"shorts", "render", "--recording-result", "run/recording/recording-result.json", "--killplan", "run/plan.json", "--out", "run/shorts", "--preset", "viral-60-clean"},
 			wantExecutable: executableName("zv-editor"),
-			wantArgs:       []string{"--recording-result", "run/recording/recording-result.json", "--killplan", "run/plan.json", "--out", "run/shorts", "--preset", "smoke-lineups"},
+			wantArgs:       []string{"--recording-result", "run/recording/recording-result.json", "--killplan", "run/plan.json", "--out", "run/shorts", "--preset", "viral-60-clean"},
 		},
 		{
 			name:           "analysis tactical data",

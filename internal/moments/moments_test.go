@@ -60,8 +60,8 @@ func TestBuildDerivesScoredKillMoments(t *testing.T) {
 	if got.Score <= 0.5 {
 		t.Fatalf("score = %v, want > 0.5", got.Score)
 	}
-	if got.DefaultVariant != editor.PresetViral60 {
-		t.Fatalf("default variant = %q, want %q", got.DefaultVariant, editor.PresetViral60)
+	if got.DefaultVariant != editor.PresetViral60Clean {
+		t.Fatalf("default variant = %q, want %q", got.DefaultVariant, editor.PresetViral60Clean)
 	}
 }
 

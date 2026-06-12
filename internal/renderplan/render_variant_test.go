@@ -12,7 +12,7 @@ func TestNewRenderVariantStatePreservesCreatedAt(t *testing.T) {
 	updated := created.Add(time.Minute)
 	previous := NewRenderVariantState(NewRenderVariantStateOptions{
 		JobID:   uuid.New(),
-		Variant: "natural-hq2-full",
+		Variant: "viral-60-clean",
 		Status:  RenderVariantStatusQueued,
 		Now:     created,
 	})

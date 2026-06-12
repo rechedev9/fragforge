@@ -8,12 +8,7 @@ import (
 )
 
 func TestLoadoutForVariantDerivesFromPresetRegistry(t *testing.T) {
-	for _, variant := range []string{
-		editor.PresetViral60,
-		editor.PresetShortNaturalHQ2Full,
-		editor.PresetShortNaturalHQ2FullPlus,
-		editor.PresetSmokeLineups,
-	} {
+	for _, variant := range []string{editor.PresetViral60Clean} {
 		t.Run(variant, func(t *testing.T) {
 			got, err := LoadoutForVariant(variant)
 			if err != nil {
@@ -40,12 +35,17 @@ func TestLoadoutForVariantRejectsUnknownVariant(t *testing.T) {
 	if err == nil {
 		t.Fatal("LoadoutForVariant error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), editor.PresetViral60) {
+	if !strings.Contains(err.Error(), editor.PresetViral60Clean) {
 		t.Fatalf("error %q should list valid presets", err)
+	}
+	for _, removed := range []string{editor.PresetShortNaturalHQ2Full, editor.PresetSmokeLineups} {
+		if strings.Contains(err.Error(), removed) {
+			t.Fatalf("error %q listed removed preset %q", err, removed)
+		}
 	}
 }
 
-func TestLoadoutCatalogListsEveryPresetWithViral60First(t *testing.T) {
+func TestLoadoutCatalogListsEveryPresetWithViral60CleanFirst(t *testing.T) {
 	got := LoadoutCatalog()
 	names := editor.PresetNames()
 	if len(got) != len(names) {
@@ -56,7 +56,7 @@ func TestLoadoutCatalogListsEveryPresetWithViral60First(t *testing.T) {
 			t.Fatalf("catalog[%d].Variant = %q, want %q", i, got[i].Variant, name)
 		}
 	}
-	if got[0].Variant != editor.PresetViral60 {
-		t.Fatalf("catalog default = %q, want %q", got[0].Variant, editor.PresetViral60)
+	if got[0].Variant != editor.PresetViral60Clean {
+		t.Fatalf("catalog default = %q, want %q", got[0].Variant, editor.PresetViral60Clean)
 	}
 }

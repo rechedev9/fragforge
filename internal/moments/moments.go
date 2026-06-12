@@ -108,7 +108,7 @@ func buildMoment(index int, segment killplan.Segment, plan killplan.Plan) Moment
 		Victims:         victims(segment),
 		Utility:         utilityEvents(segment),
 		Warnings:        warnings,
-		DefaultVariant:  editor.PresetViral60,
+		DefaultVariant:  editor.PresetViral60Clean,
 	}
 }
 

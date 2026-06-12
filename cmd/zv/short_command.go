@@ -133,8 +133,12 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 	if err != nil {
 		return shortPlan{}, err
 	}
-	if preset.RhythmSync && opts.MusicPath == "" {
-		return shortPlan{}, fmt.Errorf("preset %q requires --music <audio file>", preset.Name)
+	needsRhythm := preset.RhythmSync || intent.BeatSync || opts.MusicPath != ""
+	if needsRhythm && opts.MusicPath == "" {
+		if preset.RhythmSync {
+			return shortPlan{}, fmt.Errorf("preset %q requires --music <audio file>", preset.Name)
+		}
+		return shortPlan{}, fmt.Errorf("beat-synced shorts require --music <audio file>")
 	}
 
 	plan := shortPlan{preset: preset, intent: intent, outDir: shortOutDir(opts)}
@@ -185,7 +189,7 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 	}
 
 	rhythmPath := ""
-	if preset.RhythmSync {
+	if needsRhythm {
 		rhythmPath = filepath.Join(plan.outDir, "rhythm.json")
 		rhythmArgs := []string{"analyze", "--input", opts.MusicPath, "--out", rhythmPath}
 		if killPlanPath != "" {
@@ -207,15 +211,11 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 }
 
 // resolveShortPreset picks the render preset: explicit --preset wins, then a
-// preset named in the prompt, then viral-beatsync for music intent, then the
-// product default (viral-60).
+// preset named in the prompt, then the product default (viral-60-clean).
 func resolveShortPreset(opts shortOptions, intent shortIntent) (editor.RenderPreset, error) {
 	name := opts.Preset
 	if name == "" {
 		name = intent.Preset
-	}
-	if name == "" && intent.BeatSync {
-		name = editor.PresetViralBeatsync
 	}
 	if name == "" {
 		return editor.DefaultPreset(), nil

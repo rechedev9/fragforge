@@ -17,7 +17,7 @@ type shortIntent struct {
 	TargetSteamID string
 	// BestMoments selects a best-moments compilation instead of every kill.
 	BestMoments bool
-	// BeatSync requests music-synced editing and routes to viral-beatsync.
+	// BeatSync requests music-synced editing with the selected/default preset.
 	BeatSync bool
 	// Preset is a render preset named explicitly in the prompt, if any.
 	Preset string
@@ -57,9 +57,6 @@ func interpretShortPrompt(prompt string) shortIntent {
 		BeatSync:      containsAnyKeyword(lowered, shortBeatSyncKeywords),
 		BestMoments:   containsAnyKeyword(lowered, shortBestMomentsKeywords),
 	}
-	if intent.Preset == editor.PresetViralBeatsync {
-		intent.BeatSync = true
-	}
 	intent.TargetName = promptTargetName(lowered)
 	return intent
 }
@@ -83,7 +80,7 @@ func promptTargetName(lowered string) string {
 }
 
 // promptPresetName returns the longest registered preset name mentioned in the
-// prompt, so "natural-hq2-full" wins over its "natural-hq2" prefix.
+// prompt.
 func promptPresetName(lowered string) string {
 	var best string
 	for _, name := range editor.PresetNames() {

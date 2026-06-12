@@ -34,7 +34,7 @@ func TestInterpretShortPrompt(t *testing.T) {
 			want:   shortIntent{TargetName: "niko", BestMoments: true},
 		},
 		{
-			name:   "spanish music intent routes to beat sync",
+			name:   "spanish music intent requests beat sync",
 			prompt: "todas las kills de martinez al ritmo de la musica",
 			want:   shortIntent{TargetName: "martinez", BeatSync: true},
 		},
@@ -45,13 +45,13 @@ func TestInterpretShortPrompt(t *testing.T) {
 		},
 		{
 			name:   "explicit preset name in prompt",
-			prompt: "all kills of martinez with the natural-hq2-full preset",
-			want:   shortIntent{TargetName: "martinez", Preset: "natural-hq2-full"},
+			prompt: "all kills of martinez with the viral-60-clean preset",
+			want:   shortIntent{TargetName: "martinez", Preset: "viral-60-clean"},
 		},
 		{
-			name:   "viral-beatsync preset implies beat sync",
+			name:   "removed viral-beatsync name only requests beat sync",
 			prompt: "todas las kills de martinez con viral-beatsync",
-			want:   shortIntent{TargetName: "martinez", Preset: "viral-beatsync", BeatSync: true},
+			want:   shortIntent{TargetName: "martinez", BeatSync: true},
 		},
 		{
 			name:   "player keyword",

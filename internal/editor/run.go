@@ -265,30 +265,11 @@ func (c Config) validate() error {
 			return fmt.Errorf("unknown effects preset %q", c.EffectsPreset)
 		}
 	}
-	if preset == PresetShortPremiumPlayer {
-		if c.PlayerImagePath == "" {
-			return fmt.Errorf("--player-image is required for preset %q", PresetShortPremiumPlayer)
-		}
-		if _, err := os.Stat(c.PlayerImagePath); err != nil {
-			return fmt.Errorf("player image not found: %w", err)
-		}
-		if !supportedPlayerImage(c.PlayerImagePath) {
-			return fmt.Errorf("player image must be png, jpg, jpeg, or webp")
-		}
-		// PlayerKeyColor is interpolated into a chromakey= filtergraph argument,
-		// so hold it to the same colour allowlist as Lua effect colours.
-		if c.PlayerKeyColor != "" {
-			if err := validateEffectColor("--player-key-color", c.PlayerKeyColor); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
 	if c.PlayerImagePath != "" {
-		return fmt.Errorf("--player-image requires --preset %q", PresetShortPremiumPlayer)
+		return fmt.Errorf("--player-image is not supported by preset %q", preset)
 	}
 	if c.PlayerKeyColor != "" {
-		return fmt.Errorf("--player-key-color requires --preset %q", PresetShortPremiumPlayer)
+		return fmt.Errorf("--player-key-color is not supported by preset %q", preset)
 	}
 	return nil
 }

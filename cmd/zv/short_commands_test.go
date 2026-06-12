@@ -71,8 +71,8 @@ func TestRunShortChainsAllStages(t *testing.T) {
 	wantArgs := [][]string{
 		{"--list-presets"},
 		{"parse", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", filepath.Join(outDir, "killplan.json")},
-		{"--killplan", filepath.Join(outDir, "killplan.json"), "--demo", "inferno.dem", "--out", filepath.Join(outDir, "recording"), "--hlae", `C:\HLAE-2.190.1\HLAE.exe`, "--cs2", `C:\cs2.exe`},
-		{"--recording-result", filepath.Join(outDir, "recording", "recording-result.json"), "--out", filepath.Join(outDir, "shorts"), "--preset", "viral-60", "--killplan", filepath.Join(outDir, "killplan.json"), "--compile-segments"},
+		{"--killplan", filepath.Join(outDir, "killplan.json"), "--demo", "inferno.dem", "--out", filepath.Join(outDir, "recording"), "--hlae", `C:\HLAE-2.190.1\HLAE.exe`, "--cs2", `C:\cs2.exe`, "--hud", "deathnotices"},
+		{"--recording-result", filepath.Join(outDir, "recording", "recording-result.json"), "--out", filepath.Join(outDir, "shorts"), "--preset", "viral-60-clean", "--killplan", filepath.Join(outDir, "killplan.json"), "--compile-segments"},
 	}
 	wantBinaries := []string{"zv-editor", "zv-parser", "zv-recorder", "zv-editor"}
 	for i, call := range runner.calls {
@@ -86,7 +86,7 @@ func TestRunShortChainsAllStages(t *testing.T) {
 	for _, wantLine := range []string{
 		"player: 76561198000000000 (martinez)",
 		"selection: all kills (one compiled short)",
-		"preset: viral-60 (1080x1920 @ 60fps)",
+		"preset: viral-60-clean (1080x1920 @ 60fps)",
 		"[1/3] parsing demo...",
 		"[2/3] recording segments with HLAE/CS2...",
 		"[3/3] rendering short and publish pack...",
@@ -145,7 +145,7 @@ func TestRunShortFailsFastWhenEditorPresetIsMissing(t *testing.T) {
 	if got, want := len(runner.calls), 1; got != want {
 		t.Fatalf("calls len = %d, want %d: %#v", got, want, runner.calls)
 	}
-	for _, want := range []string{`does not know preset "viral-60"`, "scripts/build.ps1"} {
+	for _, want := range []string{`does not know preset "viral-60-clean"`, "scripts/build.ps1"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, missing %q", stderr.String(), want)
 		}
@@ -208,7 +208,7 @@ func TestRunShortBeatSyncPromptAddsRhythmStage(t *testing.T) {
 	}
 	renderArgs := strings.Join(runner.calls[4].Args, " ")
 	for _, want := range []string{
-		"--preset viral-beatsync",
+		"--preset viral-60-clean",
 		"--music track.mp3",
 		"--rhythm " + filepath.Join(outDir, "rhythm.json"),
 		"--compile-segments",
@@ -251,7 +251,7 @@ func TestRunShortCleanPresetRecordsDeathnoticesHUD(t *testing.T) {
 	}
 }
 
-func TestRunShortDefaultPresetKeepsGameplayHUD(t *testing.T) {
+func TestRunShortDefaultPresetRecordsDeathnoticesHUD(t *testing.T) {
 	setShortCaptureEnv(t)
 	runner := &multiRunner{}
 	var stdout, stderr strings.Builder
@@ -269,8 +269,8 @@ func TestRunShortDefaultPresetKeepsGameplayHUD(t *testing.T) {
 		t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
 	}
 	recorderArgs := strings.Join(runner.calls[2].Args, " ")
-	if strings.Contains(recorderArgs, "--hud") {
-		t.Fatalf("recorder args = %q, want no --hud flag for full-UI presets", recorderArgs)
+	if !strings.Contains(recorderArgs, "--hud deathnotices") {
+		t.Fatalf("recorder args = %q, missing --hud deathnotices", recorderArgs)
 	}
 }
 
@@ -293,7 +293,7 @@ func TestRunShortFromRecordingSkipsParseAndRecord(t *testing.T) {
 	if got, want := len(runner.calls), 2; got != want {
 		t.Fatalf("calls len = %d, want %d: %#v", got, want, runner.calls)
 	}
-	if got, want := strings.Join(runner.calls[1].Args, " "), "--recording-result "+filepath.Join(outDir, "recording", "recording-result.json")+" --out "+filepath.Join(outDir, "shorts")+" --preset viral-60 --compile-segments"; got != want {
+	if got, want := strings.Join(runner.calls[1].Args, " "), "--recording-result "+filepath.Join(outDir, "recording", "recording-result.json")+" --out "+filepath.Join(outDir, "shorts")+" --preset viral-60-clean --compile-segments"; got != want {
 		t.Fatalf("render args = %q, want %q", got, want)
 	}
 	if !strings.Contains(stdout.String(), "player: from existing recording") {
@@ -319,7 +319,7 @@ func TestRunShortDryRunExecutesNoStages(t *testing.T) {
 		t.Fatalf("calls len = %d, want 0: %#v", got, runner.calls)
 	}
 	for _, wantLine := range []string{
-		"preset: viral-60 (1080x1920 @ 60fps)",
+		"preset: viral-60-clean (1080x1920 @ 60fps)",
 		"[1/3] parsing demo: zv-parser parse --demo inferno.dem --steamid 76561198000000000",
 		"dry-run: no stages executed",
 	} {
@@ -367,7 +367,7 @@ func TestRunShortValidationErrors(t *testing.T) {
 		{
 			name:       "beat sync requires music",
 			args:       []string{"zv", "short", "inferno.dem", "--prompt", "all kills of 76561198000000000 with music", "--dry-run"},
-			wantStderr: `preset "viral-beatsync" requires --music`,
+			wantStderr: `beat-synced shorts require --music`,
 		},
 		{
 			name:       "unresolved player name",

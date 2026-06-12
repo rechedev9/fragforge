@@ -1669,9 +1669,9 @@ func TestRunCanonicalSkillWorkflowDelegatesThroughLocalBinEndToEnd(t *testing.T)
 		},
 		{
 			name:           "shorts render",
-			argv:           []string{"zv", "shorts", "render", "--recording-result", "run/recording/recording-result.json", "--killplan", "run/plan.json", "--out", "run/shorts", "--preset", "smoke-lineups"},
+			argv:           []string{"zv", "shorts", "render", "--recording-result", "run/recording/recording-result.json", "--killplan", "run/plan.json", "--out", "run/shorts", "--preset", "viral-60-clean"},
 			wantExecutable: executableName("zv-editor"),
-			wantArgs:       []string{"--recording-result", "run/recording/recording-result.json", "--killplan", "run/plan.json", "--out", "run/shorts", "--preset", "smoke-lineups"},
+			wantArgs:       []string{"--recording-result", "run/recording/recording-result.json", "--killplan", "run/plan.json", "--out", "run/shorts", "--preset", "viral-60-clean"},
 		},
 	}
 

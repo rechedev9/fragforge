@@ -3,7 +3,7 @@
 `zv short` is the primary product workflow: drop a `.dem` file, describe the
 Short in plain Spanish or English, and get an upload-ready vertical video.
 Output is always 1080x1920 @ 60fps by construction of the render preset
-registry (`internal/editor/preset.go`); the default preset is `viral-60`.
+registry (`internal/editor/preset.go`); the default preset is `viral-60-clean`.
 
 The command chains the existing stage binaries (zv-parser, zv-recorder,
 zv-rhythm, zv-editor) with stage logging and stops with an actionable error
@@ -25,7 +25,7 @@ All kills of a player, default viral edit:
 ./bin/zv short testdata/foo.dem --prompt "haz un short con todas las kills de martinez" --target-steamid 76561198000000000 --dry-run
 ```
 
-Best moments, beat-synced to a track (routes to the viral-beatsync preset and
+Best moments, beat-synced to a track (keeps the selected/default preset and
 adds the music analysis stage):
 
 ```bash
@@ -60,12 +60,13 @@ Prompts are interpreted with deterministic keyword and regex rules
 | --- | --- |
 | "todas las kills", "all kills" (default) | one compiled Short containing every kill |
 | "mejores", "best", "highlights" | best-moments compilation (top 5 segments) |
-| "musica", "music", "beat", "ritmo", "song" | beat-synced edit: preset `viral-beatsync`, requires `--music` |
+| "musica", "music", "beat", "ritmo", "song" | beat-synced edit with the selected/default preset; requires `--music` |
 | a 17-digit SteamID64 in the prompt | selects the target player |
 | a registered preset name in the prompt | selects that preset |
 
 Preset resolution order: explicit `--preset` flag, then a preset named in the
-prompt, then `viral-beatsync` for music intent, then the default `viral-60`.
+prompt, then the default `viral-60-clean`. When music is provided, the command
+adds rhythm analysis and passes the generated `rhythm.json` to the render.
 
 When the prompt only names a player (no SteamID64), the command fails with a
 clear error asking for `--target-steamid`; list candidates with

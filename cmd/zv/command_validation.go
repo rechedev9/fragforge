@@ -322,8 +322,6 @@ func commandValueFlags(commandName string, required []string) []string {
 			"--lineup-catalog",
 			"--segments",
 			"--limit",
-			"--player-image",
-			"--player-key-color",
 			"--video-crf",
 			"--video-preset",
 			"--ffmpeg",

@@ -169,7 +169,7 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 	}
 	for _, want := range []string{
 		"../prompts/short-001-seg-001-cover.md",
-		"preset <span>viral-60</span>",
+		"preset <span>viral-60-clean</span>",
 		"video <span>crf 16 / slow</span>",
 		"id=\"search\"",
 		"data-copy-target=\".caption\"",
@@ -193,6 +193,7 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 }
 
 func TestRunNaturalHQ3AppliesStoredPresetDefaults(t *testing.T) {
+	t.Skip("natural-hq3 preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -225,6 +226,7 @@ func TestRunNaturalHQ3AppliesStoredPresetDefaults(t *testing.T) {
 }
 
 func TestRunNaturalHQ2FullPlusAppliesStoredPresetDefaults(t *testing.T) {
+	t.Skip("natural-hq2-full-plus preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -288,6 +290,7 @@ func TestRunRejectsInvalidVideoEncodingOptions(t *testing.T) {
 }
 
 func TestRunNaturalHQAppliesStoredPresetDefaults(t *testing.T) {
+	t.Skip("natural-hq preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -326,6 +329,7 @@ func TestRunNaturalHQAppliesStoredPresetDefaults(t *testing.T) {
 }
 
 func TestRunNaturalHQ3SmoothAppliesTemporalSmoothing(t *testing.T) {
+	t.Skip("natural-hq3-smooth preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -395,6 +399,7 @@ func TestRunSkipExistingReusesRenderedFiles(t *testing.T) {
 }
 
 func TestRunPremiumPlayerRequiresPlayerImage(t *testing.T) {
+	t.Skip("short-premium-player preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	_, err := Run(context.Background(), Config{
@@ -423,12 +428,13 @@ func TestRunCleanPresetRejectsPlayerImage(t *testing.T) {
 		FFmpegPath:          filepath.Join(dir, "missing-ffmpeg"),
 		DryRun:              true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "--player-image requires") {
+	if err == nil || !strings.Contains(err.Error(), "--player-image is not supported") {
 		t.Fatalf("Run error = %v, want player image rejected for clean preset", err)
 	}
 }
 
 func TestRunPremiumPlayerWithFakeFFmpegWritesResults(t *testing.T) {
+	t.Skip("short-premium-player preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")

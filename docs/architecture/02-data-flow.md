@@ -50,7 +50,7 @@ Composer    --(PUT composed clip)----------> Object Storage
 
 - Los efectos se aplican **por segmento**, no sobre el clip final concatenado. Razón: el FFmpeg filtergraph es más simple y reusa fácilmente caché de segmentos individuales si el usuario re-renderiza con otra música.
 - La foundation actual solo concatena segmentos en `final.mp4`; efectos, overlays y música quedan como siguientes slices.
-- Los renders de variantes (`POST /api/jobs/{id}/renders/{variant}`) validan la variante contra el registro de presets de `internal/editor/preset.go`; si el task no trae variante, el worker usa el default `viral-60`. Ver "Render presets" en [`01-components.md`](01-components.md).
+- Los renders de variantes (`POST /api/jobs/{id}/renders/{variant}`) validan la variante contra el registro de presets de `internal/editor/preset.go`; si el task no trae variante, el worker usa el default `viral-60-clean`. Ver "Render presets" en [`01-components.md`](01-components.md).
 
 ## 5. Mezcla de música + corte al beat
 

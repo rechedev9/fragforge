@@ -284,11 +284,8 @@ func TestListLoadoutsReturnsCatalog(t *testing.T) {
 	if rw.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
 	}
-	if !strings.Contains(rw.Body.String(), editor.PresetShortNaturalHQ2Full) {
+	if !strings.Contains(rw.Body.String(), editor.PresetViral60Clean) {
 		t.Fatalf("body missing loadout: %s", rw.Body.String())
-	}
-	if !strings.Contains(rw.Body.String(), editor.PresetViral60) {
-		t.Fatalf("body missing default loadout: %s", rw.Body.String())
 	}
 }
 
@@ -318,15 +315,15 @@ func TestListPresetsReturnsRegistry(t *testing.T) {
 	if err := json.Unmarshal(rw.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Default != editor.PresetViral60 {
-		t.Fatalf("default = %q, want %q", resp.Default, editor.PresetViral60)
+	if resp.Default != editor.PresetViral60Clean {
+		t.Fatalf("default = %q, want %q", resp.Default, editor.PresetViral60Clean)
 	}
 	if got, want := len(resp.Presets), len(editor.PresetNames()); got != want {
 		t.Fatalf("presets = %d, want %d", got, want)
 	}
 	first := resp.Presets[0]
-	if first.Name != editor.PresetViral60 || !first.Default || first.Description == "" {
-		t.Fatalf("first preset = %#v, want default %s", first, editor.PresetViral60)
+	if first.Name != editor.PresetViral60Clean || !first.Default || first.Description == "" {
+		t.Fatalf("first preset = %#v, want default %s", first, editor.PresetViral60Clean)
 	}
 	if first.FPS != 60 || first.Width != 1080 || first.Height != 1920 {
 		t.Fatalf("first preset geometry = %#v, want 1080x1920@60", first)
@@ -770,7 +767,7 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -787,13 +784,13 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.JobID != j.ID || payload.Variant != editor.PresetShortNaturalHQ2Full {
-		t.Fatalf("payload = %#v, want job %s variant %s", payload, j.ID, editor.PresetShortNaturalHQ2Full)
+	if payload.JobID != j.ID || payload.Variant != editor.PresetViral60Clean {
+		t.Fatalf("payload = %#v, want job %s variant %s", payload, j.ID, editor.PresetViral60Clean)
 	}
 	if len(queue.options) != 1 || !hasAsynqOption(queue.options[0], "Unique(") {
 		t.Fatalf("enqueue options = %#v, want Unique option", queue.options)
 	}
-	statusKey, err := artifacts.RenderVariantStatusKey(j.ID, editor.PresetShortNaturalHQ2Full)
+	statusKey, err := artifacts.RenderVariantStatusKey(j.ID, editor.PresetViral60Clean)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -811,7 +808,7 @@ func TestGetRenderVariantReturnsQueuedState(t *testing.T) {
 	store := newFakeStorage()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	loadout, err := renderplan.LoadoutForVariant(editor.PresetShortNaturalHQ2Full)
+	loadout, err := renderplan.LoadoutForVariant(editor.PresetViral60Clean)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -823,7 +820,7 @@ func TestGetRenderVariantReturnsQueuedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	statusKey, err := artifacts.RenderVariantStatusKey(j.ID, editor.PresetShortNaturalHQ2Full)
+	statusKey, err := artifacts.RenderVariantStatusKey(j.ID, editor.PresetViral60Clean)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +829,7 @@ func TestGetRenderVariantReturnsQueuedState(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Get("/api/jobs/{id}/renders/{variant}", h.GetRenderVariant)
-	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -874,8 +871,7 @@ func TestStartRenderVariantValidatesAgainstPresetRegistry(t *testing.T) {
 		variant    string
 		wantStatus int
 	}{
-		{name: "default viral preset", variant: editor.PresetViral60, wantStatus: http.StatusAccepted},
-		{name: "known natural preset", variant: editor.PresetShortNaturalHQ2Full, wantStatus: http.StatusAccepted},
+		{name: "registered preset", variant: editor.PresetViral60Clean, wantStatus: http.StatusAccepted},
 		{name: "unknown preset", variant: "made-up-preset", wantStatus: http.StatusBadRequest},
 	}
 	for _, tc := range cases {
@@ -899,7 +895,7 @@ func TestStartRenderVariantValidatesAgainstPresetRegistry(t *testing.T) {
 				if len(queue.enqueued) != 0 {
 					t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
 				}
-				if !strings.Contains(rw.Body.String(), editor.PresetViral60) {
+				if !strings.Contains(rw.Body.String(), editor.PresetViral60Clean) {
 					t.Fatalf("error body should list valid presets: %s", rw.Body.String())
 				}
 				return
@@ -920,7 +916,7 @@ func TestStartRenderVariantRejectsWrongStatus(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -937,11 +933,11 @@ func TestGetRenderVariantReturnsReadyArtifactStatus(t *testing.T) {
 	store := newFakeStorage()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	key, err := artifacts.RenderVariantResultKey(j.ID, editor.PresetShortNaturalHQ2Full)
+	key, err := artifacts.RenderVariantResultKey(j.ID, editor.PresetViral60Clean)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := editor.Result{Preset: editor.PresetShortNaturalHQ2Full}
+	result := editor.Result{Preset: editor.PresetViral60Clean}
 	b, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
@@ -951,7 +947,7 @@ func TestGetRenderVariantReturnsReadyArtifactStatus(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Get("/api/jobs/{id}/renders/{variant}", h.GetRenderVariant)
-	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1017,7 +1013,7 @@ func TestGetRenderPublishBoardReturnsReadyStatus(t *testing.T) {
 	store := newFakeStorage()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	variant := editor.PresetShortNaturalHQ2Full
+	variant := editor.PresetViral60Clean
 	resultKey, err := artifacts.RenderVariantResultKey(j.ID, variant)
 	if err != nil {
 		t.Fatal(err)
@@ -1068,7 +1064,7 @@ func TestGetRenderPublishBoardReturnsReadyStatus(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Get("/api/jobs/{id}/renders/{variant}/publish", h.GetRenderPublishBoard)
-	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/publish", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/publish", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1091,14 +1087,14 @@ func TestSetRenderUploadedWritesLocalMarker(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}/publish/uploaded", h.SetRenderUploaded)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/publish/uploaded", strings.NewReader(`{"uploaded":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/publish/uploaded", strings.NewReader(`{"uploaded":true}`))
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
 	if rw.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
 	}
-	key, err := artifacts.RenderVariantUploadStatusKey(j.ID, editor.PresetShortNaturalHQ2Full)
+	key, err := artifacts.RenderVariantUploadStatusKey(j.ID, editor.PresetViral60Clean)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1115,7 +1111,7 @@ func TestSetRenderUploadedRejectsLargeJSONBody(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}/publish/uploaded", h.SetRenderUploaded)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/publish/uploaded", strings.NewReader(`{`+strings.Repeat(" ", maxJSONBodyBytes+1)))
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/publish/uploaded", strings.NewReader(`{`+strings.Repeat(" ", maxJSONBodyBytes+1)))
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1133,7 +1129,7 @@ func TestStartCaptionAgentEnqueuesCodexTask(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}/agent/captions", h.StartCaptionAgent)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/agent/captions", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/agent/captions", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1153,7 +1149,7 @@ func TestGetCaptionAgentStreamsStoredResult(t *testing.T) {
 	store := newFakeStorage()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	key, err := artifacts.RenderVariantAgentResultKey(j.ID, editor.PresetShortNaturalHQ2Full, renderplan.AgentKindCaptionCandidates)
+	key, err := artifacts.RenderVariantAgentResultKey(j.ID, editor.PresetViral60Clean, renderplan.AgentKindCaptionCandidates)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1162,7 +1158,7 @@ func TestGetCaptionAgentStreamsStoredResult(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Get("/api/jobs/{id}/renders/{variant}/agent/captions", h.GetCaptionAgent)
-	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/agent/captions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/agent/captions", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1179,7 +1175,7 @@ func TestGetRenderQualityReturnsReadyReport(t *testing.T) {
 	store := newFakeStorage()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	variant := editor.PresetShortNaturalHQ2Full
+	variant := editor.PresetViral60Clean
 	resultKey, err := artifacts.RenderVariantResultKey(j.ID, variant)
 	if err != nil {
 		t.Fatal(err)
@@ -1206,7 +1202,7 @@ func TestGetRenderQualityReturnsReadyReport(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Get("/api/jobs/{id}/renders/{variant}/quality", h.GetRenderQuality)
-	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/quality", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/quality", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1225,7 +1221,7 @@ func TestRenderArtifactRoutesStreamKnownArtifacts(t *testing.T) {
 	store := newFakeStorage()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	variant := editor.PresetShortNaturalHQ2Full
+	variant := editor.PresetViral60Clean
 	videoKey, err := artifacts.RenderVariantVideoKey(j.ID, variant, "seg-001")
 	if err != nil {
 		t.Fatal(err)
@@ -1235,7 +1231,7 @@ func TestRenderArtifactRoutesStreamKnownArtifacts(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Get("/api/jobs/{id}/renders/{variant}/videos/{name}", h.GetRenderVideo)
-	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/videos/seg-001", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/videos/seg-001", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1258,7 +1254,7 @@ func TestRenderArtifactRoutesRejectUnsafeArtifactName(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Get("/api/jobs/{id}/renders/{variant}/videos/{name}", h.GetRenderVideo)
-	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/natural-hq2-full/videos/seg-001.mp4", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/videos/seg-001.mp4", nil)
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1272,7 +1268,7 @@ func TestRenderPackAndEditDocumentRoutesStreamJSON(t *testing.T) {
 	store := newFakeStorage()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	variant := editor.PresetShortNaturalHQ2Full
+	variant := editor.PresetViral60Clean
 	packKey, err := artifacts.RenderVariantPackManifestKey(j.ID, variant)
 	if err != nil {
 		t.Fatal(err)
@@ -1289,8 +1285,8 @@ func TestRenderPackAndEditDocumentRoutesStreamJSON(t *testing.T) {
 	r.Get("/api/jobs/{id}/renders/{variant}/pack", h.GetRenderPack)
 	r.Get("/api/jobs/{id}/renders/{variant}/edit-document", h.GetRenderEditDocument)
 	for _, path := range []string{
-		"/api/jobs/" + j.ID.String() + "/renders/natural-hq2-full/pack",
-		"/api/jobs/" + j.ID.String() + "/renders/natural-hq2-full/edit-document",
+		"/api/jobs/" + j.ID.String() + "/renders/viral-60-clean/pack",
+		"/api/jobs/" + j.ID.String() + "/renders/viral-60-clean/edit-document",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rw := httptest.NewRecorder()
@@ -1421,7 +1417,7 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 	}{
 		{"/", "FragForge Workbench"},
 		{"/api/jobs", j.ID.String()},
-		{"/api/loadouts", editor.PresetShortNaturalHQ2Full},
+		{"/api/loadouts", editor.PresetViral60Clean},
 		{"/api/jobs/" + j.ID.String() + "/moments", "MartinezSa"},
 	} {
 		if body := get(check.path); !strings.Contains(body, check.want) {
@@ -1429,7 +1425,7 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 		}
 	}
 
-	renderPath := "/api/jobs/" + j.ID.String() + "/renders/natural-hq2-full"
+	renderPath := "/api/jobs/" + j.ID.String() + "/renders/viral-60-clean"
 	post(renderPath, "", false, http.StatusUnauthorized)
 	post(renderPath, "", true, http.StatusAccepted)
 	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeRenderVariant {
@@ -1439,12 +1435,12 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 		t.Fatalf("render state missing queued: %s", body)
 	}
 
-	resultKey, err := artifacts.RenderVariantResultKey(j.ID, editor.PresetShortNaturalHQ2Full)
+	resultKey, err := artifacts.RenderVariantResultKey(j.ID, editor.PresetViral60Clean)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result := editor.Result{
-		Preset: editor.PresetShortNaturalHQ2Full,
+		Preset: editor.PresetViral60Clean,
 		Shorts: []editor.ShortResult{{
 			SegmentID: "seg-001",
 			PublishArtifact: recording.RecordingArtifact{
@@ -1466,7 +1462,7 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 		artifacts.RenderVariantGalleryKey,
 		artifacts.RenderVariantPublishSummaryKey,
 	} {
-		key, err := keyFn(j.ID, editor.PresetShortNaturalHQ2Full)
+		key, err := keyFn(j.ID, editor.PresetViral60Clean)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1477,7 +1473,7 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 		artifacts.RenderVariantCoverKey,
 		artifacts.RenderVariantCaptionKey,
 	} {
-		key, err := keyFn(j.ID, editor.PresetShortNaturalHQ2Full, "seg-001")
+		key, err := keyFn(j.ID, editor.PresetViral60Clean, "seg-001")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1500,7 +1496,7 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 	if len(queue.enqueued) != 2 || queue.enqueued[1].Type() != tasks.TypeCodexAgent {
 		t.Fatalf("queue after agent = %#v", queue.enqueued)
 	}
-	agentKey, err := artifacts.RenderVariantAgentResultKey(j.ID, editor.PresetShortNaturalHQ2Full, renderplan.AgentKindCaptionCandidates)
+	agentKey, err := artifacts.RenderVariantAgentResultKey(j.ID, editor.PresetViral60Clean, renderplan.AgentKindCaptionCandidates)
 	if err != nil {
 		t.Fatal(err)
 	}

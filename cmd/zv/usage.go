@@ -58,7 +58,7 @@ Flags:
 Prompt rules (deterministic keywords, no model calls):
   "todas las kills" / "all kills"        one compiled Short with every kill (default)
   "mejores" / "best" / "highlights"      best-moments compilation (top segments)
-  "música" / "music" / "beat" / "ritmo"  beat-synced edit; uses preset viral-beatsync and needs --music
+  "música" / "music" / "beat" / "ritmo"  beat-synced edit; needs --music
   a SteamID64 in the prompt              selects the target player
   a preset name in the prompt            selects that preset
 `

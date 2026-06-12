@@ -51,8 +51,9 @@ Use `--dry-run` first when changing recording settings.
   --recording-result <run>\recording\recording-result.json `
   --killplan <run>\plan-utility.json `
   --out <run>\shorts-utility `
-  --preset smoke-lineups `
-  --lineup-catalog data\lineups
+  --preset viral-60-clean `
+  --lineup-catalog data\lineups `
+  --effects-preset smoke-lineups
 ```
 
 Use `--skip-existing` only when changing captions/metadata but not burned-in overlay text.

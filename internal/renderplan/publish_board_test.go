@@ -9,7 +9,7 @@ import (
 func TestNewPublishBoardMarksReadyWhenAllItemsReady(t *testing.T) {
 	board := NewPublishBoard(NewPublishBoardOptions{
 		JobID:   uuid.New(),
-		Variant: "natural-hq2-full",
+		Variant: "viral-60-clean",
 		Items: []PublishBoardItem{{
 			SegmentID:    "seg-001",
 			VideoReady:   true,
@@ -29,7 +29,7 @@ func TestNewPublishBoardMarksReadyWhenAllItemsReady(t *testing.T) {
 func TestNewPublishBoardSurfacesMissingCoverBeforeCaption(t *testing.T) {
 	board := NewPublishBoard(NewPublishBoardOptions{
 		JobID:   uuid.New(),
-		Variant: "natural-hq2-full",
+		Variant: "viral-60-clean",
 		Items: []PublishBoardItem{{
 			SegmentID:    "seg-001",
 			VideoReady:   true,
@@ -48,7 +48,7 @@ func TestNewPublishBoardSurfacesMissingCoverBeforeCaption(t *testing.T) {
 func TestNewPublishBoardMarksNeedsCaption(t *testing.T) {
 	board := NewPublishBoard(NewPublishBoardOptions{
 		JobID:   uuid.New(),
-		Variant: "natural-hq2-full",
+		Variant: "viral-60-clean",
 		Items: []PublishBoardItem{{
 			SegmentID:    "seg-001",
 			VideoReady:   true,
@@ -65,7 +65,7 @@ func TestNewPublishBoardMarksNeedsCaption(t *testing.T) {
 func TestNewPublishBoardMarksFailedFromRenderError(t *testing.T) {
 	board := NewPublishBoard(NewPublishBoardOptions{
 		JobID:   uuid.New(),
-		Variant: "natural-hq2-full",
+		Variant: "viral-60-clean",
 		Error:   "render failed",
 		Items: []PublishBoardItem{{
 			SegmentID: "seg-001",
@@ -80,7 +80,7 @@ func TestNewPublishBoardMarksFailedFromRenderError(t *testing.T) {
 func TestNewPublishBoardMarksUploadedWhenReadyAndUploaded(t *testing.T) {
 	board := NewPublishBoard(NewPublishBoardOptions{
 		JobID:    uuid.New(),
-		Variant:  "natural-hq2-full",
+		Variant:  "viral-60-clean",
 		Uploaded: true,
 		Items: []PublishBoardItem{{
 			SegmentID:    "seg-001",

@@ -35,7 +35,7 @@ type OutputShape struct {
 }
 
 // LoadoutCatalog lists one loadout per registered render preset, in registry
-// order. The first entry is the product default (viral-60).
+// order. The first entry is the product default (viral-60-clean).
 func LoadoutCatalog() []Loadout {
 	names := editor.PresetNames()
 	out := make([]Loadout, 0, len(names))

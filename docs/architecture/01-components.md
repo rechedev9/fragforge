@@ -147,8 +147,8 @@ un preset es añadir una entrada ahí; el catálogo de loadouts
 Reglas de producto:
 
 - Toda salida es 1080×1920 a 60fps (vertical Shorts).
-- El default es `viral-60`: demo + prompt → Short con edición viral
-  (hook text, punch-ins, kill counter). Ver
+- El default es `viral-60-clean`: demo + prompt → Short clean POV con edición
+  viral (kill notices, hook text, punch-ins, kill counter). Ver
   [`research/11-viral-cs2-vertical-editing.md`](../research/11-viral-cs2-vertical-editing.md).
 - Una variante desconocida se rechaza con la lista de presets válidos.
 

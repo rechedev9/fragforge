@@ -14,18 +14,12 @@ const (
 )
 
 const (
-	// PresetViral60 is the default render preset: the natural-hq2-full
-	// full-UI 60fps base plus the aggressive viral-ultra overlay pack
-	// (cold-open hook text, kill punch-ins, kill counter, milestone labels).
-	PresetViral60 = "viral-60"
-
-	// PresetViralBeatsync is viral-60 for beat-synced montages: it requires
-	// music, a rhythm analysis json, and compile-segments so cuts land on
-	// the detected beat grid.
+	// Legacy preset name constants are kept only for old artifact/test
+	// compatibility. The only registered preset is PresetViral60Clean.
+	PresetViral60       = "viral-60"
 	PresetViralBeatsync = "viral-beatsync"
 
-	// PresetViral60Clean is viral-60 recorded without the gameplay HUD: a
-	// clean POV where only kill notices appear, plus the viral overlay pack.
+	// PresetViral60Clean is the sole registered preset.
 	PresetViral60Clean = "viral-60-clean"
 )
 
@@ -93,42 +87,12 @@ type presetGrade = struct {
 }
 
 // renderPresets is the single source of preset knowledge: encoder defaults,
-// filtergraph layout, default effects, feature flags, and grading.
+// filtergraph layout, default effects, feature flags, and grading. The first
+// entry is the product default.
 var renderPresets = []RenderPreset{
 	{
-		Name:           PresetViral60,
-		Description:    "default viral edit: full-UI 60fps gameplay with hook text, punch-ins, and kill counter overlays",
-		FPS:            60,
-		Width:          1080,
-		Height:         1920,
-		VideoCRF:       NaturalHQVideoCRF,
-		VideoPreset:    NaturalHQVideoPreset,
-		EffectsPreset:  EffectsPresetViralUltra,
-		FilterKind:     FilterKindFullFrame,
-		HQFilters:      true,
-		AudioNormalize: true,
-		QualityChecks:  true,
-		CoverSheets:    true,
-	},
-	{
-		Name:           PresetViralBeatsync,
-		Description:    "viral-60 for montages with cuts on the detected beat grid; requires music, rhythm json, and compile-segments",
-		FPS:            60,
-		Width:          1080,
-		Height:         1920,
-		VideoCRF:       NaturalHQVideoCRF,
-		VideoPreset:    NaturalHQVideoPreset,
-		EffectsPreset:  EffectsPresetViralUltra,
-		FilterKind:     FilterKindFullFrame,
-		HQFilters:      true,
-		AudioNormalize: true,
-		QualityChecks:  true,
-		CoverSheets:    true,
-		RhythmSync:     true,
-	},
-	{
 		Name:           PresetViral60Clean,
-		Description:    "viral-60 on a clean HUD-less POV; only kill notices appear when kills happen",
+		Description:    "default clean viral edit: HUD-less 60fps POV with kill notices, punch-ins, and kill counter overlays",
 		FPS:            60,
 		Width:          1080,
 		Height:         1920,
@@ -141,153 +105,6 @@ var renderPresets = []RenderPreset{
 		QualityChecks:  true,
 		CoverSheets:    true,
 		HUDMode:        "deathnotices",
-	},
-	{
-		Name:          PresetShortClean,
-		Description:   "restrained labels, vertical POV crop, and subtle kill punch-ins",
-		FPS:           60,
-		Width:         1080,
-		Height:        1920,
-		VideoCRF:      DefaultVideoCRF,
-		VideoPreset:   DefaultVideoPreset,
-		EffectsPreset: EffectsPresetBuiltinClean,
-		FilterKind:    FilterKindCropCenter,
-	},
-	{
-		Name:          PresetShortPremiumPlayer,
-		Description:   "short-clean base plus a player cutout overlay and larger headline",
-		FPS:           60,
-		Width:         1080,
-		Height:        1920,
-		VideoCRF:      DefaultVideoCRF,
-		VideoPreset:   DefaultVideoPreset,
-		EffectsPreset: EffectsPresetBuiltinClean,
-		FilterKind:    FilterKindCropCenter,
-	},
-	{
-		Name:           PresetShortViralSquare,
-		Description:    "blurred vertical background with centered square gameplay for top/bottom copy",
-		FPS:            60,
-		Width:          1080,
-		Height:         1920,
-		VideoCRF:       NaturalHQVideoCRF,
-		VideoPreset:    NaturalHQVideoPreset,
-		EffectsPreset:  EffectsPresetBuiltinClean,
-		FilterKind:     FilterKindViralSquare,
-		HQFilters:      true,
-		AudioNormalize: true,
-		QualityChecks:  true,
-		CoverSheets:    true,
-	},
-	{
-		Name:          PresetShortNaturalHQ,
-		Description:   "unmodified gameplay at higher encode quality for clean local masters",
-		FPS:           60,
-		Width:         1080,
-		Height:        1920,
-		VideoCRF:      NaturalHQVideoCRF,
-		VideoPreset:   NaturalHQVideoPreset,
-		EffectsPreset: EffectsPresetNone,
-		FilterKind:    FilterKindCropCenter,
-	},
-	{
-		Name:           PresetShortNaturalHQ2,
-		Description:    "natural-hq plus FFmpeg quality-of-life checks and contact sheets",
-		FPS:            60,
-		Width:          1080,
-		Height:         1920,
-		VideoCRF:       NaturalHQVideoCRF,
-		VideoPreset:    NaturalHQVideoPreset,
-		EffectsPreset:  EffectsPresetNone,
-		FilterKind:     FilterKindCropCenter,
-		HQFilters:      true,
-		AudioNormalize: true,
-		QualityChecks:  true,
-		CoverSheets:    true,
-	},
-	{
-		Name:           PresetShortNaturalHQ2Full,
-		Description:    "continuous full-UI 9:16 gameplay crop with a mild saturation lift and no scripted effects",
-		FPS:            60,
-		Width:          1080,
-		Height:         1920,
-		VideoCRF:       NaturalHQVideoCRF,
-		VideoPreset:    NaturalHQVideoPreset,
-		EffectsPreset:  EffectsPresetNone,
-		FilterKind:     FilterKindFullFrame,
-		HQFilters:      true,
-		AudioNormalize: true,
-		QualityChecks:  true,
-		CoverSheets:    true,
-		Grade:          presetGrade{Saturation: 1.12},
-	},
-	{
-		Name:            PresetShortNaturalHQ2FullPlus,
-		Description:     "experimental full-frame variant with stronger FFmpeg-only color, sharpening, and mastering settings",
-		FPS:             60,
-		Width:           1080,
-		Height:          1920,
-		VideoCRF:        NaturalHQ2FullPlusVideoCRF,
-		VideoPreset:     NaturalHQ2FullPlusVideoPreset,
-		EffectsPreset:   EffectsPresetNone,
-		FilterKind:      FilterKindFullFrame,
-		HQFilters:       true,
-		AudioNormalize:  true,
-		QualityChecks:   true,
-		CoverSheets:     true,
-		AccurateScaling: true,
-		MasteringBT709:  true,
-		Grade:           presetGrade{Saturation: 1.16, Contrast: 1.02, Gamma: 1.00, Unsharp: true},
-	},
-	{
-		Name:            PresetShortNaturalHQ3,
-		Description:     "experimental hq2 variant with higher encode settings and strict playback/color metadata",
-		FPS:             60,
-		Width:           1080,
-		Height:          1920,
-		VideoCRF:        NaturalHQ3VideoCRF,
-		VideoPreset:     NaturalHQ3VideoPreset,
-		EffectsPreset:   EffectsPresetNone,
-		FilterKind:      FilterKindCropCenter,
-		HQFilters:       true,
-		AudioNormalize:  true,
-		QualityChecks:   true,
-		CoverSheets:     true,
-		AccurateScaling: true,
-		MasteringBT709:  true,
-	},
-	{
-		Name:              PresetShortNaturalHQ3Smooth,
-		Description:       "natural-hq3 comparison with subtle temporal blending at a 60fps upload target",
-		FPS:               60,
-		Width:             1080,
-		Height:            1920,
-		VideoCRF:          NaturalHQ3VideoCRF,
-		VideoPreset:       NaturalHQ3VideoPreset,
-		EffectsPreset:     EffectsPresetNone,
-		FilterKind:        FilterKindCropCenter,
-		HQFilters:         true,
-		AudioNormalize:    true,
-		QualityChecks:     true,
-		CoverSheets:       true,
-		TemporalSmoothing: true,
-		AccurateScaling:   true,
-		MasteringBT709:    true,
-	},
-	{
-		Name:           PresetSmokeLineups,
-		Description:    "natural-hq2 visual baseline plus educational overlays and slow motion for utility throws",
-		FPS:            60,
-		Width:          1080,
-		Height:         1920,
-		VideoCRF:       NaturalHQVideoCRF,
-		VideoPreset:    NaturalHQVideoPreset,
-		EffectsPreset:  EffectsPresetSmokeLineups,
-		FilterKind:     FilterKindSmokeLineups,
-		HQFilters:      true,
-		AudioNormalize: true,
-		QualityChecks:  true,
-		CoverSheets:    true,
 	},
 }
 
@@ -316,9 +133,9 @@ func PresetNames() []string {
 	return names
 }
 
-// DefaultPreset returns the product default render preset (viral-60).
+// DefaultPreset returns the product default render preset (viral-60-clean).
 func DefaultPreset() RenderPreset {
-	preset, _ := PresetByName(PresetViral60)
+	preset, _ := PresetByName(PresetViral60Clean)
 	return preset
 }
 

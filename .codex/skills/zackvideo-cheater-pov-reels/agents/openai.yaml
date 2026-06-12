@@ -1,4 +1,4 @@
 interface:
   display_name: "FragForge Cheater POV Reels"
   short_description: "Build cheater POV death reels from CS2 demos."
-  default_prompt: "Create a FragForge cheater POV reel from a CS2 demo: identify the suspected cheater, extract every time our team kills them, record the killer POV followed by the target POV dying for each death, render in natural-hq2-full, concatenate into one long vertical Short, and QA every kill block before delivery."
+  default_prompt: "Create a FragForge cheater POV reel from a CS2 demo: identify the suspected cheater, extract every time our team kills them, record the killer POV followed by the target POV dying for each death, render in viral-60-clean, concatenate into one long vertical Short, and QA every kill block before delivery."

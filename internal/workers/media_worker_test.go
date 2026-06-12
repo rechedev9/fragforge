@@ -338,8 +338,8 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 		recordingResultPath := argValue(args, "--recording-result")
 		outDir := argValue(args, "--out")
 		publishDir := argValue(args, "--publish-dir")
-		if got := argValue(args, "--preset"); got != editor.PresetShortNaturalHQ2Full {
-			t.Fatalf("--preset = %q, want %q", got, editor.PresetShortNaturalHQ2Full)
+		if got := argValue(args, "--preset"); got != editor.PresetViral60Clean {
+			t.Fatalf("--preset = %q, want %q", got, editor.PresetViral60Clean)
 		}
 		var result recording.RecordingResult
 		if err := readJSONFile(recordingResultPath, &result); err != nil {
@@ -382,7 +382,7 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 			}
 		}
 		rendered := editor.Result{
-			Preset:      editor.PresetShortNaturalHQ2Full,
+			Preset:      editor.PresetViral60Clean,
 			OutputDir:   outDir,
 			PublishDir:  publishDir,
 			GalleryPath: filepath.Join(publishDir, "index.html"),
@@ -408,34 +408,34 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	})
 	w.runner = runner
 
-	if err := w.HandleRenderVariant(context.Background(), renderTask(t, id, editor.PresetShortNaturalHQ2Full)); err != nil {
+	if err := w.HandleRenderVariant(context.Background(), renderTask(t, id, editor.PresetViral60Clean)); err != nil {
 		t.Fatalf("HandleRenderVariant error = %v", err)
 	}
 	if repo.jobs[id].Status != job.StatusRecorded {
 		t.Fatalf("Status = %s, want unchanged recorded", repo.jobs[id].Status)
 	}
 	for _, key := range []string{
-		mustRenderVariantResultKey(t, id, editor.PresetShortNaturalHQ2Full),
-		mustRenderVariantStatusKey(t, id, editor.PresetShortNaturalHQ2Full),
-		mustRenderVariantEditDocumentKey(t, id, editor.PresetShortNaturalHQ2Full),
-		mustRenderVariantEditManifestKey(t, id, editor.PresetShortNaturalHQ2Full),
-		mustRenderVariantPackManifestKey(t, id, editor.PresetShortNaturalHQ2Full),
-		mustRenderVariantPublishSummaryKey(t, id, editor.PresetShortNaturalHQ2Full),
-		mustRenderVariantGalleryKey(t, id, editor.PresetShortNaturalHQ2Full),
-		mustRenderVariantVideoKey(t, id, editor.PresetShortNaturalHQ2Full, "seg-001"),
-		mustRenderVariantCoverKey(t, id, editor.PresetShortNaturalHQ2Full, "seg-001"),
-		mustRenderVariantCaptionKey(t, id, editor.PresetShortNaturalHQ2Full, "seg-001"),
-		mustRenderVariantLogKey(t, id, editor.PresetShortNaturalHQ2Full, "seg-001-render"),
+		mustRenderVariantResultKey(t, id, editor.PresetViral60Clean),
+		mustRenderVariantStatusKey(t, id, editor.PresetViral60Clean),
+		mustRenderVariantEditDocumentKey(t, id, editor.PresetViral60Clean),
+		mustRenderVariantEditManifestKey(t, id, editor.PresetViral60Clean),
+		mustRenderVariantPackManifestKey(t, id, editor.PresetViral60Clean),
+		mustRenderVariantPublishSummaryKey(t, id, editor.PresetViral60Clean),
+		mustRenderVariantGalleryKey(t, id, editor.PresetViral60Clean),
+		mustRenderVariantVideoKey(t, id, editor.PresetViral60Clean, "seg-001"),
+		mustRenderVariantCoverKey(t, id, editor.PresetViral60Clean, "seg-001"),
+		mustRenderVariantCaptionKey(t, id, editor.PresetViral60Clean, "seg-001"),
+		mustRenderVariantLogKey(t, id, editor.PresetViral60Clean, "seg-001-render"),
 	} {
 		if _, ok := store.files[key]; !ok {
 			t.Fatalf("storage missing %s", key)
 		}
 	}
-	if !strings.Contains(string(store.files[mustRenderVariantEditDocumentKey(t, id, editor.PresetShortNaturalHQ2Full)]), "shortslistosparasubir") {
-		t.Fatalf("edit document missing upload-ready root: %s", store.files[mustRenderVariantEditDocumentKey(t, id, editor.PresetShortNaturalHQ2Full)])
+	if !strings.Contains(string(store.files[mustRenderVariantEditDocumentKey(t, id, editor.PresetViral60Clean)]), "shortslistosparasubir") {
+		t.Fatalf("edit document missing upload-ready root: %s", store.files[mustRenderVariantEditDocumentKey(t, id, editor.PresetViral60Clean)])
 	}
 	var state renderplan.RenderVariantState
-	if err := json.Unmarshal(store.files[mustRenderVariantStatusKey(t, id, editor.PresetShortNaturalHQ2Full)], &state); err != nil {
+	if err := json.Unmarshal(store.files[mustRenderVariantStatusKey(t, id, editor.PresetViral60Clean)], &state); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := state.Status, renderplan.RenderVariantStatusReady; got != want {
@@ -463,7 +463,7 @@ func TestRenderWorkerWritesFailedStateWhenEditorFails(t *testing.T) {
 			t.Fatal(err)
 		}
 		result := editor.Result{
-			Preset: editor.PresetShortNaturalHQ2Full,
+			Preset: editor.PresetViral60Clean,
 			Error:  "encoder failed",
 			Shorts: []editor.ShortResult{{
 				SegmentID:   "seg-001",
@@ -485,12 +485,12 @@ func TestRenderWorkerWritesFailedStateWhenEditorFails(t *testing.T) {
 	})
 	w.runner = runner
 
-	err := w.HandleRenderVariant(context.Background(), renderTask(t, id, editor.PresetShortNaturalHQ2Full))
+	err := w.HandleRenderVariant(context.Background(), renderTask(t, id, editor.PresetViral60Clean))
 	if err == nil {
 		t.Fatal("HandleRenderVariant error = nil, want failure")
 	}
 	var state renderplan.RenderVariantState
-	if err := json.Unmarshal(store.files[mustRenderVariantStatusKey(t, id, editor.PresetShortNaturalHQ2Full)], &state); err != nil {
+	if err := json.Unmarshal(store.files[mustRenderVariantStatusKey(t, id, editor.PresetViral60Clean)], &state); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := state.Status, renderplan.RenderVariantStatusFailed; got != want {
@@ -518,7 +518,7 @@ func TestRenderWorkerRejectsUnknownVariant(t *testing.T) {
 	if err == nil {
 		t.Fatal("HandleRenderVariant error = nil, want unknown variant error")
 	}
-	if !strings.Contains(err.Error(), "unknown render variant") || !strings.Contains(err.Error(), editor.PresetViral60) {
+	if !strings.Contains(err.Error(), "unknown render variant") || !strings.Contains(err.Error(), editor.PresetViral60Clean) {
 		t.Fatalf("error = %v, want unknown render variant listing valid presets", err)
 	}
 }
@@ -598,14 +598,14 @@ func TestRenderWorkerSkipsWhenVariantOutputsAlreadyExist(t *testing.T) {
 	id := uuid.New()
 	plan := minimalKillPlan()
 	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
-	putJSON(t, store, mustRenderVariantResultKey(t, id, editor.PresetShortNaturalHQ2Full), editor.Result{
-		Preset: editor.PresetShortNaturalHQ2Full,
+	putJSON(t, store, mustRenderVariantResultKey(t, id, editor.PresetViral60Clean), editor.Result{
+		Preset: editor.PresetViral60Clean,
 		Shorts: []editor.ShortResult{{
 			SegmentID: "seg-001",
 		}},
 	})
-	_ = store.Put(mustRenderVariantPackManifestKey(t, id, editor.PresetShortNaturalHQ2Full), bytes.NewReader([]byte("pack")))
-	_ = store.Put(mustRenderVariantGalleryKey(t, id, editor.PresetShortNaturalHQ2Full), bytes.NewReader([]byte("gallery")))
+	_ = store.Put(mustRenderVariantPackManifestKey(t, id, editor.PresetViral60Clean), bytes.NewReader([]byte("pack")))
+	_ = store.Put(mustRenderVariantGalleryKey(t, id, editor.PresetViral60Clean), bytes.NewReader([]byte("gallery")))
 
 	runner := &fakeRunner{fn: func(context.Context, string, ...string) ([]byte, error) {
 		t.Fatal("runner should not be called when render variant outputs already exist")
@@ -614,7 +614,7 @@ func TestRenderWorkerSkipsWhenVariantOutputsAlreadyExist(t *testing.T) {
 	w := NewRenderWorker(repo, store, RenderWorkerConfig{})
 	w.runner = runner
 
-	if err := w.HandleRenderVariant(context.Background(), renderTask(t, id, editor.PresetShortNaturalHQ2Full)); err != nil {
+	if err := w.HandleRenderVariant(context.Background(), renderTask(t, id, editor.PresetViral60Clean)); err != nil {
 		t.Fatalf("HandleRenderVariant error = %v", err)
 	}
 	if len(runner.calls) != 0 {

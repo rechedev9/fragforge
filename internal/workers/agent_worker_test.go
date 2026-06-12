@@ -21,7 +21,7 @@ func TestAgentWorkerWritesCaptionCandidates(t *testing.T) {
 	store := newFakeStorage()
 	id := uuid.New()
 	_ = store.Put(artifacts.MomentsKey(id), bytes.NewReader([]byte(`{"moments":[{"id":"mom-001"}]}`)))
-	packKey, err := artifacts.RenderVariantPackManifestKey(id, editor.PresetShortNaturalHQ2Full)
+	packKey, err := artifacts.RenderVariantPackManifestKey(id, editor.PresetViral60Clean)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestAgentWorkerWritesCaptionCandidates(t *testing.T) {
 		CodexPath: "codex",
 	})
 	w.runner = runner
-	task, err := tasks.NewCodexAgentTask(id, editor.PresetShortNaturalHQ2Full, renderplan.AgentKindCaptionCandidates)
+	task, err := tasks.NewCodexAgentTask(id, editor.PresetViral60Clean, renderplan.AgentKindCaptionCandidates)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestAgentWorkerWritesCaptionCandidates(t *testing.T) {
 	if err := w.HandleCodexAgent(context.Background(), task); err != nil {
 		t.Fatalf("HandleCodexAgent error = %v", err)
 	}
-	resultKey, err := artifacts.RenderVariantAgentResultKey(id, editor.PresetShortNaturalHQ2Full, renderplan.AgentKindCaptionCandidates)
+	resultKey, err := artifacts.RenderVariantAgentResultKey(id, editor.PresetViral60Clean, renderplan.AgentKindCaptionCandidates)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestAgentWorkerWritesCaptionCandidates(t *testing.T) {
 	if result.Status != "ready" || len(result.Titles) != 1 || result.Titles[0] != "t1" {
 		t.Fatalf("result = %#v", result)
 	}
-	contextKey, err := artifacts.RenderVariantAgentContextKey(id, editor.PresetShortNaturalHQ2Full, renderplan.AgentKindCaptionCandidates)
+	contextKey, err := artifacts.RenderVariantAgentContextKey(id, editor.PresetViral60Clean, renderplan.AgentKindCaptionCandidates)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestAgentWorkerWritesCaptionCandidates(t *testing.T) {
 func TestAgentWorkerRejectsUnknownKind(t *testing.T) {
 	store := newFakeStorage()
 	w := NewAgentWorker(store, AgentWorkerConfig{CodexPath: "codex"})
-	payload, _ := json.Marshal(tasks.CodexAgentPayload{JobID: uuid.New(), Variant: "natural-hq2-full", Kind: "other"})
+	payload, _ := json.Marshal(tasks.CodexAgentPayload{JobID: uuid.New(), Variant: "viral-60-clean", Kind: "other"})
 	err := w.HandleCodexAgent(context.Background(), asynq.NewTask(tasks.TypeCodexAgent, payload))
 	if err == nil {
 		t.Fatal("HandleCodexAgent error = nil, want unknown kind")

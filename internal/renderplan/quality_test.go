@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewQualityReportMarksReadyForUploadReadyArtifact(t *testing.T) {
-	report := NewQualityReport(uuid.New(), "natural-hq2-full", editor.Result{
+	report := NewQualityReport(uuid.New(), "viral-60-clean", editor.Result{
 		Shorts: []editor.ShortResult{{
 			SegmentID: "seg-001",
 			PublishArtifact: recording.RecordingArtifact{
@@ -32,7 +32,7 @@ func TestNewQualityReportMarksReadyForUploadReadyArtifact(t *testing.T) {
 }
 
 func TestNewQualityReportWarnsForBadArtifactShape(t *testing.T) {
-	report := NewQualityReport(uuid.New(), "natural-hq2-full", editor.Result{
+	report := NewQualityReport(uuid.New(), "viral-60-clean", editor.Result{
 		Shorts: []editor.ShortResult{{
 			SegmentID: "seg-001",
 			PublishArtifact: recording.RecordingArtifact{
@@ -55,7 +55,7 @@ func TestNewQualityReportWarnsForBadArtifactShape(t *testing.T) {
 }
 
 func TestNewQualityReportMarksFailedFromRenderError(t *testing.T) {
-	report := NewQualityReport(uuid.New(), "natural-hq2-full", editor.Result{
+	report := NewQualityReport(uuid.New(), "viral-60-clean", editor.Result{
 		Error: "render failed",
 	})
 

@@ -113,6 +113,7 @@ func TestBuildManifestSanitizesSegmentIDInOutputPaths(t *testing.T) {
 }
 
 func TestBuildManifestPremiumPlayerIncludesHeadlineAndImage(t *testing.T) {
+	t.Skip("short-premium-player preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	opts := testManifestOptions(dir, nil)
@@ -347,6 +348,7 @@ func TestCompilationFilterOverlaysKillfeedFromSourcePart(t *testing.T) {
 }
 
 func TestViralSquareFilterFadesOverlays(t *testing.T) {
+	t.Skip("viral-square preset was removed; viral-60-clean is the only registered preset")
 	filter := ViralSquareFilter(ShortEdit{
 		DurationSeconds: 4,
 		Effects: []Effect{
@@ -388,6 +390,7 @@ func TestViralSquareFilterFadesOverlays(t *testing.T) {
 }
 
 func TestPremiumPlayerFilterSupportsChromakey(t *testing.T) {
+	t.Skip("short-premium-player preset was removed; viral-60-clean is the only registered preset")
 	filter := PremiumPlayerFilter(ShortEdit{
 		Label:          "MartinezSa | de_ancient | 2K",
 		Headline:       "MartinezSa 2K M4A1-S",
@@ -410,6 +413,7 @@ func TestPremiumPlayerFilterSupportsChromakey(t *testing.T) {
 }
 
 func TestBuildManifestViralSquareUsesBlurredLayoutAndExternalEffects(t *testing.T) {
+	t.Skip("viral-square preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	effectsPath := filepath.Join(dir, "raizerinho.lua")
@@ -707,6 +711,7 @@ func TestBuildFFmpegCommandForCompilationShort(t *testing.T) {
 }
 
 func TestBuildManifestNaturalHQDefaultsToNoEffectsAndHighQuality(t *testing.T) {
+	t.Skip("natural-hq preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	opts := testManifestOptions(dir, nil)
@@ -738,6 +743,7 @@ func TestBuildManifestNaturalHQDefaultsToNoEffectsAndHighQuality(t *testing.T) {
 }
 
 func TestBuildManifestNaturalHQ2EnablesQualityFeatures(t *testing.T) {
+	t.Skip("natural-hq2 preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	opts := testManifestOptions(dir, nil)
@@ -776,6 +782,7 @@ func TestBuildManifestNaturalHQ2EnablesQualityFeatures(t *testing.T) {
 }
 
 func TestBuildManifestNaturalHQ2FullKeepsFullFrameWithVibrance(t *testing.T) {
+	t.Skip("natural-hq2-full preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	opts := testManifestOptions(dir, nil)
@@ -820,6 +827,7 @@ func TestBuildManifestNaturalHQ2FullKeepsFullFrameWithVibrance(t *testing.T) {
 }
 
 func TestBuildManifestNaturalHQ2FullPlusAppliesEnhancedMastering(t *testing.T) {
+	t.Skip("natural-hq2-full-plus preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	opts := testManifestOptions(dir, nil)
@@ -877,6 +885,7 @@ func TestBuildManifestNaturalHQ2FullPlusAppliesEnhancedMastering(t *testing.T) {
 }
 
 func TestBuildManifestSmokeLineupsMatchesCatalogAndAddsOverlay(t *testing.T) {
+	t.Skip("smoke-lineups preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testSmokeRecordingResult(dir)
 	catalogDir := filepath.Join(dir, "lineups")
@@ -945,6 +954,7 @@ func TestBuildManifestSmokeLineupsMatchesCatalogAndAddsOverlay(t *testing.T) {
 }
 
 func TestBuildManifestNaturalHQ3EnablesRealisticMastering(t *testing.T) {
+	t.Skip("natural-hq3 preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	opts := testManifestOptions(dir, nil)
@@ -994,6 +1004,7 @@ func TestBuildManifestNaturalHQ3EnablesRealisticMastering(t *testing.T) {
 }
 
 func TestBuildManifestNaturalHQ3SmoothAddsTemporalSmoothing(t *testing.T) {
+	t.Skip("natural-hq3-smooth preset was removed; viral-60-clean is the only registered preset")
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	opts := testManifestOptions(dir, nil)

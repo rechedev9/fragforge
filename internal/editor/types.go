@@ -9,48 +9,19 @@ import (
 )
 
 const (
-	// PresetShortClean is the first local editing preset: restrained labels,
-	// vertical POV crop, and subtle kill punch-ins.
-	PresetShortClean = "short-clean"
-
-	// PresetShortPremiumPlayer adds a player cutout and larger headline while
-	// keeping the same vertical gameplay base.
-	PresetShortPremiumPlayer = "short-premium-player"
-
-	// PresetShortViralSquare uses a blurred vertical background with centered
-	// square gameplay for social clips that need top/bottom copy.
-	PresetShortViralSquare = "viral-square"
-
-	// PresetShortNaturalHQ keeps gameplay unmodified and raises encode quality
-	// for cleaner local masters.
-	PresetShortNaturalHQ = "natural-hq"
-
-	// PresetShortNaturalHQ2 is the current recommended realistic baseline: it
-	// adds FFmpeg quality-of-life checks and contact sheets while preserving the
-	// no-effects gameplay style.
-	PresetShortNaturalHQ2 = "natural-hq2"
-
-	// PresetShortNaturalHQ2Full renders a continuous 9:16 gameplay crop with
-	// full vertical coverage, no scripted effects, and a mild FFmpeg-only
-	// saturation lift.
-	PresetShortNaturalHQ2Full = "natural-hq2-full"
-
-	// PresetShortNaturalHQ2FullPlus is an experimental higher-quality
-	// full-frame variant with stronger FFmpeg-only color, sharpening, and
-	// mastering settings for A/B tests.
+	// Legacy render preset names are retained only so old manifests and focused
+	// filter tests can still refer to their historical values. They are not
+	// registered or accepted as product presets.
+	PresetShortClean              = "short-clean"
+	PresetShortPremiumPlayer      = "short-premium-player"
+	PresetShortViralSquare        = "viral-square"
+	PresetShortNaturalHQ          = "natural-hq"
+	PresetShortNaturalHQ2         = "natural-hq2"
+	PresetShortNaturalHQ2Full     = "natural-hq2-full"
 	PresetShortNaturalHQ2FullPlus = "natural-hq2-full-plus"
-
-	// PresetShortNaturalHQ3 is an experimental HQ2 variant with higher encode
-	// settings and stricter playback/color metadata.
-	PresetShortNaturalHQ3 = "natural-hq3"
-
-	// PresetShortNaturalHQ3Smooth is an experimental HQ3 comparison with
-	// subtle temporal blending while keeping a 60fps upload target.
-	PresetShortNaturalHQ3Smooth = "natural-hq3-smooth"
-
-	// PresetSmokeLineups keeps the natural-hq2 visual baseline and adds
-	// educational text overlays for target-player smoke throws.
-	PresetSmokeLineups = "smoke-lineups"
+	PresetShortNaturalHQ3         = "natural-hq3"
+	PresetShortNaturalHQ3Smooth   = "natural-hq3-smooth"
+	PresetSmokeLineups            = "smoke-lineups"
 )
 
 const (

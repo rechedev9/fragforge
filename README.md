@@ -28,10 +28,10 @@ is interpreted deterministically (Spanish and English):
 - A 17-digit number or `--target-steamid` selects the target player.
 - `mejores` / `best` / `highlights` selects the top moments; otherwise all kills
   are compiled into one Short.
-- `música` / `music` / `beat` routes to the `viral-beatsync` preset (requires
-  `--music <audio>`).
+- `música` / `music` / `beat` adds beat analysis for the selected/default
+  preset (requires `--music <audio>`).
 - An explicit preset name in the prompt (or `--preset`) overrides the default.
-- Anything else falls back to the default preset, `viral-60`.
+- Anything else falls back to the default preset, `viral-60-clean`.
 
 Useful flags:
 
@@ -47,29 +47,20 @@ The command prints a plan summary before running and stage-by-stage progress
 (`[1/4] parse`, ...). If a stage fails, rerun with `--from-recording` instead of
 recording again.
 
-## Render presets
+## Render preset
 
-All presets live in one registry: `internal/editor/preset.go`. Adding a preset
-means adding one entry there; the loadout catalog (`internal/renderplan`), the
+The single supported preset lives in `internal/editor/preset.go`: `viral-60-clean`.
+The loadout catalog (`internal/renderplan`), the
 HTTP API (`/api/presets`, `/api/loadouts`, render-variant validation), the
-workbench UI, and the render worker all derive from it. Every preset outputs
-1080x1920 at 60fps. Unknown preset names are rejected with the valid list.
+workbench UI, and the render worker all derive from that registry. The preset
+outputs 1080x1920 at 60fps. Unknown preset names are rejected with the valid
+list.
 
 List them any time with `zv presets` (`--format json` for automation).
 
 | Preset | What it does |
 |--------|--------------|
-| `viral-60` (default) | Full-UI gameplay with viral editing: hook text, kill punch-ins, kill counter, milestone labels. |
-| `viral-beatsync` | `viral-60` for montages with cuts on the detected beat grid. Needs `--music` plus rhythm analysis. |
-| `viral-60-clean` | `viral-60` recorded without the gameplay HUD: clean POV where only kill notices appear on kills. |
-| `natural-hq2-full` | Full-UI crop with a mild saturation lift, no scripted effects. Minimal-edit baseline. |
-| `natural-hq2-full-plus` | Stronger FFmpeg-only color and mastering for A/B comparisons. |
-| `natural-hq` / `natural-hq2` | Unmodified gameplay at higher encode quality; `hq2` adds quality checks and contact sheets. |
-| `natural-hq3` / `natural-hq3-smooth` | Experimental high-encode comparison presets. |
-| `short-clean` | Restrained labels, vertical POV crop, subtle punch-ins (legacy default). |
-| `short-premium-player` | `short-clean` plus a player cutout overlay (`--player-image`). |
-| `viral-square` | Blurred vertical background with centered square gameplay. |
-| `smoke-lineups` | Educational overlays and slow motion for utility throws. |
+| `viral-60-clean` (default) | Clean HUD-less POV with kill notices, viral hook text, punch-ins, kill counter, and milestone labels. |
 
 The editing choices behind the viral presets (hook text in the first 1-2s,
 punch-ins on kills, slow-mo only on the final kill, beat-synced drops,
@@ -152,7 +143,7 @@ available.
 for `recorded` and `composed` jobs. Manual retries are idempotent: workers skip
 external media commands when the durable artifacts already exist. Render
 variant requests are validated against the preset registry; scored moments
-default to `viral-60`.
+default to `viral-60-clean`.
 
 ## CLI reference
 
@@ -163,7 +154,7 @@ scripted use:
 ./bin/zv demo parse --demo match.dem --steamid 76561198000000000 --out plan.json
 ./bin/zv demo players --demo match.dem
 ./bin/zv record --killplan plan.json --demo match.dem --out run/recording --hlae <HLAE.exe> --cs2 <cs2.exe>
-./bin/zv shorts render --recording-result run/recording/recording-result.json --out run/shorts --preset viral-60
+./bin/zv shorts render --recording-result run/recording/recording-result.json --out run/shorts --preset viral-60-clean
 ./bin/zv compose final --recording-result run/recording/recording-result.json --out run/final.mp4
 ./bin/zv music analyze --input track.mp3 --killplan plan.json --out run/rhythm.json
 ./bin/zv presets
@@ -193,11 +184,8 @@ stay reachable through pass-throughs such as `zv parser`, `zv editor`,
   `flash`, `text`, and `grade`; scripts run sandboxed (no filesystem/process
   access) with a capped evaluation budget. `effects/` contains editable
   starting points such as `viral_ultra.lua` and `awpgod.lua`.
-- `--player-image cutout.png` (with optional `--player-key-color`) for the
-  `short-premium-player` layout.
-- Smoke clips: parse with `--segment-mode smokes`, then render with
-  `--preset smoke-lineups --lineup-catalog data/lineups`. Unmatched landings
-  are still rendered and reported in `unmatched-smokes.json`.
+- `--music`, `--rhythm`, and `--compile-segments` for music-synced
+  compilations with the same `viral-60-clean` visual standard.
 
 Every render writes a publish pack under `shorts/publish/`: clean MP4
 filenames, caption files, cover JPGs, `pack-manifest.json`,

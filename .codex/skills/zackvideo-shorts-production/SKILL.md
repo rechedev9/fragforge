@@ -1,6 +1,6 @@
 ---
 name: zackvideo-shorts-production
-description: "Generate professional CS2 Shorts with FragForge from demos, archives, kill plans, utility plans, or recording results. Use when asked to create, rerender, review, polish, concatenate, split, or QA Shorts packs, especially realistic full-gameplay kill highlights with complete CS2 UI, FFmpeg-only natural-hq2-full rendering, mild digital-vibrance saturation, 120fps capture, long compilations, map-specific compilations, split by map/player, joining many Shorts into one video, publish galleries, and platform-ready upload assets."
+description: "Generate professional CS2 Shorts with FragForge from demos, archives, kill plans, utility plans, or recording results. Use when asked to create, rerender, review, polish, concatenate, split, or QA Shorts packs, especially viral-60-clean POV kill highlights with deathnotices, viral-ultra-clean overlays, 120fps capture, long compilations, map-specific compilations, split by map/player, joining many Shorts into one video, publish galleries, and platform-ready upload assets."
 ---
 
 # FragForge Shorts Production
@@ -64,120 +64,43 @@ Generate the HLAE script first. Remove `--dry-run` only when the user wants an a
 .\bin\zv.exe workflows run record -- `
   --killplan <run>\plan.json `
   --demo <demo.dem> `
-  --out <run>\recording-gameplay-120 `
+  --out <run>\recording-deathnotices-120 `
   --hlae C:\HLAE-2.190.1\HLAE.exe `
   --cs2 "<cs2.exe>" `
-  --hud gameplay `
+  --hud deathnotices `
   --fps 120 `
   --video-crf 16 `
   --timeout 45m
 ```
 
-For realistic kill Shorts, record with the full gameplay HUD visible and high source FPS so the editor preserves radar, killfeed, score, crosshair, health, ammo, and round context while delivering smoother 60fps output. Use `--hud gameplay` unless the user explicitly asks for a cleaner/deathnotice-only style. For a dry run, keep the same command shape but use `--dry-run` and omit `--hlae`/`--cs2`.
+For standard kill Shorts, record with clean/deathnotice HUD and high source FPS so the editor keeps a clear POV while the kill notices narrate the frags. Use `--hud deathnotices` unless the user explicitly asks for full gameplay HUD. For a dry run, keep the same command shape but use `--dry-run` and omit `--hlae`/`--cs2`.
 
 The recorder adds `-windowed` to the CS2 command line passed through HLAE. If a manual HLAE launch is ever needed, include `-windowed` with the existing `-w 1920 -h 1080` flags.
 
 If CS2 crashes near the end, inspect `<run>\recording-...\segments` and `recording-result.json` before rerunning. Compare segment MP4 count against the plan, verify every listed segment with `ffprobe`, and confirm `recording-result.json` references those files. Continue from existing artifacts when the check passes; rerun only missing or corrupt segments when it fails.
 
-## Legacy Player-Branded Render
+## Standard Render
 
-Do not use this older blurred/player-photo/Lua style by default. It remains here only for explicit user requests that ask for player branding, blurred top/bottom bands, custom overlays, or Lua effects.
+Use `viral-60-clean` as the current professional baseline and standard preset for kill/highlight Shorts. It is the latest designed default: clean HUD-less 60fps POV with kill notices, viral-ultra-clean overlays, hook text, punch-ins, kill counters, CRF 16 slow encode, Lanczos scaling, square-pixel normalization, audio loudness normalization, black/freeze checks, and cover sheets.
 
-Use this pattern only when the user provides an explicit player image path or explicitly approves a discovered image. Do not guess which image belongs to a player. If no suitable image is available, ask for one or fall back to `natural-hq2-full` rather than burning in the wrong asset.
+Do not add `--temporal-smoothing`; the 120fps source already downsamples cleanly to 60fps and frame blending can create ghosting on fast camera/weapon movement.
 
-It matches the older branded style: blurred top/bottom gameplay, centered square gameplay, player cutout/photo in the lower band, channel logo watermark in the upper-right blurred band, native deathnotice killfeed in the upper right, mild saturation, and smoother 60fps delivery.
-
-1. Convert player images and the channel logo to PNG assets under `<run>\assets` when needed. The channel logo watermark is required for the standard player-branded style; use the user-provided channel logo image, not a guessed replacement.
-
-```powershell
-ffmpeg -y -v error -i "<player-image.webp>" <run>\assets\<player>-player.png
-
-ffmpeg -y -v error -i "<channel-logo>" `
-  -vf "scale=132:-1:flags=lanczos,format=rgba,colorchannelmixer=aa=0.82" `
-  <run>\assets\channel-logo-watermark.png
-```
-
-Before rendering, inspect the player image enough to confirm it matches the target player, has usable framing, and has transparency or a keyable background. Inspect the logo asset enough to confirm it is the user's channel logo and remains readable at watermark size. After rendering, check the gallery that the player image stays in the lower blurred band, the logo is anchored at the top right, and neither overlay covers the core gameplay or killfeed.
-
-2. Create a small Lua effects file per player:
-
-```lua
-local player_asset = "<run>/assets/<player>-player.png"
-local channel_logo = "<run>/assets/channel-logo-watermark.png"
-
-on_segment(function(s)
-  grade({
-    contrast = 1.03,
-    saturation = 1.22,
-    gamma = 1.00
-  })
-
-  image({
-    path = player_asset,
-    start = 0,
-    duration = s.duration,
-    x = "(W-w)/2",
-    y = "H-h+16",
-    width = 430
-  })
-
-  image({
-    path = channel_logo,
-    start = 0,
-    duration = s.duration,
-    x = "W-w-24",
-    y = 24,
-    width = 132
-  })
-end)
-
-on_kill(function(k)
-  killfeed({
-    at = k.time,
-    pre = 0.35,
-    post = 2.80,
-    x = "W-w-18",
-    y = 438,
-    width = 430,
-    crop_x = 1558,
-    crop_y = 64,
-    crop_width = 360,
-    crop_height = 110
-  })
-end)
-```
-
-3. Render with `viral-square` and the quality flags:
+For standard viral kill clips, use the same render workflow with `--preset viral-60-clean`, `--compile-segments`, the deathnotice-HUD recording result, and an output such as `<run>\shorts-viral60-clean-<player>-<map>`. For fast iteration, add `--segments seg-001,seg-004 --limit 2 --dry-run`. Use `--skip-existing` only when burned-in video content will not change.
 
 ```powershell
 .\bin\zv.exe workflows run shorts-render -- `
   --recording-result <run>\recording-deathnotices-120\recording-result.json `
   --killplan <run>\plan.json `
-  --out <run>\shorts-<map>-<player>-photo-killfeed `
-  --preset viral-square `
-  --effects <run>\<player>-photo-killfeed.lua `
+  --out <run>\shorts-viral60-clean-<player>-<map> `
+  --preset viral-60-clean `
+  --compile-segments `
   --video-crf 16 `
   --video-preset slow `
   --hq-filters `
   --audio-normalize `
   --quality-checks `
-  --cover-sheets `
-  --temporal-smoothing
+  --cover-sheets
 ```
-
-Use `--dry-run` first when changing the Lua, crop, player image, or output directory. Do not use `--skip-existing` for burned-in visual changes.
-
-Expected warnings: source recordings at `120/1` may warn that the source is not 60fps; that is acceptable when the rendered publish MP4s verify as `1080x1920` and `60/1`.
-
-## Natural/Utility Render
-
-Use `natural-hq2-full` as the current professional baseline for kill/highlight Shorts. It is FFmpeg-only, avoids Lua/scripted effects, uses one continuous 9:16 gameplay crop with no black bars and no stacked foreground/background bands, applies a mild saturation lift for a digital-vibrance feel, and keeps CRF 16 slow encode, Lanczos scaling, square-pixel normalization, audio loudness normalization, black/freeze checks, and cover sheets.
-
-Do not add `--temporal-smoothing` for realistic gameplay exports unless explicitly A/B testing it. The 120fps source already downsamples cleanly to 60fps; frame blending can create ghosting on fast camera/weapon movement.
-
-Use `natural-hq2-full-plus` only for explicit A/B tests. It keeps the same full-UI layout but adds stronger digital-vibrance color, light sharpening, CRF 15, x264 preset `slower`, and BT.709 mastering metadata.
-
-For natural kill clips, use the same render workflow with `--preset natural-hq2-full`, the gameplay-HUD recording result, and an output such as `<run>\shorts-natural-hq2-full`. For utility clips, use `--killplan <run>\plan-utility.json --preset smoke-lineups --lineup-catalog data\lineups`. For fast iteration, add `--segments seg-001,seg-004 --limit 2 --dry-run`. Use `--skip-existing` only when burned-in video content will not change.
 
 For kill/highlight deliverables, treat the per-segment rendered Shorts as intermediate publish inputs. After the MP4s pass validation, concatenate all selected kills for each player/game into one long vertical upload-ready Short by default. Deliver individual per-kill Shorts only when the user explicitly asks for separate Shorts.
 
@@ -221,8 +144,8 @@ Open the generated gallery when it was not opened by the render command:
 
 Check the gallery and `publish-summary.md` for:
 
-- 1080x1920 vertical framing with complete gameplay/UI preserved for `natural-hq2-full`.
-- HUD, radar, killfeed, score, crosshair, health, ammo, and round context remain visible and readable enough to represent the demo correctly.
+- 1080x1920 vertical framing with clean POV/deathnotice presentation for `viral-60-clean`.
+- The killfeed/deathnotices, crosshair, weapon view, and round context visible in the POV remain readable enough to represent the demo correctly.
 - No blurred top/bottom bands, player image overlays, logo overlays, cinematic crops, or Lua/scripted effects are present unless the user explicitly requested that style.
 - Saturation looks slightly more vivid than stock CS2 capture without crushing detail or misrepresenting the gameplay.
 - No black/frozen sections, missing audio, text clipping, or overlay overlap.

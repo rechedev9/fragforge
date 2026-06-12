@@ -11,8 +11,8 @@ func TestNewEditDocumentSnapshotsStableRenderIntent(t *testing.T) {
 
 	doc := NewEditDocument(NewEditDocumentOptions{
 		JobID:              id,
-		Variant:            "natural-hq2-full",
-		Preset:             "natural-hq2-full",
+		Variant:            "viral-60-clean",
+		Preset:             "viral-60-clean",
 		VideoCRF:           16,
 		VideoPreset:        "slow",
 		HQFilters:          true,
@@ -24,22 +24,22 @@ func TestNewEditDocumentSnapshotsStableRenderIntent(t *testing.T) {
 		Output:             OutputShape{AspectRatio: "9:16", Width: 1080, Height: 1920, FPS: 60, Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"},
 		RecordingResultKey: "jobs/111/recording/recording-result.json",
 		KillPlanSource:     "job.kill_plan",
-		OutputPrefix:       "jobs/111/renders/natural-hq2-full",
-		RenderResultKey:    "jobs/111/renders/natural-hq2-full/render-result.json",
-		EditManifestKey:    "jobs/111/renders/natural-hq2-full/edit-manifest.json",
-		PackManifestKey:    "jobs/111/renders/natural-hq2-full/pack-manifest.json",
-		GalleryKey:         "jobs/111/renders/natural-hq2-full/index.html",
-		PublishSummaryKey:  "jobs/111/renders/natural-hq2-full/publish-summary.md",
+		OutputPrefix:       "jobs/111/renders/viral-60-clean",
+		RenderResultKey:    "jobs/111/renders/viral-60-clean/render-result.json",
+		EditManifestKey:    "jobs/111/renders/viral-60-clean/edit-manifest.json",
+		PackManifestKey:    "jobs/111/renders/viral-60-clean/pack-manifest.json",
+		GalleryKey:         "jobs/111/renders/viral-60-clean/index.html",
+		PublishSummaryKey:  "jobs/111/renders/viral-60-clean/publish-summary.md",
 		SegmentIDs:         []string{"seg-001"},
 	})
 
 	if doc.SchemaVersion != EditDocumentSchemaVersion {
 		t.Fatalf("schema = %q, want %q", doc.SchemaVersion, EditDocumentSchemaVersion)
 	}
-	if doc.JobID != id || doc.Variant != "natural-hq2-full" {
+	if doc.JobID != id || doc.Variant != "viral-60-clean" {
 		t.Fatalf("identity = %#v", doc)
 	}
-	if doc.LoadoutSnapshot.Preset != "natural-hq2-full" || doc.LoadoutSnapshot.Framing != "full-ui" {
+	if doc.LoadoutSnapshot.Preset != "viral-60-clean" || doc.LoadoutSnapshot.Framing != "full-ui" {
 		t.Fatalf("loadout = %#v", doc.LoadoutSnapshot)
 	}
 	if doc.LoadoutSnapshot.VideoCRF != 16 || doc.LoadoutSnapshot.VideoPreset != "slow" || !doc.LoadoutSnapshot.QualityChecks {
