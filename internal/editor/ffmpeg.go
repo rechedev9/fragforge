@@ -17,17 +17,6 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	if len(short.Parts) > 0 {
 		return BuildCompilationFFmpegCommand(ffmpegPath, short)
 	}
-	if short.PlayerImage != "" {
-		return BuildPremiumPlayerFFmpegCommand(ffmpegPath, short)
-	}
-	switch presetFilterKind(short.Preset) {
-	case FilterKindViralSquare:
-		return BuildViralSquareFFmpegCommand(ffmpegPath, short)
-	case FilterKindSmokeLineups:
-		if len(short.Smokes) > 0 {
-			return BuildSmokeLineupFFmpegCommand(ffmpegPath, short)
-		}
-	}
 	if short.MusicPath != "" {
 		return BuildMusicFFmpegCommand(ffmpegPath, short)
 	}
@@ -43,36 +32,6 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		"-preset", videoPresetForCommand(short.VideoPreset),
 		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
 	}
-	command = appendVideoEncodeArgs(command, short)
-	command = appendAudioEncodeArgs(command, short)
-	return append(command,
-		"-movflags", "+faststart",
-		short.Output,
-	)
-}
-
-func BuildViralSquareFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
-	command := []string{
-		ffmpegPath,
-		"-y",
-		"-v", "error",
-		"-i", short.Input,
-	}
-	for _, effect := range imageEffects(short.Effects) {
-		command = append(command, "-i", effect.Path)
-	}
-	command = append(command,
-		"-filter_complex", ViralSquareFilter(short),
-		"-map", "[v]",
-		"-map", "0:a?",
-		"-c:v", "libx264",
-		"-preset", videoPresetForCommand(short.VideoPreset),
-		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
-	)
-	command = appendVideoEncodeArgs(command, short)
 	command = appendAudioEncodeArgs(command, short)
 	return append(command,
 		"-movflags", "+faststart",
@@ -108,7 +67,6 @@ func BuildMusicFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		"-preset", videoPresetForCommand(short.VideoPreset),
 		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
 	}
-	command = appendVideoEncodeArgs(command, short)
 	command = appendAudioCodecArgs(command)
 	return append(command,
 		"-movflags", "+faststart",
@@ -128,57 +86,6 @@ func appendAudioCodecArgs(command []string) []string {
 	return append(command,
 		"-c:a", "aac",
 		"-b:a", "192k",
-	)
-}
-
-func BuildSmokeLineupFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
-	command := []string{
-		ffmpegPath,
-		"-y",
-		"-v", "error",
-		"-i", short.Input,
-		"-filter_complex", SmokeLineupSlowMotionFilter(short),
-		"-map", "[v]",
-		"-map", "[a]",
-		"-c:v", "libx264",
-		"-preset", videoPresetForCommand(short.VideoPreset),
-		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
-	}
-	command = appendVideoEncodeArgs(command, short)
-	command = appendAudioCodecArgs(command)
-	return append(command,
-		"-movflags", "+faststart",
-		short.Output,
-	)
-}
-
-func BuildPremiumPlayerFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
-	command := []string{
-		ffmpegPath,
-		"-y",
-		"-v", "error",
-		"-i", short.Input,
-		"-loop", "1",
-		"-i", short.PlayerImage,
-		"-filter_complex", PremiumPlayerFilter(short),
-		"-map", "[v]",
-		"-map", "0:a?",
-		"-c:v", "libx264",
-		"-preset", videoPresetForCommand(short.VideoPreset),
-		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
-	}
-	command = appendVideoEncodeArgs(command, short)
-	command = appendAudioEncodeArgs(command, short)
-	return append(command,
-		"-movflags", "+faststart",
-		"-shortest",
-		short.Output,
 	)
 }
 
@@ -208,7 +115,6 @@ func BuildCompilationFFmpegCommand(ffmpegPath string, short ShortEdit) []string 
 		"-preset", videoPresetForCommand(short.VideoPreset),
 		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
 	)
-	command = appendVideoEncodeArgs(command, short)
 	command = appendAudioCodecArgs(command)
 	command = append(command, "-movflags", "+faststart")
 	if short.MusicPath != "" {
@@ -348,20 +254,6 @@ func compilationKillfeedCropFilter(effect Effect, short ShortEdit, sampleSeconds
 	filters = append(filters, "format=rgba")
 	filters = append(filters, overlayFadeFilters(effect)...)
 	return strings.Join(filters, ",")
-}
-
-func appendVideoEncodeArgs(command []string, short ShortEdit) []string {
-	renderPreset, ok := PresetByName(short.Preset)
-	if !ok || !renderPreset.MasteringBT709 {
-		return command
-	}
-	return append(command,
-		"-profile:v", "high",
-		"-color_primaries", "bt709",
-		"-color_trc", "bt709",
-		"-colorspace", "bt709",
-		"-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709",
-	)
 }
 
 func videoCRFForCommand(crf int) int {

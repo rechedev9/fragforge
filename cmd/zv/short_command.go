@@ -133,11 +133,8 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 	if err != nil {
 		return shortPlan{}, err
 	}
-	needsRhythm := preset.RhythmSync || intent.BeatSync || opts.MusicPath != ""
+	needsRhythm := intent.BeatSync || opts.MusicPath != ""
 	if needsRhythm && opts.MusicPath == "" {
-		if preset.RhythmSync {
-			return shortPlan{}, fmt.Errorf("preset %q requires --music <audio file>", preset.Name)
-		}
 		return shortPlan{}, fmt.Errorf("beat-synced shorts require --music <audio file>")
 	}
 

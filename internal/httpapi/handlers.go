@@ -251,7 +251,6 @@ type presetSummary struct {
 	QualityChecks     bool   `json:"quality_checks"`
 	CoverSheets       bool   `json:"cover_sheets"`
 	TemporalSmoothing bool   `json:"temporal_smoothing"`
-	RhythmSync        bool   `json:"rhythm_sync"`
 }
 
 // ListPresets handles GET /api/presets. It exposes the editor preset registry
@@ -279,7 +278,6 @@ func (h *Handlers) ListPresets(w http.ResponseWriter, r *http.Request) {
 			QualityChecks:     preset.QualityChecks,
 			CoverSheets:       preset.CoverSheets,
 			TemporalSmoothing: preset.TemporalSmoothing,
-			RhythmSync:        preset.RhythmSync,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

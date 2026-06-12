@@ -1,4 +1,4 @@
 interface:
   display_name: "FragForge Shorts Production"
-  short_description: "Generate watermarked player-branded CS2 kill Shorts, utility packs, long compilations, and split-by-map outputs with FragForge."
-  default_prompt: "Generate a watermarked player-branded CS2 Shorts pack or long compilation from a demo or recording result using the FragForge pipeline: blurred top/bottom layout, player image at the bottom, channel logo watermark at the top right, deathnotice killfeed, gallery, split-by-map/player outputs when requested, and upload-ready assets."
+  short_description: "Generate clean viral-60-clean CS2 kill Shorts, utility packs, long compilations, and split-by-map outputs with FragForge."
+  default_prompt: "Generate a clean viral-60-clean CS2 Shorts pack or long compilation from a demo or recording result using the FragForge pipeline: deathnotice POV capture, clean vertical render, gallery, split-by-map/player outputs when requested, and upload-ready assets."

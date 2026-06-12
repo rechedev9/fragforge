@@ -57,11 +57,6 @@ func GenerateCoverPrompt(short ShortEdit) string {
 	if short.CoverPath != "" {
 		sb.WriteString("- Gameplay frame: " + short.CoverPath + "\n")
 	}
-	if short.PlayerImage != "" {
-		sb.WriteString("- Player cutout/reference: " + short.PlayerImage + "\n")
-	} else {
-		sb.WriteString("- Player cutout/reference: not provided; do not invent a face or team jersey.\n")
-	}
 	if short.Output != "" {
 		sb.WriteString("- Source short: " + short.Output + "\n")
 	}
@@ -69,7 +64,7 @@ func GenerateCoverPrompt(short ShortEdit) string {
 	if len(short.Smokes) > 0 && short.KillCount == 0 {
 		sb.WriteString("Premium esports tutorial thumbnail, clean and realistic, centered on the actual POV utility throw or landing, sharp map readability, refined contrast, subtle tactical emphasis, minimal clutter.\n\n")
 	} else {
-		sb.WriteString("Premium esports thumbnail, clean and realistic, centered on POV match energy, sharp action framing, refined contrast, crisp weapon emphasis, subtle map atmosphere, minimal clutter. If a player cutout is provided, place the player in the lower third without hiding the crosshair moment or weapon identity.\n\n")
+		sb.WriteString("Premium esports thumbnail, clean and realistic, centered on POV match energy, sharp action framing, refined contrast, crisp weapon emphasis, subtle map atmosphere, minimal clutter. Do not invent a face, team jersey, or player cutout.\n\n")
 	}
 	sb.WriteString("Text direction:\n")
 	headline := short.Headline

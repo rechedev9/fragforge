@@ -424,8 +424,6 @@ func PackManifestFromManifest(manifest Manifest, result Result) PackManifest {
 		CompileSegments:   manifest.CompileSegments,
 		LineupCatalogPath: manifest.LineupCatalogPath,
 		UnmatchedSmokes:   manifest.UnmatchedSmokes,
-		PlayerImage:       manifest.PlayerImage,
-		PlayerKeyColor:    manifest.PlayerKeyColor,
 		VideoCRF:          manifest.VideoCRF,
 		VideoPreset:       manifest.VideoPreset,
 		HQFilters:         manifest.HQFilters,
@@ -450,7 +448,6 @@ func PackManifestFromManifest(manifest Manifest, result Result) PackManifest {
 			Source:             short.Output,
 			Video:              short.PublishPath,
 			SourceArtifact:     short.SourceArtifact,
-			PlayerImage:        short.PlayerImage,
 			MusicPath:          short.MusicPath,
 			RhythmPath:         short.RhythmPath,
 			OutputFPS:          short.OutputFPS,
@@ -502,11 +499,6 @@ func WritePublishGallery(path string, manifest Manifest) error {
 	if len(manifest.SegmentFilter) > 0 {
 		sb.WriteString(" · filtered <span>")
 		sb.WriteString(html.EscapeString(strings.Join(manifest.SegmentFilter, ", ")))
-		sb.WriteString("</span>")
-	}
-	if manifest.PlayerImage != "" {
-		sb.WriteString(" · player asset <span>")
-		sb.WriteString(html.EscapeString(filepath.Base(manifest.PlayerImage)))
 		sb.WriteString("</span>")
 	}
 	if manifest.VideoCRF > 0 || manifest.VideoPreset != "" {
@@ -724,11 +716,7 @@ func WritePublishSummary(path string, manifest Manifest) error {
 func featureSummary(manifest Manifest) string {
 	parts := []string{}
 	if manifest.HQFilters {
-		if manifest.Preset == PresetShortNaturalHQ3 || manifest.Preset == PresetShortNaturalHQ3Smooth {
-			parts = append(parts, "lanczos+accurate_rnd")
-		} else {
-			parts = append(parts, "lanczos")
-		}
+		parts = append(parts, "lanczos")
 	}
 	if manifest.AudioNormalize {
 		parts = append(parts, "loudnorm")

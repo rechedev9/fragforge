@@ -34,8 +34,6 @@ func run() error {
 		lineupCatalogPath   = flag.String("lineup-catalog", "", "optional directory with manual smoke lineup catalog JSON files")
 		segments            = flag.String("segments", "", "optional comma-separated segment ids to render, e.g. seg-001,seg-004")
 		limit               = flag.Int("limit", 0, "optional max number of shorts to render after segment filtering")
-		playerImage         = flag.String("player-image", "", "legacy player image asset; unsupported by the registered preset")
-		playerKeyColor      = flag.String("player-key-color", "", "legacy chromakey color for player image; unsupported by the registered preset")
 		videoCRF            = flag.Int("video-crf", 0, "x264 CRF quality from 1..51; lower is higher quality; defaults by preset")
 		videoPreset         = flag.String("video-preset", "", "x264 preset; defaults by preset")
 		hqFilters           = flag.Bool("hq-filters", false, "use Lanczos scaling and square-pixel normalization")
@@ -81,8 +79,6 @@ func run() error {
 		LineupCatalogPath:   *lineupCatalogPath,
 		SegmentIDs:          segmentIDs,
 		Limit:               *limit,
-		PlayerImagePath:     *playerImage,
-		PlayerKeyColor:      *playerKeyColor,
 		VideoCRF:            *videoCRF,
 		VideoPreset:         *videoPreset,
 		HQFilters:           *hqFilters,

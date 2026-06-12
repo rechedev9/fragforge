@@ -38,7 +38,7 @@ func TestLoadoutForVariantRejectsUnknownVariant(t *testing.T) {
 	if !strings.Contains(err.Error(), editor.PresetViral60Clean) {
 		t.Fatalf("error %q should list valid presets", err)
 	}
-	for _, removed := range []string{editor.PresetShortNaturalHQ2Full, editor.PresetSmokeLineups} {
+	for _, removed := range []string{"natural-hq2-full", "smoke-lineups"} {
 		if strings.Contains(err.Error(), removed) {
 			t.Fatalf("error %q listed removed preset %q", err, removed)
 		}

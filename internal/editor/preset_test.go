@@ -38,7 +38,7 @@ func TestAllPresetsRenderVertical1080x1920At60FPS(t *testing.T) {
 }
 
 func TestPresetByNameUnknown(t *testing.T) {
-	for _, name := range []string{"", "nope", "natural-hq9", PresetViral60, PresetViralBeatsync, PresetShortNaturalHQ2Full, PresetSmokeLineups} {
+	for _, name := range []string{"", "nope", "viral-60", "viral-beatsync", "natural-hq2-full", "smoke-lineups"} {
 		if _, ok := PresetByName(name); ok {
 			t.Fatalf("PresetByName(%q) ok = true, want false", name)
 		}
@@ -113,7 +113,7 @@ func TestUnknownPresetErrorListsValidNames(t *testing.T) {
 			t.Fatalf("error %q missing %q", err.Error(), want)
 		}
 	}
-	for _, removed := range []string{PresetViralBeatsync, PresetShortNaturalHQ2Full, PresetSmokeLineups} {
+	for _, removed := range []string{"viral-beatsync", "natural-hq2-full", "smoke-lineups"} {
 		if strings.Contains(err.Error(), removed) {
 			t.Fatalf("error %q listed removed preset %q", err.Error(), removed)
 		}

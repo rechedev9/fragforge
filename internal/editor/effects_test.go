@@ -60,7 +60,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		Label:           "MartinezSa | de_ancient | 1K",
 		DurationSeconds: 5,
 		Kills: []KillCue{
@@ -107,7 +107,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AK-47", Headshot: true}},
 	}
@@ -143,7 +143,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AK-47"}},
 	}
@@ -180,7 +180,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AK-47", Headshot: true}},
 	}
@@ -212,7 +212,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AK-47"}},
 	}
@@ -261,7 +261,7 @@ end)
 				Script: tc.script,
 			}, ShortEdit{
 				SegmentID:       "seg-001",
-				Preset:          PresetShortClean,
+				Preset:          PresetViral60Clean,
 				DurationSeconds: 5,
 			})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -380,7 +380,7 @@ end)
 `,
 	}, ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 	})
 	if err == nil || !strings.Contains(err.Error(), "fade_in") {
@@ -414,7 +414,7 @@ on_segment(function(s)
 end)
 `,
 	}
-	short := ShortEdit{SegmentID: "seg-001", Preset: PresetShortClean, Label: "x", DurationSeconds: 5}
+	short := ShortEdit{SegmentID: "seg-001", Preset: PresetViral60Clean, Label: "x", DurationSeconds: 5}
 	if _, _, err := evaluateEffects(source, short); err == nil {
 		t.Fatal("evaluateEffects error = nil, want error for x position with filtergraph metacharacters")
 	}
@@ -431,7 +431,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "AWP"}},
 	}
@@ -459,7 +459,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetSmokeLineups,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 6,
 		Smokes: []SmokeCue{
 			{
@@ -513,7 +513,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortViralSquare,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 6,
 	}
 
@@ -558,7 +558,7 @@ end)
 	}
 	short := ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortViralSquare,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 6,
 		Kills:           []KillCue{{Tick: 100, TimeSeconds: 1, Weapon: "MP9", Headshot: true}},
 	}
@@ -591,7 +591,7 @@ func TestEvaluateEffectsRejectsInvalidScript(t *testing.T) {
 		Script: `on_kill(function(k) zoom({ at = k.time, scale = 9 }) end)`,
 	}, ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 		Kills:           []KillCue{{TimeSeconds: 1}},
 	})
@@ -615,7 +615,7 @@ end)
 `,
 	}, ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		Label:           "safe",
 		DurationSeconds: 5,
 	})
@@ -637,7 +637,7 @@ func TestEvaluateEffectsTimesOutRunawayScript(t *testing.T) {
 		Script: `while true do end`,
 	}, ShortEdit{
 		SegmentID:       "seg-001",
-		Preset:          PresetShortClean,
+		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 	})
 	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {

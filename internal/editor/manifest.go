@@ -59,12 +59,6 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
-	playerImagePath := ""
-	playerKeyColor := ""
-	if preset == PresetShortPremiumPlayer {
-		playerImagePath = opts.PlayerImagePath
-		playerKeyColor = opts.PlayerKeyColor
-	}
 	videoCRF, err := normalizeVideoCRFForPreset(preset, opts.VideoCRF)
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
@@ -106,8 +100,6 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		OutputFPS:         outputFPS,
 		CompileSegments:   opts.CompileSegments,
 		LineupCatalogPath: opts.LineupCatalogPath,
-		PlayerImage:       playerImagePath,
-		PlayerKeyColor:    playerKeyColor,
 		VideoCRF:          videoCRF,
 		VideoPreset:       videoPreset,
 		HQFilters:         hqFilters,
@@ -153,8 +145,6 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			ClipBySegment:     clipBySegment,
 			Selected:          selected,
 			RhythmSync:        rhythmSync,
-			PlayerImagePath:   playerImagePath,
-			PlayerKeyColor:    playerKeyColor,
 			VideoCRF:          videoCRF,
 			VideoPreset:       videoPreset,
 			OutputFPS:         outputFPS,
@@ -239,8 +229,6 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			SourceArtifact:    clip.Artifact,
 			PromptPath:        promptPath,
 			PublishPath:       filepath.Join(opts.PublishDir, publishBase+".mp4"),
-			PlayerImage:       playerImagePath,
-			PlayerKeyColor:    playerKeyColor,
 			MusicPath:         opts.MusicPath,
 			RhythmPath:        opts.RhythmPath,
 			OutputFPS:         outputFPS,
@@ -306,8 +294,6 @@ type compiledShortOptions struct {
 	ClipBySegment     map[string]composition.SegmentClip
 	Selected          map[string]bool
 	RhythmSync        map[string]rhythm.SegmentSync
-	PlayerImagePath   string
-	PlayerKeyColor    string
 	VideoCRF          int
 	VideoPreset       string
 	OutputFPS         int
@@ -396,8 +382,6 @@ func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, 
 		SourceArtifact:    parts[0].SourceArtifact,
 		PromptPath:        filepath.Join(c.PromptDir, "short-001-demo-compilation-cover.md"),
 		PublishPath:       filepath.Join(opts.PublishDir, publishBase+".mp4"),
-		PlayerImage:       c.PlayerImagePath,
-		PlayerKeyColor:    c.PlayerKeyColor,
 		MusicPath:         opts.MusicPath,
 		RhythmPath:        opts.RhythmPath,
 		OutputFPS:         c.OutputFPS,

@@ -7,19 +7,12 @@ import (
 
 // FilterKind values select how a preset builds its 9:16 filtergraph.
 const (
-	FilterKindCropCenter   = "crop-center"
-	FilterKindFullFrame    = "full-frame"
-	FilterKindViralSquare  = "viral-square"
-	FilterKindSmokeLineups = "smoke-lineups"
+	FilterKindCropCenter = "crop-center"
+	FilterKindFullFrame  = "full-frame"
 )
 
 const (
-	// Legacy preset name constants are kept only for old artifact/test
-	// compatibility. The only registered preset is PresetViral60Clean.
-	PresetViral60       = "viral-60"
-	PresetViralBeatsync = "viral-beatsync"
-
-	// PresetViral60Clean is the sole registered preset.
+	// PresetViral60Clean is the sole registered render preset.
 	PresetViral60Clean = "viral-60-clean"
 )
 
@@ -53,37 +46,10 @@ type RenderPreset struct {
 	CoverSheets       bool
 	TemporalSmoothing bool
 
-	// AccurateScaling upgrades lanczos scaling with accurate rounding.
-	AccurateScaling bool
-	// MasteringBT709 adds high-profile encode arguments and BT.709 color
-	// metadata to render commands.
-	MasteringBT709 bool
-	// RhythmSync marks presets that require beat-synced compilation inputs
-	// (music path, rhythm json, compile-segments).
-	RhythmSync bool
-
 	// HUDMode is the recording-stage HUD hint passed to zv-recorder --hud.
 	// Empty means the recorder default (full gameplay HUD). The render
 	// stage never reads it; it only travels through `zv short`.
 	HUDMode string
-
-	// Grade is the FFmpeg-only base color grade applied by full-frame
-	// presets. The zero value means no grading.
-	Grade struct {
-		Saturation float64
-		Contrast   float64
-		Gamma      float64
-		Unsharp    bool
-	}
-}
-
-// presetGrade aliases the anonymous RenderPreset.Grade type so registry
-// literals and grade helpers stay readable.
-type presetGrade = struct {
-	Saturation float64
-	Contrast   float64
-	Gamma      float64
-	Unsharp    bool
 }
 
 // renderPresets is the single source of preset knowledge: encoder defaults,
@@ -96,8 +62,8 @@ var renderPresets = []RenderPreset{
 		FPS:            60,
 		Width:          1080,
 		Height:         1920,
-		VideoCRF:       NaturalHQVideoCRF,
-		VideoPreset:    NaturalHQVideoPreset,
+		VideoCRF:       StandardVideoCRF,
+		VideoPreset:    StandardVideoPreset,
 		EffectsPreset:  EffectsPresetViralUltraClean,
 		FilterKind:     FilterKindFullFrame,
 		HQFilters:      true,

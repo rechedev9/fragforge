@@ -56,13 +56,6 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	playerImagePath := cfg.PlayerImagePath
-	if playerImagePath != "" {
-		playerImagePath, err = filepath.Abs(playerImagePath)
-		if err != nil {
-			return Result{}, fmt.Errorf("resolve player image path: %w", err)
-		}
-	}
 	effectsPath := cfg.EffectsPath
 	if effectsPath != "" {
 		effectsPath, err = filepath.Abs(effectsPath)
@@ -127,8 +120,6 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		LineupCatalogPath:   cfg.LineupCatalogPath,
 		SegmentIDs:          cfg.SegmentIDs,
 		Limit:               cfg.Limit,
-		PlayerImagePath:     playerImagePath,
-		PlayerKeyColor:      cfg.PlayerKeyColor,
 		VideoCRF:            videoCRF,
 		VideoPreset:         videoPreset,
 		HQFilters:           cfg.HQFilters,
@@ -223,8 +214,7 @@ func (c Config) validate() error {
 	if preset == "" {
 		preset = DefaultPreset().Name
 	}
-	renderPreset, ok := PresetByName(preset)
-	if !ok {
+	if _, ok := PresetByName(preset); !ok {
 		return unknownPresetError(c.Preset)
 	}
 	if _, err := normalizeVideoCRFForPreset(preset, c.VideoCRF); err != nil {
@@ -242,17 +232,6 @@ func (c Config) validate() error {
 	if c.RhythmPath != "" && !c.CompileSegments {
 		return fmt.Errorf("rhythm path requires compile segments")
 	}
-	if renderPreset.RhythmSync {
-		if c.MusicPath == "" {
-			return fmt.Errorf("preset %q requires a music path", preset)
-		}
-		if c.RhythmPath == "" {
-			return fmt.Errorf("preset %q requires a rhythm json path", preset)
-		}
-		if !c.CompileSegments {
-			return fmt.Errorf("preset %q requires compile segments", preset)
-		}
-	}
 	for _, id := range c.SegmentIDs {
 		if strings.TrimSpace(id) == "" {
 			return fmt.Errorf("segment ids must not be empty")
@@ -264,12 +243,6 @@ func (c Config) validate() error {
 		default:
 			return fmt.Errorf("unknown effects preset %q", c.EffectsPreset)
 		}
-	}
-	if c.PlayerImagePath != "" {
-		return fmt.Errorf("--player-image is not supported by preset %q", preset)
-	}
-	if c.PlayerKeyColor != "" {
-		return fmt.Errorf("--player-key-color is not supported by preset %q", preset)
 	}
 	return nil
 }
@@ -340,8 +313,6 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 		CompileSegments:   manifest.CompileSegments,
 		LineupCatalogPath: manifest.LineupCatalogPath,
 		UnmatchedSmokes:   manifest.UnmatchedSmokes,
-		PlayerImage:       manifest.PlayerImage,
-		PlayerKeyColor:    manifest.PlayerKeyColor,
 		VideoCRF:          manifest.VideoCRF,
 		VideoPreset:       manifest.VideoPreset,
 		HQFilters:         manifest.HQFilters,
@@ -364,8 +335,6 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 			SourceArtifact:    short.SourceArtifact,
 			PromptPath:        short.PromptPath,
 			PublishPath:       short.PublishPath,
-			PlayerImage:       short.PlayerImage,
-			PlayerKeyColor:    short.PlayerKeyColor,
 			MusicPath:         short.MusicPath,
 			RhythmPath:        short.RhythmPath,
 			OutputFPS:         short.OutputFPS,
@@ -457,15 +426,6 @@ func fileExistsNonEmpty(path string) bool {
 	}
 	info, err := os.Stat(path)
 	return err == nil && info.Size() > 0 && !info.IsDir()
-}
-
-func supportedPlayerImage(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".png", ".jpg", ".jpeg", ".webp":
-		return true
-	default:
-		return false
-	}
 }
 
 func writePrompts(manifest Manifest) []string {

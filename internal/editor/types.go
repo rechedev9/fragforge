@@ -9,22 +9,6 @@ import (
 )
 
 const (
-	// Legacy render preset names are retained only so old manifests and focused
-	// filter tests can still refer to their historical values. They are not
-	// registered or accepted as product presets.
-	PresetShortClean              = "short-clean"
-	PresetShortPremiumPlayer      = "short-premium-player"
-	PresetShortViralSquare        = "viral-square"
-	PresetShortNaturalHQ          = "natural-hq"
-	PresetShortNaturalHQ2         = "natural-hq2"
-	PresetShortNaturalHQ2Full     = "natural-hq2-full"
-	PresetShortNaturalHQ2FullPlus = "natural-hq2-full-plus"
-	PresetShortNaturalHQ3         = "natural-hq3"
-	PresetShortNaturalHQ3Smooth   = "natural-hq3-smooth"
-	PresetSmokeLineups            = "smoke-lineups"
-)
-
-const (
 	// EffectsPresetBuiltinClean reproduces the original local editor look
 	// through the Lua effects layer.
 	EffectsPresetBuiltinClean = "builtin-clean"
@@ -62,24 +46,11 @@ const (
 	// DefaultVideoPreset keeps the historical x264 speed setting.
 	DefaultVideoPreset = "fast"
 
-	// NaturalHQVideoCRF is the quality setting for the natural-hq preset.
-	NaturalHQVideoCRF = 16
+	// StandardVideoCRF is the quality setting for viral-60-clean.
+	StandardVideoCRF = 16
 
-	// NaturalHQVideoPreset is the x264 speed/quality setting for natural-hq.
-	NaturalHQVideoPreset = "slow"
-
-	// NaturalHQ3VideoCRF raises quality one step beyond natural-hq2.
-	NaturalHQ3VideoCRF = 15
-
-	// NaturalHQ3VideoPreset is intentionally slower for cleaner local masters.
-	NaturalHQ3VideoPreset = "slower"
-
-	// NaturalHQ2FullPlusVideoCRF raises full-frame comparison renders one step
-	// beyond natural-hq2-full.
-	NaturalHQ2FullPlusVideoCRF = 15
-
-	// NaturalHQ2FullPlusVideoPreset spends more encode time on cleaner masters.
-	NaturalHQ2FullPlusVideoPreset = "slower"
+	// StandardVideoPreset is the x264 speed/quality setting for viral-60-clean.
+	StandardVideoPreset = "slow"
 )
 
 type Config struct {
@@ -97,8 +68,6 @@ type Config struct {
 	LineupCatalogPath   string
 	SegmentIDs          []string
 	Limit               int
-	PlayerImagePath     string
-	PlayerKeyColor      string
 	VideoCRF            int
 	VideoPreset         string
 	HQFilters           bool
@@ -131,8 +100,6 @@ type ManifestOptions struct {
 	LineupCatalogPath   string
 	SegmentIDs          []string
 	Limit               int
-	PlayerImagePath     string
-	PlayerKeyColor      string
 	VideoCRF            int
 	VideoPreset         string
 	HQFilters           bool
@@ -168,8 +135,6 @@ type Manifest struct {
 	CompileSegments   bool        `json:"compile_segments,omitempty"`
 	LineupCatalogPath string      `json:"lineup_catalog_path,omitempty"`
 	UnmatchedSmokes   string      `json:"unmatched_smokes,omitempty"`
-	PlayerImage       string      `json:"player_image,omitempty"`
-	PlayerKeyColor    string      `json:"player_key_color,omitempty"`
 	VideoCRF          int         `json:"video_crf,omitempty"`
 	VideoPreset       string      `json:"video_preset,omitempty"`
 	HQFilters         bool        `json:"hq_filters,omitempty"`
@@ -199,8 +164,6 @@ type ShortEdit struct {
 	PublishArtifact   recording.RecordingArtifact `json:"publish_artifact,omitempty"`
 	PromptPath        string                      `json:"prompt_path"`
 	PublishPath       string                      `json:"publish_path"`
-	PlayerImage       string                      `json:"player_image,omitempty"`
-	PlayerKeyColor    string                      `json:"player_key_color,omitempty"`
 	MusicPath         string                      `json:"music_path,omitempty"`
 	RhythmPath        string                      `json:"rhythm_path,omitempty"`
 	OutputFPS         int                         `json:"output_fps,omitempty"`
@@ -298,8 +261,6 @@ type Result struct {
 	CompileSegments   bool          `json:"compile_segments,omitempty"`
 	LineupCatalogPath string        `json:"lineup_catalog_path,omitempty"`
 	UnmatchedSmokes   string        `json:"unmatched_smokes,omitempty"`
-	PlayerImage       string        `json:"player_image,omitempty"`
-	PlayerKeyColor    string        `json:"player_key_color,omitempty"`
 	VideoCRF          int           `json:"video_crf,omitempty"`
 	VideoPreset       string        `json:"video_preset,omitempty"`
 	HQFilters         bool          `json:"hq_filters,omitempty"`
@@ -323,8 +284,6 @@ type ShortResult struct {
 	SourceArtifact     recording.RecordingArtifact `json:"source_artifact,omitempty"`
 	PromptPath         string                      `json:"prompt_path"`
 	PublishPath        string                      `json:"publish_path"`
-	PlayerImage        string                      `json:"player_image,omitempty"`
-	PlayerKeyColor     string                      `json:"player_key_color,omitempty"`
 	MusicPath          string                      `json:"music_path,omitempty"`
 	RhythmPath         string                      `json:"rhythm_path,omitempty"`
 	OutputFPS          int                         `json:"output_fps,omitempty"`
@@ -380,8 +339,6 @@ type PackManifest struct {
 	CompileSegments   bool          `json:"compile_segments,omitempty"`
 	LineupCatalogPath string        `json:"lineup_catalog_path,omitempty"`
 	UnmatchedSmokes   string        `json:"unmatched_smokes,omitempty"`
-	PlayerImage       string        `json:"player_image,omitempty"`
-	PlayerKeyColor    string        `json:"player_key_color,omitempty"`
 	VideoCRF          int           `json:"video_crf,omitempty"`
 	VideoPreset       string        `json:"video_preset,omitempty"`
 	HQFilters         bool          `json:"hq_filters,omitempty"`
@@ -407,7 +364,6 @@ type PublishItem struct {
 	Source             string                      `json:"source"`
 	Video              string                      `json:"video"`
 	SourceArtifact     recording.RecordingArtifact `json:"source_artifact,omitempty"`
-	PlayerImage        string                      `json:"player_image,omitempty"`
 	MusicPath          string                      `json:"music_path,omitempty"`
 	RhythmPath         string                      `json:"rhythm_path,omitempty"`
 	OutputFPS          int                         `json:"output_fps,omitempty"`

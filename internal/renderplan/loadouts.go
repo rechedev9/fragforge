@@ -76,10 +76,8 @@ func LoadoutForVariant(variant string) (Loadout, error) {
 
 func loadoutFraming(filterKind string) string {
 	switch filterKind {
-	case editor.FilterKindFullFrame, editor.FilterKindSmokeLineups:
+	case editor.FilterKindFullFrame:
 		return "full-ui"
-	case editor.FilterKindViralSquare:
-		return "viral-square"
 	default:
 		return "center-crop"
 	}

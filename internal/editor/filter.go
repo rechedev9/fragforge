@@ -66,18 +66,11 @@ func VideoFilter(short ShortEdit) string {
 }
 
 func FullFrameVideoFilter(short ShortEdit) string {
-	grade := presetGradeFor(short.Preset)
 	filters := []string{
 		fullFrameBackgroundScaleFilter(short),
 		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
 	}
-	if gradeClause := baseGradeFilter(grade); gradeClause != "" {
-		filters = append(filters, gradeClause)
-	}
 	filters = append(filters, "setsar=1")
-	if grade.Unsharp {
-		filters = append(filters, "unsharp=5:5:0.35:3:3:0.15")
-	}
 	filters = append(filters,
 		fpsFilter(short),
 	)
@@ -85,105 +78,6 @@ func FullFrameVideoFilter(short ShortEdit) string {
 	filters = appendEffectFilters(filters, short.Effects)
 	filters = append(filters, "format=yuv420p")
 	return strings.Join(filters, ",")
-}
-
-func presetGradeFor(name string) presetGrade {
-	if renderPreset, ok := PresetByName(name); ok {
-		return renderPreset.Grade
-	}
-	return presetGrade{}
-}
-
-// baseGradeFilter renders a registry grade as an FFmpeg eq clause. It keeps
-// the historical saturation-only form when only saturation is set and returns
-// "" when the grade carries no color change.
-func baseGradeFilter(grade presetGrade) string {
-	if grade.Saturation == 0 && grade.Contrast == 0 && grade.Gamma == 0 {
-		return ""
-	}
-	if grade.Contrast == 0 && grade.Gamma == 0 {
-		return fmt.Sprintf("eq=saturation=%.3f", grade.Saturation)
-	}
-	contrast, saturation, gamma := grade.Contrast, grade.Saturation, grade.Gamma
-	if contrast == 0 {
-		contrast = 1
-	}
-	if saturation == 0 {
-		saturation = 1
-	}
-	if gamma == 0 {
-		gamma = 1
-	}
-	return fmt.Sprintf("eq=contrast=%.3f:saturation=%.3f:gamma=%.3f", contrast, saturation, gamma)
-}
-
-func ViralSquareFilter(short ShortEdit) string {
-	background := []string{
-		viralSquareBackgroundScaleFilter(short),
-		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
-		"boxblur=24:1",
-		"setsar=1",
-	}
-	foregroundHeight := "1080"
-	if expr := zoomHeightExpressionForBase(short.Effects, 1080); expr != "" {
-		foregroundHeight = "'" + expr + "'"
-	}
-	foreground := []string{
-		scaleFilter(foregroundHeight, short),
-		"crop=1080:1080:(iw-ow)/2:(ih-oh)/2",
-		"setsar=1",
-	}
-	foreground = appendTemporalSmoothingFilter(foreground, short)
-	final := []string{fpsFilter(short)}
-	final = appendEffectFilters(final, short.Effects)
-	images := imageEffects(short.Effects)
-	killfeeds := killfeedEffects(short.Effects)
-	final = append(final, "format=rgba")
-	clauses := []string{
-		fmt.Sprintf("[0:v]%s[bg]", strings.Join(background, ",")),
-		fmt.Sprintf("[0:v]%s[fg]", strings.Join(foreground, ",")),
-		"[bg][fg]overlay=x=0:y=420:format=auto[base]",
-		fmt.Sprintf("[base]%s[vbase]", strings.Join(final, ",")),
-	}
-	current := "vbase"
-	for i, effect := range killfeeds {
-		killfeedLabel := fmt.Sprintf("kf%d", i)
-		next := fmt.Sprintf("vkf%d", i)
-		clauses = append(clauses,
-			fmt.Sprintf("[0:v]%s[%s]", sourceCropFilter(effect, short), killfeedLabel),
-			fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
-				current,
-				killfeedLabel,
-				effectPosition(effect.X, "W-w-18"),
-				effectPosition(effect.Y, "438"),
-				betweenExpression(effect.StartSeconds, effect.EndSeconds),
-				next,
-			),
-		)
-		current = next
-	}
-	for i, effect := range images {
-		imageInput := i + 1
-		imageLabel := fmt.Sprintf("img%d", i)
-		next := fmt.Sprintf("vimg%d", i)
-		if i == len(images)-1 {
-			next = "vimages"
-		}
-		clauses = append(clauses,
-			fmt.Sprintf("[%d:v]%s[%s]", imageInput, imageOverlayFilter(effect, short), imageLabel),
-			fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
-				current,
-				imageLabel,
-				effectPosition(effect.X, "(W-w)/2"),
-				effectPosition(effect.Y, "72"),
-				betweenExpression(effect.StartSeconds, effect.EndSeconds),
-				next,
-			),
-		)
-		current = next
-	}
-	clauses = append(clauses, fmt.Sprintf("[%s]format=yuv420p[v]", current))
-	return strings.Join(clauses, ";")
 }
 
 func imageEffects(effects []Effect) []Effect {
@@ -265,26 +159,6 @@ func imageScaleFilter(effect Effect) string {
 	}
 }
 
-func sourceCropFilter(effect Effect, short ShortEdit) string {
-	cropWidth := effect.CropWidth
-	if cropWidth == 0 {
-		cropWidth = 360
-	}
-	cropHeight := effect.CropHeight
-	if cropHeight == 0 {
-		cropHeight = 110
-	}
-	filters := []string{
-		scaleFilter("1080", short),
-		fmt.Sprintf("crop=%d:%d:%d:%d", cropWidth, cropHeight, effect.CropX, effect.CropY),
-		sourceCropScaleFilter(effect),
-	}
-	filters = append(filters, gradeFilters(short.Effects)...)
-	filters = append(filters, "format=rgba")
-	filters = append(filters, overlayFadeFilters(effect)...)
-	return strings.Join(filters, ",")
-}
-
 func sourceCropScaleFilter(effect Effect) string {
 	switch {
 	case effect.Width > 0 && effect.Height > 0:
@@ -338,173 +212,6 @@ func effectPosition(value, fallback string) string {
 	return value
 }
 
-func viralSquareBackgroundScaleFilter(short ShortEdit) string {
-	filter := "scale=1080:1920:force_original_aspect_ratio=increase"
-	if short.HQFilters {
-		filter += ":flags=" + hqScaleFlags(short)
-	}
-	return filter
-}
-
-func SmokeLineupSlowMotionFilter(short ShortEdit) string {
-	window := smokeLineupSlowMotionWindow(short)
-	base := VideoFilter(short)
-	videoParts := []string{}
-	audioParts := []string{}
-	clauses := []string{
-		fmt.Sprintf("[0:v]%s,split=%d%s", base, len(window.parts), splitLabels("vsrc", len(window.parts))),
-		fmt.Sprintf("[0:a]asplit=%d%s", len(window.parts), splitLabels("asrc", len(window.parts))),
-	}
-	for i, part := range window.parts {
-		videoLabel := fmt.Sprintf("v%d", i)
-		audioLabel := fmt.Sprintf("a%d", i)
-		videoParts = append(videoParts, "["+videoLabel+"]")
-		audioParts = append(audioParts, "["+audioLabel+"]")
-		videoFilters := []string{trimFilter(part.start, part.end), "setpts=PTS-STARTPTS"}
-		audioFilters := []string{atrimFilter(part.start, part.end), "asetpts=PTS-STARTPTS"}
-		if part.slow {
-			videoFilters[1] = fmt.Sprintf("setpts=(PTS-STARTPTS)*%.3f", window.factor)
-			audioFilters = append(audioFilters, atempoChain(1/window.factor)...)
-		}
-		clauses = append(clauses,
-			fmt.Sprintf("[vsrc%d]%s[%s]", i, strings.Join(videoFilters, ","), videoLabel),
-			fmt.Sprintf("[asrc%d]%s[%s]", i, strings.Join(audioFilters, ","), audioLabel),
-		)
-	}
-	clauses = append(clauses,
-		fmt.Sprintf("%sconcat=n=%d:v=1:a=0,%s,format=yuv420p[v]", strings.Join(videoParts, ""), len(videoParts), fpsFilter(short)),
-		fmt.Sprintf("%sconcat=n=%d:v=0:a=1%s", strings.Join(audioParts, ""), len(audioParts), smokeLineupAudioOutput(short)),
-	)
-	return strings.Join(clauses, ";")
-}
-
-type smokeLineupSlowMotionPart struct {
-	start float64
-	end   float64
-	slow  bool
-}
-
-type smokeLineupSlowMotionPlan struct {
-	factor float64
-	parts  []smokeLineupSlowMotionPart
-}
-
-func smokeLineupSlowMotionWindowForTest(short ShortEdit) smokeLineupSlowMotionPlan {
-	return smokeLineupSlowMotionWindow(short)
-}
-
-func smokeLineupSlowMotionWindow(short ShortEdit) smokeLineupSlowMotionPlan {
-	const (
-		preSeconds  = 1.15
-		postSeconds = 0.95
-		factor      = 2.5
-	)
-	smoke := short.Smokes[0]
-	start := smoke.TimeSeconds - preSeconds
-	if start < 0 {
-		start = 0
-	}
-	end := smoke.TimeSeconds + postSeconds
-	if short.DurationSeconds > 0 && end > short.DurationSeconds {
-		end = short.DurationSeconds
-	}
-	if end <= start {
-		end = start + 0.25
-	}
-	parts := make([]smokeLineupSlowMotionPart, 0, 3)
-	if start > 0.001 {
-		parts = append(parts, smokeLineupSlowMotionPart{start: 0, end: start})
-	}
-	parts = append(parts, smokeLineupSlowMotionPart{start: start, end: end, slow: true})
-	if short.DurationSeconds <= 0 || end < short.DurationSeconds-0.001 {
-		parts = append(parts, smokeLineupSlowMotionPart{start: end})
-	}
-	return smokeLineupSlowMotionPlan{factor: factor, parts: parts}
-}
-
-func splitLabels(prefix string, n int) string {
-	labels := make([]string, 0, n)
-	for i := 0; i < n; i++ {
-		labels = append(labels, fmt.Sprintf("[%s%d]", prefix, i))
-	}
-	return strings.Join(labels, "")
-}
-
-func trimFilter(start, end float64) string {
-	if end > 0 {
-		return fmt.Sprintf("trim=start=%.3f:end=%.3f", start, end)
-	}
-	return fmt.Sprintf("trim=start=%.3f", start)
-}
-
-func atrimFilter(start, end float64) string {
-	if end > 0 {
-		return fmt.Sprintf("atrim=start=%.3f:end=%.3f", start, end)
-	}
-	return fmt.Sprintf("atrim=start=%.3f", start)
-}
-
-func atempoChain(speed float64) []string {
-	if speed <= 0 {
-		return nil
-	}
-	out := []string{}
-	for speed < 0.5 {
-		out = append(out, "atempo=0.5")
-		speed /= 0.5
-	}
-	for speed > 2.0 {
-		out = append(out, "atempo=2.0")
-		speed /= 2.0
-	}
-	out = append(out, fmt.Sprintf("atempo=%.3f", speed))
-	return out
-}
-
-func smokeLineupAudioOutput(short ShortEdit) string {
-	if short.AudioNormalize {
-		return ",loudnorm=I=-16:TP=-1.5:LRA=11[a]"
-	}
-	return "[a]"
-}
-
-func PremiumPlayerFilter(short ShortEdit) string {
-	base := []string{
-		scaleFilter("1920", short),
-		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
-		"setsar=1",
-		fpsFilter(short),
-	}
-	base = appendTemporalSmoothingFilter(base, short)
-	if expr := zoomHeightExpression(short.Effects); expr != "" {
-		base[0] = scaleFilter("'"+expr+"'", short)
-	}
-	headline := short.Headline
-	if headline == "" {
-		headline = short.Label
-	}
-	if headline != "" {
-		base = append(base, drawTextExpr(headline, "(w-text_w)/2", "82", 54, 0, 2.8, "black@0.96", "white@0.92", 22))
-	}
-	if short.Player != "" {
-		base = append(base, drawTextExpr(short.Player, "(w-text_w)/2", "164", 32, 0, 2.8, "white@0.92", "black@0.32", 14))
-	}
-	base = appendEffectFilters(base, short.Effects)
-	base = append(base, "format=rgba")
-
-	player := "format=rgba"
-	if key := ffmpegColor(short.PlayerKeyColor); key != "" {
-		player += fmt.Sprintf(",chromakey=%s:0.09:0.03", key)
-	}
-	player += ",scale=-1:640"
-
-	return fmt.Sprintf(
-		"[0:v]%s[base];[1:v]%s[player];[base][player]overlay=x=(W-w)/2:y=H-h+36:format=auto,format=yuv420p[v]",
-		strings.Join(base, ","),
-		player,
-	)
-}
-
 func scaleFilter(height string, short ShortEdit) string {
 	filter := fmt.Sprintf("scale=w=-2:h=%s:eval=frame", height)
 	if short.HQFilters {
@@ -537,9 +244,6 @@ func fullFrameBackgroundScaleFilter(short ShortEdit) string {
 }
 
 func hqScaleFlags(short ShortEdit) string {
-	if renderPreset, ok := PresetByName(short.Preset); ok && renderPreset.AccurateScaling {
-		return "lanczos+accurate_rnd"
-	}
 	return "lanczos"
 }
 
