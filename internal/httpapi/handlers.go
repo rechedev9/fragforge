@@ -109,14 +109,6 @@ type uploadStatusRequest struct {
 	Uploaded bool `json:"uploaded"`
 }
 
-type uploadStatusDocument struct {
-	SchemaVersion string    `json:"schema_version"`
-	JobID         uuid.UUID `json:"job_id"`
-	Variant       string    `json:"variant"`
-	Uploaded      bool      `json:"uploaded"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
 // CreateJob handles POST /api/jobs.
 func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxMultipartBytes)
@@ -655,18 +647,12 @@ func (h *Handlers) SetRenderUploaded(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid upload status JSON")
 		return
 	}
-	key, err := artifacts.RenderVariantUploadStatusKey(j.ID, variant)
+	key, err := renderplan.RenderVariantUploadStatusKey(j.ID, variant)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	doc := uploadStatusDocument{
-		SchemaVersion: "1.0",
-		JobID:         j.ID,
-		Variant:       variant,
-		Uploaded:      req.Uploaded,
-		UpdatedAt:     time.Now().UTC(),
-	}
+	doc := renderplan.NewRenderVariantUploadStatus(j.ID, variant, req.Uploaded)
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		internalError(w, "marshal upload status", err)
@@ -744,7 +730,7 @@ func (h *Handlers) GetCaptionAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) renderVariantUploaded(id uuid.UUID, variant string) bool {
-	key, err := artifacts.RenderVariantUploadStatusKey(id, variant)
+	key, err := renderplan.RenderVariantUploadStatusKey(id, variant)
 	if err != nil {
 		return false
 	}
@@ -753,7 +739,7 @@ func (h *Handlers) renderVariantUploaded(id uuid.UUID, variant string) bool {
 		return false
 	}
 	defer rc.Close()
-	var doc uploadStatusDocument
+	var doc renderplan.RenderVariantUploadStatus
 	if err := json.NewDecoder(rc).Decode(&doc); err != nil {
 		return false
 	}

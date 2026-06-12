@@ -1059,7 +1059,7 @@ func TestGetRenderPublishBoardReturnsReadyStatus(t *testing.T) {
 	for _, key := range []string{videoKey, coverKey, captionKey} {
 		_ = store.Put(key, bytes.NewReader([]byte("artifact")))
 	}
-	uploadedKey, err := artifacts.RenderVariantUploadStatusKey(j.ID, variant)
+	uploadedKey, err := renderplan.RenderVariantUploadStatusKey(j.ID, variant)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1098,7 +1098,7 @@ func TestSetRenderUploadedWritesLocalMarker(t *testing.T) {
 	if rw.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
 	}
-	key, err := artifacts.RenderVariantUploadStatusKey(j.ID, editor.PresetViral60Clean)
+	key, err := renderplan.RenderVariantUploadStatusKey(j.ID, editor.PresetViral60Clean)
 	if err != nil {
 		t.Fatal(err)
 	}
