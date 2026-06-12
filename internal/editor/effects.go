@@ -16,75 +16,6 @@ import (
 
 var effectsEvaluationTimeout = 2 * time.Second
 
-const smokeLineupsEffectsScript = `
-on_segment(function(segment)
-  grade({
-    contrast = 1.03,
-    saturation = 1.24,
-    gamma = 1.00
-  })
-end)
-
-on_smoke(function(smoke)
-  local duration = smoke.duration or 0
-  local kind = "UTILITY"
-  if smoke.type == "smokegrenade" then kind = "SMOKE" end
-  if smoke.type == "flashbang" then kind = "FLASH" end
-  if smoke.type == "molotov" or smoke.type == "incgrenade" then kind = "MOLLY" end
-
-  local destination = smoke.destination
-  if destination == "" then
-    destination = "LINEUP"
-  end
-
-  local title = string.upper(destination .. " " .. kind)
-  local subtitle = "UTILITY THROW"
-  if smoke.from_area ~= "" then
-    subtitle = "FROM " .. string.upper(smoke.from_area)
-  end
-  local action = smoke.throw_action
-  if action ~= "" then
-    local action_label = string.upper(string.gsub(action, "_", " "))
-    if action == "jumpthrow" then
-      if smoke.stance == "crouching" or smoke.stance == "crouching_in_progress" then
-        action_label = "CROUCH JUMPTHROW"
-      elseif smoke.stance == "standing" then
-        action_label = "STANDING JUMPTHROW"
-      end
-    end
-    subtitle = subtitle .. " · " .. action_label
-  elseif smoke.movement ~= "" then
-    subtitle = subtitle .. " · " .. string.upper(smoke.movement)
-  end
-
-  if duration == 0 or smoke.time < duration - 0.1 then
-    text({
-      value = title,
-      start = smoke.time,
-      duration = 2.75,
-      x = 58,
-      y = 1368,
-      size = 58,
-      color = "white@0.97",
-      box_color = "0x2a1190@0.92",
-      box_border = 22
-    })
-
-    text({
-      value = subtitle,
-      start = smoke.time,
-      duration = 2.75,
-      x = 58,
-      y = 1450,
-      size = 34,
-      color = "white@0.96",
-      box_color = "black@0.84",
-      box_border = 14
-    })
-  end
-end)
-`
-
 // viralUltraCleanEffectsScript is the standard HUD-less capture preset:
 // the cropped killfeed overlay narrates each kill, so the per-kill text
 // banners (weapon labels, wallbang/chain callouts, milestone pills) are
@@ -279,12 +210,8 @@ func loadEffectsSource(path, preset string) (effectsSource, error) {
 	}
 	preset = normalizeEffectsPreset(preset)
 	switch preset {
-	case EffectsPresetSmokeLineups:
-		return effectsSource{Preset: preset, Script: smokeLineupsEffectsScript}, nil
 	case EffectsPresetViralUltraClean:
 		return effectsSource{Preset: preset, Script: viralUltraCleanEffectsScript}, nil
-	case EffectsPresetNone:
-		return effectsSource{Preset: preset}, nil
 	default:
 		return effectsSource{}, fmt.Errorf("unknown effects preset %q", preset)
 	}

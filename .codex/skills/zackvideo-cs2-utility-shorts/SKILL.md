@@ -1,11 +1,11 @@
 ---
 name: zackvideo-cs2-utility-shorts
-description: "Create CS2 utility Shorts from a demo with FragForge: parse utility, audit destinations/actions, record, render smoke-lineup overlays, and open the gallery."
+description: "Create CS2 utility Shorts from a demo with FragForge: parse utility, audit destinations/actions, record, render with the standard viral-60-clean preset, and open the gallery."
 ---
 
 # FragForge CS2 Utility Shorts
 
-Use this skill when the user wants Shorts about CS2 utility from a demo, especially smokes/flashes/molotovs for one player.
+Use this skill when the user wants Shorts about CS2 utility from a demo, especially smokes/flashes/molotovs for one player. Use the standard `viral-60-clean` preset; alternate effects presets are retired.
 
 ## Workflow
 
@@ -52,8 +52,7 @@ Use `--dry-run` first when changing recording settings.
   --killplan <run>\plan-utility.json `
   --out <run>\shorts-utility `
   --preset viral-60-clean `
-  --lineup-catalog data\lineups `
-  --effects-preset smoke-lineups
+  --lineup-catalog data\lineups
 ```
 
 Use `--skip-existing` only when changing captions/metadata but not burned-in overlay text.
@@ -64,13 +63,11 @@ Use `--skip-existing` only when changing captions/metadata but not burned-in ove
 .\bin\zv.exe workflows run gallery-open -- --path <run>\shorts-utility\publish\index.html
 ```
 
-## Overlay Rules
+## Review Rules
 
-- Show the card when the player launches the utility, not when it lands.
-- Use lower-left purple/black cards for utility labels.
-- Title format: `<DESTINATION> <UTILITY>`, for example `T RAMP SMOKE`.
-- Subtitle format: `FROM <ORIGIN> · <ACTION>`, for example `FROM CTSPAWN · STANDING JUMPTHROW`.
-- Include stance and action when known: `STANDING JUMPTHROW`, `CROUCH JUMPTHROW`, `RUNNING THROW`, `WALKING THROW`.
+- Confirm the selected utility moment is visible in the clean POV.
+- Keep destination/action labels in metadata and captions unless a custom Lua script is explicitly requested.
+- Include stance and action when known in captions or review notes: `STANDING JUMPTHROW`, `CROUCH JUMPTHROW`, `RUNNING THROW`, `WALKING THROW`.
 
 ## Destination Rules
 

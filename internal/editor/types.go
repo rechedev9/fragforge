@@ -9,16 +9,8 @@ import (
 )
 
 const (
-	// EffectsPresetNone disables scripted effects and leaves only the base
-	// vertical layout.
-	EffectsPresetNone = "none"
-
-	// EffectsPresetSmokeLineups annotates utility clips with restrained
-	// tutorial labels.
-	EffectsPresetSmokeLineups = "smoke-lineups"
-
-	// EffectsPresetViralUltraClean is the standard kill/highlight effects
-	// preset for HUD-less recordings.
+	// EffectsPresetViralUltraClean is the effects pack bundled into the sole
+	// public render preset, viral-60-clean.
 	EffectsPresetViralUltraClean = "viral-ultra-clean"
 
 	// EffectsPresetExternal marks manifests rendered from a user script path.

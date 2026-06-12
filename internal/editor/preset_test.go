@@ -121,7 +121,7 @@ func TestUnknownPresetErrorListsValidNames(t *testing.T) {
 }
 
 func TestRetiredEffectsPresetsAreRejected(t *testing.T) {
-	for _, preset := range []string{"builtin-clean", "awpgod", "viral-ultra"} {
+	for _, preset := range []string{"builtin-clean", "awpgod", "viral-ultra", "smoke-lineups", "none"} {
 		t.Run(preset, func(t *testing.T) {
 			cfg := Config{
 				RecordingResultPath: "recording-result.json",

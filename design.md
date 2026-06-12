@@ -98,11 +98,12 @@ Every job should answer these questions at a glance:
 - What is already upload-ready?
 - Where are the final files?
 
-### Default To The Real CS2 Frame
+### Default To The Standard Clean POV
 
-For kill/highlight Shorts, the visual default is `natural-hq2-full`: full
-gameplay UI preserved inside the vertical canvas, subtle saturation lift, and no
-cinematic crop unless explicitly requested.
+For kill/highlight Shorts, the visual default is `viral-60-clean`: clean
+deathnotice-HUD capture rendered as 1080x1920 60fps POV with the standard
+viral-ultra-clean overlay pack. Do not expose alternate render presets unless a
+future product decision intentionally reopens the catalog.
 
 ### Review Before Cost
 
@@ -245,7 +246,7 @@ controls, state, and concise labels.
 9. Codex proposes recording all selected moments.
 10. Operator approves recording.
 11. Recording completes.
-12. Codex proposes `natural-hq2-full`.
+12. Codex proposes `viral-60-clean`.
 13. Operator approves render.
 14. Publish pack appears with video, cover, caption, gallery, QA.
 15. Codex proposes captions/hashtags and cleanup.
@@ -266,7 +267,7 @@ Codex should ask for the minimum missing decision:
 
 - target player
 - style: kills, utility, cheater POV, music sync
-- output default if no preference: `natural-hq2-full`
+- output default if no preference: `viral-60-clean`
 
 The UI should not block on unnecessary questions. If the user gives only a
 target player, defaults are acceptable.
@@ -293,7 +294,7 @@ Controls:
 - File drop zone for `.dem`
 - Prompt textarea
 - Optional target SteamID64 input hidden under `Advanced`
-- Optional preset selector hidden under `Advanced`
+- Preset display hidden under `Advanced`; no alternate preset selector in V1
 - Primary button: `Start with Codex`
 
 Behavior:
@@ -393,13 +394,11 @@ Content:
 - render button
 - generated videos and covers
 
-Default loadouts:
+Default loadout:
 
-- `natural-hq2-full`
-- `natural-hq2-full-plus`
-- `smoke-lineups`
+- `viral-60-clean`
 
-For kill/highlight jobs, `natural-hq2-full` should be preselected.
+For kill/highlight jobs, `viral-60-clean` should be preselected.
 
 ### 9.6 Publish Tab
 
@@ -665,7 +664,7 @@ Good labels:
 
 - `Start with Codex`
 - `Approve recording`
-- `Render natural-hq2-full`
+- `Render viral-60-clean`
 - `Open gallery`
 - `Show logs`
 - `Mark uploaded`
@@ -784,7 +783,7 @@ Roles:
   "requires_approval": true,
   "payload": {
     "job_id": "uuid",
-    "variant": "natural-hq2-full"
+    "variant": "viral-60-clean"
   },
   "result": null,
   "created_at": "timestamp",
@@ -930,7 +929,7 @@ Payload:
 {
   "target_steamid": "76561198148986856",
   "rules": {},
-  "prompt_summary": "all target kills, natural-hq2-full"
+  "prompt_summary": "all target kills, viral-60-clean"
 }
 ```
 
@@ -974,7 +973,7 @@ Payload:
 ```json
 {
   "job_id": "uuid",
-  "variant": "natural-hq2-full"
+  "variant": "viral-60-clean"
 }
 ```
 
@@ -982,7 +981,7 @@ Guardrails:
 
 - variant must be from the loadout catalog
 - job must be `recorded`, `composed`, or `done`
-- default kill/highlight variant is `natural-hq2-full`
+- default kill/highlight variant is `viral-60-clean`
 
 ### `start_caption_agent`
 
@@ -995,7 +994,7 @@ Payload:
 ```json
 {
   "job_id": "uuid",
-  "variant": "natural-hq2-full"
+  "variant": "viral-60-clean"
 }
 ```
 
@@ -1010,7 +1009,7 @@ Payload:
 ```json
 {
   "job_id": "uuid",
-  "variant": "natural-hq2-full",
+  "variant": "viral-60-clean",
   "uploaded": true
 }
 ```
@@ -1198,7 +1197,7 @@ Run this checklist before calling the UI slice ready:
 - Expensive actions cannot be triggered accidentally.
 - Failed states show the failure reason and the next valid action.
 - The `shortslistosparasubir` destination is visible in Publish and Artifacts.
-- The default kill/highlight render is `natural-hq2-full`.
+- The default kill/highlight render is `viral-60-clean`.
 - The visual design is neutral and operational, not a one-color theme.
 - The app can be used with keyboard focus visible.
 - The UI remains useful if Codex is unavailable.

@@ -239,7 +239,7 @@ func (c Config) validate() error {
 	}
 	if c.EffectsPath == "" && c.EffectsPreset != "" {
 		switch c.EffectsPreset {
-		case EffectsPresetSmokeLineups, EffectsPresetViralUltraClean, EffectsPresetNone:
+		case EffectsPresetViralUltraClean:
 		default:
 			return fmt.Errorf("unknown effects preset %q", c.EffectsPreset)
 		}

@@ -179,8 +179,8 @@ stay reachable through pass-throughs such as `zv parser`, `zv editor`,
   prompts without rendering.
 - `--music`, `--rhythm`, `--compile-segments` for music-scripted compilation
   edits (analyze the track first with `zv music analyze`).
-- `--effects-preset viral-ultra-clean|smoke-lineups|none` or
-  `--effects <script.lua>` for explicit custom Lua effects. The Lua DSL
+- `--effects-preset viral-ultra-clean` or `--effects <script.lua>` for explicit
+  custom Lua effects. The Lua DSL
   exposes `on_segment`, `on_kill`, `on_smoke`, `zoom`, `flash`, `text`, and
   `grade`; scripts run sandboxed (no filesystem/process access) with a capped
   evaluation budget. Standard kill/highlight renders use `viral-ultra-clean`.

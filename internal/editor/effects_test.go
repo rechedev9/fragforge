@@ -649,28 +649,6 @@ func TestEvaluateEffectsTimesOutRunawayScript(t *testing.T) {
 	}
 }
 
-func TestBuildManifestEffectsPresetNoneLeavesBaseFilter(t *testing.T) {
-	dir := t.TempDir()
-	result := testRecordingResult(dir)
-	opts := testManifestOptions(dir, nil)
-	opts.EffectsPreset = EffectsPresetNone
-
-	manifest := BuildManifest(result, opts)
-	if manifest.EffectsPreset != EffectsPresetNone {
-		t.Fatalf("effects preset = %q", manifest.EffectsPreset)
-	}
-	if len(manifest.Shorts) != 2 {
-		t.Fatalf("shorts len = %d", len(manifest.Shorts))
-	}
-	if len(manifest.Shorts[0].Effects) != 0 {
-		t.Fatalf("effects = %#v, want none", manifest.Shorts[0].Effects)
-	}
-	filter := argAfter(manifest.Shorts[0].FFmpegCommand, "-vf")
-	if strings.Contains(filter, "drawtext") || strings.Contains(filter, "if(between") {
-		t.Fatalf("base filter should not contain scripted effects:\n%s", filter)
-	}
-}
-
 func TestRunDryRunExternalEffectsWritesMetadata(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
