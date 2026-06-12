@@ -1126,8 +1126,8 @@ func uploadRenderVariantOutputs(store storage.Storage, id uuid.UUID, variant, ou
 		}
 	}
 
-	if result.Error == "" && len(result.Shorts) == 0 {
-		return nil, fmt.Errorf("render result has no shorts")
+	if err := renderplan.ValidateRenderVariantUploadResult(result); err != nil {
+		return nil, err
 	}
 	return keys, nil
 }
