@@ -1257,24 +1257,17 @@ func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant stri
 }
 
 func localizeSegmentClips(store storage.Storage, id uuid.UUID, workDir string, result *recording.RecordingResult) error {
-	localized := 0
-	for i := range result.Artifacts {
-		artifact := &result.Artifacts[i]
-		if artifact.Role != "segment" || artifact.Type != "video" || artifact.SegmentID == "" {
-			continue
-		}
-		localPath := filepath.Join(workDir, "segments", artifact.SegmentID+".mp4")
-		key, err := recording.SegmentClipArtifactKey(id, artifact.SegmentID)
-		if err != nil {
-			return err
-		}
-		if err := copyStorageToFile(store, key, localPath); err != nil {
-			return fmt.Errorf("localize segment %s: %w", artifact.SegmentID, err)
-		}
-		artifact.Path = localPath
-		localized++
+	localizations, err := recording.NewSegmentClipLocalizations(id, workDir, *result)
+	if err != nil {
+		return err
 	}
-	if localized == 0 {
+	for _, localization := range localizations {
+		if err := copyStorageToFile(store, localization.Key, localization.LocalPath); err != nil {
+			return fmt.Errorf("localize segment %s: %w", localization.SegmentID, err)
+		}
+		result.Artifacts[localization.ArtifactIndex].Path = localization.LocalPath
+	}
+	if len(localizations) == 0 {
 		return fmt.Errorf("recording result has no segment clips")
 	}
 	return nil
