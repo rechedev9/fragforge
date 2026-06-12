@@ -695,7 +695,7 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (e
 			Loadout:  loadout,
 			Status:   renderplan.RenderVariantStatusFailed,
 			Warnings: result.Warnings,
-			Error:    renderVariantFailureMessage(result, err),
+			Error:    renderplan.RenderVariantFailureMessage(result, err),
 			Previous: currentState,
 		})
 		if stateErr != nil {
@@ -836,13 +836,6 @@ func (w *RenderWorker) writeRenderVariantState(state renderplan.RenderVariantSta
 		return err
 	}
 	return w.storage.Put(key, bytes.NewReader(b))
-}
-
-func renderVariantFailureMessage(result editor.Result, err error) string {
-	if result.Error != "" {
-		return result.Error
-	}
-	return err.Error()
 }
 
 type ffprobeJSON struct {
