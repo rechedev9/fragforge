@@ -154,8 +154,20 @@ func main() {
 		}()
 	}
 
+	// Defense-in-depth gating only kicks in on an exposed (non-loopback) bind;
+	// the loopback default stays unauthenticated and unthrottled for the local
+	// UI and e2e.
+	exposed := !isLoopbackHTTPAddr(cfg.HTTPAddr)
+	rateLimitRPS := 0.0
+	rateLimitBurst := 0
+	if exposed {
+		rateLimitRPS = 20
+		rateLimitBurst = 40
+	}
 	handlers := httpapi.NewHandlers(repo, store, queue,
 		httpapi.WithMutationToken(cfg.MutationToken),
+		httpapi.WithRequireReadAuth(exposed),
+		httpapi.WithRateLimit(rateLimitRPS, rateLimitBurst),
 		httpapi.WithStreamRepository(streamRepo),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
 	)

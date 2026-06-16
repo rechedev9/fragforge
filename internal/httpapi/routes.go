@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -9,6 +11,8 @@ import (
 // Routes returns a chi router with all orchestrator routes wired.
 func Routes(h *Handlers) chi.Router {
 	r := chi.NewRouter()
+	r.Use(h.rateLimiter.middleware)
+	r.Use(crossSiteGuard)
 	r.Use(h.requireMutationToken)
 	r.Get("/", h.Workbench)
 	r.Get("/api/loadouts", h.ListLoadouts)
@@ -51,16 +55,34 @@ func Routes(h *Handlers) chi.Router {
 
 func (h *Handlers) requireMutationToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.mutationToken == "" || !isMutationMethod(r.Method) {
+		if h.mutationToken == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.Header.Get("X-FragForge-Token") != h.mutationToken {
-			writeError(w, http.StatusUnauthorized, "mutation token required")
+		if isMutationMethod(r.Method) {
+			if !h.tokenMatches(r) {
+				writeError(w, http.StatusUnauthorized, "mutation token required")
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		// When the bind is exposed, reads of the API also require the token so an
+		// untrusted network cannot enumerate jobs or stream artifacts. The
+		// workbench shell (GET /) and other non-/api paths stay open so the
+		// operator console still loads and can prompt for the token.
+		if h.requireReadAuth && strings.HasPrefix(r.URL.Path, "/api/") && !h.tokenMatches(r) {
+			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// tokenMatches reports whether the request carries the configured mutation
+// token, using a constant-time comparison to avoid leaking it via timing.
+func (h *Handlers) tokenMatches(r *http.Request) bool {
+	return subtle.ConstantTimeCompare([]byte(r.Header.Get("X-FragForge-Token")), []byte(h.mutationToken)) == 1
 }
 
 func isMutationMethod(method string) bool {

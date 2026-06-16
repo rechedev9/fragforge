@@ -63,12 +63,14 @@ type Enqueuer interface {
 
 // Handlers bundles the dependencies needed by every endpoint.
 type Handlers struct {
-	repo          JobRepository
-	streamRepo    StreamJobRepository
-	storage       storage.Storage
-	queue         Enqueuer
-	mutationToken string
-	streamProber  streamclips.Prober
+	repo            JobRepository
+	streamRepo      StreamJobRepository
+	storage         storage.Storage
+	queue           Enqueuer
+	mutationToken   string
+	requireReadAuth bool
+	rateLimiter     *rateLimiter
+	streamProber    streamclips.Prober
 }
 
 type Option func(*Handlers)
@@ -77,6 +79,23 @@ type Option func(*Handlers)
 func WithMutationToken(token string) Option {
 	return func(h *Handlers) {
 		h.mutationToken = token
+	}
+}
+
+// WithRequireReadAuth also gates non-mutation /api reads behind the mutation
+// token. It is meant for exposed (non-loopback) binds and has no effect unless a
+// mutation token is configured. Loopback deployments leave this off.
+func WithRequireReadAuth(require bool) Option {
+	return func(h *Handlers) {
+		h.requireReadAuth = require
+	}
+}
+
+// WithRateLimit throttles requests per client IP. When rps <= 0 the limiter is a
+// no-op pass-through, which keeps loopback deployments unthrottled.
+func WithRateLimit(rps float64, burst int) Option {
+	return func(h *Handlers) {
+		h.rateLimiter = newRateLimiter(rps, burst)
 	}
 }
 
@@ -111,6 +130,12 @@ type uploadStatusRequest struct {
 	Uploaded bool `json:"uploaded"`
 }
 
+// isDemoHeader reports whether the leading bytes look like a CS2 (Source 2) or
+// legacy GOTV (Source 1) demo.
+func isDemoHeader(header []byte) bool {
+	return bytes.HasPrefix(header, []byte("PBDEMS2")) || bytes.HasPrefix(header, []byte("HL2DEMO"))
+}
+
 // CreateJob handles POST /api/jobs.
 func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxMultipartBytes)
@@ -131,6 +156,22 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+
+	// Peek the demo magic bytes before persisting so non-demo uploads are
+	// rejected at the door. io.ReadFull tolerates a short read via ErrUnexpectedEOF.
+	var header [8]byte
+	n, err := io.ReadFull(file, header[:])
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		internalError(w, "read demo header", err)
+		return
+	}
+	if !isDemoHeader(header[:n]) {
+		writeError(w, http.StatusBadRequest, "uploaded file is not a CS2 demo")
+		return
+	}
+	// Stitch the peeked bytes back ahead of the remaining stream so the upload is
+	// neither truncated nor read twice.
+	demo := io.MultiReader(bytes.NewReader(header[:n]), file)
 
 	var cfg createJobConfig
 	if raw := r.FormValue("config"); raw != "" {
@@ -168,7 +209,7 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 
 	// Stream upload to storage while hashing in one pass.
 	h256 := sha256.New()
-	tee := io.TeeReader(file, h256)
+	tee := io.TeeReader(demo, h256)
 	if err := h.storage.Put(key, tee); err != nil {
 		internalError(w, "store demo", err)
 		return
@@ -499,7 +540,7 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	}
 	// The job stays in its parsed/recorded state on enqueue failure so the
 	// client can retry the POST once the queue recovers.
-	if _, err := h.queue.Enqueue(task, asynq.MaxRetry(0)); err != nil {
+	if _, err := h.queue.Enqueue(task, asynq.MaxRetry(0), asynq.Unique(renderUniqueTTL)); err != nil {
 		internalError(w, "enqueue record task", err)
 		return
 	}

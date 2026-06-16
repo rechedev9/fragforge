@@ -198,7 +198,27 @@ func (q *fakeQueue) Enqueue(t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInf
 	return &asynq.TaskInfo{ID: "x"}, nil
 }
 
+// demoMagic is the CS2 (Source 2) demo header CreateJob validates against.
+var demoMagic = []byte("PBDEMS2\x00")
+
+// multipartBody builds a CreateJob upload whose demo bytes start with a valid
+// CS2 demo header, so it exercises the happy path. Tests that need an invalid
+// header build their own body.
 func multipartBody(t *testing.T, demoBytes []byte, configJSON string) (*bytes.Buffer, string) {
+	t.Helper()
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	demoPart, _ := mw.CreateFormFile("demo", "test.dem")
+	demoPart.Write(demoMagic)
+	demoPart.Write(demoBytes)
+	mw.WriteField("config", configJSON)
+	mw.Close()
+	return body, mw.FormDataContentType()
+}
+
+// multipartBodyRaw builds a CreateJob upload with exactly the given demo bytes,
+// for tests that assert on the magic-byte validation itself.
+func multipartBodyRaw(t *testing.T, demoBytes []byte, configJSON string) (*bytes.Buffer, string) {
 	t.Helper()
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)
@@ -479,6 +499,53 @@ func TestPostJobsRejectsInvalidSteamID(t *testing.T) {
 	h.CreateJob(rw, req)
 	if rw.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rw.Code)
+	}
+}
+
+func TestPostJobsValidatesDemoMagicBytes(t *testing.T) {
+	cases := []struct {
+		name       string
+		demo       []byte
+		wantStatus int
+	}{
+		{name: "cs2 source2 demo", demo: []byte("PBDEMS2\x00rest-of-demo"), wantStatus: http.StatusCreated},
+		{name: "legacy gotv demo", demo: []byte("HL2DEMO\x00rest-of-demo"), wantStatus: http.StatusCreated},
+		{name: "not a demo", demo: []byte("just some bytes"), wantStatus: http.StatusBadRequest},
+		{name: "short non-demo body", demo: []byte("PB2"), wantStatus: http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			store := newFakeStorage()
+			queue := &fakeQueue{}
+			h := NewHandlers(repo, store, queue)
+
+			body, ct := multipartBodyRaw(t, tc.demo, `{"target_steamid":"76561198000000000"}`)
+			req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+			req.Header.Set("Content-Type", ct)
+			rw := httptest.NewRecorder()
+
+			h.CreateJob(rw, req)
+
+			if rw.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rw.Code, tc.wantStatus, rw.Body.String())
+			}
+			if tc.wantStatus == http.StatusBadRequest {
+				if !strings.Contains(rw.Body.String(), "not a CS2 demo") {
+					t.Fatalf("body = %s, want not-a-demo error", rw.Body.String())
+				}
+				if len(store.puts) != 0 {
+					t.Fatalf("storage puts = %d, want 0 (must reject before Put)", len(store.puts))
+				}
+				return
+			}
+			// The full demo bytes (header included) must reach storage intact.
+			for _, stored := range store.puts {
+				if !bytes.Equal(stored, tc.demo) {
+					t.Fatalf("stored demo = %q, want full bytes %q", stored, tc.demo)
+				}
+			}
+		})
 	}
 }
 
@@ -826,6 +893,9 @@ func TestStartRecordingEnqueuesRecordTaskWhenParsed(t *testing.T) {
 	}
 	if queue.enqueued[0].Type() != tasks.TypeRecordDemo {
 		t.Fatalf("task type = %q, want %q", queue.enqueued[0].Type(), tasks.TypeRecordDemo)
+	}
+	if len(queue.options) != 1 || !hasAsynqOption(queue.options[0], "Unique(") {
+		t.Fatalf("enqueue options = %#v, want Unique option for dedup", queue.options)
 	}
 }
 
