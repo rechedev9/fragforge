@@ -1,0 +1,12 @@
+export type SteamUser = { id: string; personaName: string; avatarUrl: string };
+export type MatchStats = { kills: number; deaths: number; assists: number; mvps: number; kd: number };
+export type Match = { id: string; map: string; score: string; playedAt: string; stats: MatchStats; decentPlays: number; thumbnailUrl?: string };
+export type PlayKind = 'clean' | 'highlight';
+export type Play = { id: string; matchId: string; label: string; kind: PlayKind; round: number; kills: number; weapon?: string; thumbnailUrl?: string };
+export type RenderMode = 'clean' | 'music';
+export type Song = { id: string; title: string; artist: string; genre: string; previewUrl: string; durationSec: number };
+export type VideoStatus = 'queued' | 'recording' | 'composing' | 'ready' | 'failed';
+export type Video = { id: string; title: string; map: string; score: string; mode: RenderMode; songId?: string; status: VideoStatus; createdAt: number; availableForSec?: number; thumbnailUrl?: string; published: boolean; downloadUrl?: string };
+export type Slots = { used: number; total: number };
+export type FeedItem = { id: string; author: string; authorAvatarUrl: string; title: string; map: string; thumbnailUrl: string; likes: number; createdAt: number; videoUrl: string };
+export type Session = { user: SteamUser | null; slots: Slots; pcPaired: boolean; matchHistoryLinked: boolean };
