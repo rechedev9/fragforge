@@ -4,7 +4,7 @@ import { Film, Music } from 'lucide-react';
 import type { Video } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { Card } from '@/components/ui/card';
-import { PipelineSteps, RecDot } from '@/components/brand';
+import { PipelineSteps, RecDot, ReelCover } from '@/components/brand';
 
 /**
  * A render still in flight (queued / recording / composing). Shows a dimmed
@@ -22,15 +22,7 @@ export function RenderingCard({ video }: { video: Video }) {
       )}
     >
       <div className="relative aspect-video w-28 shrink-0 overflow-hidden rounded-lg border border-border bg-muted sm:w-36">
-        {video.thumbnailUrl ? (
-          // Mock thumbnails come from external placeholder hosts.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={video.thumbnailUrl}
-            alt={video.title}
-            className="h-full w-full object-cover opacity-40"
-          />
-        ) : null}
+        <ReelCover seed={video.id} plain className="size-full opacity-50" />
         <div className="absolute inset-0 grid place-items-center">
           <ModeIcon className="size-5 text-muted-foreground" />
         </div>

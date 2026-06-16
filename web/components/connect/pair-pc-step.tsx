@@ -8,7 +8,6 @@ import { useSession } from '@/lib/session';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SectionEyebrow } from '@/components/brand';
-import { cn } from '@/lib/utils';
 
 /**
  * Step 2 — pair the player's own PC. FragForge records on the user's rig, with
@@ -135,7 +134,7 @@ export function PairPcStep() {
 
         <Button
           size="lg"
-          className={cn('w-full', !pairingCode && 'opacity-60')}
+          className="w-full"
           onClick={() => router.push('/matches')}
           disabled={!pairingCode}
         >

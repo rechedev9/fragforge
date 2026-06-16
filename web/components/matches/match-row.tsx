@@ -40,7 +40,7 @@ export function MatchRow({ match }: MatchRowProps) {
             <span
               className={
                 'font-[family-name:var(--font-mono)] text-sm font-semibold tabular-nums ' +
-                (win ? 'text-primary' : 'text-muted-foreground')
+                (win ? 'text-foreground' : 'text-muted-foreground')
               }
             >
               {match.score}
@@ -51,7 +51,7 @@ export function MatchRow({ match }: MatchRowProps) {
                 <span className="font-[family-name:var(--font-mono)] tabular-nums">
                   {match.decentPlays}
                 </span>
-                highlights
+                {match.decentPlays === 1 ? 'highlight' : 'highlights'}
               </Badge>
             ) : null}
             <span className="font-[family-name:var(--font-mono)] text-xs tabular-nums text-muted-foreground">

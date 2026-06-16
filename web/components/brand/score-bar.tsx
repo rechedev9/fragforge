@@ -17,7 +17,7 @@ export function ScoreBar({ win, className }: ScoreBarProps) {
       aria-hidden
       className={cn(
         'block w-1 self-stretch rounded-full',
-        win ? 'bg-primary' : 'bg-muted-foreground/40',
+        win ? 'bg-primary/70' : 'bg-muted-foreground/40',
         className,
       )}
     />

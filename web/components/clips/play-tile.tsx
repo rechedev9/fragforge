@@ -2,6 +2,7 @@
 
 import { Crosshair } from 'lucide-react';
 import type { Play } from '@/lib/api/types';
+import { ReelCover } from '@/components/brand';
 import { cn } from '@/lib/utils';
 
 export type PlayTileProps = {
@@ -29,15 +30,10 @@ export function PlayTile({ play, selected, onSelect }: PlayTileProps) {
       )}
     >
       <div className="relative aspect-video w-full overflow-hidden bg-muted">
-        {play.thumbnailUrl ? (
-          // Mock thumbnails come from external placeholder hosts.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={play.thumbnailUrl}
-            alt=""
-            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-          />
-        ) : null}
+        <ReelCover
+          seed={play.id}
+          className="transition-transform duration-200 group-hover:scale-[1.03]"
+        />
         <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
 
         <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 font-[family-name:var(--font-mono)] text-[0.7rem] font-semibold tabular-nums text-foreground backdrop-blur-sm">

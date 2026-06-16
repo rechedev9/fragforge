@@ -8,6 +8,7 @@ import { formatCountdown } from '@/lib/format';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ReelCover } from '@/components/brand';
 
 /**
  * A finished, downloadable video. Thumbnail with a hover overlay (View /
@@ -35,15 +36,7 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
   return (
     <Card className="gap-0 overflow-hidden py-0">
       <div className="group relative aspect-video w-full bg-muted">
-        {video.thumbnailUrl ? (
-          // Mock thumbnails come from external placeholder hosts.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={video.thumbnailUrl}
-            alt={video.title}
-            className="h-full w-full object-cover"
-          />
-        ) : null}
+        <ReelCover seed={video.id} label={video.map} className="size-full" />
 
         {video.published ? (
           <div className="absolute right-3 top-3">

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Heart, MapPin, Play } from 'lucide-react';
 import type { FeedItem } from '@/lib/api/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { ReelCover } from '@/components/brand';
 import { timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -24,13 +25,9 @@ export function FeedCard({ item }: FeedCardProps) {
   return (
     <figure className="group break-inside-avoid overflow-hidden rounded-xl border border-border bg-card">
       <div className="relative aspect-[9/16] overflow-hidden bg-muted">
-        {/* Plain <img>: mock thumbnails come from external placeholder hosts. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={item.thumbnailUrl}
-          alt={item.title}
-          loading="lazy"
-          className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
+        <ReelCover
+          seed={item.id}
+          className="transition-transform duration-300 ease-out group-hover:scale-[1.04]"
         />
 
         {/* soft gradient foot for legibility */}
