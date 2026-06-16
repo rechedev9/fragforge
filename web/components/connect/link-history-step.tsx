@@ -97,7 +97,7 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
         <p className="text-xs leading-relaxed text-muted-foreground">
           Generate your auth code and copy your latest sharecode from Steam.{' '}
           <a
-            href="https://help.steampowered.com/"
+            href="https://help.steampowered.com/en/wizard/HelpWithGameIssue/?appid=730&issueid=128"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
