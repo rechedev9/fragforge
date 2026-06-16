@@ -16,6 +16,10 @@ const (
 	// TypeParseDemo is the Asynq task type for parsing a demo into a kill plan.
 	TypeParseDemo = "parse:demo"
 
+	// TypeScanRoster is the Asynq task type for scanning a demo's roster before
+	// the user picks a target to clip.
+	TypeScanRoster = "scan:roster"
+
 	// TypeRecordDemo is the Asynq task type for running the Windows recorder.
 	TypeRecordDemo = "record:demo"
 
@@ -58,6 +62,11 @@ type ParseDemoPayload struct {
 	JobID uuid.UUID `json:"job_id"`
 }
 
+// ScanRosterPayload carries the job id for a roster scan worker.
+type ScanRosterPayload struct {
+	JobID uuid.UUID `json:"job_id"`
+}
+
 // RecordDemoPayload carries the job id for a Windows recording worker.
 type RecordDemoPayload struct {
 	JobID uuid.UUID `json:"job_id"`
@@ -69,10 +78,12 @@ type ComposeFinalPayload struct {
 }
 
 // RenderVariantPayload carries the job id and render variant requested by the
-// orchestrator.
+// orchestrator. MusicKey, when set, names a music track the render worker mixes
+// into the reel (resolved from its music directory).
 type RenderVariantPayload struct {
-	JobID   uuid.UUID `json:"job_id"`
-	Variant string    `json:"variant"`
+	JobID    uuid.UUID `json:"job_id"`
+	Variant  string    `json:"variant"`
+	MusicKey string    `json:"music_key,omitempty"`
 }
 
 type CodexAgentPayload struct {
@@ -99,6 +110,20 @@ func NewParseDemoTask(id uuid.UUID) (*asynq.Task, error) {
 	), nil
 }
 
+// NewScanRosterTask mirrors NewParseDemoTask: a roster scan is a single
+// deterministic pass over the same demo, so it reuses the parse timeout and
+// max-retry ceiling.
+func NewScanRosterTask(id uuid.UUID) (*asynq.Task, error) {
+	payload, err := json.Marshal(ScanRosterPayload{JobID: id})
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(TypeScanRoster, payload,
+		asynq.Timeout(parseDemoTimeout),
+		asynq.MaxRetry(parseDemoMaxRetry),
+	), nil
+}
+
 func NewRecordDemoTask(id uuid.UUID) (*asynq.Task, error) {
 	payload, err := json.Marshal(RecordDemoPayload{JobID: id})
 	if err != nil {
@@ -116,12 +141,16 @@ func NewComposeFinalTask(id uuid.UUID) (*asynq.Task, error) {
 }
 
 // NewRenderVariantTask returns an Asynq task for rendering one named output
-// variant for a job.
-func NewRenderVariantTask(id uuid.UUID, variant string) (*asynq.Task, error) {
+// variant for a job. musicKey is optional; when non-empty the render worker
+// mixes the named track into the reel.
+func NewRenderVariantTask(id uuid.UUID, variant, musicKey string) (*asynq.Task, error) {
 	if !renderVariantPattern.MatchString(variant) {
 		return nil, fmt.Errorf("invalid render variant %q", variant)
 	}
-	payload, err := json.Marshal(RenderVariantPayload{JobID: id, Variant: variant})
+	if musicKey != "" && !renderVariantPattern.MatchString(musicKey) {
+		return nil, fmt.Errorf("invalid music key %q", musicKey)
+	}
+	payload, err := json.Marshal(RenderVariantPayload{JobID: id, Variant: variant, MusicKey: musicKey})
 	if err != nil {
 		return nil, err
 	}

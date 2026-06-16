@@ -41,6 +41,9 @@ overlays/**/out/
 # Local frontend toolchains
 /internal/httpapi/workbench_assets/node_modules/
 
+# Local one-box deploy data (scripts/run-local.sh)
+/.local/
+
 # Local git worktrees
 /.worktrees/
 /.claude/worktrees/

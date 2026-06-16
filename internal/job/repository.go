@@ -12,10 +12,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 // ErrNotFound is returned by Get when no job has the requested id.
 var ErrNotFound = errors.New("job not found")
+
+// ErrConflict is returned when an operation is rejected because the job is not
+// in a state that allows it (e.g. a parse request for a job that was never
+// scanned). It maps to HTTP 409 at the API boundary.
+var ErrConflict = errors.New("job state conflict")
 
 // Repository persists Jobs in Postgres.
 type Repository struct {
@@ -178,6 +184,44 @@ func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status Stat
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetParseInputs atomically claims a scanned (or already parsed) job for a new
+// parse: in a single status-gated update it records the picked target and rules
+// and moves the job to "parsing". The status guard closes the check-then-act
+// race when two parse requests arrive together — only the first update affects a
+// row. It returns ErrConflict when the job is not in a parseable state and
+// ErrNotFound when the job does not exist.
+func (r *Repository) SetParseInputs(ctx context.Context, id uuid.UUID, steamID string, rl rules.Rules) error {
+	rulesJSON, err := json.Marshal(rl)
+	if err != nil {
+		return fmt.Errorf("marshal rules: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE jobs SET target_steamid = $2, rules = $3, status = $4, updated_at = NOW()
+		 WHERE id = $1 AND status IN ('scanned', 'parsed')`,
+		id, steamID, rulesJSON, StatusParsing.String(),
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return r.parseInputConflict(ctx, id)
+	}
+	return nil
+}
+
+// parseInputConflict tells a missing job apart from a wrong-state one after a
+// status-gated SetParseInputs update affected no rows.
+func (r *Repository) parseInputConflict(ctx context.Context, id uuid.UUID) error {
+	var exists bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return ErrConflict
 }
 
 // SetKillPlan persists the kill plan JSONB.

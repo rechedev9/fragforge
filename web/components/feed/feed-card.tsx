@@ -4,7 +4,13 @@ import { useState } from 'react';
 import { Heart, MapPin, Play } from 'lucide-react';
 import type { FeedItem } from '@/lib/api/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { ReelCover } from '@/components/brand';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -14,42 +20,51 @@ export type FeedCardProps = {
 
 /**
  * One community reel in the feed: a 9:16 portrait thumbnail with a soft gradient
- * foot, author avatar + name, a map chip, and a like toggle. Lime is reserved
- * for the liked state; everything else stays neutral charcoal.
+ * foot, author avatar + name, a map chip, a like toggle, and a click-to-play
+ * overlay that opens the reel in an inline player. Lime is reserved for the
+ * liked state; everything else stays neutral charcoal.
  */
 export function FeedCard({ item }: FeedCardProps) {
   const [liked, setLiked] = useState(false);
+  const [playerOpen, setPlayerOpen] = useState(false);
   const likeCount = item.likes + (liked ? 1 : 0);
   const initials = item.author.slice(0, 2).toUpperCase();
 
   return (
     <figure className="group break-inside-avoid overflow-hidden rounded-xl border border-border bg-card">
       <div className="relative aspect-[9/16] overflow-hidden bg-muted">
-        <ReelCover
-          seed={item.id}
-          className="transition-transform duration-300 ease-out group-hover:scale-[1.04]"
+        {/* eslint-disable-next-line @next/next/no-img-element -- remote seed thumbnail */}
+        <img
+          src={item.thumbnailUrl}
+          alt=""
+          className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
         />
 
         {/* soft gradient foot for legibility */}
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/15 to-transparent" />
 
         {/* map chip */}
-        <div className="absolute left-2.5 top-2.5">
+        <div className="pointer-events-none absolute left-2.5 top-2.5">
           <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-background/70 px-2 py-0.5 text-[0.7rem] font-medium text-foreground/90 backdrop-blur-sm">
             <MapPin className="size-3 text-muted-foreground" aria-hidden />
             {item.map}
           </span>
         </div>
 
-        {/* hover play affordance */}
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+        {/* click-to-play overlay (covers the thumbnail; ▶ appears on hover/focus) */}
+        <button
+          type="button"
+          onClick={() => setPlayerOpen(true)}
+          aria-label={`Play ${item.title}`}
+          className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 focus-visible:opacity-100 group-hover:opacity-100"
+        >
           <span className="flex size-14 items-center justify-center rounded-full bg-background/70 text-foreground ring-1 ring-white/15 backdrop-blur-sm">
             <Play className="ml-0.5 size-6 fill-current" aria-hidden />
           </span>
-        </div>
+        </button>
 
         {/* footer: title + author */}
-        <figcaption className="absolute inset-x-0 bottom-0 space-y-2 p-3">
+        <figcaption className="pointer-events-none absolute inset-x-0 bottom-0 space-y-2 p-3">
           <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground drop-shadow-sm">
             {item.title}
           </h3>
@@ -85,6 +100,24 @@ export function FeedCard({ item }: FeedCardProps) {
           </span>
         </button>
       </div>
+
+      <Dialog open={playerOpen} onOpenChange={setPlayerOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="truncate">{item.title}</DialogTitle>
+            <DialogDescription>
+              {item.author} · {item.map}
+            </DialogDescription>
+          </DialogHeader>
+          <video
+            src={item.videoUrl}
+            controls
+            autoPlay
+            playsInline
+            className="mx-auto max-h-[72vh] w-auto rounded-lg bg-black"
+          />
+        </DialogContent>
+      </Dialog>
     </figure>
   );
 }

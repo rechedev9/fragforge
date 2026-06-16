@@ -21,8 +21,10 @@ type config struct {
 	EditorPath        string
 	HLAEPath          string
 	CS2Path           string
+	RecordHUD         string
 	FFmpegPath        string
 	FFprobePath       string
+	MusicDir          string
 	RecordTimeout     string
 	ComposeTimeout    string
 	RenderTimeout     string
@@ -51,8 +53,10 @@ func loadConfig() (config, error) {
 		EditorPath:    os.Getenv("ZV_EDITOR_PATH"),
 		HLAEPath:      os.Getenv("ZV_HLAE_PATH"),
 		CS2Path:       os.Getenv("ZV_CS2_PATH"),
+		RecordHUD:     os.Getenv("ZV_RECORD_HUD"),
 		FFmpegPath:    os.Getenv("ZV_FFMPEG_PATH"),
 		FFprobePath:   os.Getenv("ZV_FFPROBE_PATH"),
+		MusicDir:      os.Getenv("ZV_MUSIC_DIR"),
 		MutationToken: os.Getenv("ZV_MUTATION_TOKEN"),
 		CodexPath:     os.Getenv("ZV_CODEX_PATH"),
 		CodexModel:    os.Getenv("ZV_CODEX_MODEL"),

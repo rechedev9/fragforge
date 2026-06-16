@@ -94,6 +94,51 @@ func TestRunWithContextReturnsUnderlyingResultWhenNotCancelled(t *testing.T) {
 	}
 }
 
+func TestRosterWithContextAbortsWhenContextCancelled(t *testing.T) {
+	p := &blockingParser{entered: make(chan struct{}), release: make(chan struct{}), block: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		<-p.entered
+		cancel()
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := RosterWithContext(ctx, p)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("RosterWithContext err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RosterWithContext did not return after context cancellation")
+	}
+	if !p.cancelCalled.Load() {
+		t.Error("parser Cancel() was not called on context cancellation")
+	}
+}
+
+func TestRosterWithContextReturnsResultWhenNotCancelled(t *testing.T) {
+	p := &blockingParser{block: false}
+
+	roster, err := RosterWithContext(context.Background(), p)
+
+	if err != nil {
+		t.Fatalf("RosterWithContext err = %v, want nil", err)
+	}
+	if len(roster) != 0 {
+		t.Fatalf("roster = %#v, want empty (no events dispatched)", roster)
+	}
+	if p.cancelCalled.Load() {
+		t.Error("parser Cancel() was called on a run that was never cancelled")
+	}
+}
+
 func TestRunWithOptionsAllowsUnexpectedEndOfDemo(t *testing.T) {
 	p := &blockingParser{parseErr: fmt.Errorf("parse frame: %w", demoinfocs.ErrUnexpectedEndOfDemo)}
 

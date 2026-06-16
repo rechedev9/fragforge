@@ -28,6 +28,25 @@ func TestNewParseDemoTaskRoundtrip(t *testing.T) {
 	}
 }
 
+func TestNewScanRosterTaskRoundtrip(t *testing.T) {
+	id := uuid.New()
+	tk, err := NewScanRosterTask(id)
+	if err != nil {
+		t.Fatalf("NewScanRosterTask error = %v", err)
+	}
+	if tk.Type() != TypeScanRoster {
+		t.Errorf("Type() = %q, want %q", tk.Type(), TypeScanRoster)
+	}
+
+	var payload ScanRosterPayload
+	if err := json.Unmarshal(tk.Payload(), &payload); err != nil {
+		t.Fatalf("Unmarshal payload error = %v", err)
+	}
+	if payload.JobID != id {
+		t.Errorf("JobID = %v, want %v", payload.JobID, id)
+	}
+}
+
 func TestNewRecordDemoTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
 	tk, err := NewRecordDemoTask(id)
@@ -68,7 +87,7 @@ func TestNewComposeFinalTaskRoundtrip(t *testing.T) {
 
 func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	tk, err := NewRenderVariantTask(id, testRenderVariant)
+	tk, err := NewRenderVariantTask(id, testRenderVariant, "")
 	if err != nil {
 		t.Fatalf("NewRenderVariantTask error = %v", err)
 	}
@@ -91,7 +110,7 @@ func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 func TestNewRenderVariantTaskRejectsUnsafeVariant(t *testing.T) {
 	id := uuid.New()
 	for _, variant := range []string{"", "../x", "x/y", `x\y`, "-bad", "x.mp4"} {
-		if _, err := NewRenderVariantTask(id, variant); err == nil {
+		if _, err := NewRenderVariantTask(id, variant, ""); err == nil {
 			t.Fatalf("NewRenderVariantTask(%q) error = nil, want error", variant)
 		}
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
 )
 
 type orchestratorJobRepository interface {
@@ -18,6 +19,7 @@ type orchestratorJobRepository interface {
 	GetMeta(context.Context, uuid.UUID) (job.Job, error)
 	List(context.Context, int) ([]job.Job, error)
 	UpdateStatus(context.Context, uuid.UUID, job.Status, string) error
+	SetParseInputs(context.Context, uuid.UUID, string, rules.Rules) error
 	SetKillPlan(context.Context, uuid.UUID, killplan.Plan) error
 }
 
@@ -112,6 +114,27 @@ func (r *memoryJobRepository) UpdateStatus(ctx context.Context, id uuid.UUID, st
 	}
 	j.Status = status
 	j.FailureReason = failureReason
+	j.UpdatedAt = time.Now().UTC()
+	r.jobs[id] = j
+	return nil
+}
+
+func (r *memoryJobRepository) SetParseInputs(ctx context.Context, id uuid.UUID, steamID string, rl rules.Rules) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return job.ErrNotFound
+	}
+	if j.Status != job.StatusScanned && j.Status != job.StatusParsed {
+		return job.ErrConflict
+	}
+	j.TargetSteamID = steamID
+	j.Rules = rl
+	j.Status = job.StatusParsing
 	j.UpdatedAt = time.Now().UTC()
 	r.jobs[id] = j
 	return nil

@@ -1,4 +1,4 @@
-import type { Match, Play, Song, Video, FeedItem, SteamUser, Slots } from './types';
+import type { Match, Play, Song, Video, FeedItem, SteamUser, Slots, DemoPlayer } from './types';
 
 /**
  * Static mock data backing the MockApiClient. None of these reference real
@@ -13,6 +13,14 @@ function avatar(seed: string): string {
 function thumb(seed: string): string {
   return `https://picsum.photos/seed/${encodeURIComponent(seed)}/640/360`;
 }
+
+/**
+ * A locally-served sample clip (same-origin, from web/public) so mock "ready"
+ * reels and feed items are actually playable/downloadable in the demo with no
+ * external dependency. scripts/run-local.sh generates it; reels produced by the
+ * real pipeline (uploaded demos) stream from the orchestrator instead.
+ */
+export const SAMPLE_REEL_URL = '/sample-reel.mp4';
 
 export const fixtureUser: SteamUser = {
   id: '7656',
@@ -177,6 +185,36 @@ export function synthUploadedMatch(fileName: string, seq: number): { match: Matc
   return { match, plays };
 }
 
+/** Plausible CS2 handles a synthesized roster draws from (first 10 used). */
+const rosterNamePool = [
+  'kekO', 'RaiSeNN', 'granz', 'mcyans', 'Revol',
+  's1xth', 'noctis', 'pylon', 'wraith', 'kovaq',
+];
+
+/**
+ * Synthesizes a deterministic ~10-player roster for an uploaded .dem, seeded off
+ * the file name so the same demo always yields the same scan. SteamIDs are stable
+ * decimal-string ids; K/D/A are plausible and the list is sorted by kills desc so
+ * the picker can auto-highlight the top fragger. parseDemo reuses these steamIds.
+ */
+export function synthRoster(fileName: string): DemoPlayer[] {
+  const base = hashName(fileName);
+  const players: DemoPlayer[] = rosterNamePool.map((name, i) => {
+    const kills = 8 + ((base + i * 7) % 22);
+    const deaths = 8 + ((base + i * 5) % 16);
+    const assists = (base + i * 3) % 9;
+    return {
+      steamId: String(76561190000000000n + BigInt(base % 1000000) + BigInt(i)),
+      name,
+      team: i % 2 === 0 ? 'CT' : 'T',
+      kills,
+      deaths,
+      assists,
+    };
+  });
+  return players.sort((a, b) => b.kills - a.kills || a.name.localeCompare(b.name));
+}
+
 export const fixtureSongs: Song[] = [
   { id: 'song-tikitaka-1', title: 'TikiTakaYala 1', artist: 'TikiTakaYala', genre: 'Phonk', previewUrl: '', durationSec: 30 },
   { id: 'song-tikitaka-2', title: 'TikiTakaYala 2', artist: 'TikiTakaYala', genre: 'Phonk', previewUrl: '', durationSec: 30 },
@@ -204,7 +242,7 @@ export function seedVideos(): Video[] {
       availableForSec: 14 * 3600,
       thumbnailUrl: thumb('v-seed-ready'),
       published: true,
-      downloadUrl: 'https://example.com/mock/v-seed-ready.mp4',
+      downloadUrl: SAMPLE_REEL_URL,
     },
     {
       id: 'v-seed-rendering',
@@ -232,7 +270,7 @@ export const fixtureFeed: FeedItem[] = [
     thumbnailUrl: thumb('feed-1'),
     likes: 482,
     createdAt: Date.now() - 2 * 3600 * 1000,
-    videoUrl: 'https://example.com/mock/feed-1.mp4',
+    videoUrl: SAMPLE_REEL_URL,
   },
   {
     id: 'feed-2',
@@ -243,7 +281,7 @@ export const fixtureFeed: FeedItem[] = [
     thumbnailUrl: thumb('feed-2'),
     likes: 1203,
     createdAt: Date.now() - 5 * 3600 * 1000,
-    videoUrl: 'https://example.com/mock/feed-2.mp4',
+    videoUrl: SAMPLE_REEL_URL,
   },
   {
     id: 'feed-3',
@@ -254,7 +292,7 @@ export const fixtureFeed: FeedItem[] = [
     thumbnailUrl: thumb('feed-3'),
     likes: 87,
     createdAt: Date.now() - 26 * 3600 * 1000,
-    videoUrl: 'https://example.com/mock/feed-3.mp4',
+    videoUrl: SAMPLE_REEL_URL,
   },
   {
     id: 'feed-4',
@@ -265,7 +303,7 @@ export const fixtureFeed: FeedItem[] = [
     thumbnailUrl: thumb('feed-4'),
     likes: 351,
     createdAt: Date.now() - 50 * 3600 * 1000,
-    videoUrl: 'https://example.com/mock/feed-4.mp4',
+    videoUrl: SAMPLE_REEL_URL,
   },
   {
     id: 'feed-5',
@@ -276,6 +314,6 @@ export const fixtureFeed: FeedItem[] = [
     thumbnailUrl: thumb('feed-5'),
     likes: 902,
     createdAt: Date.now() - 72 * 3600 * 1000,
-    videoUrl: 'https://example.com/mock/feed-5.mp4',
+    videoUrl: SAMPLE_REEL_URL,
   },
 ];

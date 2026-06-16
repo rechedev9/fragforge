@@ -72,6 +72,7 @@ func main() {
 	taskHandlers := map[string]taskHandler{}
 	parserWorker := workers.NewParserWorker(repo, store)
 	taskHandlers[tasks.TypeParseDemo] = parserWorker.HandleParseDemo
+	taskHandlers[tasks.TypeScanRoster] = parserWorker.HandleScanRoster
 	if cfg.recordWorkerEnabled() {
 		recordWorker := workers.NewRecordWorker(repo, store, workers.RecordWorkerConfig{
 			WorkDir:      cfg.MediaWorkDir,
@@ -79,6 +80,7 @@ func main() {
 			HLAEPath:     cfg.HLAEPath,
 			CS2Path:      cfg.CS2Path,
 			Timeout:      cfg.RecordTimeout,
+			HUDMode:      cfg.RecordHUD,
 		})
 		taskHandlers[tasks.TypeRecordDemo] = recordWorker.HandleRecordDemo
 		log.Printf("worker: record enabled")
@@ -100,6 +102,7 @@ func main() {
 			FFmpegPath:  cfg.FFmpegPath,
 			FFprobePath: cfg.FFprobePath,
 			Timeout:     cfg.RenderTimeout,
+			MusicDir:    cfg.MusicDir,
 		})
 		taskHandlers[tasks.TypeRenderVariant] = renderWorker.HandleRenderVariant
 		log.Printf("worker: render enabled")

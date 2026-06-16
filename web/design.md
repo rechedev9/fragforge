@@ -175,10 +175,17 @@ video). On sign-in → `/connect` if history not linked, else `/matches`.
 ### `/upload` — Upload a demo (Flow B, no login)
 Renders on the root layout (no sidebar) like `/connect`. A centered card with a
 dashed **drop zone** (`DemoDropzone`): drag-and-drop or click-to-browse a single
-`.dem`, extension-validated. On select it shows a brief "Parsing demo…" state,
-then `uploadDemo({ fileName })` synthesizes a match and we route to
-`/matches/[id]` — the same find-highlights screen Steam matches use. Copy leans
-on "analyze any demo, yours or anyone's, no login".
+`.dem`, extension-validated. The real flow is **scan → player picker → parse**:
+on select it shows a brief "Scanning roster…" state (`scanDemo`), then a
+**`PlayerPicker`** ("Who do you want to clip?") listing the demo's players with
+mono K/D/A (top fragger auto-highlighted, click to confirm). Picking a player
+runs `parseDemo({ jobId, steamId })` ("Forging highlights…") and routes to
+`/matches/[id]` — the same find-highlights screen Steam matches use. Uploaded
+matches have no round score, so `score` is `''` and `mvps` is `0`; the summary
+strip hides the win/loss + score chips and shows the highlight count instead.
+The deprecated single-shot `uploadDemo` remains for the mock. Copy leans on
+"analyze any demo, yours or anyone's, no login · the .dem never leaves your
+machine".
 
 ### `/connect` — Onboarding (vertical stepper, not two side cards)
 A centered, two-step **stepper**:
@@ -243,6 +250,8 @@ reel is rendering on your rig." "Ready to post." Avoid hype words and emoji.
   as the primary stat treatment (use mono numbers). No generic stock-SaaS hero.
 - Keep `web/lib/api/*` and `useSession()` stable. The contract may grow only
   **additively** when a new flow needs it (e.g. the `uploadDemo` method and the
-  optional `Match.source` field added for Flow B) so the Fase 2 real-backend
-  swap stays intact; never change or remove existing fields/signatures.
+  optional `Match.source` field added for Flow B, and the `scanDemo`/`parseDemo`
+  methods + `DemoPlayer` type added for the real scan→pick→parse upload flow) so
+  the Fase 2 real-backend swap stays intact; never change or remove existing
+  fields/signatures.
 - No real audio, no real video — placeholders only (picsum/dicebear) this phase.

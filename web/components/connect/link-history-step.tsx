@@ -44,14 +44,16 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
       });
       if (!result.ok) {
         setError("We couldn't validate those codes. Check them and try again.");
+        setSubmitting(false);
         return;
       }
       setMatchesFound(result.matchesFound);
       await refresh();
-      onLinked(result.matchesFound);
+      // Show the "N matches found" confirmation before advancing to step 2;
+      // keep the button busy meanwhile so it can't be re-submitted.
+      window.setTimeout(() => onLinked(result.matchesFound), 1200);
     } catch {
       setError('Something went wrong loading your matches. Try again.');
-    } finally {
       setSubmitting(false);
     }
   }

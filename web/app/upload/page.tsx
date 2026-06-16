@@ -5,39 +5,69 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, FileVideo, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import type { DemoPlayer } from '@/lib/api/types';
 import { Wordmark } from '@/components/brand';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { DemoDropzone } from '@/components/upload/demo-dropzone';
+import { PlayerPicker } from '@/components/upload/player-picker';
+
+type Stage = 'idle' | 'scanning' | 'picking' | 'parsing';
 
 /**
  * Upload flow (/upload) — the no-login entry. Drop any .dem (yours or someone
- * else's), we parse it into a match, then route into the same highlight →
- * render pipeline as Steam matches. Renders on the root layout (no sidebar):
- * the user isn't necessarily signed in here.
+ * else's), we scan its roster, let you pick whose POV to clip, then parse that
+ * player into a match and route into the same highlight → render pipeline as
+ * Steam matches. Renders on the root layout (no sidebar): the user isn't
+ * necessarily signed in here.
  */
 export default function UploadPage() {
   const router = useRouter();
-  const [parsing, setParsing] = useState(false);
+  const [stage, setStage] = useState<Stage>('idle');
   const [fileName, setFileName] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [players, setPlayers] = useState<DemoPlayer[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const reset = useCallback((message: string) => {
+    setError(message);
+    setStage('idle');
+    setFileName(null);
+    setJobId(null);
+    setPlayers([]);
+  }, []);
 
   const onFile = useCallback(
     async (file: File) => {
-      if (parsing) return;
+      if (stage !== 'idle') return;
       setError(null);
       setFileName(file.name);
-      setParsing(true);
+      setStage('scanning');
       try {
-        const match = await api.uploadDemo({ fileName: file.name });
-        router.push('/matches/' + match.id);
+        const scan = await api.scanDemo(file);
+        setJobId(scan.jobId);
+        setPlayers(scan.players);
+        setStage('picking');
       } catch {
-        setFileName(null);
-        setError('Could not parse that demo. Try another .dem file.');
-        setParsing(false);
+        reset('Could not scan that demo. Try another .dem file.');
       }
     },
-    [parsing, router],
+    [stage, reset],
+  );
+
+  const onPick = useCallback(
+    async (steamId: string) => {
+      if (stage !== 'picking' || !jobId) return;
+      setError(null);
+      setStage('parsing');
+      try {
+        const match = await api.parseDemo({ jobId, steamId });
+        router.push('/matches/' + match.id);
+      } catch {
+        reset('Could not parse highlights for that player. Pick another.');
+      }
+    },
+    [stage, jobId, router, reset],
   );
 
   return (
@@ -64,21 +94,27 @@ export default function UploadPage() {
         <div className="flex flex-1 flex-col justify-center py-12">
           <div className="mb-8 max-w-xl">
             <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold uppercase tracking-tight sm:text-4xl">
-              Analyze any demo
+              {stage === 'picking' ? 'Who do you want to clip?' : 'Analyze any demo'}
             </h1>
             <p className="mt-3 text-muted-foreground">
-              Drop a .dem file — yours or someone else&apos;s — and forge its
-              best plays into a reel. No Steam login required.
+              {stage === 'picking' ? (
+                <>Pick a player from the demo and we&apos;ll forge their best plays into a reel.</>
+              ) : (
+                <>
+                  Drop a .dem file — yours or someone else&apos;s — and forge its
+                  best plays into a reel. No Steam login required.
+                </>
+              )}
             </p>
           </div>
 
           <Card className="overflow-hidden p-6 sm:p-8">
-            {parsing ? (
+            {stage === 'scanning' || stage === 'parsing' ? (
               <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
                 <Loader2 className="size-8 animate-spin text-primary" />
                 <div className="flex flex-col gap-1">
                   <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
-                    Parsing demo…
+                    {stage === 'scanning' ? 'Scanning roster…' : 'Forging highlights…'}
                   </p>
                   {fileName ? (
                     <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
@@ -88,6 +124,8 @@ export default function UploadPage() {
                   ) : null}
                 </div>
               </div>
+            ) : stage === 'picking' ? (
+              <PlayerPicker players={players} onPick={onPick} />
             ) : (
               <div className="flex flex-col gap-3">
                 <DemoDropzone onFile={onFile} />

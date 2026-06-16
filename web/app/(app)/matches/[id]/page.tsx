@@ -47,11 +47,19 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   useEffect(() => {
     let active = true;
     (async () => {
-      const [m, p] = await Promise.all([api.getMatch(id), api.findClips(id)]);
-      if (!active) return;
-      setMatch(m);
-      setPlays(p);
-      setLoaded(true);
+      try {
+        const [m, p] = await Promise.all([api.getMatch(id), api.findClips(id)]);
+        if (!active) return;
+        setMatch(m);
+        setPlays(p);
+      } catch {
+        // A failed fetch falls through to the "Match not found" branch below.
+        if (!active) return;
+        setMatch(null);
+        setPlays([]);
+      } finally {
+        if (active) setLoaded(true);
+      }
     })();
     return () => {
       active = false;
@@ -118,6 +126,9 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   const n = playList.length;
   const score = parseScore(match.score);
   const win = isWin(match.score);
+  // Uploaded demos have no round score (the parser computes none): hide the
+  // win/loss + score chips and show the highlight count instead.
+  const hasScore = match.score.trim() !== '';
   const fromUpload = match.source === 'upload';
   const backHref = fromUpload ? '/upload' : '/matches';
   const backLabel = fromUpload ? 'Upload' : 'Matches';
@@ -143,12 +154,14 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
               {match.map}
             </h1>
             <Badge variant="outline" className="font-[family-name:var(--font-mono)]">
-              {win ? 'WIN' : 'LOSS'}
+              {hasScore ? (win ? 'WIN' : 'LOSS') : `${n} ${n === 1 ? 'HIGHLIGHT' : 'HIGHLIGHTS'}`}
             </Badge>
           </div>
         </div>
 
-        <StatMono label="Score" value={score ? `${score[0]}-${score[1]}` : match.score} />
+        {hasScore ? (
+          <StatMono label="Score" value={score ? `${score[0]}-${score[1]}` : match.score} />
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <StatMono label="K" value={match.stats.kills} />

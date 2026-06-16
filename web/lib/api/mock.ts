@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer } from './types';
 import {
   fixtureUser,
   fixtureSlots,
@@ -9,6 +9,8 @@ import {
   playsForMatch,
   seedVideos,
   synthUploadedMatch,
+  synthRoster,
+  SAMPLE_REEL_URL,
 } from './fixtures';
 
 /**
@@ -36,6 +38,14 @@ let pcPaired = false;
 const uploadedMatches: Match[] = [];
 const uploadedPlays = new Map<string, Play[]>();
 let uploadSeq = 0;
+
+/**
+ * Scans awaiting a target pick: scanDemo mints a jobId and stashes the file name
+ * + roster so parseDemo can resolve it. In-memory only (a scan that is never
+ * parsed costs nothing); not persisted, since the picker resolves it in one go.
+ */
+type PendingScan = { fileName: string; seq: number; players: DemoPlayer[] };
+const pendingScans = new Map<string, PendingScan>();
 
 /**
  * Uploaded demos persist to sessionStorage so the bookmarkable /matches/[id]
@@ -73,6 +83,40 @@ function loadUploads(): void {
 
 loadUploads();
 
+/**
+ * The auth session persists to sessionStorage too, so a page reload keeps the
+ * user signed in (and slots/pairing state) instead of silently logging out.
+ * Same SSR/quota guards as the upload store.
+ */
+const SESSION_STORE_KEY = 'fragforge.session.v1';
+
+function saveSession(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(SESSION_STORE_KEY, JSON.stringify(session));
+  } catch {
+    // sessionStorage can throw (quota / privacy mode); in-memory state still works.
+  }
+}
+
+function loadSession(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_STORE_KEY);
+    if (!raw) return;
+    const stored = JSON.parse(raw) as Session;
+    session.user = stored.user;
+    session.slots = stored.slots ?? session.slots;
+    session.pcPaired = stored.pcPaired ?? false;
+    session.matchHistoryLinked = stored.matchHistoryLinked ?? false;
+    pcPaired = stored.pcPaired ?? false;
+  } catch {
+    // ignore corrupt storage; fall back to the signed-out default.
+  }
+}
+
+loadSession();
+
 function delay(): Promise<void> {
   const ms = 150 + Math.floor(Math.random() * 250); // 150-400ms
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -98,7 +142,7 @@ function project(video: Video): Video {
 
   const next: Video = { ...video, status };
   if (status === 'ready' && !next.downloadUrl) {
-    next.downloadUrl = `https://example.com/mock/${video.id}.mp4`;
+    next.downloadUrl = SAMPLE_REEL_URL;
   }
   return next;
 }
@@ -112,6 +156,7 @@ export class MockApiClient implements ApiClient {
   async signInWithSteam(): Promise<Session> {
     await delay();
     session.user = { ...fixtureUser };
+    saveSession();
     return cloneSession();
   }
 
@@ -121,11 +166,13 @@ export class MockApiClient implements ApiClient {
     session.matchHistoryLinked = false;
     session.pcPaired = false;
     pcPaired = false;
+    saveSession();
   }
 
   async linkMatchHistory(_input: { authCode: string; knownCode: string }): Promise<{ ok: boolean; matchesFound: number }> {
     await delay();
     session.matchHistoryLinked = true;
+    saveSession();
     return { ok: true, matchesFound: fixtureMatches.length };
   }
 
@@ -139,6 +186,7 @@ export class MockApiClient implements ApiClient {
   async getPcStatus(): Promise<{ paired: boolean }> {
     await delay();
     session.pcPaired = pcPaired;
+    saveSession();
     return { paired: pcPaired };
   }
 
@@ -153,6 +201,7 @@ export class MockApiClient implements ApiClient {
     return match ? { ...match, stats: { ...match.stats } } : null;
   }
 
+  /** @deprecated Superseded by scanDemo + parseDemo. */
   async uploadDemo(input: { fileName: string }): Promise<Match> {
     await delay();
     uploadSeq += 1;
@@ -161,6 +210,45 @@ export class MockApiClient implements ApiClient {
     uploadedPlays.set(match.id, plays);
     saveUploads();
     return { ...match, stats: { ...match.stats } };
+  }
+
+  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[] }> {
+    await delay();
+    uploadSeq += 1;
+    const jobId = `m-upload-${uploadSeq}`;
+    const players = synthRoster(file.name);
+    pendingScans.set(jobId, { fileName: file.name, seq: uploadSeq, players });
+    return { jobId, players: players.map((p) => ({ ...p })) };
+  }
+
+  async parseDemo(input: { jobId: string; steamId: string }): Promise<Match> {
+    await delay();
+    const pending = pendingScans.get(input.jobId);
+    if (!pending) throw new Error(`no scan to parse: ${input.jobId}`);
+    const player = pending.players.find((p) => p.steamId === input.steamId);
+    if (!player) throw new Error(`player not in roster: ${input.steamId}`);
+
+    const { match, plays } = synthUploadedMatch(pending.fileName, pending.seq);
+    // The synthesized match uses the chosen player's real roster K/D/A so the
+    // picked target's stats carry through to /matches/[id].
+    const picked: Match = {
+      ...match,
+      id: input.jobId,
+      stats: {
+        ...match.stats,
+        kills: player.kills,
+        deaths: player.deaths,
+        assists: player.assists,
+        kd: player.deaths ? Number((player.kills / player.deaths).toFixed(2)) : player.kills,
+      },
+    };
+    const pickedPlays = plays.map((p) => ({ ...p, matchId: input.jobId }));
+
+    uploadedMatches.unshift(picked);
+    uploadedPlays.set(picked.id, pickedPlays);
+    pendingScans.delete(input.jobId);
+    saveUploads();
+    return { ...picked, stats: { ...picked.stats } };
   }
 
   async findClips(matchId: string): Promise<Play[]> {
@@ -201,6 +289,7 @@ export class MockApiClient implements ApiClient {
 
     videos.unshift(video);
     session.slots.used += 1;
+    saveSession();
     return project(video);
   }
 

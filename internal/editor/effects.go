@@ -16,162 +16,16 @@ import (
 
 var effectsEvaluationTimeout = 2 * time.Second
 
-// viralUltraCleanEffectsScript is the standard HUD-less capture preset:
-// the cropped killfeed overlay narrates each kill, so the per-kill text
-// banners (weapon labels, wallbang/chain callouts, milestone pills) are
-// dropped and only the hook, punch-ins, kill counter, and finish card remain.
+// viralUltraCleanEffectsScript keeps the reel clean: no overlay lettering and
+// no per-kill effects (zoom, flash, or killfeed overlay). It applies only a
+// subtle colour grade over the raw HUD-less gameplay capture.
 const viralUltraCleanEffectsScript = `
-local segment = {}
-local kill_number = 0
-
-local function nonempty(value)
-  return value ~= nil and tostring(value) ~= ""
-end
-
-local function upper(value)
-  if value == nil then return "" end
-  return string.upper(tostring(value))
-end
-
 on_segment(function(s)
-  segment.player = s.player or ""
-  segment.map = s.map or ""
-  segment.kill_count = s.kill_count or 0
-  kill_number = 0
-
   grade({
     contrast = 1.18,
     saturation = 1.28,
     gamma = 1.02
   })
-
-  flash({
-    start = 0,
-    duration = 0.16,
-    opacity = 0.18,
-    color = "white"
-  })
-
-  text({
-    value = upper(segment.player) .. " " .. tostring(segment.kill_count) .. "K",
-    start = 0,
-    duration = 1.55,
-    x = "(w-text_w)/2",
-    y = 74,
-    size = 60,
-    color = "#ffffff@0.96",
-    box_color = "#000000@0.38",
-    box_border = 14,
-    shadow_color = "black@0.45",
-    shadow_x = 2,
-    shadow_y = 2,
-    fade_in = 0.06,
-    fade_out = 0.18
-  })
-
-  local streak_label = "CS2 KILL STREAK"
-  if nonempty(segment.map) then
-    streak_label = upper(segment.map) .. " KILL STREAK"
-  end
-  text({
-    value = streak_label,
-    start = 0.10,
-    duration = 1.35,
-    x = "(w-text_w)/2",
-    y = 162,
-    size = 28,
-    color = "#e9e9e9@0.92",
-    box_color = "#000000@0.30",
-    box_border = 10,
-    shadow_color = "black@0.40",
-    shadow_x = 2,
-    shadow_y = 2,
-    fade_in = 0.06,
-    fade_out = 0.18
-  })
-end)
-
-on_kill(function(k)
-  kill_number = kill_number + 1
-
-  local scale = 1.085
-  local flash_opacity = 0.16
-  local flash_duration = 0.10
-
-  if k.weapon == "AWP" then
-    scale = 1.13
-    flash_opacity = 0.28
-    flash_duration = 0.14
-  elseif k.headshot then
-    scale = 1.115
-    flash_opacity = 0.23
-    flash_duration = 0.12
-  end
-
-  if k.wallbang then
-    scale = scale + 0.025
-  end
-
-  zoom({
-    at = k.time,
-    pre = 0.16,
-    post = 0.78,
-    scale = scale
-  })
-
-  flash({
-    at = k.time,
-    duration = flash_duration,
-    opacity = flash_opacity,
-    color = "white"
-  })
-
-  text({
-    value = tostring(kill_number) .. "/" .. tostring(segment.kill_count),
-    at = k.time,
-    pre = 0.05,
-    post = 0.82,
-    x = "w-text_w-46",
-    y = 330,
-    size = 30,
-    color = "#ffffff@0.94",
-    box_color = "#000000@0.36",
-    box_border = 10,
-    shadow_color = "black@0.40",
-    shadow_x = 2,
-    shadow_y = 2,
-    fade_in = 0.04,
-    fade_out = 0.14
-  })
-
-  killfeed({
-    at = k.time,
-    pre = 0.05,
-    post = 3.40,
-    x = "W-w-24",
-    y = 416,
-    fade_in = 0.08,
-    fade_out = 0.25
-  })
-
-  if segment.kill_count >= 2 and kill_number == segment.kill_count then
-    text({
-      value = tostring(segment.kill_count) .. "K FINISH",
-      start = k.time + 0.28,
-      duration = 1.30,
-      x = "(w-text_w)/2",
-      y = 1440,
-      size = 56,
-      color = "#ffffff@0.96",
-      box_color = "#000000@0.40",
-      box_border = 14,
-      shadow_color = "black@0.45",
-      shadow_x = 2,
-      shadow_y = 2,
-      fade_in = 0.08,
-      fade_out = 0.22
-    })
-  end
 end)
 `
 

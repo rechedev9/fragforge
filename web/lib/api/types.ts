@@ -10,3 +10,5 @@ export type Video = { id: string; title: string; map: string; score: string; mod
 export type Slots = { used: number; total: number };
 export type FeedItem = { id: string; author: string; authorAvatarUrl: string; title: string; map: string; thumbnailUrl: string; likes: number; createdAt: number; videoUrl: string };
 export type Session = { user: SteamUser | null; slots: Slots; pcPaired: boolean; matchHistoryLinked: boolean };
+/** One player from a roster scan of an uploaded demo; the user picks who to clip. */
+export type DemoPlayer = { steamId: string; name: string; team: 'CT' | 'T' | ''; kills: number; deaths: number; assists: number };

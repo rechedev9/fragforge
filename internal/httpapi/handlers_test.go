@@ -141,6 +141,20 @@ func (f *fakeRepo) UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status,
 	f.jobs[id] = j
 	return nil
 }
+func (f *fakeRepo) SetParseInputs(_ context.Context, id uuid.UUID, steamID string, r rules.Rules) error {
+	j, ok := f.jobs[id]
+	if !ok {
+		return job.ErrNotFound
+	}
+	if j.Status != job.StatusScanned && j.Status != job.StatusParsed {
+		return job.ErrConflict
+	}
+	j.TargetSteamID = steamID
+	j.Rules = r
+	j.Status = job.StatusParsing
+	f.jobs[id] = j
+	return nil
+}
 
 // fakeStorage records every Put call.
 type fakeStorage struct {
@@ -465,6 +479,170 @@ func TestPostJobsRejectsInvalidSteamID(t *testing.T) {
 	h.CreateJob(rw, req)
 	if rw.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rw.Code)
+	}
+}
+
+func TestPostJobsWithTargetEnqueuesParse(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	body, ct := multipartBody(t, []byte("dem-bytes"), `{"target_steamid":"76561198000000000"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+	req.Header.Set("Content-Type", ct)
+	rw := httptest.NewRecorder()
+
+	h.CreateJob(rw, req)
+
+	if rw.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeParseDemo {
+		t.Fatalf("queue = %#v, want one parse task", queue.enqueued)
+	}
+}
+
+func TestPostJobsWithoutTargetEnqueuesScan(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	body, ct := multipartBody(t, []byte("dem-bytes"), ``)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+	req.Header.Set("Content-Type", ct)
+	rw := httptest.NewRecorder()
+
+	h.CreateJob(rw, req)
+
+	if rw.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeScanRoster {
+		t.Fatalf("queue = %#v, want one scan task", queue.enqueued)
+	}
+	for _, j := range repo.jobs {
+		if j.TargetSteamID != "" {
+			t.Fatalf("TargetSteamID = %q, want empty for scan-first job", j.TargetSteamID)
+		}
+	}
+}
+
+func TestGetRosterReturns409BeforeScan(t *testing.T) {
+	repo := newFakeRepo()
+	j := job.Job{ID: uuid.New(), Status: job.StatusScanning, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}/roster", h.GetRoster)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/roster", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), "roster not ready") {
+		t.Fatalf("body = %s, want roster-not-ready", rw.Body.String())
+	}
+}
+
+func TestGetRosterReturnsPlayersAfterScan(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	j := job.Job{ID: uuid.New(), Status: job.StatusScanned, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	_ = store.Put(artifacts.RosterKey(j.ID), bytes.NewReader([]byte(`{"players":[{"steamid64":"765","name":"kekO","team":"CT","kills":24,"deaths":14,"assists":5}]}`)))
+	h := NewHandlers(repo, store, &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}/roster", h.GetRoster)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/roster", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	if got := rw.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	for _, want := range []string{`"players"`, `"kekO"`, `"kills":24`} {
+		if !strings.Contains(rw.Body.String(), want) {
+			t.Fatalf("body missing %s: %s", want, rw.Body.String())
+		}
+	}
+}
+
+func TestStartParseAcceptsScannedJob(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusScanned, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/parse", h.StartParse)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/parse", strings.NewReader(`{"target_steamid":"76561198000000000"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), `"status":"parsing"`) {
+		t.Fatalf("body missing parsing status: %s", rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeParseDemo {
+		t.Fatalf("queue = %#v, want one parse task", queue.enqueued)
+	}
+	if got := repo.jobs[j.ID].TargetSteamID; got != "76561198000000000" {
+		t.Fatalf("TargetSteamID = %q, want persisted target", got)
+	}
+}
+
+func TestStartParseRejectsNonUintTarget(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusScanned, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/parse", h.StartParse)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/parse", strings.NewReader(`{"target_steamid":"not-a-number"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
+	}
+}
+
+func TestStartParseRejectsWrongState(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusQueued, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/parse", h.StartParse)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/parse", strings.NewReader(`{"target_steamid":"76561198000000000"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
 	}
 }
 

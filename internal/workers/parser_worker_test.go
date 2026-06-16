@@ -12,9 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
+	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/moments"
+	"github.com/rechedev9/fragforge/internal/parser"
 	"github.com/rechedev9/fragforge/internal/rules"
 	"github.com/rechedev9/fragforge/internal/tasks"
 )
@@ -132,6 +134,45 @@ func TestParserWorkerRunsAgainstRealDemo(t *testing.T) {
 		got.KillPlan.Stats.SegmentsCreated,
 		got.KillPlan.Stats.TotalKillsTarget,
 		got.KillPlan.Stats.KillsAfterFilters)
+}
+
+func TestParserWorkerScansRosterAgainstRealDemo(t *testing.T) {
+	demo := loadRealDemo(t)
+	repo := newFakeRepo()
+	store := newFakeStorage()
+
+	id := uuid.New()
+	repo.jobs[id] = &job.Job{
+		ID:         id,
+		Status:     job.StatusQueued,
+		DemoPath:   "demos/test.dem",
+		DemoSHA256: "fake",
+		Rules:      rules.Default(),
+	}
+	_ = store.Put("demos/test.dem", bytes.NewReader(demo))
+
+	w := NewParserWorker(repo, store)
+	payload, _ := json.Marshal(tasks.ScanRosterPayload{JobID: id})
+	if err := w.HandleScanRoster(context.Background(), asynq.NewTask(tasks.TypeScanRoster, payload)); err != nil {
+		t.Fatalf("HandleScanRoster error = %v", err)
+	}
+
+	if got := repo.jobs[id].Status; got != job.StatusScanned {
+		t.Errorf("Status = %v, want StatusScanned", got)
+	}
+	raw, ok := store.files[artifacts.RosterKey(id)]
+	if !ok {
+		t.Fatal("roster artifact missing after scan")
+	}
+	var doc struct {
+		Players []parser.PlayerStat `json:"players"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Players) == 0 {
+		t.Fatal("roster has no players, expected > 0 (regression)")
+	}
 }
 
 func TestParserWorkerMarksJobFailedOnUnknownTarget(t *testing.T) {

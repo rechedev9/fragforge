@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Target, UploadCloud, Film, Compass, LogOut, ChevronsUpDown, Plus } from 'lucide-react';
+import { Target, UploadCloud, Film, Compass, LogOut, LogIn, ChevronsUpDown, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Sidebar,
   SidebarContent,
@@ -125,6 +126,7 @@ function SlotsMeter() {
       <Button
         variant="ghost"
         size="sm"
+        onClick={() => toast('More render slots are coming soon.', { description: 'For now each account renders one reel at a time.' })}
         className="mt-2 h-7 w-full justify-start gap-1.5 px-1.5 text-xs text-sidebar-foreground/80 hover:text-sidebar-foreground"
       >
         <Plus className="size-3.5" />
@@ -139,7 +141,24 @@ function UserMenu() {
   const { session, signOut } = useSession();
   const router = useRouter();
   const user = session?.user;
-  if (!user) return null;
+
+  // Signed out (e.g. after a reload before the session restores, or a real
+  // logged-out visit): offer a way back to sign in rather than an empty footer.
+  if (!user) {
+    return (
+      <Button
+        asChild
+        variant="outline"
+        size="sm"
+        className="w-full justify-start gap-2 group-data-[collapsible=icon]:justify-center"
+      >
+        <Link href="/">
+          <LogIn className="size-4" />
+          <span className="group-data-[collapsible=icon]:hidden">Sign in</span>
+        </Link>
+      </Button>
+    );
+  }
 
   const initials = user.personaName.slice(0, 2).toUpperCase();
 

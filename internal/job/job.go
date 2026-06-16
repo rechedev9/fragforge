@@ -25,6 +25,9 @@ const (
 	StatusComposed
 	StatusDone
 	StatusFailed
+	// Appended after StatusFailed so the existing integer values are unchanged.
+	StatusScanning // queued→scanning while the roster scan runs
+	StatusScanned  // roster ready; awaiting the user's target pick
 )
 
 var statusNames = [...]string{
@@ -37,6 +40,8 @@ var statusNames = [...]string{
 	"composed",
 	"done",
 	"failed",
+	"scanning",
+	"scanned",
 }
 
 // String returns the canonical lowercase representation used in JSON and DB.

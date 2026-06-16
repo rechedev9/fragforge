@@ -17,6 +17,7 @@ import (
 	"github.com/hibiken/asynq"
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 
+	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/moments"
@@ -81,28 +82,45 @@ func (w *ParserWorker) HandleParseDemo(ctx context.Context, t *asynq.Task) error
 	return nil
 }
 
+// HandleScanRoster is the Asynq handler for scan:roster. It scans the demo's
+// roster once so the user can pick a target before a full parse, mirroring
+// HandleParseDemo's status transitions and failure handling.
+func (w *ParserWorker) HandleScanRoster(ctx context.Context, t *asynq.Task) error {
+	var payload tasks.ScanRosterPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("decode payload: %w", err)
+	}
+
+	j, err := w.repo.GetMeta(ctx, payload.JobID)
+	if err != nil {
+		return fmt.Errorf("load job %s: %w", payload.JobID, err)
+	}
+
+	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusScanning, ""); err != nil {
+		return fmt.Errorf("mark scanning: %w", err)
+	}
+	logWorkerTransition(j.ID, tasks.TypeScanRoster, job.StatusScanning)
+
+	rosterKey, scanErr := w.scanRoster(ctx, j)
+	if scanErr != nil {
+		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeScanRoster, scanErr)
+		return scanErr
+	}
+
+	logWorkerArtifacts(j.ID, tasks.TypeScanRoster, []string{rosterKey})
+	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusScanned, ""); err != nil {
+		return fmt.Errorf("mark scanned: %w", err)
+	}
+	logWorkerTransition(j.ID, tasks.TypeScanRoster, job.StatusScanned)
+	return nil
+}
+
 func (w *ParserWorker) parse(ctx context.Context, j job.Job) (killplan.Plan, error) {
-	rc, err := w.storage.Open(j.DemoPath)
+	tmp, cleanup, err := w.openDemo(j.DemoPath)
 	if err != nil {
-		return killplan.Plan{}, fmt.Errorf("open demo: %w", err)
-	}
-	defer rc.Close()
-
-	// demoinfocs needs an io.ReadSeeker for CS2 demos; copy to a temp file
-	// to give it one without buffering the whole demo in memory.
-	tmp, err := os.CreateTemp("", "zv-demo-*.dem")
-	if err != nil {
-		return killplan.Plan{}, fmt.Errorf("temp file: %w", err)
-	}
-	defer os.Remove(tmp.Name())
-	defer tmp.Close()
-
-	if _, err := io.Copy(tmp, rc); err != nil {
-		return killplan.Plan{}, fmt.Errorf("write temp demo: %w", err)
-	}
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return killplan.Plan{}, err
 	}
+	defer cleanup()
 
 	p := demoinfocs.NewParser(tmp)
 	defer p.Close()
@@ -119,6 +137,62 @@ func (w *ParserWorker) parse(ctx context.Context, j job.Job) (killplan.Plan, err
 		return killplan.Plan{}, err
 	}
 	return plan, nil
+}
+
+func (w *ParserWorker) scanRoster(ctx context.Context, j job.Job) (string, error) {
+	tmp, cleanup, err := w.openDemo(j.DemoPath)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+
+	p := demoinfocs.NewParser(tmp)
+	defer p.Close()
+
+	players, err := parser.RosterWithContext(ctx, p)
+	if err != nil {
+		return "", fmt.Errorf("scan roster: %w", err)
+	}
+	b, err := json.MarshalIndent(map[string]any{"players": players}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	key := artifacts.RosterKey(j.ID)
+	if err := w.storage.Put(key, bytes.NewReader(b)); err != nil {
+		return "", fmt.Errorf("store roster: %w", err)
+	}
+	return key, nil
+}
+
+// openDemo copies the demo blob to a temp *.dem and returns it positioned at
+// the start. demoinfocs needs an io.ReadSeeker for CS2 demos; copying to a
+// temp file gives it one without buffering the whole demo in memory. The
+// returned cleanup closes and removes the temp file and must be deferred.
+func (w *ParserWorker) openDemo(demoPath string) (*os.File, func(), error) {
+	rc, err := w.storage.Open(demoPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open demo: %w", err)
+	}
+	defer rc.Close()
+
+	tmp, err := os.CreateTemp("", "zv-demo-*.dem")
+	if err != nil {
+		return nil, nil, fmt.Errorf("temp file: %w", err)
+	}
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}
+
+	if _, err := io.Copy(tmp, rc); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("write temp demo: %w", err)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return tmp, cleanup, nil
 }
 
 func (w *ParserWorker) writeMoments(id uuid.UUID, plan killplan.Plan) (string, error) {

@@ -35,7 +35,8 @@ export default function MatchesPage() {
     }
 
     if (filter === 'frags') {
-      rows = [...rows].sort((a, b) => b.stats.kd - a.stats.kd);
+      // "Best frags" = most kills first; K/D only breaks ties.
+      rows = [...rows].sort((a, b) => b.stats.kills - a.stats.kills || b.stats.kd - a.stats.kd);
     }
 
     return rows;

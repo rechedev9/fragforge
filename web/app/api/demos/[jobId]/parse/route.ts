@@ -1,0 +1,30 @@
+import { NextResponse } from 'next/server';
+import { jobUrl, mutationHeaders, forwardError } from '../../_lib';
+
+export const runtime = 'nodejs';
+
+/**
+ * POST /api/demos/{jobId}/parse — start a parse for the chosen player. Maps the
+ * client's { steamId } to the orchestrator's { target_steamid } and forwards the
+ * mutation token.
+ */
+export async function POST(request: Request, { params }: { params: Promise<{ jobId: string }> }): Promise<Response> {
+  const { jobId } = await params;
+  const url = jobUrl(jobId, '/parse');
+  if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
+
+  const { steamId } = (await request.json()) as { steamId?: string };
+  if (!steamId) {
+    return NextResponse.json({ error: 'steamId required' }, { status: 400 });
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...mutationHeaders() },
+    body: JSON.stringify({ target_steamid: steamId }),
+  });
+  if (!res.ok) return forwardError(res);
+
+  const body = (await res.json()) as { id: string; status: string };
+  return NextResponse.json(body);
+}

@@ -43,6 +43,11 @@ func MomentsKey(id uuid.UUID) string {
 	return path.Join(JobPrefix(id), "moments", "moments.json")
 }
 
+// RosterKey is the storage key for a job's roster scan result.
+func RosterKey(id uuid.UUID) string {
+	return path.Join(JobPrefix(id), "roster.json")
+}
+
 // RenderVariantPrefix returns the durable storage prefix for a named render
 // variant, such as a vertical Shorts pack or a future mobile render.
 func RenderVariantPrefix(id uuid.UUID, variant string) (string, error) {

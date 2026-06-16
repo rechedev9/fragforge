@@ -1,4 +1,4 @@
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer } from './types';
 
 export interface ApiClient {
   getSession(): Promise<Session>;
@@ -9,7 +9,12 @@ export interface ApiClient {
   getPcStatus(): Promise<{ paired: boolean }>;
   listMatches(): Promise<Match[]>;
   getMatch(id: string): Promise<Match | null>;
+  /** @deprecated Superseded by scanDemo + parseDemo (roster scan → target pick). */
   uploadDemo(input: { fileName: string }): Promise<Match>;
+  /** Roster scan: returns the demo's players (K/D/A) so the user can pick a target. */
+  scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[] }>;
+  /** Parse the scanned demo for the chosen player and return its Match. */
+  parseDemo(input: { jobId: string; steamId: string }): Promise<Match>;
   findClips(matchId: string): Promise<Play[]>;
   listSongs(): Promise<Song[]>;
   createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string }): Promise<Video>;

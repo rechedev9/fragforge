@@ -271,42 +271,6 @@ end)
 	}
 }
 
-func TestViralUltraCleanEmitsKillfeedPerKill(t *testing.T) {
-	short := ShortEdit{
-		SegmentID:       "seg-001",
-		Preset:          PresetViral60Clean,
-		DurationSeconds: 12,
-		Player:          "latto",
-		Map:             "de_mirage",
-		KillCount:       2,
-		Kills: []KillCue{
-			{Tick: 100, TimeSeconds: 1, Weapon: "AK-47"},
-			{Tick: 500, TimeSeconds: 7, Weapon: "AK-47", Headshot: true},
-		},
-	}
-
-	source, err := loadEffectsSource("", EffectsPresetViralUltraClean)
-	if err != nil {
-		t.Fatalf("loadEffectsSource error = %v", err)
-	}
-	effects, warnings, err := evaluateEffects(source, short)
-	if err != nil {
-		t.Fatalf("evaluateEffects error = %v", err)
-	}
-	if len(warnings) != 0 {
-		t.Fatalf("warnings = %v", warnings)
-	}
-	killfeeds := killfeedEffects(effects)
-	if got, want := len(killfeeds), len(short.Kills); got != want {
-		t.Fatalf("killfeed effects = %d, want %d (one per kill)", got, want)
-	}
-	for i, effect := range killfeeds {
-		if effect.AtSeconds != short.Kills[i].TimeSeconds {
-			t.Fatalf("killfeed[%d] at = %.3f, want %.3f", i, effect.AtSeconds, short.Kills[i].TimeSeconds)
-		}
-	}
-}
-
 func TestLoadEffectsSourceDefaultsToViralUltraClean(t *testing.T) {
 	source, err := loadEffectsSource("", "")
 	if err != nil {
@@ -320,7 +284,7 @@ func TestLoadEffectsSourceDefaultsToViralUltraClean(t *testing.T) {
 	}
 }
 
-func TestViralUltraCleanDropsPerKillTextBanners(t *testing.T) {
+func TestViralUltraCleanEmitsOnlyColorGrade(t *testing.T) {
 	short := ShortEdit{
 		SegmentID:       "seg-001",
 		Preset:          PresetViral60Clean,
@@ -345,29 +309,15 @@ func TestViralUltraCleanDropsPerKillTextBanners(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluateEffects error = %v", err)
 	}
-	// the killfeed overlay narrates the kills: no weapon labels, wallbang or
-	// chain banners, and no milestone pills on the clean preset
+	// The clean preset adds no overlay lettering and no per-kill effects
+	// (zoom/flash/killfeed): it keeps only a colour grade over raw gameplay.
+	if len(effects) == 0 {
+		t.Fatal("clean preset emitted no effects; expected a colour grade")
+	}
 	for _, effect := range effects {
-		if effect.Type != EffectText {
-			continue
+		if effect.Type != EffectGrade {
+			t.Fatalf("clean preset emits a %q effect; want only colour grade", effect.Type)
 		}
-		for _, banned := range []string{"HEADSHOT", "THROUGH THE WALL", "FAST CHAIN", "KILLS", "AWP PICK"} {
-			if strings.Contains(effect.Value, banned) {
-				t.Fatalf("clean preset emits per-kill banner %q", effect.Value)
-			}
-		}
-	}
-	counters := 0
-	for _, effect := range effects {
-		if effect.Type == EffectText && strings.Contains(effect.Value, "/5") {
-			counters++
-		}
-	}
-	if counters != len(short.Kills) {
-		t.Fatalf("kill counter texts = %d, want %d", counters, len(short.Kills))
-	}
-	if got, want := len(killfeedEffects(effects)), len(short.Kills); got != want {
-		t.Fatalf("killfeed effects = %d, want %d", got, want)
 	}
 }
 

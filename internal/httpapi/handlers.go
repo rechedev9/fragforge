@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
+	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
@@ -44,6 +45,7 @@ type JobRepository interface {
 	Get(ctx context.Context, id uuid.UUID) (job.Job, error)
 	List(ctx context.Context, limit int) ([]job.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
+	SetParseInputs(ctx context.Context, id uuid.UUID, steamID string, r rules.Rules) error
 }
 
 type StreamJobRepository interface {
@@ -137,13 +139,13 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if cfg.TargetSteamID == "" {
-		writeError(w, http.StatusBadRequest, "target_steamid is required")
-		return
-	}
-	if _, err := strconv.ParseUint(cfg.TargetSteamID, 10, 64); err != nil {
-		writeError(w, http.StatusBadRequest, "target_steamid must be a 64-bit unsigned integer")
-		return
+	// target_steamid is optional: when present the job parses straight away;
+	// when absent it runs a roster scan first so the user can pick a target.
+	if cfg.TargetSteamID != "" {
+		if _, err := strconv.ParseUint(cfg.TargetSteamID, 10, 64); err != nil {
+			writeError(w, http.StatusBadRequest, "target_steamid must be a 64-bit unsigned integer")
+			return
+		}
 	}
 
 	effectiveRules := rules.Default()
@@ -178,9 +180,17 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := tasks.NewParseDemoTask(j.ID)
+	// With a target the job parses immediately; without one it scans the roster
+	// so the user can pick a target before the full parse.
+	taskKind := "parse"
+	build := tasks.NewParseDemoTask
+	if j.TargetSteamID == "" {
+		taskKind = "scan"
+		build = tasks.NewScanRosterTask
+	}
+	task, err := build(j.ID)
 	if err != nil {
-		internalError(w, "build parse task", err)
+		internalError(w, "build "+taskKind+" task", err)
 		return
 	}
 	if _, err := h.queue.Enqueue(task); err != nil {
@@ -190,11 +200,11 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 		// short-lived context so the compensating write lands even if the request
 		// context is already cancelled (client disconnect or proxy deadline).
 		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if uerr := h.repo.UpdateStatus(markCtx, j.ID, job.StatusFailed, "enqueue parse task: "+err.Error()); uerr != nil {
+		if uerr := h.repo.UpdateStatus(markCtx, j.ID, job.StatusFailed, "enqueue "+taskKind+" task: "+err.Error()); uerr != nil {
 			log.Printf("httpapi: mark job %s failed after enqueue error: %v", j.ID, uerr)
 		}
 		markCancel()
-		internalError(w, "enqueue parse task", err)
+		internalError(w, "enqueue "+taskKind+" task", err)
 		return
 	}
 
@@ -343,6 +353,112 @@ func (h *Handlers) GetMoments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, moments.Build(j.ID, *j.KillPlan))
 }
 
+// GetRoster handles GET /api/jobs/{id}/roster. It streams the roster scan
+// result stored by the scan worker, already shaped as { "players": [...] }.
+func (h *Handlers) GetRoster(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	rc, err := h.storage.Open(artifacts.RosterKey(j.ID))
+	if err != nil {
+		if storage.IsNotExist(err) {
+			// Either the scan is still running or this job was created with a
+			// target and never scanned.
+			writeError(w, http.StatusConflict, "roster not ready")
+			return
+		}
+		internalError(w, "open roster artifact", err)
+		return
+	}
+	defer rc.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, rc)
+}
+
+// startParseRequest is the JSON body for POST /api/jobs/{id}/parse.
+type startParseRequest struct {
+	TargetSteamID string       `json:"target_steamid"`
+	Rules         *rules.Rules `json:"rules,omitempty"`
+}
+
+// StartParse handles POST /api/jobs/{id}/parse. After a roster scan it records
+// the picked target (and optional rules) and enqueues the full parse.
+func (h *Handlers) StartParse(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	// Friendly early-out with the current status. The race-safe guard is the
+	// status-gated SetParseInputs below, which atomically claims the job, so a
+	// second concurrent request that slips past this check still conflicts there.
+	if j.Status != job.StatusScanned && j.Status != job.StatusParsed {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to parse (status=%s)", j.Status))
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	var req startParseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "parse request JSON is too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid parse request JSON")
+		return
+	}
+	if _, err := strconv.ParseUint(req.TargetSteamID, 10, 64); err != nil {
+		writeError(w, http.StatusBadRequest, "target_steamid must be a 64-bit unsigned integer")
+		return
+	}
+
+	effectiveRules := j.Rules
+	if req.Rules != nil {
+		effectiveRules = *req.Rules
+		if err := effectiveRules.Validate(); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid rules: "+err.Error())
+			return
+		}
+	}
+
+	if err := h.repo.SetParseInputs(r.Context(), j.ID, req.TargetSteamID, effectiveRules); err != nil {
+		switch {
+		case errors.Is(err, job.ErrNotFound):
+			writeError(w, http.StatusNotFound, "job not found")
+		case errors.Is(err, job.ErrConflict):
+			writeError(w, http.StatusConflict, "job is no longer ready to parse")
+		default:
+			internalError(w, "set parse inputs", err)
+		}
+		return
+	}
+
+	task, err := tasks.NewParseDemoTask(j.ID)
+	if err != nil {
+		internalError(w, "build parse task", err)
+		return
+	}
+	if _, err := h.queue.Enqueue(task); err != nil {
+		// Inputs are persisted; mark the job failed so it is not stranded with no
+		// task to advance it. Use a fresh context so the write survives a
+		// cancelled request context (client disconnect or proxy deadline).
+		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if uerr := h.repo.UpdateStatus(markCtx, j.ID, job.StatusFailed, "enqueue parse task: "+err.Error()); uerr != nil {
+			log.Printf("httpapi: mark job %s failed after enqueue error: %v", j.ID, uerr)
+		}
+		markCancel()
+		internalError(w, "enqueue parse task", err)
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":     j.ID,
+		"status": job.StatusParsing,
+	})
+}
+
 // GetFinal handles GET /api/jobs/{id}/final.
 func (h *Handlers) GetFinal(w http.ResponseWriter, r *http.Request) {
 	j, ok := h.loadJob(w, r)
@@ -436,7 +552,22 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	task, err := tasks.NewRenderVariantTask(j.ID, variant)
+	// Optional JSON body { "music": "<track-key>" } selects a track to mix in.
+	var musicKey string
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+		var req struct {
+			Music string `json:"music"`
+		}
+		switch err := json.NewDecoder(r.Body).Decode(&req); {
+		case err == nil, errors.Is(err, io.EOF):
+			musicKey = req.Music
+		default:
+			writeError(w, http.StatusBadRequest, "invalid render request JSON")
+			return
+		}
+	}
+	task, err := tasks.NewRenderVariantTask(j.ID, variant, musicKey)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

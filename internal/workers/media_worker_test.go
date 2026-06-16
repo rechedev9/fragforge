@@ -704,7 +704,7 @@ func composeTask(t *testing.T, id uuid.UUID) *asynq.Task {
 
 func renderTask(t *testing.T, id uuid.UUID, variant string) *asynq.Task {
 	t.Helper()
-	task, err := tasks.NewRenderVariantTask(id, variant)
+	task, err := tasks.NewRenderVariantTask(id, variant, "")
 	if err != nil {
 		t.Fatal(err)
 	}

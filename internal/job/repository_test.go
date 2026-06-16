@@ -171,6 +171,59 @@ func TestRepositorySetKillPlanPersists(t *testing.T) {
 	}
 }
 
+func TestRepositorySetParseInputsPersists(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+
+	j := Job{
+		ID:         uuid.New(),
+		Status:     StatusScanned,
+		DemoPath:   "/tmp/demo.dem",
+		DemoSHA256: "abc",
+		Rules:      rules.Default(),
+	}
+	_ = repo.Create(context.Background(), &j)
+
+	want := rules.Default()
+	want.MinRound = 7
+	if err := repo.SetParseInputs(context.Background(), j.ID, "76561198000000000", want); err != nil {
+		t.Fatalf("SetParseInputs error = %v", err)
+	}
+	got, _ := repo.Get(context.Background(), j.ID)
+	if got.TargetSteamID != "76561198000000000" {
+		t.Errorf("TargetSteamID = %q, want persisted target", got.TargetSteamID)
+	}
+	if got.Rules.MinRound != 7 {
+		t.Errorf("Rules.MinRound = %d, want 7", got.Rules.MinRound)
+	}
+	if got.Status != StatusParsing {
+		t.Errorf("Status = %v, want parsing after claim", got.Status)
+	}
+}
+
+func TestRepositorySetParseInputsOnWrongStateReturnsConflict(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+
+	j := Job{ID: uuid.New(), Status: StatusQueued, DemoPath: "/tmp/demo.dem", Rules: rules.Default()}
+	_ = repo.Create(context.Background(), &j)
+
+	err := repo.SetParseInputs(context.Background(), j.ID, "76561198000000000", rules.Default())
+	if err != ErrConflict {
+		t.Errorf("SetParseInputs(queued) error = %v, want ErrConflict", err)
+	}
+}
+
+func TestRepositorySetParseInputsOnMissingReturnsNotFound(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+
+	err := repo.SetParseInputs(context.Background(), uuid.New(), "1", rules.Default())
+	if err != ErrNotFound {
+		t.Errorf("SetParseInputs(missing) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestRepositoryListReturnsRecentJobsWithoutKillPlan(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)

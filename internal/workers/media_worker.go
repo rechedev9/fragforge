@@ -119,6 +119,10 @@ type RecordWorkerConfig struct {
 	HLAEPath     string
 	CS2Path      string
 	Timeout      string
+	// HUDMode is the in-game HUD the recorder captures with (gameplay, clean, or
+	// deathnotices). The viral short wants a HUD-less POV with the deathnotices
+	// killfeed, so it defaults to "deathnotices" (see withDefaults).
+	HUDMode string
 }
 
 type ComposeWorkerConfig struct {
@@ -134,6 +138,25 @@ type RenderWorkerConfig struct {
 	FFmpegPath  string
 	FFprobePath string
 	Timeout     string
+	// MusicDir holds music tracks named "<key>.<ext>" that a render can mix in
+	// (see RenderVariantPayload.MusicKey). Empty disables music mixing.
+	MusicDir string
+}
+
+// resolveMusicFile returns the first existing track file for key in dir, or ""
+// when dir is unset, key is unsafe, or nothing matches. key is validated
+// upstream; the separator check is defence in depth against path traversal.
+func resolveMusicFile(dir, key string) string {
+	if dir == "" || key == "" || strings.ContainsAny(key, `/\`) || strings.Contains(key, "..") {
+		return ""
+	}
+	for _, ext := range []string{".m4a", ".mp3", ".ogg", ".opus", ".wav", ".aac"} {
+		p := filepath.Join(dir, key+ext)
+		if info, statErr := os.Stat(p); statErr == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 type StreamRenderRepository interface {
@@ -230,6 +253,7 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job) error {
 		"--out", outDir,
 		"--hlae", cfg.HLAEPath,
 		"--cs2", cfg.CS2Path,
+		"--hud", cfg.HUDMode,
 		"--timeout", cfg.Timeout,
 	)
 
@@ -258,6 +282,12 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job) error {
 func (c RecordWorkerConfig) withDefaults() RecordWorkerConfig {
 	if c.Timeout == "" {
 		c.Timeout = defaultMediaWorkerTimeout
+	}
+	if c.HUDMode == "" {
+		// The viral short is a HUD-less POV with the in-game deathnotices killfeed
+		// (the editor crops that killfeed into its overlay), not the full scoreboard
+		// HUD the recorder defaults to.
+		c.HUDMode = string(recording.HUDModeDeathnotices)
 	}
 	return c
 }
@@ -619,14 +649,14 @@ func (w *RenderWorker) HandleRenderVariant(ctx context.Context, t *asynq.Task) e
 	if variant == "" {
 		variant = editor.DefaultPreset().Name
 	}
-	if err := w.render(ctx, j, variant); err != nil {
+	if err := w.render(ctx, j, variant, payload.MusicKey); err != nil {
 		logWorkerError(j.ID, tasks.TypeRenderVariant, err)
 		return err
 	}
 	return nil
 }
 
-func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (err error) {
+func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey string) (err error) {
 	loadout, err := renderplan.LoadoutForVariant(variant)
 	if err != nil {
 		return err
@@ -737,6 +767,14 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant string) (e
 	}
 	if cfg.FFprobePath != "" {
 		args = append(args, "--ffprobe", cfg.FFprobePath)
+	}
+	if musicKey != "" {
+		if musicPath := resolveMusicFile(cfg.MusicDir, musicKey); musicPath != "" {
+			args = append(args, "--music", musicPath)
+		} else {
+			// Requested music is unavailable; render without it rather than fail.
+			logWorkerError(j.ID, tasks.TypeRenderVariant, fmt.Errorf("music %q not found in %q; rendering without music", musicKey, cfg.MusicDir))
+		}
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, cfg.timeoutDuration())
