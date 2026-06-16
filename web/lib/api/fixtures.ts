@@ -117,6 +117,66 @@ export function playsForMatch(matchId: string): Play[] {
   }));
 }
 
+/** Maps an uploaded demo can land on; the file name picks a stable one. */
+const uploadMapPool = ['Inferno', 'Mirage', 'Nuke', 'Ancient', 'Dust2', 'Anubis', 'Overpass', 'Vertigo'];
+
+/** Highlight templates an uploaded demo's plays are drawn from (first N used). */
+const uploadPlaySeeds: PlaySeed[] = [
+  { label: '4K - Site retake', kind: 'highlight', round: 12, kills: 4, weapon: 'AK-47' },
+  { label: '3K - Clutch hold', kind: 'highlight', round: 7, kills: 3, weapon: 'M4A1-S' },
+  { label: '5K - Eco frags', kind: 'highlight', round: 3, kills: 5, weapon: 'USP-S' },
+];
+
+/** Small stable string hash so the same file name always yields the same map. */
+function hashName(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = (h * 31 + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+/**
+ * Synthesizes a Match (and its highlight plays) for an uploaded .dem. The demo
+ * may belong to anyone, so there is no Steam user behind it — the rest of the
+ * app treats it like any other match. seq keeps successive uploads distinct in
+ * a single session; the file name picks a stable map.
+ */
+export function synthUploadedMatch(fileName: string, seq: number): { match: Match; plays: Play[] } {
+  const id = `m-upload-${seq}`;
+  const map = uploadMapPool[(hashName(fileName) + seq) % uploadMapPool.length];
+  const losses = 6 + (seq % 7);
+  const kills = 18 + (seq % 9);
+  const deaths = 10 + (seq % 6);
+  const playCount = 1 + (seq % 3);
+
+  const plays: Play[] = uploadPlaySeeds.slice(0, playCount).map((seed, i) => ({
+    id: `${id}-p${i + 1}`,
+    matchId: id,
+    thumbnailUrl: thumb(`${id}-p${i + 1}`),
+    ...seed,
+  }));
+
+  const match: Match = {
+    id,
+    map,
+    score: `13-${losses}`,
+    playedAt: new Date().toISOString(),
+    stats: {
+      kills,
+      deaths,
+      assists: 3 + (seq % 4),
+      mvps: 1 + (seq % 3),
+      kd: Number((kills / deaths).toFixed(2)),
+    },
+    decentPlays: playCount,
+    thumbnailUrl: thumb(id),
+    source: 'upload',
+  };
+
+  return { match, plays };
+}
+
 export const fixtureSongs: Song[] = [
   { id: 'song-tikitaka-1', title: 'TikiTakaYala 1', artist: 'TikiTakaYala', genre: 'Phonk', previewUrl: '', durationSec: 30 },
   { id: 'song-tikitaka-2', title: 'TikiTakaYala 2', artist: 'TikiTakaYala', genre: 'Phonk', previewUrl: '', durationSec: 30 },

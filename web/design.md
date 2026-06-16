@@ -20,6 +20,11 @@ dashboard. Confident, fast, a little broadcast-room. We lean into the one thing
 that is uniquely ours: a transparent **capture → edit → reel** pipeline that
 runs on the player's PC.
 
+**Two ways in.** (1) *Steam* — sign in, link your match history, and forge reels
+from your own demos. (2) *Upload* — drop any `.dem` (yours or someone else's),
+no login required, and analyze it the same way. Both converge on the identical
+highlight → render pipeline; only the front door differs.
+
 Differentiators from v1 (these are non-negotiable, they are what makes it "not a
 copy"):
 
@@ -116,8 +121,9 @@ Map `--font-sans`/`--font-mono` into the shadcn `@theme inline` block and add
 A persistent **left sidebar** (shadcn `Sidebar`), collapsible, mobile → `Sheet`:
 
 - Top: FragForge wordmark + spark mark.
-- Items: **Matches** (target icon), **Library** (film icon), **Feed**
-  (compass/flame icon). Active item = lime text + lime left accent.
+- Items: **Matches** (target icon), **Upload** (upload-cloud icon), **Library**
+  (film icon), **Feed** (compass/flame icon). Active item = lime text + lime left
+  accent.
 - Footer: a **slots meter** (`used / total`, a thin lime progress) with a small
   "Get more" button, then the user (avatar + persona, dropdown → sign out).
 
@@ -161,9 +167,18 @@ changes.
 ### `/` — Auth
 Full-bleed dark hero with grain + scanline. Left: huge Space Grotesk headline
 ("FORGE YOUR FRAGS INTO REELS" or similar), a one-line subhead, a lime
-**"Continue with Steam"** button (Steam glyph), and a trust line *"No AI. Your
-POV. Your rig."*. Right: a stylized reel/filmstrip motif (CSS, no real video).
-On sign-in → `/connect` if history not linked, else `/matches`.
+**"Continue with Steam"** button (Steam glyph), a secondary outline **"Upload a
+demo"** button (→ `/upload`, no login) for the file flow, and a trust line *"No
+AI. Your POV. Your rig."*. Right: a stylized reel/filmstrip motif (CSS, no real
+video). On sign-in → `/connect` if history not linked, else `/matches`.
+
+### `/upload` — Upload a demo (Flow B, no login)
+Renders on the root layout (no sidebar) like `/connect`. A centered card with a
+dashed **drop zone** (`DemoDropzone`): drag-and-drop or click-to-browse a single
+`.dem`, extension-validated. On select it shows a brief "Parsing demo…" state,
+then `uploadDemo({ fileName })` synthesizes a match and we route to
+`/matches/[id]` — the same find-highlights screen Steam matches use. Copy leans
+on "analyze any demo, yours or anyone's, no login".
 
 ### `/connect` — Onboarding (vertical stepper, not two side cards)
 A centered, two-step **stepper**:
@@ -226,6 +241,8 @@ reel is rendering on your rig." "Ready to post." Avoid hype words and emoji.
 
 - No violet as the brand color. No centered top-tab navigation. No stat "pills"
   as the primary stat treatment (use mono numbers). No generic stock-SaaS hero.
-- Do not touch `web/lib/api/*` types/contract or `useSession()`. Extend
-  `fixtures.ts` only to add image/thumbnail fields if needed.
+- Keep `web/lib/api/*` and `useSession()` stable. The contract may grow only
+  **additively** when a new flow needs it (e.g. the `uploadDemo` method and the
+  optional `Match.source` field added for Flow B) so the Fase 2 real-backend
+  swap stays intact; never change or remove existing fields/signatures.
 - No real audio, no real video — placeholders only (picsum/dicebear) this phase.

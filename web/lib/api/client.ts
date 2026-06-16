@@ -9,6 +9,7 @@ export interface ApiClient {
   getPcStatus(): Promise<{ paired: boolean }>;
   listMatches(): Promise<Match[]>;
   getMatch(id: string): Promise<Match | null>;
+  uploadDemo(input: { fileName: string }): Promise<Match>;
   findClips(matchId: string): Promise<Play[]>;
   listSongs(): Promise<Song[]>;
   createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string }): Promise<Video>;

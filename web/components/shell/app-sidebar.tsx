@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Target, Film, Compass, LogOut, ChevronsUpDown, Plus } from 'lucide-react';
+import { Target, UploadCloud, Film, Compass, LogOut, ChevronsUpDown, Plus } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -36,6 +36,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Matches', href: '/matches', icon: Target },
+  { label: 'Upload', href: '/upload', icon: UploadCloud },
   { label: 'Library', href: '/videos', icon: Film },
   { label: 'Feed', href: '/feed', icon: Compass },
 ];

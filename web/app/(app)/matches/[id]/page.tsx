@@ -118,6 +118,9 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   const n = playList.length;
   const score = parseScore(match.score);
   const win = isWin(match.score);
+  const fromUpload = match.source === 'upload';
+  const backHref = fromUpload ? '/upload' : '/matches';
+  const backLabel = fromUpload ? 'Upload' : 'Matches';
 
   return (
     <div className="flex min-h-[calc(100vh-5rem)] flex-col gap-8 pb-2">
@@ -125,10 +128,10 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         variant="ghost"
         size="sm"
         className="-ml-2 w-fit text-muted-foreground"
-        onClick={() => router.push('/matches')}
+        onClick={() => router.push(backHref)}
       >
         <ArrowLeft className="size-4" />
-        Matches
+        {backLabel}
       </Button>
 
       {/* Compact match summary strip */}

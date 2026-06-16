@@ -8,6 +8,7 @@ import {
   fixtureFeed,
   playsForMatch,
   seedVideos,
+  synthUploadedMatch,
 } from './fixtures';
 
 /**
@@ -25,6 +26,52 @@ const videos: Video[] = seedVideos();
 
 /** Set by pairPc so the next getPcStatus reports the PC as paired. */
 let pcPaired = false;
+
+/**
+ * Uploaded demos, parsed on the fly. They are not Steam matches (the demo may
+ * belong to anyone) so they live apart from fixtureMatches, but getMatch /
+ * findClips / createVideo resolve them too, letting an upload reuse the same
+ * highlight → render pipeline.
+ */
+const uploadedMatches: Match[] = [];
+const uploadedPlays = new Map<string, Play[]>();
+let uploadSeq = 0;
+
+/**
+ * Uploaded demos persist to sessionStorage so the bookmarkable /matches/[id]
+ * URL still resolves after a reload or a direct visit, matching the Steam path.
+ * Guarded for SSR (no window) and tolerant of corrupt / over-quota storage.
+ */
+const UPLOAD_STORE_KEY = 'fragforge.uploads.v1';
+
+function saveUploads(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const store = { matches: uploadedMatches, plays: Object.fromEntries(uploadedPlays), seq: uploadSeq };
+    window.sessionStorage.setItem(UPLOAD_STORE_KEY, JSON.stringify(store));
+  } catch {
+    // sessionStorage can throw (quota / privacy mode); in-memory state still works this session.
+  }
+}
+
+function loadUploads(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.sessionStorage.getItem(UPLOAD_STORE_KEY);
+    if (!raw) return;
+    const store = JSON.parse(raw) as { matches: Match[]; plays: Record<string, Play[]>; seq: number };
+    uploadedMatches.splice(0, uploadedMatches.length, ...store.matches);
+    uploadedPlays.clear();
+    for (const [matchId, plays] of Object.entries(store.plays)) {
+      uploadedPlays.set(matchId, plays);
+    }
+    uploadSeq = store.seq;
+  } catch {
+    // ignore corrupt storage; uploaded demos are best-effort in the mock.
+  }
+}
+
+loadUploads();
 
 function delay(): Promise<void> {
   const ms = 150 + Math.floor(Math.random() * 250); // 150-400ms
@@ -102,12 +149,24 @@ export class MockApiClient implements ApiClient {
 
   async getMatch(id: string): Promise<Match | null> {
     await delay();
-    const match = fixtureMatches.find((m) => m.id === id);
+    const match = uploadedMatches.find((m) => m.id === id) ?? fixtureMatches.find((m) => m.id === id);
     return match ? { ...match, stats: { ...match.stats } } : null;
+  }
+
+  async uploadDemo(input: { fileName: string }): Promise<Match> {
+    await delay();
+    uploadSeq += 1;
+    const { match, plays } = synthUploadedMatch(input.fileName, uploadSeq);
+    uploadedMatches.unshift(match);
+    uploadedPlays.set(match.id, plays);
+    saveUploads();
+    return { ...match, stats: { ...match.stats } };
   }
 
   async findClips(matchId: string): Promise<Play[]> {
     await delay();
+    const uploaded = uploadedPlays.get(matchId);
+    if (uploaded) return uploaded.map((p) => ({ ...p }));
     return playsForMatch(matchId);
   }
 
@@ -118,8 +177,9 @@ export class MockApiClient implements ApiClient {
 
   async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string }): Promise<Video> {
     await delay();
-    const match = fixtureMatches.find((m) => m.id === input.matchId);
-    const play = playsForMatch(input.matchId).find((p) => p.id === input.playId);
+    const match = uploadedMatches.find((m) => m.id === input.matchId) ?? fixtureMatches.find((m) => m.id === input.matchId);
+    const plays = uploadedPlays.get(input.matchId) ?? playsForMatch(input.matchId);
+    const play = plays.find((p) => p.id === input.playId);
 
     const modeLabel = input.mode === 'music' ? 'Music Edit' : 'Clean POV';
     const playLabel = play?.label ?? 'Highlight';

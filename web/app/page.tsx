@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { Loader2, UploadCloud } from 'lucide-react';
 import { useSession } from '@/lib/session';
 import { Wordmark } from '@/components/brand';
+import { Button } from '@/components/ui/button';
 import { SteamButton } from '@/components/login/steam-button';
 import { HeroReel } from '@/components/login/hero-reel';
 
@@ -84,10 +86,23 @@ export default function LoginPage() {
               capture, edit and package the highlight reel.
             </p>
 
-            <div className="mt-9">
-              <SteamButton onClick={handleSignIn} loading={signingIn} />
-              <p className="mt-4 font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-muted-foreground">
-                No AI. Your POV. Your rig.
+            <div className="mt-9 flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <SteamButton onClick={handleSignIn} loading={signingIn} />
+                <Button
+                  variant="outline"
+                  size="lg"
+                  asChild
+                  className="h-12 gap-2.5 px-6 text-base"
+                >
+                  <Link href="/upload">
+                    <UploadCloud className="size-5" />
+                    Upload a demo
+                  </Link>
+                </Button>
+              </div>
+              <p className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-muted-foreground">
+                No AI. Your POV. Your rig. · No login to analyze a demo.
               </p>
             </div>
           </div>
