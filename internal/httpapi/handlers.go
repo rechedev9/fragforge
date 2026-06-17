@@ -529,7 +529,11 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if (j.Status != job.StatusParsed && j.Status != job.StatusRecorded) || j.KillPlan == nil {
+	// Parsed/Recorded are the normal entry points. Failed is allowed too so a
+	// failed capture can be retried in place (the .dem and kill plan are still
+	// there); the KillPlan==nil guard still rejects a job that failed before it
+	// was ever parsed.
+	if (j.Status != job.StatusParsed && j.Status != job.StatusRecorded && j.Status != job.StatusFailed) || j.KillPlan == nil {
 		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to record (status=%s)", j.Status))
 		return
 	}
