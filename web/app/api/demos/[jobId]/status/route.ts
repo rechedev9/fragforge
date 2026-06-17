@@ -12,6 +12,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
   const res = await fetch(url);
   if (!res.ok) return forwardError(res);
 
-  const { status } = (await res.json()) as { status: string };
-  return NextResponse.json({ status });
+  // Forward only the two known fields, never the raw upstream object (see _lib).
+  // failure_reason is omitted by the orchestrator unless the job actually failed.
+  const data = (await res.json()) as { status: string; failure_reason?: string };
+  const body: { status: string; failure_reason?: string } = { status: data.status };
+  if (data.failure_reason) body.failure_reason = data.failure_reason;
+  return NextResponse.json(body);
 }

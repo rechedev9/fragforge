@@ -312,6 +312,17 @@ export class MockApiClient implements ApiClient {
     return project(video);
   }
 
+  async retryVideo(id: string): Promise<Video> {
+    await delay();
+    const video = videos.find((v) => v.id === id);
+    if (!video) throw new Error(`video not found: ${id}`);
+    // Restart the projected timeline so a failed mock reel re-renders to ready.
+    video.status = 'queued';
+    video.createdAt = Date.now();
+    video.failureReason = undefined;
+    return project(video);
+  }
+
   async listFeed(): Promise<FeedItem[]> {
     await delay();
     return fixtureFeed.map((f) => ({ ...f }));

@@ -21,5 +21,7 @@ export interface ApiClient {
   listVideos(): Promise<Video[]>;
   getVideo(id: string): Promise<Video | null>;
   publishVideo(id: string): Promise<Video>;
+  /** Re-drive a failed reel from where it failed (re-record or re-render). */
+  retryVideo(id: string): Promise<Video>;
   listFeed(): Promise<FeedItem[]>;
 }

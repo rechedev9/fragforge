@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RenderingCard } from '@/components/videos/rendering-card';
 import { ReadyCard } from '@/components/videos/ready-card';
+import { FailedCard } from '@/components/videos/failed-card';
 
 const POLL_MS = 1500;
 
@@ -74,11 +75,23 @@ export default function VideosPage() {
 }
 
 function LibrarySections({ videos, onChange }: { videos: Video[]; onChange: () => void }) {
+  const failed = videos.filter((v) => v.status === 'failed');
   const rendering = videos.filter((v) => v.status !== 'ready' && v.status !== 'failed');
   const ready = videos.filter((v) => v.status === 'ready');
 
   return (
     <>
+      {failed.length > 0 ? (
+        <section className="space-y-4">
+          <SectionEyebrow label="Needs attention" count={failed.length} />
+          <div className="space-y-3">
+            {failed.map((v) => (
+              <FailedCard key={v.id} video={v} onChange={onChange} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {rendering.length > 0 ? (
         <section className="space-y-4">
           <SectionEyebrow label="Rendering" count={rendering.length} />

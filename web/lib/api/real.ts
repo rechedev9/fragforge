@@ -2,6 +2,8 @@ import type { ApiClient } from './client';
 import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
+import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
+import { loadReelIntents, saveReelIntents, type ReelIntent } from './reel-store';
 
 /** Server roster row as returned by /api/demos/{jobId}/roster (steamid64). */
 type RosterPlayer = {
@@ -42,23 +44,49 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** A queued placeholder Video for an intent; its live status is filled by reconcile. */
+function videoFromIntent(intent: ReelIntent): Video {
+  return {
+    id: intent.videoId,
+    title: intent.title,
+    map: intent.map,
+    score: intent.score,
+    mode: intent.mode,
+    songId: intent.songId,
+    status: 'queued',
+    createdAt: intent.createdAt,
+    availableForSec: 14 * 3600,
+    published: intent.published,
+  };
+}
+
 /**
- * RealApiClient talks to the same-origin Next route handlers under
- * /api/demos/*, which proxy the local orchestrator. Only the upload-real path
- * (scan → pick → parse) is implemented here; everything else (steam, library,
- * feed, render) delegates to a MockApiClient so the rest of the app keeps
- * working in this slice. Selected by index.ts when NEXT_PUBLIC_API_BASE is set.
+ * RealApiClient talks to the same-origin Next route handlers under /api/demos/*,
+ * which proxy the local orchestrator. The orchestrator is the source of truth: the
+ * client persists only lightweight reel INTENTS (reel-store) and derives each reel's
+ * live status by reconciling against the orchestrator on every poll (reel-reconcile),
+ * driving record→render idempotently. A hard reload re-reads server state and
+ * resumes exactly where it left off. Everything outside the upload→reel path
+ * (steam, library seeds, feed) delegates to a MockApiClient. Selected by index.ts
+ * when NEXT_PUBLIC_API_BASE is set.
  */
 export class RealApiClient implements ApiClient {
   private readonly fallback = new MockApiClient();
-  /**
-   * Reels (vertical shorts) rendered for uploaded jobs, keyed by
-   * `${jobId}__${segmentId}`. createVideo registers one and drives the
-   * record→render pipeline in the background, mutating the entry's status as it
-   * advances so listVideos/getVideo report live progress (queued→recording→
-   * composing→ready). In-memory for the session, like the mock's videos.
-   */
+  /** Live, derived view of each tracked reel (status/downloadUrl/failureReason). */
   private readonly reels = new Map<string, Video>();
+  /** Durable facts the user asked for, mirrored to localStorage via reel-store. */
+  private readonly intents = new Map<string, ReelIntent>();
+  /** Reels with a record/render POST in flight, so a tick never double-drives. */
+  private readonly driving = new Set<string>();
+
+  constructor() {
+    // Rehydrate the reels the user asked for so the Library survives a hard reload
+    // or a direct visit; their live status is filled on the first reconcile tick.
+    for (const intent of loadReelIntents()) {
+      this.intents.set(intent.videoId, intent);
+      this.reels.set(intent.videoId, videoFromIntent(intent));
+    }
+  }
 
   async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[] }> {
     const form = new FormData();
@@ -154,62 +182,184 @@ export class RealApiClient implements ApiClient {
     throw new Error(`timed out waiting for ${want}`);
   }
 
-  /** Polls a render variant's state until 'ready'; throws on 'failed' or timeout. */
-  private async waitForRender(jobId: string, variant: string, maxAttempts = 600): Promise<void> {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const res = await fetch(`/api/demos/${jobId}/renders/${variant}`);
-      const { status } = await readJson<{ status: string }>(res);
-      if (status === 'ready') return;
-      if (status === 'failed') throw new Error(`render ${variant} for ${jobId} failed`);
-      await sleep(1000);
+  /**
+   * For an uploaded job (matchId = job UUID, playId = segment id), registers a
+   * durable reel intent and returns immediately with a queued Video. The reconcile
+   * loop (driven by listVideos polling) advances it record→render; this is safe
+   * across reloads because every step is derived from the orchestrator's state.
+   * Mock matches delegate to the fallback.
+   */
+  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string }): Promise<Video> {
+    if (!isJobId(input.matchId)) return this.fallback.createVideo(input);
+
+    const videoId = `${input.matchId}__${input.playId}`;
+    const existing = this.reels.get(videoId);
+    if (existing && existing.status !== 'failed') return { ...existing };
+
+    const [plays, match] = await Promise.all([this.findClips(input.matchId), this.getMatch(input.matchId)]);
+    const play = plays.find((p) => p.id === input.playId);
+    const modeLabel = input.mode === 'music' ? 'Music Edit' : 'Clean POV';
+    const intent: ReelIntent = {
+      videoId,
+      jobId: input.matchId,
+      segmentId: input.playId,
+      mode: input.mode,
+      songId: input.songId,
+      title: `${play?.label ?? 'Highlight'} - ${modeLabel}`,
+      map: match?.map ?? 'Unknown',
+      score: match?.score ?? '',
+      createdAt: Date.now(),
+      published: false,
+    };
+    this.intents.set(videoId, intent);
+    saveReelIntents(Array.from(this.intents.values()));
+    this.reels.set(videoId, videoFromIntent(intent));
+    void this.reconcile(); // kick now (idempotent); /videos polling continues it.
+    return { ...videoFromIntent(intent) };
+  }
+
+  async listVideos(): Promise<Video[]> {
+    await this.reconcile();
+    const reels = Array.from(this.reels.values())
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((v) => ({ ...v }));
+    const seeds = await this.fallback.listVideos();
+    return [...reels, ...seeds];
+  }
+
+  async getVideo(id: string): Promise<Video | null> {
+    const reel = this.reels.get(id);
+    if (reel) return { ...reel };
+    return this.fallback.getVideo(id);
+  }
+
+  async publishVideo(id: string): Promise<Video> {
+    const reel = this.reels.get(id);
+    if (!reel) return this.fallback.publishVideo(id);
+    const updated: Video = { ...reel, published: true };
+    this.reels.set(id, updated);
+    const intent = this.intents.get(id);
+    if (intent) {
+      this.intents.set(id, { ...intent, published: true });
+      saveReelIntents(Array.from(this.intents.values()));
     }
-    throw new Error(`timed out waiting for render ${variant}`);
+    return { ...updated };
   }
 
   /**
-   * Drives record→render for one chosen play in the background and updates the
-   * reel entry's status as it advances. Fire-and-forget from createVideo.
+   * Re-drives a failed reel from where it failed. A failed job re-records (the
+   * orchestrator allows record from failed once a kill plan exists); a recorded
+   * job whose render failed re-renders. Clearing the local 'failed' status lets
+   * the reconcile loop pick the reel back up and carry it to ready.
    */
-  private async orchestrateReel(videoId: string, jobId: string, segmentId: string, mode: RenderMode, songId?: string): Promise<void> {
-    const patch = (next: Partial<Video>) => {
-      const cur = this.reels.get(videoId);
-      if (cur) this.reels.set(videoId, { ...cur, ...next });
-    };
-    try {
-      // 1. Record the segments on the local rig (HLAE/CS2). Recording a full
-      //    match can take several minutes, so allow a generous window.
-      patch({ status: 'recording' });
-      await readJson<unknown>(await fetch(`/api/demos/${jobId}/record`, { method: 'POST' }));
-      await this.waitForStatus(jobId, 'recorded', 900);
+  async retryVideo(id: string): Promise<Video> {
+    const intent = this.intents.get(id);
+    if (!intent) return this.fallback.retryVideo(id);
 
-      // 2. Render the vertical reel (zv-editor viral short). Music Edit mixes the
-      //    chosen track in; Clean POV renders without music.
-      patch({ status: 'composing' });
-      const renderInit: RequestInit = { method: 'POST' };
-      if (mode === 'music' && songId) {
-        renderInit.headers = { 'Content-Type': 'application/json' };
-        renderInit.body = JSON.stringify({ music: songId });
-      }
-      await readJson<unknown>(await fetch(`/api/demos/${jobId}/renders/${REEL_VARIANT}`, renderInit));
-      await this.waitForRender(jobId, REEL_VARIANT);
+    this.applyView(intent, { status: 'queued', action: 'none' });
+    const [job, render] = await Promise.all([
+      this.fetchStatusFull(intent.jobId),
+      this.fetchRenderStatus(intent.jobId),
+    ]);
+    if (job && job.status === 'failed') {
+      await this.drive(intent, 'record');
+    } else if (render.status === 'failed') {
+      await this.drive(intent, 'render');
+    }
+    await this.reconcile();
+    return { ...(this.reels.get(id) ?? videoFromIntent(intent)) };
+  }
 
-      // 3. Ready: point playback/download at the proxied reel mp4 + cover.
-      patch({
-        status: 'ready',
-        downloadUrl: `/api/demos/${jobId}/renders/${REEL_VARIANT}/videos/${segmentId}`,
-        thumbnailUrl: `/api/demos/${jobId}/renders/${REEL_VARIANT}/covers/${segmentId}`,
+  /**
+   * Reconciles every non-terminal tracked reel against the orchestrator and drives
+   * its next step. Idempotent and resumable: it reads server truth each tick, so a
+   * reload simply reattaches. One reel's failure never breaks the batch.
+   */
+  private async reconcile(): Promise<void> {
+    const active = Array.from(this.intents.values()).filter((intent) => {
+      const v = this.reels.get(intent.videoId);
+      return !v || (v.status !== 'ready' && v.status !== 'failed');
+    });
+    await Promise.all(active.map((intent) => this.reconcileOne(intent).catch(() => {})));
+  }
+
+  private async reconcileOne(intent: ReelIntent): Promise<void> {
+    const job = await this.fetchStatusFull(intent.jobId);
+    if (job === null) {
+      // Memory-mode orchestrator restart drops jobs; surface it instead of spinning.
+      this.applyView(intent, {
+        status: 'failed',
+        action: 'none',
+        failureReason: 'job no longer available (the local orchestrator may have restarted)',
       });
+      return;
+    }
+    const render = await this.fetchRenderStatus(intent.jobId);
+    const view = deriveReelView({
+      jobStatus: job.status,
+      jobFailureReason: job.failureReason,
+      renderStatus: render.status,
+      renderFailureReason: render.failureReason,
+    });
+    this.applyView(intent, view);
+    if (view.action !== 'none') void this.drive(intent, view.action);
+  }
+
+  /** Writes a reel's derived view onto its live Video, wiring URLs once ready. */
+  private applyView(intent: ReelIntent, view: ReelView): void {
+    const base = this.reels.get(intent.videoId) ?? videoFromIntent(intent);
+    const next: Video = { ...base, status: view.status, failureReason: view.failureReason };
+    if (view.status === 'ready') {
+      next.downloadUrl = `/api/demos/${intent.jobId}/renders/${REEL_VARIANT}/videos/${intent.segmentId}`;
+      next.thumbnailUrl = `/api/demos/${intent.jobId}/renders/${REEL_VARIANT}/covers/${intent.segmentId}`;
+    }
+    this.reels.set(intent.videoId, next);
+  }
+
+  /** Issues the single pipeline POST for `action`, guarded so it fires at most once. */
+  private async drive(intent: ReelIntent, action: ReelAction): Promise<void> {
+    if (this.driving.has(intent.videoId)) return;
+    this.driving.add(intent.videoId);
+    try {
+      if (action === 'record') {
+        await fetch(`/api/demos/${intent.jobId}/record`, { method: 'POST' });
+      } else if (action === 'render') {
+        const init: RequestInit = { method: 'POST' };
+        if (intent.mode === 'music' && intent.songId) {
+          init.headers = { 'Content-Type': 'application/json' };
+          init.body = JSON.stringify({ music: intent.songId });
+        }
+        await fetch(`/api/demos/${intent.jobId}/renders/${REEL_VARIANT}`, init);
+      }
     } catch {
-      patch({ status: 'failed' });
+      // network blip; the next reconcile tick re-evaluates from server truth.
+    } finally {
+      this.driving.delete(intent.videoId);
     }
   }
 
-  /** Reads the job status; null when the job is unknown (404). */
-  private async fetchStatus(jobId: string): Promise<string | null> {
+  /** Reads job status + failure reason; null when the job is unknown (404). */
+  private async fetchStatusFull(jobId: string): Promise<{ status: string; failureReason?: string } | null> {
     const res = await fetch(`/api/demos/${jobId}/status`);
     if (res.status === 404) return null;
-    const { status } = await readJson<{ status: string }>(res);
-    return status;
+    const data = await readJson<{ status: string; failure_reason?: string }>(res);
+    return { status: data.status, failureReason: data.failure_reason };
+  }
+
+  /** Reads the job status string; null when the job is unknown (404). */
+  private async fetchStatus(jobId: string): Promise<string | null> {
+    const full = await this.fetchStatusFull(jobId);
+    return full ? full.status : null;
+  }
+
+  /** Reads the reel render-variant state; 'none' when the render has not started. */
+  private async fetchRenderStatus(jobId: string): Promise<{ status: RenderStatus; failureReason?: string }> {
+    const res = await fetch(`/api/demos/${jobId}/renders/${REEL_VARIANT}`);
+    if (!res.ok) return { status: 'none' }; // 404 = render not started yet
+    const data = (await res.json()) as { status?: string; failure_reason?: string };
+    const known = new Set<RenderStatus>(['queued', 'rendering', 'ready', 'failed']);
+    const status: RenderStatus = data.status && known.has(data.status as RenderStatus) ? (data.status as RenderStatus) : 'none';
+    return { status, failureReason: data.failure_reason };
   }
 
   // --- everything below delegates to the mock fallback (out of scope here) ---
@@ -241,59 +391,6 @@ export class RealApiClient implements ApiClient {
   }
   listSongs(): Promise<Song[]> {
     return this.fallback.listSongs();
-  }
-  /**
-   * For an uploaded job (matchId = job UUID, playId = segment id), registers a
-   * reel and drives record→render in the background; returns immediately with a
-   * queued Video. Mock matches delegate to the fallback.
-   */
-  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string }): Promise<Video> {
-    if (!isJobId(input.matchId)) return this.fallback.createVideo(input);
-
-    const videoId = `${input.matchId}__${input.playId}`;
-    const existing = this.reels.get(videoId);
-    if (existing && existing.status !== 'failed') return { ...existing };
-
-    const [plays, match] = await Promise.all([this.findClips(input.matchId), this.getMatch(input.matchId)]);
-    const play = plays.find((p) => p.id === input.playId);
-    const modeLabel = input.mode === 'music' ? 'Music Edit' : 'Clean POV';
-    const video: Video = {
-      id: videoId,
-      title: `${play?.label ?? 'Highlight'} - ${modeLabel}`,
-      map: match?.map ?? 'Unknown',
-      score: match?.score ?? '',
-      mode: input.mode,
-      songId: input.songId,
-      status: 'queued',
-      createdAt: Date.now(),
-      availableForSec: 14 * 3600,
-      published: false,
-    };
-    this.reels.set(videoId, video);
-    void this.orchestrateReel(videoId, input.matchId, input.playId, input.mode, input.songId);
-    return { ...video };
-  }
-
-  async listVideos(): Promise<Video[]> {
-    const reels = Array.from(this.reels.values())
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((v) => ({ ...v }));
-    const seeds = await this.fallback.listVideos();
-    return [...reels, ...seeds];
-  }
-
-  async getVideo(id: string): Promise<Video | null> {
-    const reel = this.reels.get(id);
-    if (reel) return { ...reel };
-    return this.fallback.getVideo(id);
-  }
-
-  async publishVideo(id: string): Promise<Video> {
-    const reel = this.reels.get(id);
-    if (!reel) return this.fallback.publishVideo(id);
-    const updated: Video = { ...reel, published: true };
-    this.reels.set(id, updated);
-    return { ...updated };
   }
   listFeed(): Promise<FeedItem[]> {
     return this.fallback.listFeed();
