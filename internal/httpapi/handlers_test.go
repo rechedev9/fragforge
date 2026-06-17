@@ -942,6 +942,51 @@ func TestStartRecordingAllowsIdempotentRetryWhenRecorded(t *testing.T) {
 	}
 }
 
+func TestStartRecordingAllowsRetryWhenFailed(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	// A capture that failed (CS2 crash) keeps its kill plan; the user retries.
+	j := job.Job{ID: uuid.New(), Status: job.StatusFailed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/record", h.StartRecording)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
+	}
+}
+
+func TestStartRecordingRejectsFailedJobWithoutPlan(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	// Failed before it was ever parsed: no kill plan, so re-record stays rejected.
+	j := job.Job{ID: uuid.New(), Status: job.StatusFailed, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/record", h.StartRecording)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rw.Code)
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
+	}
+}
+
 func TestStartCompositionEnqueuesComposeTaskWhenRecorded(t *testing.T) {
 	repo := newFakeRepo()
 	queue := &fakeQueue{}
