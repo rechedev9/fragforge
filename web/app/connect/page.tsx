@@ -1,7 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { ArrowRight, Loader2 } from 'lucide-react';
+import { useSession } from '@/lib/session';
+import { dismissOnboarding } from '@/lib/onboarding';
 import { Wordmark } from '@/components/brand';
 import { Card } from '@/components/ui/card';
 import { StepperRail, type StepperStep } from '@/components/connect/stepper-rail';
@@ -22,10 +26,32 @@ const STEPS: StepperStep[] = [
 /**
  * Onboarding (/connect). A two-step vertical stepper that gets the player from a
  * fresh sign-in to the studio: link their match history, then pair their PC.
- * Renders on the root layout (no sidebar) — they're not "in the app" yet.
+ * Both steps are optional — a persistent "enter the studio" escape hatch means
+ * you can jump straight in and finish setup later. The active step resumes from
+ * the session, so returning here never re-asks a step you've already done.
  */
 export default function ConnectPage() {
+  const router = useRouter();
+  const { session, loading } = useSession();
   const [step, setStep] = useState(0);
+
+  // Resume where the player actually is — skip steps already completed.
+  useEffect(() => {
+    if (session?.matchHistoryLinked) setStep(1);
+  }, [session?.matchHistoryLinked]);
+
+  function enterStudio() {
+    dismissOnboarding();
+    router.push('/matches');
+  }
+
+  if (loading) {
+    return (
+      <main className="grid min-h-screen place-items-center">
+        <Loader2 className="size-6 animate-spin text-primary" />
+      </main>
+    );
+  }
 
   return (
     <main className="relative min-h-screen overflow-hidden">
@@ -49,7 +75,7 @@ export default function ConnectPage() {
             </h1>
             <p className="mt-3 text-muted-foreground">
               Two quick steps and you&apos;re ready to forge your frags into
-              reels.
+              reels — or jump straight in.
             </p>
           </div>
 
@@ -61,11 +87,23 @@ export default function ConnectPage() {
                 {step === 0 ? (
                   <LinkHistoryStep onLinked={() => setStep(1)} />
                 ) : (
-                  <PairPcStep />
+                  <PairPcStep onEnter={enterStudio} />
                 )}
               </div>
             </div>
           </Card>
+
+          {/* Always-available escape hatch — never get trapped in onboarding. */}
+          <div className="mt-5 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={enterStudio}
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Skip for now — enter the studio
+              <ArrowRight className="size-3.5" aria-hidden />
+            </button>
+          </div>
         </div>
 
         <footer className="flex h-16 items-center text-xs text-muted-foreground/70">

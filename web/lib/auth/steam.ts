@@ -66,34 +66,88 @@ export async function fetchPersona(steamid64: string): Promise<{ persona: string
   return fallback;
 }
 
+/** Stable, non-secret failure codes the match-history route maps to HTTP status. */
+export type SteamErrorCode = 'steam_not_configured' | 'steam_unreachable';
+
+/**
+ * A classified, safe-to-surface Steam Web API failure. `code` is stable and the
+ * `message` is user-facing and never contains the API key, the request URL, or
+ * any underlying Node error text. Wrapped causes stay in `cause` for server logs.
+ */
+export class SteamApiError extends Error {
+  readonly code: SteamErrorCode;
+  constructor(code: SteamErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'SteamApiError';
+    this.code = code;
+    if (options?.cause !== undefined) this.cause = options.cause;
+  }
+}
+
+/** Outcome of a share-code enumeration: the codes plus whether Steam was queried at all. */
+export type SharecodeResult = {
+  codes: string[];
+  /** True once at least one Steam lookup returned a response; lets the caller tell a
+   *  clean "no newer matches / bad codes" run apart from a transport failure. */
+  queried: boolean;
+};
+
 /**
  * Enumerates a player's recent CS2 match-sharing codes via the Steam Web API,
  * starting just after `knownCode`. Each returned code becomes the next query, up
  * to `max` matches. Requires STEAM_WEB_API_KEY plus the player's authentication
- * code (steamidkey). Throws when the key is missing so the caller can surface it.
+ * code (steamidkey).
+ *
+ * Throws a SteamApiError on a missing key ('steam_not_configured') or a network /
+ * transport failure ('steam_unreachable'). It does NOT throw on a non-ok Steam
+ * response or an empty result: those return { codes: [...], queried: true } so the
+ * caller can distinguish "Steam answered, no newer codes" (likely a bad/expired
+ * auth code or an already-latest sharecode) from a true outage. Error messages and
+ * the returned value never expose the API key or the request URL.
  */
 export async function enumerateSharecodes(
   steamid64: string,
   authCode: string,
   knownCode: string,
   max = 50,
-): Promise<string[]> {
+): Promise<SharecodeResult> {
   const key = process.env.STEAM_WEB_API_KEY;
-  if (!key) throw new Error('STEAM_WEB_API_KEY is not configured on the server');
+  if (!key) {
+    throw new SteamApiError(
+      'steam_not_configured',
+      "match-history linking isn't set up on this server",
+    );
+  }
 
   const codes: string[] = [];
+  let queried = false;
   let current = knownCode;
   for (let i = 0; i < max; i++) {
     const url =
       `https://api.steampowered.com/ICSGOPlayers_730/GetNextMatchSharingCode/v1/` +
       `?key=${key}&steamid=${steamid64}&steamidkey=${encodeURIComponent(authCode)}&knowncode=${encodeURIComponent(current)}`;
-    const res = await fetch(url, { cache: 'no-store' });
+    let res: Response;
+    try {
+      res = await fetch(url, { cache: 'no-store' });
+    } catch (err) {
+      // Transport failure (DNS/TLS/offline). The cause may embed the URL+key, so it
+      // stays in `cause` for server logs only and never reaches the message/client.
+      throw new SteamApiError('steam_unreachable', 'could not reach the Steam Web API', { cause: err });
+    }
+    queried = true;
+    // A 4xx/5xx from Steam (bad auth code, rate limit, no newer match) is a normal
+    // terminal state, not an outage: stop and let the caller read it as "no codes".
     if (!res.ok) break;
-    const data = (await res.json()) as { result?: { nextcode?: string } };
+    let data: { result?: { nextcode?: string } };
+    try {
+      data = (await res.json()) as { result?: { nextcode?: string } };
+    } catch (err) {
+      throw new SteamApiError('steam_unreachable', 'could not read the Steam Web API response', { cause: err });
+    }
     const next = data.result?.nextcode;
     if (!next || next === 'n/a') break;
     codes.push(next);
     current = next;
   }
-  return codes;
+  return { codes, queried };
 }

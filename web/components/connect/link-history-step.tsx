@@ -26,6 +26,7 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
   const [knownCode, setKnownCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [linkUnavailable, setLinkUnavailable] = useState(false);
   const [matchesFound, setMatchesFound] = useState<number | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
@@ -38,6 +39,7 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
 
     setSubmitting(true);
     setError(null);
+    setLinkUnavailable(false);
     try {
       const result = await api.linkMatchHistory({
         authCode: authCode.trim(),
@@ -53,8 +55,17 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
       // Show the "N matches found" confirmation before advancing to step 2;
       // keep the button busy meanwhile so it can't be re-submitted.
       window.setTimeout(() => onLinked(result.matchesFound), 1200);
-    } catch {
-      setError('Something went wrong loading your matches. Try again.');
+    } catch (err) {
+      // Show the real, actionable error (the API surfaces it). Branch on the
+      // backend's stable `code` — not the message text — to decide whether to
+      // nudge the player toward the "Skip for now" path.
+      const message =
+        err instanceof Error && err.message.trim().length > 0
+          ? err.message
+          : 'We could not load your matches. Please try again.';
+      const code = (err as { code?: string } | null)?.code;
+      setLinkUnavailable(code === 'steam_not_configured' || code === 'steam_unreachable');
+      setError(message);
       setSubmitting(false);
     }
   }
@@ -147,12 +158,18 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
         </div>
 
         {error ? (
-          <p
+          <div
             role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground"
+            className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground"
           >
-            {error}
-          </p>
+            <p>{error}</p>
+            {linkUnavailable ? (
+              <p className="text-xs text-destructive-foreground/80">
+                Match-history linking isn&apos;t available right now — use{' '}
+                <span className="font-medium">Skip for now</span> below and link it later.
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
         {matchesFound !== null && !error ? (

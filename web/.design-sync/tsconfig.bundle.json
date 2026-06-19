@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "next/link": ["./.design-sync/shims/next-link.tsx"],
+      "next/navigation": ["./.design-sync/shims/next-navigation.ts"],
+      "next-themes": ["./.design-sync/shims/next-themes.tsx"],
+      "@/lib/api": ["./.design-sync/shims/lib-api.ts"],
+      "@/lib/session": ["./.design-sync/shims/lib-session.ts"]
+    }
+  }
+}

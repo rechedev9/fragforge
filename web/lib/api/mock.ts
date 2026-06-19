@@ -179,6 +179,8 @@ export class MockApiClient implements ApiClient {
   async pairPc(): Promise<{ pairingCode: string }> {
     await delay();
     pcPaired = true;
+    session.pcPaired = true;
+    saveSession();
     const code = `CS2V-${randomCode()}`;
     return { pairingCode: code };
   }

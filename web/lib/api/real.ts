@@ -432,8 +432,20 @@ export class RealApiClient implements ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
-    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; matchesFound?: number; error?: string };
-    if (!res.ok) throw new Error(data.error || 'failed to link match history');
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      matchesFound?: number;
+      error?: string;
+      code?: string;
+    };
+    if (!res.ok) {
+      // Propagate the backend's stable `code` on the thrown error so the UI can
+      // branch deterministically (no message string-sniffing). Additive only —
+      // the ApiClient signature is unchanged.
+      const err = new Error(data.error || 'failed to link match history') as Error & { code?: string };
+      err.code = data.code;
+      throw err;
+    }
     return { ok: Boolean(data.ok), matchesFound: Number(data.matchesFound) || 0 };
   }
 
