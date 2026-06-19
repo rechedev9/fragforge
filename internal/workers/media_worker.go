@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,15 @@ import (
 )
 
 const defaultMediaWorkerTimeout = "20m"
+
+// Bounded fan-out for the render worker's per-short I/O. Probing and localizing
+// run one external/IO op per short; doing them concurrently (capped) turns an
+// N-short serial wait into roughly N/limit while keeping disk and subprocess
+// pressure sane on a single BYO box.
+const (
+	probeConcurrency    = 4
+	localizeConcurrency = 6
+)
 
 // failureWriteTimeout bounds the fresh-context status write performed when a
 // task fails. The handler context is frequently already cancelled at that
@@ -872,7 +882,14 @@ func (w *RenderWorker) writeRenderVariantState(state renderplan.RenderVariantSta
 }
 
 func probeRenderResult(ctx context.Context, runner commandRunner, ffprobePath string, result *editor.Result) error {
-	var firstErr error
+	// Each short probes an independent file and writes only its own struct, so
+	// the probes run concurrently (bounded) and the per-short writes never race.
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	sem := make(chan struct{}, probeConcurrency)
 	for i := range result.Shorts {
 		short := &result.Shorts[i]
 		path := short.PublishPath
@@ -884,25 +901,34 @@ func probeRenderResult(ctx context.Context, runner commandRunner, ffprobePath st
 		if path == "" {
 			continue
 		}
-		artifact, err := probeVideoArtifact(ctx, runner, ffprobePath, short.SegmentID, role, path)
-		if err != nil {
-			artifact = recording.RecordingArtifact{
-				SegmentID:  short.SegmentID,
-				Role:       role,
-				Type:       "video",
-				Path:       path,
-				ProbeError: err.Error(),
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			artifact, err := probeVideoArtifact(ctx, runner, ffprobePath, short.SegmentID, role, path)
+			if err != nil {
+				artifact = recording.RecordingArtifact{
+					SegmentID:  short.SegmentID,
+					Role:       role,
+					Type:       "video",
+					Path:       path,
+					ProbeError: err.Error(),
+				}
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
 			}
-			if firstErr == nil {
-				firstErr = err
+			if role == "publish" {
+				short.PublishArtifact = artifact
+			} else {
+				short.OutputArtifact = artifact
 			}
-		}
-		if role == "publish" {
-			short.PublishArtifact = artifact
-		} else {
-			short.OutputArtifact = artifact
-		}
+		}()
 	}
+	wg.Wait()
 	return firstErr
 }
 
@@ -1216,16 +1242,36 @@ func localizeSegmentClips(store storage.Storage, id uuid.UUID, workDir string, r
 	if err != nil {
 		return err
 	}
-	for _, localization := range localizations {
-		if err := copyStorageToFile(store, localization.Key, localization.LocalPath); err != nil {
-			return fmt.Errorf("localize segment %s: %w", localization.SegmentID, err)
-		}
-		result.Artifacts[localization.ArtifactIndex].Path = localization.LocalPath
-	}
 	if len(localizations) == 0 {
 		return fmt.Errorf("recording result has no segment clips")
 	}
-	return nil
+	// Each localization copies a distinct clip and updates a distinct artifact
+	// index, so the copies run concurrently (bounded) without racing on the slice.
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	sem := make(chan struct{}, localizeConcurrency)
+	for _, localization := range localizations {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if copyErr := copyStorageToFile(store, localization.Key, localization.LocalPath); copyErr != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("localize segment %s: %w", localization.SegmentID, copyErr)
+				}
+				mu.Unlock()
+				return
+			}
+			result.Artifacts[localization.ArtifactIndex].Path = localization.LocalPath
+		}()
+	}
+	wg.Wait()
+	return firstErr
 }
 
 func readJSONFile(path string, dst any) error {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -30,12 +31,16 @@ type runnerCall struct {
 }
 
 type fakeRunner struct {
+	mu    sync.Mutex
 	calls []runnerCall
 	fn    func(context.Context, string, ...string) ([]byte, error)
 }
 
 func (f *fakeRunner) Run(ctx context.Context, exe string, args ...string) ([]byte, error) {
+	// The render worker probes shorts concurrently, so guard the call log.
+	f.mu.Lock()
 	f.calls = append(f.calls, runnerCall{exe: exe, args: append([]string(nil), args...)})
+	f.mu.Unlock()
 	if f.fn == nil {
 		return nil, nil
 	}
