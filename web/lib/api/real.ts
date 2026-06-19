@@ -1,9 +1,9 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
-import { loadReelIntents, saveReelIntents, type ReelIntent } from './reel-store';
+import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, type ReelIntent } from './reel-store';
 
 /** Server roster row as returned by /api/demos/{jobId}/roster (steamid64). */
 type RosterPlayer = {
@@ -17,8 +17,24 @@ type RosterPlayer = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The only registered vertical-reel preset/variant today (1080x1920 viral short). */
-const REEL_VARIANT = 'viral-60-clean';
+/** Default vertical-reel preset/variant when an intent predates preset selection. */
+const REEL_VARIANT = DEFAULT_VARIANT;
+
+/** The render variant for a reel: the user's chosen preset, else the default. */
+function variantOf(intent: Pick<ReelIntent, 'variant'>): string {
+  return intent.variant ?? REEL_VARIANT;
+}
+
+/** Display-only labels for the known presets (server is the source of truth). */
+const VARIANT_LABELS: Record<string, string> = {
+  'viral-60-clean': 'Kill Feed',
+  'clean-pov-60': 'Clean POV',
+  'full-hud-60': 'Full HUD',
+};
+
+function variantLabel(variant: string): string {
+  return VARIANT_LABELS[variant] ?? variant;
+}
 
 /**
  * Job statuses at or past which the kill plan exists and stays available. Once a
@@ -52,6 +68,7 @@ function videoFromIntent(intent: ReelIntent): Video {
     map: intent.map,
     score: intent.score,
     mode: intent.mode,
+    variant: intent.variant,
     songId: intent.songId,
     status: 'queued',
     createdAt: intent.createdAt,
@@ -189,7 +206,7 @@ export class RealApiClient implements ApiClient {
    * across reloads because every step is derived from the orchestrator's state.
    * Mock matches delegate to the fallback.
    */
-  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string }): Promise<Video> {
+  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string }): Promise<Video> {
     if (!isJobId(input.matchId)) return this.fallback.createVideo(input);
 
     const videoId = `${input.matchId}__${input.playId}`;
@@ -198,14 +215,16 @@ export class RealApiClient implements ApiClient {
 
     const [plays, match] = await Promise.all([this.findClips(input.matchId), this.getMatch(input.matchId)]);
     const play = plays.find((p) => p.id === input.playId);
-    const modeLabel = input.mode === 'music' ? 'Music Edit' : 'Clean POV';
+    const variant = input.variant ?? REEL_VARIANT;
+    const suffix = input.songId ? `${variantLabel(variant)} + Music` : variantLabel(variant);
     const intent: ReelIntent = {
       videoId,
       jobId: input.matchId,
       segmentId: input.playId,
       mode: input.mode,
+      variant,
       songId: input.songId,
-      title: `${play?.label ?? 'Highlight'} - ${modeLabel}`,
+      title: `${play?.label ?? 'Highlight'} - ${suffix}`,
       map: match?.map ?? 'Unknown',
       score: match?.score ?? '',
       createdAt: Date.now(),
@@ -259,7 +278,7 @@ export class RealApiClient implements ApiClient {
     this.applyView(intent, { status: 'queued', action: 'none' });
     const [job, render] = await Promise.all([
       this.fetchStatusFull(intent.jobId),
-      this.fetchRenderStatus(intent.jobId),
+      this.fetchRenderStatus(intent.jobId, variantOf(intent)),
     ]);
     if (job && job.status === 'failed') {
       await this.drive(intent, 'record');
@@ -294,7 +313,7 @@ export class RealApiClient implements ApiClient {
       });
       return;
     }
-    const render = await this.fetchRenderStatus(intent.jobId);
+    const render = await this.fetchRenderStatus(intent.jobId, variantOf(intent));
     const view = deriveReelView({
       jobStatus: job.status,
       jobFailureReason: job.failureReason,
@@ -310,8 +329,9 @@ export class RealApiClient implements ApiClient {
     const base = this.reels.get(intent.videoId) ?? videoFromIntent(intent);
     const next: Video = { ...base, status: view.status, failureReason: view.failureReason };
     if (view.status === 'ready') {
-      next.downloadUrl = `/api/demos/${intent.jobId}/renders/${REEL_VARIANT}/videos/${intent.segmentId}`;
-      next.thumbnailUrl = `/api/demos/${intent.jobId}/renders/${REEL_VARIANT}/covers/${intent.segmentId}`;
+      const variant = variantOf(intent);
+      next.downloadUrl = `/api/demos/${intent.jobId}/renders/${variant}/videos/${intent.segmentId}`;
+      next.thumbnailUrl = `/api/demos/${intent.jobId}/renders/${variant}/covers/${intent.segmentId}`;
     }
     this.reels.set(intent.videoId, next);
   }
@@ -320,16 +340,22 @@ export class RealApiClient implements ApiClient {
   private async drive(intent: ReelIntent, action: ReelAction): Promise<void> {
     if (this.driving.has(intent.videoId)) return;
     this.driving.add(intent.videoId);
+    const variant = variantOf(intent);
     try {
       if (action === 'record') {
-        await fetch(`/api/demos/${intent.jobId}/record`, { method: 'POST' });
+        // The preset (Clean POV / Full HUD / Kill Feed) sets the recording HUD.
+        await fetch(`/api/demos/${intent.jobId}/record`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: variant }),
+        });
       } else if (action === 'render') {
         const init: RequestInit = { method: 'POST' };
         if (intent.mode === 'music' && intent.songId) {
           init.headers = { 'Content-Type': 'application/json' };
           init.body = JSON.stringify({ music: intent.songId });
         }
-        await fetch(`/api/demos/${intent.jobId}/renders/${REEL_VARIANT}`, init);
+        await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, init);
       }
     } catch {
       // network blip; the next reconcile tick re-evaluates from server truth.
@@ -353,8 +379,8 @@ export class RealApiClient implements ApiClient {
   }
 
   /** Reads the reel render-variant state; 'none' when the render has not started. */
-  private async fetchRenderStatus(jobId: string): Promise<{ status: RenderStatus; failureReason?: string }> {
-    const res = await fetch(`/api/demos/${jobId}/renders/${REEL_VARIANT}`);
+  private async fetchRenderStatus(jobId: string, variant: string): Promise<{ status: RenderStatus; failureReason?: string }> {
+    const res = await fetch(`/api/demos/${jobId}/renders/${variant}`);
     if (!res.ok) return { status: 'none' }; // 404 = render not started yet
     const data = (await res.json()) as { status?: string; failure_reason?: string };
     const known = new Set<RenderStatus>(['queued', 'rendering', 'ready', 'failed']);
@@ -364,18 +390,53 @@ export class RealApiClient implements ApiClient {
 
   // --- everything below delegates to the mock fallback (out of scope here) ---
 
-  getSession(): Promise<Session> {
-    return this.fallback.getSession();
+  /** Real Steam session from the signed cookie (/api/auth/session). */
+  async getSession(): Promise<Session> {
+    const signedOut: Session = { user: null, slots: { used: 0, total: 50 }, pcPaired: false, matchHistoryLinked: false };
+    try {
+      const res = await fetch('/api/auth/session', { cache: 'no-store' });
+      const data = (await res.json()) as { user: SteamUser | null; matchHistoryLinked?: boolean };
+      if (!data.user) return signedOut;
+      return {
+        user: data.user,
+        slots: { used: 0, total: 50 },
+        pcPaired: true, // BYO: the signed-in user's own machine hosts capture
+        matchHistoryLinked: Boolean(data.matchHistoryLinked),
+      };
+    } catch {
+      return signedOut;
+    }
   }
-  signInWithSteam(): Promise<Session> {
-    return this.fallback.signInWithSteam();
+
+  /** Real Steam OpenID: full-page redirect to Steam; the browser navigates away. */
+  async signInWithSteam(): Promise<Session> {
+    if (typeof window !== 'undefined') {
+      window.location.assign('/api/auth/steam/login');
+      await new Promise<never>(() => {}); // navigation in progress; never resolves
+    }
+    return this.getSession();
   }
-  signOut(): Promise<void> {
-    return this.fallback.signOut();
+
+  async signOut(): Promise<void> {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // best-effort; the cookie also expires on its own.
+    }
   }
-  linkMatchHistory(input: { authCode: string; knownCode: string }): Promise<{ ok: boolean; matchesFound: number }> {
-    return this.fallback.linkMatchHistory(input);
+
+  /** Links real CS2 match history via the Steam Web API (needs STEAM_WEB_API_KEY). */
+  async linkMatchHistory(input: { authCode: string; knownCode: string }): Promise<{ ok: boolean; matchesFound: number }> {
+    const res = await fetch('/api/auth/match-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; matchesFound?: number; error?: string };
+    if (!res.ok) throw new Error(data.error || 'failed to link match history');
+    return { ok: Boolean(data.ok), matchesFound: Number(data.matchesFound) || 0 };
   }
+
   pairPc(): Promise<{ pairingCode: string }> {
     return this.fallback.pairPc();
   }
@@ -389,9 +450,47 @@ export class RealApiClient implements ApiClient {
   uploadDemo(input: { fileName: string }): Promise<Match> {
     return this.fallback.uploadDemo(input);
   }
-  listSongs(): Promise<Song[]> {
-    return this.fallback.listSongs();
+  /** Real music catalog from the orchestrator; falls back to the mock offline. */
+  async listSongs(): Promise<Song[]> {
+    try {
+      const res = await fetch('/api/songs', { cache: 'no-store' });
+      const data = await readJson<{
+        songs: Array<{ id: string; title: string; artist?: string; genre?: string; durationSec?: number; license?: string; audioUrl: string }>;
+      }>(res);
+      return data.songs.map((s) => ({
+        id: s.id,
+        title: s.title,
+        artist: s.artist ?? '',
+        genre: s.genre ?? '',
+        previewUrl: s.audioUrl,
+        durationSec: s.durationSec ?? 0,
+        license: s.license,
+      }));
+    } catch {
+      return this.fallback.listSongs();
+    }
   }
+
+  /** Real preset registry from the orchestrator; falls back to the mock offline. */
+  async listPresets(): Promise<Preset[]> {
+    try {
+      const res = await fetch('/api/presets', { cache: 'no-store' });
+      const data = await readJson<{
+        default?: string;
+        presets: Array<{ name: string; label?: string; description?: string; hud_mode?: string; default?: boolean }>;
+      }>(res);
+      return data.presets.map((p) => ({
+        name: p.name,
+        label: p.label ?? p.name,
+        description: p.description ?? '',
+        hudMode: p.hud_mode,
+        default: p.default,
+      }));
+    } catch {
+      return this.fallback.listPresets();
+    }
+  }
+
   listFeed(): Promise<FeedItem[]> {
     return this.fallback.listFeed();
   }

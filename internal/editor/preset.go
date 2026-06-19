@@ -6,14 +6,24 @@ import (
 )
 
 const (
-	// PresetViral60Clean is the sole registered render preset.
+	// PresetViral60Clean is the product default render preset: a HUD-less POV
+	// that keeps the in-game kill feed.
 	PresetViral60Clean = "viral-60-clean"
+
+	// PresetCleanPOV60 is a fully HUD-less first-person POV (no HUD, no kill
+	// feed) for the most cinematic edit.
+	PresetCleanPOV60 = "clean-pov-60"
+
+	// PresetFullHUD60 keeps the full in-game CS2 HUD visible over the edit.
+	PresetFullHUD60 = "full-hud-60"
 )
 
 // RenderPreset is one declarative entry in the render preset registry.
 // Adding a preset means adding one entry to renderPresets.
 type RenderPreset struct {
-	Name        string
+	Name string
+	// Label is the short, user-facing name shown in the UI preset picker.
+	Label       string
 	Description string
 
 	// Output geometry. Every FragForge short renders at 1080x1920 / 60fps.
@@ -46,10 +56,16 @@ type RenderPreset struct {
 // renderPresets is the single source of preset knowledge: encoder defaults,
 // filtergraph layout, default effects, feature flags, and grading. The first
 // entry is the product default.
+// renderPresets share the same proven vertical render path (effects, encoder,
+// feature flags, 1080x1920/60fps); they differ only in the recording-stage
+// HUDMode, which is what the user actually sees as "Kill Feed" vs "Clean POV"
+// vs "Full HUD". The render stage never reads HUDMode (see RenderPreset.HUDMode);
+// it travels to zv-recorder --hud at record time.
 var renderPresets = []RenderPreset{
 	{
 		Name:           PresetViral60Clean,
-		Description:    "default clean viral edit: HUD-less 60fps POV with kill notices, punch-ins, and kill counter overlays",
+		Label:          "Kill Feed",
+		Description:    "default clean viral edit: HUD-less 60fps POV that keeps the in-game kill feed, with punch-ins and kill counter overlays",
 		FPS:            60,
 		Width:          1080,
 		Height:         1920,
@@ -61,6 +77,38 @@ var renderPresets = []RenderPreset{
 		QualityChecks:  true,
 		CoverSheets:    true,
 		HUDMode:        "deathnotices",
+	},
+	{
+		Name:           PresetCleanPOV60,
+		Label:          "Clean POV",
+		Description:    "fully HUD-less first-person POV: cinematic kills with punch-ins and kill counter overlays, no in-game HUD or kill feed",
+		FPS:            60,
+		Width:          1080,
+		Height:         1920,
+		VideoCRF:       StandardVideoCRF,
+		VideoPreset:    StandardVideoPreset,
+		EffectsPreset:  EffectsPresetViralUltraClean,
+		HQFilters:      true,
+		AudioNormalize: true,
+		QualityChecks:  true,
+		CoverSheets:    true,
+		HUDMode:        "clean",
+	},
+	{
+		Name:           PresetFullHUD60,
+		Label:          "Full HUD",
+		Description:    "full in-game HUD POV: keeps the CS2 HUD, health, ammo, and radar visible over the viral edit",
+		FPS:            60,
+		Width:          1080,
+		Height:         1920,
+		VideoCRF:       StandardVideoCRF,
+		VideoPreset:    StandardVideoPreset,
+		EffectsPreset:  EffectsPresetViralUltraClean,
+		HQFilters:      true,
+		AudioNormalize: true,
+		QualityChecks:  true,
+		CoverSheets:    true,
+		HUDMode:        "gameplay",
 	},
 }
 

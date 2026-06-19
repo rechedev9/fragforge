@@ -34,14 +34,20 @@ func run() error {
 		fps          = flag.Int("fps", 0, "recording FPS; defaults to recorder preset")
 		videoCRF     = flag.Int("video-crf", 0, "HLAE stream CRF; defaults to recorder preset")
 		dryRun       = flag.Bool("dry-run", false, "generate plan and script without launching HLAE")
+		fake         = flag.Bool("fake", false, "generate placeholder segment clips instead of launching HLAE/CS2 (e2e/CI)")
 		timeout      = flag.Duration("timeout", 15*time.Minute, "maximum duration to wait for CS2")
 	)
 	flag.Parse()
 
+	// Fake mode also engages via the environment so the orchestrator's record
+	// worker (which builds the CLI args itself) can run a real end-to-end pipeline
+	// without HLAE/CS2 by setting ZV_RECORDER_FAKE=1.
+	fakeMode := *fake || os.Getenv("ZV_RECORDER_FAKE") == "1"
+
 	if *killPlanPath == "" || *demoPath == "" || *outDir == "" {
 		return fmt.Errorf("--killplan, --demo, and --out are required")
 	}
-	if !*dryRun && (*hlaeExe == "" || *cs2Exe == "") {
+	if !*dryRun && !fakeMode && (*hlaeExe == "" || *cs2Exe == "") {
 		return fmt.Errorf("--hlae and --cs2 are required unless --dry-run is set")
 	}
 
@@ -59,7 +65,7 @@ func run() error {
 	}
 	absHLAEExe := *hlaeExe
 	absCS2Exe := *cs2Exe
-	if !*dryRun {
+	if !*dryRun && !fakeMode {
 		absHLAEExe, err = filepath.Abs(*hlaeExe)
 		if err != nil {
 			return fmt.Errorf("resolve HLAE path: %w", err)
@@ -111,6 +117,20 @@ func run() error {
 		return writeResult(plan.OutputDir, result)
 	}
 
+	if fakeMode {
+		fakeCtx, cancelFake := context.WithTimeout(context.Background(), *timeout)
+		defer cancelFake()
+		artifacts, err := generateFakeSegments(fakeCtx, plan)
+		if err != nil {
+			result.Error = err.Error()
+			_ = writeResult(plan.OutputDir, result)
+			return err
+		}
+		result.Artifacts = artifacts
+		result.Warnings = recording.ValidateArtifacts(plan, result.Artifacts)
+		return writeResult(plan.OutputDir, result)
+	}
+
 	ffprobePath := recording.FindFFprobe()
 	ffmpegPath := recording.FindFFmpeg()
 
@@ -151,6 +171,60 @@ func run() error {
 	result.Artifacts = append(result.Artifacts, recording.MuxSegmentClips(postCtx, plan, result.Artifacts, ffmpegPath, ffprobePath)...)
 	result.Warnings = recording.ValidateArtifacts(plan, result.Artifacts)
 	return writeResult(plan.OutputDir, result)
+}
+
+// generateFakeSegments produces one placeholder mp4 per plan segment (at the
+// recording resolution, with a silent-ish tone) so the downstream compose/render
+// pipeline can run end-to-end without launching HLAE/CS2. Gated behind --fake /
+// ZV_RECORDER_FAKE and intended for local e2e and CI only.
+func generateFakeSegments(ctx context.Context, plan recording.RecordingPlan) ([]recording.RecordingArtifact, error) {
+	ffmpeg := recording.FindFFmpeg()
+	if ffmpeg == "" {
+		return nil, fmt.Errorf("ffmpeg not found (required for fake recording)")
+	}
+	segDir := filepath.Join(plan.OutputDir, "segments")
+	if err := os.MkdirAll(segDir, 0o750); err != nil {
+		return nil, err
+	}
+	const fakeDurationSec = 5
+	width, height, fps := plan.Stream.Width, plan.Stream.Height, plan.Stream.FPS
+	if width <= 0 || height <= 0 {
+		width, height = 1920, 1080
+	}
+	if fps <= 0 {
+		fps = 60
+	}
+	out := make([]recording.RecordingArtifact, 0, len(plan.Segments))
+	for _, seg := range plan.Segments {
+		clip := filepath.Join(segDir, seg.ID+".mp4")
+		// #nosec G204 -- ffmpeg path is discovered locally; args are not shell-interpolated.
+		cmd := exec.CommandContext(ctx, ffmpeg, "-y",
+			"-f", "lavfi", "-i", fmt.Sprintf("testsrc=size=%dx%d:rate=%d:duration=%d", width, height, fps, fakeDurationSec),
+			"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=220:duration=%d", fakeDurationSec),
+			"-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+			"-c:a", "aac", "-shortest", clip,
+		)
+		if combined, err := cmd.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("ffmpeg fake clip %q: %w: %q", seg.ID, err, strings.TrimSpace(string(combined)))
+		}
+		info, err := os.Stat(clip)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, recording.RecordingArtifact{
+			SegmentID:       seg.ID,
+			Role:            "segment",
+			Type:            "video",
+			Path:            clip,
+			SizeBytes:       info.Size(),
+			DurationSeconds: fakeDurationSec,
+			FrameRate:       fmt.Sprintf("%d/1", fps),
+			Codec:           "h264",
+			Width:           width,
+			Height:          height,
+		})
+	}
+	return out, nil
 }
 
 func readKillPlan(path string) (killplan.Plan, error) {

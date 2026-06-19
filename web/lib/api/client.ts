@@ -1,4 +1,4 @@
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset } from './types';
 
 export interface ApiClient {
   getSession(): Promise<Session>;
@@ -17,7 +17,9 @@ export interface ApiClient {
   parseDemo(input: { jobId: string; steamId: string }): Promise<Match>;
   findClips(matchId: string): Promise<Play[]>;
   listSongs(): Promise<Song[]>;
-  createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string }): Promise<Video>;
+  /** The user-selectable reel presets (preset name == render variant). */
+  listPresets(): Promise<Preset[]>;
+  createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string }): Promise<Video>;
   listVideos(): Promise<Video[]>;
   getVideo(id: string): Promise<Video | null>;
   publishVideo(id: string): Promise<Video>;

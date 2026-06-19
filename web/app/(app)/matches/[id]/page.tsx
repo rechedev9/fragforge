@@ -2,8 +2,8 @@
 
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
-import type { Match, Play } from '@/lib/api/types';
+import { ArrowLeft, Music } from 'lucide-react';
+import type { Match, Play, Preset } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { formatKd } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +14,7 @@ import { ScoreBar } from '@/components/brand/score-bar';
 import { StatMono } from '@/components/brand/stat-mono';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { PlayTile } from '@/components/clips/play-tile';
-import { ModeCards, type RenderModeChoice } from '@/components/clips/mode-cards';
+import { PresetCards } from '@/components/clips/preset-cards';
 import { CreateReelBar } from '@/components/clips/create-reel-bar';
 import { SongPickerDialog } from '@/components/clips/song-picker-dialog';
 
@@ -38,11 +38,13 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   const [plays, setPlays] = useState<Play[] | null>(null);
   const [loaded, setLoaded] = useState(false);
 
+  const [presets, setPresets] = useState<Preset[] | null>(null);
   const [selectedPlayId, setSelectedPlayId] = useState<string | null>(null);
-  const [mode, setMode] = useState<RenderModeChoice | null>(null);
+  const [variant, setVariant] = useState<string | null>(null);
+  const [songId, setSongId] = useState<string | null>(null);
+  const [songTitle, setSongTitle] = useState<string | null>(null);
   const [songOpen, setSongOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [pendingSongId, setPendingSongId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -66,45 +68,49 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
     };
   }, [id]);
 
+  // Load the reel presets and default to the registry's default (first) preset.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const list = await api.listPresets();
+        if (!active) return;
+        setPresets(list);
+        setVariant((cur) => cur ?? (list.find((p) => p.default)?.name ?? list[0]?.name ?? null));
+      } catch {
+        if (active) setPresets([]);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const selectedPlay = plays?.find((p) => p.id === selectedPlayId) ?? null;
-  const busy = creating || pendingSongId !== null;
+  const presetLabel = presets?.find((p) => p.name === variant)?.label ?? null;
+  const busy = creating;
 
-  function onPickMode(next: RenderModeChoice) {
-    if (busy) return;
-    setMode(next);
-    if (next === 'music') setSongOpen(true);
-  }
-
-  async function createReel(chosenMode: RenderModeChoice, songId?: string) {
-    if (!selectedPlayId) return;
-    await api.createVideo({ matchId: id, playId: selectedPlayId, mode: chosenMode, songId });
-    router.push('/videos');
-  }
-
-  // The sticky-bar CTA commits Clean POV directly; Music defers to the song
-  // picker, so the CTA re-opens the dialog in that mode.
   async function onCreate() {
-    if (busy || !selectedPlayId || mode === null) return;
-    if (mode === 'music') {
-      setSongOpen(true);
-      return;
-    }
+    if (busy || !selectedPlayId || variant === null) return;
     setCreating(true);
     try {
-      await createReel('clean');
+      await api.createVideo({
+        matchId: id,
+        playId: selectedPlayId,
+        mode: songId ? 'music' : 'clean',
+        songId: songId ?? undefined,
+        variant,
+      });
+      router.push('/videos');
     } catch {
       setCreating(false);
     }
   }
 
-  async function onChooseSong(songId: string) {
-    if (pendingSongId) return;
-    setPendingSongId(songId);
-    try {
-      await createReel('music', songId);
-    } catch {
-      setPendingSongId(null);
-    }
+  function onChooseSong(chosenId: string, chosenTitle: string) {
+    setSongId(chosenId);
+    setSongTitle(chosenTitle);
+    setSongOpen(false);
   }
 
   if (!loaded) {
@@ -177,14 +183,10 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         <div className="flex flex-col gap-1">
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight text-foreground">
             We found{' '}
-            <span className="font-[family-name:var(--font-mono)] tabular-nums text-primary">
-              {n}
-            </span>{' '}
+            <span className="font-[family-name:var(--font-mono)] tabular-nums text-primary">{n}</span>{' '}
             {n === 1 ? 'highlight' : 'highlights'}
           </h2>
-          <p className="text-sm text-muted-foreground">
-            Pick the play you want to forge into a reel.
-          </p>
+          <p className="text-sm text-muted-foreground">Pick the play you want to forge into a reel.</p>
         </div>
 
         {n === 0 ? (
@@ -205,11 +207,72 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         )}
       </section>
 
-      {/* Mode cards */}
+      {/* Preset picker */}
       {n > 0 ? (
         <section className="flex flex-col gap-4">
-          <SectionEyebrow label="Render mode" />
-          <ModeCards value={mode} onChange={onPickMode} disabled={!selectedPlayId || busy} />
+          <SectionEyebrow label="Reel preset" />
+          {presets === null ? (
+            <div className="grid gap-4 sm:grid-cols-3">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-40 rounded-xl" />
+              ))}
+            </div>
+          ) : presets.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border bg-card/50 px-5 py-6 text-center text-sm text-muted-foreground">
+              Couldn&apos;t load reel presets. Refresh the page to try again.
+            </p>
+          ) : (
+            <PresetCards
+              presets={presets}
+              value={variant}
+              onChange={setVariant}
+              disabled={!selectedPlayId || busy}
+            />
+          )}
+        </section>
+      ) : null}
+
+      {/* Soundtrack (optional) */}
+      {n > 0 ? (
+        <section className="flex flex-col gap-4">
+          <SectionEyebrow label="Soundtrack (optional)" />
+          {songTitle ? (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <Music className="size-5 shrink-0 text-primary" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">{songTitle}</p>
+                  <p className="text-xs text-muted-foreground">Soundtrack added</p>
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Button variant="secondary" size="sm" disabled={busy} onClick={() => setSongOpen(true)}>
+                  Change
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    setSongId(null);
+                    setSongTitle(null);
+                  }}
+                >
+                  Remove
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setSongOpen(true)}
+              className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-card/50 px-5 py-4 text-left text-sm text-muted-foreground transition-colors hover:border-muted-foreground/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Music className="size-5" />
+              Add a soundtrack — sync the action to a track.
+            </button>
+          )}
         </section>
       ) : null}
 
@@ -219,7 +282,8 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
       {n > 0 ? (
         <CreateReelBar
           playLabel={selectedPlay?.label ?? null}
-          mode={mode}
+          presetLabel={presetLabel}
+          songTitle={songTitle}
           creating={creating}
           onCreate={onCreate}
         />
@@ -227,12 +291,9 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
 
       <SongPickerDialog
         open={songOpen}
-        onOpenChange={(open) => {
-          if (pendingSongId) return;
-          setSongOpen(open);
-        }}
+        onOpenChange={setSongOpen}
         onChoose={onChooseSong}
-        pendingSongId={pendingSongId}
+        selectedSongId={songId}
       />
     </div>
   );
@@ -251,9 +312,10 @@ function LoadingState() {
           ))}
         </div>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Skeleton className="h-36 rounded-xl" />
-        <Skeleton className="h-36 rounded-xl" />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Skeleton className="h-40 rounded-xl" />
+        <Skeleton className="h-40 rounded-xl" />
+        <Skeleton className="h-40 rounded-xl" />
       </div>
     </div>
   );

@@ -11,6 +11,8 @@ export type ReelIntent = {
   jobId: string;
   segmentId: string;
   mode: RenderMode;
+  /** Render variant / preset name (Kill Feed / Clean POV / Full HUD). */
+  variant?: string;
   songId?: string;
   title: string;
   map: string;
@@ -22,6 +24,14 @@ export type ReelIntent = {
 const STORE_KEY = 'fragforge.reels.v1';
 /** Keep localStorage bounded; newest intents win. */
 const MAX_INTENTS = 50;
+
+/**
+ * Default render variant. Also the migration target for intents persisted before
+ * preset selection existed: those reels were recorded with the orchestrator's
+ * default HUD, which is exactly this preset's HUD, so defaulting them to it (not
+ * leaving variant undefined) keeps a later retry's re-record visually identical.
+ */
+export const DEFAULT_VARIANT = 'viral-60-clean';
 
 export function loadReelIntents(): ReelIntent[] {
   if (typeof window === 'undefined') return [];
@@ -63,6 +73,7 @@ export function coerceIntents(parsed: unknown): ReelIntent[] {
         jobId: r.jobId,
         segmentId: r.segmentId,
         mode: r.mode === 'music' ? 'music' : 'clean',
+        variant: typeof r.variant === 'string' ? r.variant : DEFAULT_VARIANT,
         songId: typeof r.songId === 'string' ? r.songId : undefined,
         title: typeof r.title === 'string' ? r.title : 'Highlight',
         map: typeof r.map === 'string' ? r.map : 'Unknown',

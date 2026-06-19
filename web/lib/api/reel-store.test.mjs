@@ -9,6 +9,7 @@ const valid = {
   jobId: 'job',
   segmentId: 'seg-001',
   mode: 'music',
+  variant: 'clean-pov-60',
   songId: 's1',
   title: 'Ace',
   map: 'de_dust2',
@@ -31,8 +32,8 @@ test('drops entries missing required ids', () => {
   assert.deepEqual(coerceIntents([{ jobId: 'j', segmentId: 's' }, 42, null]), []);
 });
 
-test('defaults soft fields and normalizes mode', () => {
+test('defaults soft fields, normalizes mode, migrates missing variant', () => {
   assert.deepEqual(coerceIntents([{ videoId: 'v', jobId: 'j', segmentId: 's', mode: 'weird' }]), [
-    { videoId: 'v', jobId: 'j', segmentId: 's', mode: 'clean', songId: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0, published: false },
+    { videoId: 'v', jobId: 'j', segmentId: 's', mode: 'clean', variant: 'viral-60-clean', songId: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0, published: false },
   ]);
 });

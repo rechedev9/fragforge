@@ -32,9 +32,16 @@ for c in zv-orchestrator zv-recorder zv-editor zv-composer; do
   go build -o "$BIN/$c.exe" "./cmd/$c"
 done
 
-# Placeholder music beds (synthesized) so Music Edit has a track to mix. These
-# are stand-ins, not licensed music — drop real tracks named "<songId>.m4a"
-# (or .mp3/.ogg/.wav) into $MUSIC to override. Song ids match web fixtures.
+# Provision the curated open-source music catalog (CC0 / CC-BY, see
+# data/music/ATTRIBUTION.md) into $MUSIC so the UI song picker has real tracks.
+# Idempotent: skips tracks already downloaded. The orchestrator's /api/songs
+# reads $MUSIC/catalog.json for the metadata it serves the web app.
+ZV_MUSIC_DIR="$MUSIC" ZV_FFPROBE_PATH="$FFPROBE" bash "$ROOT/scripts/fetch-music.sh" || \
+  echo "==> music fetch incomplete (offline?); falling back to placeholder beds"
+
+# Placeholder music beds (synthesized) as an offline fallback so Music Edit
+# always has something to mix. With a real catalog present these do not appear
+# in /api/songs. Drop real tracks named "<songId>.<ext>" into $MUSIC to add more.
 if [ -n "$FFMPEG" ]; then
   gen_bed() { # <songId> <freqHz> <beatHz>
     for ext in m4a mp3 ogg opus wav aac; do [ -f "$MUSIC/$1.$ext" ] && return 0; done
@@ -76,5 +83,13 @@ done
 
 echo "==> orchestrator up. starting web UI on http://localhost:$WEB_PORT (real API)"
 echo "    open http://localhost:$WEB_PORT/upload and drop a .dem to run the full flow."
+echo "    or http://localhost:$WEB_PORT to sign in with Steam (real OpenID)."
+
+# Steam login uses real OpenID (no key needed). Match-history import via the Steam
+# Web API needs STEAM_WEB_API_KEY; persona/avatar lookup uses it too when set.
+# ZV_SESSION_SECRET signs the session cookie (a dev default is used if unset).
 cd web
-NEXT_PUBLIC_API_BASE=/api ORCHESTRATOR_URL="http://$HTTP_ADDR" npm run dev -- -p "$WEB_PORT"
+NEXT_PUBLIC_API_BASE=/api ORCHESTRATOR_URL="http://$HTTP_ADDR" \
+  STEAM_WEB_API_KEY="${STEAM_WEB_API_KEY:-}" \
+  ZV_SESSION_SECRET="${ZV_SESSION_SECRET:-fragforge-local-dev-secret}" \
+  npm run dev -- -p "$WEB_PORT"

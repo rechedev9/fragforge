@@ -202,7 +202,7 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 	}
 	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecording)
 
-	if err := w.record(ctx, j); err != nil {
+	if err := w.record(ctx, j, payload.HUDMode); err != nil {
 		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeRecordDemo, err)
 		return err
 	}
@@ -213,7 +213,7 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 	return nil
 }
 
-func (w *RecordWorker) record(ctx context.Context, j job.Job) error {
+func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string) error {
 	if j.KillPlan == nil {
 		return fmt.Errorf("job %s has no kill plan", j.ID)
 	}
@@ -229,6 +229,10 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job) error {
 	cfg := w.cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		return err
+	}
+	// A per-job preset HUD (e.g. "Clean POV") overrides the worker default.
+	if hudMode != "" {
+		cfg.HUDMode = hudMode
 	}
 
 	workDir, cleanup, err := prepareStageDir(cfg.WorkDir, j.ID, "record")

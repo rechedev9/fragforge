@@ -11,7 +11,16 @@ import { RenderingCard } from '@/components/videos/rendering-card';
 import { ReadyCard } from '@/components/videos/ready-card';
 import { FailedCard } from '@/components/videos/failed-card';
 
-const POLL_MS = 1500;
+// Poll fast while a reel is advancing through the pipeline; once every reel is
+// terminal (ready/failed) there is nothing to drive, so back off to an idle
+// cadence to stop hammering the orchestrator. A newly created reel resumes fast
+// polling on the next tick.
+const FAST_POLL_MS = 1500;
+const IDLE_POLL_MS = 10000;
+
+function hasActiveReel(list: Video[] | undefined): boolean {
+  return !!list && list.some((v) => v.status !== 'ready' && v.status !== 'failed');
+}
 
 export default function VideosPage() {
   const [videos, setVideos] = useState<Video[] | null>(null);
@@ -19,6 +28,9 @@ export default function VideosPage() {
   // Guards against overlapping listVideos() calls if one is still in flight
   // when the next interval tick fires.
   const inFlight = useRef(false);
+  // The pending poll timer, tracked in a ref so unmount always clears the most
+  // recently scheduled one (the tick reschedules across an await boundary).
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const reload = useCallback(async (): Promise<Video[] | undefined> => {
     if (inFlight.current) return undefined;
@@ -40,14 +52,18 @@ export default function VideosPage() {
 
     const tick = async () => {
       const next = await reload();
-      if (active && next) setVideos(next);
+      if (!active) return;
+      if (next) setVideos(next);
+      // `next` is undefined only if a manual refresh raced this tick; treat that
+      // as "keep polling fast" so a just-created reel is never stranded.
+      const delay = next === undefined || hasActiveReel(next) ? FAST_POLL_MS : IDLE_POLL_MS;
+      pollTimer.current = setTimeout(() => void tick(), delay);
     };
 
     void tick();
-    const id = setInterval(() => void tick(), POLL_MS);
     return () => {
       active = false;
-      clearInterval(id);
+      if (pollTimer.current) clearTimeout(pollTimer.current);
     };
   }, [reload]);
 

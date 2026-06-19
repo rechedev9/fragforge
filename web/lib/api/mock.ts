@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset } from './types';
 import {
   fixtureUser,
   fixtureSlots,
@@ -263,7 +263,16 @@ export class MockApiClient implements ApiClient {
     return fixtureSongs.map((s) => ({ ...s }));
   }
 
-  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string }): Promise<Video> {
+  async listPresets(): Promise<Preset[]> {
+    await delay();
+    return [
+      { name: 'viral-60-clean', label: 'Kill Feed', description: 'HUD-less POV that keeps the in-game kill feed, with punch-ins and kill counters', hudMode: 'deathnotices', default: true },
+      { name: 'clean-pov-60', label: 'Clean POV', description: 'Fully HUD-less cinematic first-person POV, no in-game HUD or kill feed', hudMode: 'clean' },
+      { name: 'full-hud-60', label: 'Full HUD', description: 'Keeps the full in-game CS2 HUD, health, ammo, and radar visible', hudMode: 'gameplay' },
+    ];
+  }
+
+  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string }): Promise<Video> {
     await delay();
     const match = uploadedMatches.find((m) => m.id === input.matchId) ?? fixtureMatches.find((m) => m.id === input.matchId);
     const plays = uploadedPlays.get(input.matchId) ?? playsForMatch(input.matchId);
@@ -279,6 +288,7 @@ export class MockApiClient implements ApiClient {
       map: match?.map ?? 'Unknown',
       score: match?.score ?? '',
       mode: input.mode,
+      variant: input.variant,
       songId: input.songId,
       status: 'queued',
       createdAt: Date.now(),
