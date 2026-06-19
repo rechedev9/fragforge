@@ -111,6 +111,52 @@ func TestRecordWorkerStoresOutputsAndMarksRecorded(t *testing.T) {
 	}
 }
 
+func TestRecordWorkerHUDFromPayloadOverridesDefault(t *testing.T) {
+	cases := []struct {
+		name    string
+		hud     string
+		wantHUD string
+	}{
+		{name: "preset clean overrides default", hud: "clean", wantHUD: "clean"},
+		{name: "empty payload keeps worker default", hud: "", wantHUD: "deathnotices"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			store := newFakeStorage()
+			id := uuid.New()
+			plan := minimalKillPlan()
+			repo.jobs[id] = &job.Job{ID: id, Status: job.StatusParsed, DemoPath: "demos/test.dem", Rules: rules.Default(), KillPlan: &plan}
+			_ = store.Put("demos/test.dem", bytes.NewReader([]byte("demo")))
+
+			runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				outDir := argValue(args, "--out")
+				scriptPath := filepath.Join(outDir, "recording.js")
+				segmentPath := filepath.Join(outDir, "segments", "seg-001.mp4")
+				_ = os.MkdirAll(filepath.Dir(segmentPath), 0o755)
+				_ = os.WriteFile(scriptPath, []byte("script"), 0o644)
+				_ = os.WriteFile(segmentPath, []byte("clip"), 0o644)
+				_ = writeJSONFile(filepath.Join(outDir, "recording-result.json"), recordingResultWithSegment(scriptPath, segmentPath))
+				return []byte("recorded"), nil
+			}}
+			// Worker default HUD is "deathnotices" (withDefaults); the payload may override it.
+			w := NewRecordWorker(repo, store, RecordWorkerConfig{WorkDir: t.TempDir(), RecorderPath: "zv-recorder", HLAEPath: "HLAE.exe", CS2Path: "cs2.exe"})
+			w.runner = runner
+
+			task, err := tasks.NewRecordDemoTask(id, tc.hud)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := w.HandleRecordDemo(context.Background(), task); err != nil {
+				t.Fatalf("HandleRecordDemo error = %v", err)
+			}
+			if got := argValue(runner.calls[0].args, "--hud"); got != tc.wantHUD {
+				t.Fatalf("--hud = %q, want %q", got, tc.wantHUD)
+			}
+		})
+	}
+}
+
 func TestRecordWorkerFailsWithoutKillPlan(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()
@@ -686,7 +732,7 @@ func recordingResultWithSegment(scriptPath, segmentPath string) recording.Record
 
 func recordTask(t *testing.T, id uuid.UUID) *asynq.Task {
 	t.Helper()
-	task, err := tasks.NewRecordDemoTask(id)
+	task, err := tasks.NewRecordDemoTask(id, "")
 	if err != nil {
 		t.Fatal(err)
 	}

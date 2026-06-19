@@ -170,6 +170,7 @@ func main() {
 		httpapi.WithRateLimit(rateLimitRPS, rateLimitBurst),
 		httpapi.WithStreamRepository(streamRepo),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
+		httpapi.WithMusicDir(cfg.MusicDir),
 	)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

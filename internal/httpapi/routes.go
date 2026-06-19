@@ -17,6 +17,8 @@ func Routes(h *Handlers) chi.Router {
 	r.Get("/", h.Workbench)
 	r.Get("/api/loadouts", h.ListLoadouts)
 	r.Get("/api/presets", h.ListPresets)
+	r.Get("/api/songs", h.ListSongs)
+	r.Get("/api/songs/{id}/audio", h.GetSongAudio)
 	r.Post("/api/jobs", h.CreateJob)
 	r.Get("/api/jobs", h.ListJobs)
 	r.Get("/api/jobs/{id}", h.GetJob)

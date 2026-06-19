@@ -49,7 +49,7 @@ func TestNewScanRosterTaskRoundtrip(t *testing.T) {
 
 func TestNewRecordDemoTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	tk, err := NewRecordDemoTask(id)
+	tk, err := NewRecordDemoTask(id, "")
 	if err != nil {
 		t.Fatalf("NewRecordDemoTask error = %v", err)
 	}

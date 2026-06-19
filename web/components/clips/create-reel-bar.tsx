@@ -7,8 +7,10 @@ import { cn } from '@/lib/utils';
 export type CreateReelBarProps = {
   /** Label of the selected play, or null when nothing is picked. */
   playLabel: string | null;
-  /** Selected render mode, or null when none chosen. */
-  mode: 'clean' | 'music' | null;
+  /** Label of the chosen preset, or null when none chosen. */
+  presetLabel: string | null;
+  /** Title of the chosen soundtrack, or null when the reel has no music. */
+  songTitle: string | null;
   /** Whether a render is in flight (spinner + disabled). */
   creating: boolean;
   onCreate: () => void;
@@ -16,13 +18,11 @@ export type CreateReelBarProps = {
 
 /**
  * CreateReelBar — the sticky bottom action bar. Mirrors the current selection
- * (play + mode) on the left and offers the single lime "Create reel" CTA. For
- * Music Edit the CTA is deferred to the song picker, so it only fires here for
- * Clean POV; the bar still shows the chosen mode for context.
+ * (play + preset + optional music) on the left and fires the single lime
+ * "Create reel" CTA. Enabled once a play and a preset are chosen.
  */
-export function CreateReelBar({ playLabel, mode, creating, onCreate }: CreateReelBarProps) {
-  const ready = playLabel != null && mode != null;
-  const modeLabel = mode === 'music' ? 'Music Edit' : mode === 'clean' ? 'Clean POV' : null;
+export function CreateReelBar({ playLabel, presetLabel, songTitle, creating, onCreate }: CreateReelBarProps) {
+  const ready = playLabel != null && presetLabel != null;
 
   return (
     <div className="sticky bottom-0 z-20 -mx-4 mt-2 border-t border-border bg-background/85 px-4 py-3 backdrop-blur md:-mx-8 md:px-8">
@@ -34,14 +34,18 @@ export function CreateReelBar({ playLabel, mode, creating, onCreate }: CreateRee
               <span className="font-medium">{playLabel}</span>
               <span className="text-muted-foreground"> · </span>
               <span className="font-[family-name:var(--font-mono)] uppercase tracking-wide text-primary">
-                {modeLabel}
+                {presetLabel}
               </span>
+              {songTitle ? (
+                <>
+                  <span className="text-muted-foreground"> · </span>
+                  <span className="text-muted-foreground">♪ {songTitle}</span>
+                </>
+              ) : null}
             </p>
           ) : (
             <p className="truncate text-muted-foreground">
-              {playLabel == null
-                ? 'Pick a highlight to start.'
-                : 'Choose a mode below.'}
+              {playLabel == null ? 'Pick a highlight to start.' : 'Choose a preset below.'}
             </p>
           )}
         </div>

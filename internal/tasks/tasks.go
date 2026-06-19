@@ -68,8 +68,11 @@ type ScanRosterPayload struct {
 }
 
 // RecordDemoPayload carries the job id for a Windows recording worker.
+// HUDMode, when set, overrides the recorder's default in-game HUD for this
+// capture (one of "gameplay", "clean", "deathnotices"); empty keeps the default.
 type RecordDemoPayload struct {
-	JobID uuid.UUID `json:"job_id"`
+	JobID   uuid.UUID `json:"job_id"`
+	HUDMode string    `json:"hud_mode,omitempty"`
 }
 
 // ComposeFinalPayload carries the job id for the composition worker.
@@ -124,8 +127,16 @@ func NewScanRosterTask(id uuid.UUID) (*asynq.Task, error) {
 	), nil
 }
 
-func NewRecordDemoTask(id uuid.UUID) (*asynq.Task, error) {
-	payload, err := json.Marshal(RecordDemoPayload{JobID: id})
+// NewRecordDemoTask returns an Asynq task for recording a job. hudMode is
+// optional; when non-empty it must be one of the known HUD modes and overrides
+// the recorder default for this capture.
+func NewRecordDemoTask(id uuid.UUID, hudMode string) (*asynq.Task, error) {
+	switch hudMode {
+	case "", "gameplay", "clean", "deathnotices":
+	default:
+		return nil, fmt.Errorf("invalid hud mode %q", hudMode)
+	}
+	payload, err := json.Marshal(RecordDemoPayload{JobID: id, HUDMode: hudMode})
 	if err != nil {
 		return nil, err
 	}

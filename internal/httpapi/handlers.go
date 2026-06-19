@@ -71,6 +71,7 @@ type Handlers struct {
 	requireReadAuth bool
 	rateLimiter     *rateLimiter
 	streamProber    streamclips.Prober
+	musicDir        string
 }
 
 type Option func(*Handlers)
@@ -282,8 +283,10 @@ func (h *Handlers) ListLoadouts(w http.ResponseWriter, r *http.Request) {
 // presetSummary is the UI-facing view of one editor render preset.
 type presetSummary struct {
 	Name              string `json:"name"`
+	Label             string `json:"label,omitempty"`
 	Description       string `json:"description"`
 	Default           bool   `json:"default"`
+	HUDMode           string `json:"hud_mode,omitempty"`
 	FPS               int    `json:"fps"`
 	Width             int    `json:"width"`
 	Height            int    `json:"height"`
@@ -308,8 +311,10 @@ func (h *Handlers) ListPresets(w http.ResponseWriter, r *http.Request) {
 		}
 		presets = append(presets, presetSummary{
 			Name:              preset.Name,
+			Label:             preset.Label,
 			Description:       preset.Description,
 			Default:           preset.Name == defaultName,
+			HUDMode:           preset.HUDMode,
 			FPS:               preset.FPS,
 			Width:             preset.Width,
 			Height:            preset.Height,
@@ -537,7 +542,31 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to record (status=%s)", j.Status))
 		return
 	}
-	task, err := tasks.NewRecordDemoTask(j.ID)
+	// Optional JSON body { "preset": "<name>" } selects the recording HUD from
+	// the shared preset registry (so a "Clean POV" reel records HUD-less). An
+	// empty or absent body keeps the recorder's default HUD.
+	var hudMode string
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+		var req struct {
+			Preset string `json:"preset"`
+		}
+		switch err := json.NewDecoder(r.Body).Decode(&req); {
+		case err == nil, errors.Is(err, io.EOF):
+			if req.Preset != "" {
+				preset, ok := editor.PresetByName(req.Preset)
+				if !ok {
+					writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset %q", req.Preset))
+					return
+				}
+				hudMode = preset.HUDMode
+			}
+		default:
+			writeError(w, http.StatusBadRequest, "invalid record request JSON")
+			return
+		}
+	}
+	task, err := tasks.NewRecordDemoTask(j.ID, hudMode)
 	if err != nil {
 		internalError(w, "build record task", err)
 		return

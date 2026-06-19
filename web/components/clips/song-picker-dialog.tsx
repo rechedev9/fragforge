@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Loader2, Pause, Play } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, Pause, Play } from 'lucide-react';
 import type { Song } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import {
@@ -17,25 +17,29 @@ import { cn } from '@/lib/utils';
 export type SongPickerDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called with the chosen song id; the page creates the music video. */
-  onChoose: (songId: string) => void;
-  /** Song id currently being committed (its "Use this track" button spins). */
-  pendingSongId?: string | null;
+  /** Called with the chosen song; the page stores it and closes the dialog. */
+  onChoose: (songId: string, songTitle: string) => void;
+  /** Currently selected song id (its row is marked as chosen). */
+  selectedSongId?: string | null;
 };
 
+function mmss(totalSec: number): string {
+  if (!totalSec || totalSec < 0) return '';
+  const m = Math.floor(totalSec / 60);
+  const s = Math.floor(totalSec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 /**
- * SongPickerDialog — the Music Edit soundtrack picker. Lists songs from the
- * api; each row has a UI-only preview toggle (no real audio — a tiny equalizer
- * animates while "playing") and a lime "Use this track" that creates the reel.
+ * SongPickerDialog — the soundtrack picker. Lists the orchestrator's curated
+ * open-source catalog, plays a real audio preview per row (one shared <audio>),
+ * and commits the chosen track to the reel. Music is optional; the reel is
+ * created from the page's main CTA.
  */
-export function SongPickerDialog({
-  open,
-  onOpenChange,
-  onChoose,
-  pendingSongId,
-}: SongPickerDialogProps) {
+export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId }: SongPickerDialogProps) {
   const [songs, setSongs] = useState<Song[] | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -49,28 +53,45 @@ export function SongPickerDialog({
     };
   }, [open]);
 
-  // Stop the fake preview whenever the dialog closes.
+  // Stop playback whenever the dialog closes.
   useEffect(() => {
-    if (!open) setPlayingId(null);
+    if (!open) {
+      audioRef.current?.pause();
+      setPlayingId(null);
+    }
   }, [open]);
 
-  const committing = pendingSongId != null;
+  function togglePlay(song: Song) {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playingId === song.id) {
+      audio.pause();
+      setPlayingId(null);
+      return;
+    }
+    audio.src = song.previewUrl;
+    audio.currentTime = 0;
+    void audio.play().then(() => setPlayingId(song.id)).catch(() => setPlayingId(null));
+  }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (committing ? null : onOpenChange(next))}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="font-[family-name:var(--font-display)] tracking-tight">
-            Pick a track
-          </DialogTitle>
-          <DialogDescription>
-            We&apos;ll cut the action to the beat. Preview is for vibe only.
-          </DialogDescription>
+          <DialogTitle className="font-[family-name:var(--font-display)] tracking-tight">Pick a track</DialogTitle>
+          <DialogDescription>We&apos;ll cut the action to the beat. Tap play to preview.</DialogDescription>
         </DialogHeader>
+
+        {/* One shared element drives every row's preview. */}
+        <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
 
         <div className="-mx-2 max-h-[22rem] overflow-y-auto px-2">
           {songs === null ? (
             <SongRowSkeletons />
+          ) : songs.length === 0 ? (
+            <p className="px-2 py-8 text-center text-sm text-muted-foreground">
+              No tracks available. Drop audio into the music directory and reload.
+            </p>
           ) : (
             <ul className="flex flex-col gap-1.5">
               {songs.map((song) => (
@@ -78,12 +99,9 @@ export function SongPickerDialog({
                   key={song.id}
                   song={song}
                   playing={playingId === song.id}
-                  pending={pendingSongId === song.id}
-                  disabled={committing}
-                  onTogglePlay={() =>
-                    setPlayingId((cur) => (cur === song.id ? null : song.id))
-                  }
-                  onUse={() => onChoose(song.id)}
+                  selected={selectedSongId === song.id}
+                  onTogglePlay={() => togglePlay(song)}
+                  onUse={() => onChoose(song.id, song.title)}
                 />
               ))}
             </ul>
@@ -97,15 +115,20 @@ export function SongPickerDialog({
 type SongRowProps = {
   song: Song;
   playing: boolean;
-  pending: boolean;
-  disabled: boolean;
+  selected: boolean;
   onTogglePlay: () => void;
   onUse: () => void;
 };
 
-function SongRow({ song, playing, pending, disabled, onTogglePlay, onUse }: SongRowProps) {
+function SongRow({ song, playing, selected, onTogglePlay, onUse }: SongRowProps) {
+  const meta = [song.genre, mmss(song.durationSec)].filter(Boolean).join(' · ');
   return (
-    <li className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
+    <li
+      className={cn(
+        'flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5',
+        selected ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border',
+      )}
+    >
       <Button
         type="button"
         variant="ghost"
@@ -119,29 +142,25 @@ function SongRow({ song, playing, pending, disabled, onTogglePlay, onUse }: Song
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground">{song.title}</p>
-        <p className="truncate text-xs text-muted-foreground">{song.artist}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {song.artist}
+          {meta ? <span className="text-muted-foreground/70"> · {meta}</span> : null}
+        </p>
       </div>
 
       {playing ? <Equalizer /> : null}
 
-      <Button
-        type="button"
-        size="sm"
-        onClick={onUse}
-        disabled={disabled}
-        className="shrink-0"
-      >
-        {pending ? <Loader2 className="animate-spin" /> : null}
-        Use this track
+      <Button type="button" size="sm" variant={selected ? 'secondary' : 'default'} onClick={onUse} className="shrink-0">
+        {selected ? <Check /> : null}
+        {selected ? 'Selected' : 'Use this track'}
       </Button>
     </li>
   );
 }
 
 /**
- * A purely decorative equalizer that animates while a preview is "playing".
- * The keyframes are scoped here (globals.css is foundation-owned) and honor
- * prefers-reduced-motion by holding the bars at a static mid height.
+ * A decorative equalizer that animates while a preview plays. Keyframes are
+ * scoped here (globals.css is foundation-owned) and honor prefers-reduced-motion.
  */
 function Equalizer() {
   return (
@@ -172,10 +191,7 @@ function SongRowSkeletons() {
   return (
     <ul className="flex flex-col gap-1.5">
       {[0, 1, 2, 3].map((i) => (
-        <li
-          key={i}
-          className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
-        >
+        <li key={i} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
           <div className="size-8 shrink-0 animate-pulse rounded-md bg-accent" />
           <div className="flex-1 space-y-1.5">
             <div className="h-3.5 w-24 animate-pulse rounded bg-accent" />

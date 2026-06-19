@@ -899,6 +899,58 @@ func TestStartRecordingEnqueuesRecordTaskWhenParsed(t *testing.T) {
 	}
 }
 
+func TestStartRecordingAppliesPresetHUD(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/record", h.StartRecording)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", strings.NewReader(`{"preset":"clean-pov-60"}`))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
+	}
+	var payload tasks.RecordDemoPayload
+	if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal record payload: %v", err)
+	}
+	// clean-pov-60 records HUD-less, so its preset resolves to the "clean" HUD.
+	if payload.HUDMode != "clean" {
+		t.Fatalf("HUDMode = %q, want clean", payload.HUDMode)
+	}
+}
+
+func TestStartRecordingRejectsUnknownPreset(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/record", h.StartRecording)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", strings.NewReader(`{"preset":"no-such-preset"}`))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for unknown preset; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
+	}
+}
+
 func TestStartRecordingRejectsJobWithoutPlan(t *testing.T) {
 	repo := newFakeRepo()
 	queue := &fakeQueue{}

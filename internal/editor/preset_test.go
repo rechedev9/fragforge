@@ -61,10 +61,28 @@ func TestDefaultPresetIsViral60Clean(t *testing.T) {
 	}
 }
 
-func TestOnlyViral60CleanIsRegistered(t *testing.T) {
+func TestRegisteredPresets(t *testing.T) {
+	want := []string{PresetViral60Clean, PresetCleanPOV60, PresetFullHUD60}
 	names := PresetNames()
-	if len(names) != 1 || names[0] != PresetViral60Clean {
-		t.Fatalf("PresetNames = %v, want [%s]", names, PresetViral60Clean)
+	if len(names) != len(want) {
+		t.Fatalf("PresetNames = %v, want %v", names, want)
+	}
+	for i, w := range want {
+		if names[i] != w {
+			t.Fatalf("PresetNames[%d] = %q, want %q (registry order)", i, names[i], w)
+		}
+	}
+	if got := DefaultPreset().Name; got != PresetViral60Clean {
+		t.Fatalf("default preset = %q, want %q (first entry)", got, PresetViral60Clean)
+	}
+}
+
+func TestEveryPresetHasLabel(t *testing.T) {
+	for _, name := range PresetNames() {
+		preset, _ := PresetByName(name)
+		if preset.Label == "" {
+			t.Errorf("preset %q has no Label (the UI picker shows it)", name)
+		}
 	}
 }
 
@@ -84,15 +102,24 @@ func TestViral60CleanRecordsDeathnoticesHUD(t *testing.T) {
 	}
 }
 
-func TestOnlyCleanPresetsSetHUDMode(t *testing.T) {
+func TestPresetHUDModes(t *testing.T) {
+	// Each user-facing preset records with a specific HUD; that capture-time
+	// difference is what the user picks ("Kill Feed" vs "Clean POV" vs "Full
+	// HUD"). The render path is otherwise identical across presets.
+	want := map[string]string{
+		PresetViral60Clean: "deathnotices",
+		PresetCleanPOV60:   "clean",
+		PresetFullHUD60:    "gameplay",
+	}
+	valid := map[string]bool{"gameplay": true, "clean": true, "deathnotices": true}
 	for _, name := range PresetNames() {
 		t.Run(name, func(t *testing.T) {
 			preset, _ := PresetByName(name)
-			if name == PresetViral60Clean {
-				return
+			if !valid[preset.HUDMode] {
+				t.Fatalf("hud mode = %q, want one of gameplay/clean/deathnotices", preset.HUDMode)
 			}
-			if preset.HUDMode != "" {
-				t.Fatalf("hud mode = %q, want empty (full-UI recording)", preset.HUDMode)
+			if w, ok := want[name]; ok && preset.HUDMode != w {
+				t.Fatalf("preset %q hud mode = %q, want %q", name, preset.HUDMode, w)
 			}
 		})
 	}
