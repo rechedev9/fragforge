@@ -1,0 +1,78 @@
+# Music Attribution
+
+This catalog contains royalty-free / open-license instrumental tracks used as
+background music for FragForge highlight reels. All tracks permit redistribution
+and use in user-generated videos.
+
+Two license families are present:
+
+- **CC0** (Creative Commons Zero / public domain): no attribution required.
+- **CC-BY-4.0** (Creative Commons Attribution 4.0): attribution **required**
+  whenever the track is published in a video. Use the exact credit line given
+  below for each track.
+
+---
+
+## CC0 tracks (no attribution required)
+
+Source: FreePD (https://freepd.com) — mirrored at
+https://archive.org/details/freepd — released under Creative Commons Zero (CC0).
+
+| id          | title                       | artist | license | source |
+|-------------|-----------------------------|--------|---------|--------|
+| dnb-1       | Drum n Bass B Drive         | FreePD | CC0     | https://archive.org/details/freepd |
+| dnb-2       | Electro DnB B Chaos         | FreePD | CC0     | https://archive.org/details/freepd |
+| edm-1       | Electro DnB A               | FreePD | CC0     | https://archive.org/details/freepd |
+| edm-2       | Electronic E System is Down | FreePD | CC0     | https://archive.org/details/freepd |
+| trap-1      | Hip Hop Driver              | FreePD | CC0     | https://archive.org/details/freepd |
+| epic-1      | Adventure                   | FreePD | CC0     | https://archive.org/details/freepd |
+| epic-2      | Video Games Trailer         | FreePD | CC0     | https://archive.org/details/freepd |
+| synthwave-2 | Neon and Kickboxing         | FreePD | CC0     | https://archive.org/details/freepd |
+
+These tracks are public domain. No credit line is legally required.
+
+---
+
+## CC-BY-4.0 tracks (attribution REQUIRED)
+
+Source: Kevin MacLeod (https://incompetech.com) — all licensed under
+Creative Commons Attribution 4.0 International (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+When any of these tracks is included in a published video, you **must** display
+the corresponding credit line.
+
+| id           | title              | artist        | license     | source |
+|--------------|--------------------|---------------|-------------|--------|
+| edm-3        | Voltaic            | Kevin MacLeod | CC-BY-4.0   | https://incompetech.com/music/royalty-free/ |
+| aggressive-1 | Hitman             | Kevin MacLeod | CC-BY-4.0   | https://incompetech.com/music/royalty-free/ |
+| hardstyle-1  | Severe Tire Damage | Kevin MacLeod | CC-BY-4.0   | https://incompetech.com/music/royalty-free/ |
+| synthwave-1  | Cyborg Ninja       | Kevin MacLeod | CC-BY-4.0   | https://incompetech.com/music/royalty-free/ |
+| retro-1      | Itty Bitty 8 Bit   | Kevin MacLeod | CC-BY-4.0   | https://incompetech.com/music/royalty-free/ |
+
+### Required credit lines
+
+- **edm-3 — Voltaic**
+  > "Voltaic" by Kevin MacLeod (incompetech.com)
+  > Licensed under Creative Commons: By Attribution 4.0 License
+  > http://creativecommons.org/licenses/by/4.0/
+
+- **aggressive-1 — Hitman**
+  > "Hitman" by Kevin MacLeod (incompetech.com)
+  > Licensed under Creative Commons: By Attribution 4.0 License
+  > http://creativecommons.org/licenses/by/4.0/
+
+- **hardstyle-1 — Severe Tire Damage**
+  > "Severe Tire Damage" by Kevin MacLeod (incompetech.com)
+  > Licensed under Creative Commons: By Attribution 4.0 License
+  > http://creativecommons.org/licenses/by/4.0/
+
+- **synthwave-1 — Cyborg Ninja**
+  > "Cyborg Ninja" by Kevin MacLeod (incompetech.com)
+  > Licensed under Creative Commons: By Attribution 4.0 License
+  > http://creativecommons.org/licenses/by/4.0/
+
+- **retro-1 — Itty Bitty 8 Bit**
+  > "Itty Bitty 8 Bit" by Kevin MacLeod (incompetech.com)
+  > Licensed under Creative Commons: By Attribution 4.0 License
+  > http://creativecommons.org/licenses/by/4.0/
