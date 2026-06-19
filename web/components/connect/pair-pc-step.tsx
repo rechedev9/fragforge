@@ -9,12 +9,21 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SectionEyebrow } from '@/components/brand';
 
+export type PairPcStepProps = {
+  /**
+   * Called when the player chooses to enter the studio. Falls back to a
+   * /matches navigation when omitted (e.g. standalone previews).
+   */
+  onEnter?: () => void;
+};
+
 /**
  * Step 2 — pair the player's own PC. FragForge records on the user's rig, with
- * their Steam and GPU, so onboarding ends by issuing a pairing code their local
- * agent enters. Once paired they can enter the studio.
+ * their Steam and GPU, so onboarding offers a pairing code their local agent
+ * enters. Pairing is optional, though: the player can enter the studio now and
+ * pair before their first reel.
  */
-export function PairPcStep() {
+export function PairPcStep({ onEnter }: PairPcStepProps = {}) {
   const router = useRouter();
   const { refresh } = useSession();
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -135,10 +144,9 @@ export function PairPcStep() {
         <Button
           size="lg"
           className="w-full"
-          onClick={() => router.push('/matches')}
-          disabled={!pairingCode}
+          onClick={() => (onEnter ? onEnter() : router.push('/matches'))}
         >
-          Enter the studio
+          {pairingCode ? 'Enter the studio' : 'Skip pairing — enter the studio'}
           <ArrowRight className="size-4" aria-hidden />
         </Button>
       </div>

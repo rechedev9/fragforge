@@ -2,5 +2,13 @@ node_modules
 .next
 out
 .env*
+!.env.example
 *.tsbuildinfo
 next-env.d.ts
+
+# design-sync (staged scripts, build output, machine state)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

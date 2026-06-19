@@ -1,14 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Loader2, UploadCloud } from 'lucide-react';
 import { useSession } from '@/lib/session';
+import { isOnboardingDismissed } from '@/lib/onboarding';
 import { Wordmark } from '@/components/brand';
 import { Button } from '@/components/ui/button';
 import { SteamButton } from '@/components/login/steam-button';
-import { HeroReel } from '@/components/login/hero-reel';
+
+// Client-only: three.js touches WebGL, so it never renders on the server.
+const HeroThree = dynamic(() => import('@/components/login/hero-three'), {
+  ssr: false,
+});
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,7 +25,8 @@ export default function LoginPage() {
   // match history isn't linked yet, otherwise straight into the studio.
   useEffect(() => {
     if (loading || !session?.user) return;
-    router.replace(session.matchHistoryLinked ? '/matches' : '/connect');
+    const ready = session.matchHistoryLinked || isOnboardingDismissed();
+    router.replace(ready ? '/matches' : '/connect');
   }, [loading, session, router]);
 
   async function handleSignIn() {
@@ -44,31 +51,43 @@ export default function LoginPage() {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background">
-      {/* Auth-only scanline + vignette, layered above the global grain. */}
+      {/* Cinematic 3D film reel, full-bleed behind the hero copy. */}
+      <HeroThree className="absolute inset-0 z-0" />
+
+      {/* Auth-only scanline + vignette, layered above the reel + global grain. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0"
+        className="pointer-events-none absolute inset-0 z-[1]"
         style={{
           backgroundImage:
-            'repeating-linear-gradient(0deg, transparent 0 3px, oklch(0 0 0 / 0.18) 3px 4px)',
+            'repeating-linear-gradient(0deg, transparent 0 3px, oklch(0 0 0 / 0.14) 3px 4px)',
         }}
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0"
+        className="pointer-events-none absolute inset-0 z-[1]"
         style={{
           background:
-            'radial-gradient(120% 90% at 50% 0%, transparent 40%, oklch(0 0 0 / 0.55) 100%)',
+            'radial-gradient(120% 90% at 50% 0%, transparent 45%, oklch(0 0 0 / 0.5) 100%)',
+        }}
+      />
+      {/* Left scrim keeps the copy crisp over the reel. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-[1]"
+        style={{
+          background:
+            'linear-gradient(90deg, var(--background) 0%, color-mix(in oklch, var(--background) 72%, transparent) 44%, transparent 80%)',
         }}
       />
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6">
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6">
         <header className="flex h-16 items-center">
           <Wordmark />
         </header>
 
-        <div className="grid flex-1 items-center gap-12 py-12 lg:grid-cols-[1.1fr_0.9fr]">
-          {/* Left: headline + CTA + trust line. */}
+        <div className="flex flex-1 items-center py-12">
+          {/* Headline + CTA + trust line, kept on the left over the reel. */}
           <div className="max-w-xl">
             <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <span className="size-1.5 rounded-full bg-primary" />
@@ -107,10 +126,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Right: stylized CSS reel motif (no real video). */}
-          <div className="hidden justify-center lg:flex">
-            <HeroReel />
-          </div>
         </div>
 
         <footer className="flex h-16 items-center text-xs text-muted-foreground/70">
