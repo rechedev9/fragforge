@@ -27,6 +27,7 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [matchesFound, setMatchesFound] = useState<number | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   const canSubmit =
     authCode.trim().length > 0 && knownCode.trim().length > 0 && !submitting;
@@ -96,18 +97,54 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
           />
         </div>
 
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Generate your auth code and copy your latest sharecode from Steam.{' '}
-          <a
-            href="https://help.steampowered.com/en/wizard/HelpWithGameIssue/?appid=730&issueid=128"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-          >
-            How to get these
-            <ExternalLink className="size-3" aria-hidden />
-          </a>
-        </p>
+        <div className="text-xs leading-relaxed text-muted-foreground">
+          <p>
+            Generate your auth code and copy your latest sharecode from Steam.{' '}
+            <button
+              type="button"
+              onClick={() => setShowHelp((open) => !open)}
+              aria-expanded={showHelp}
+              className="font-medium text-primary hover:underline"
+            >
+              How to get these
+            </button>
+          </p>
+
+          {showHelp ? (
+            <div className="mt-2 space-y-2 rounded-md border border-border bg-card/60 p-3">
+              <p>
+                <span className="font-medium text-foreground">Authentication code</span> — generate it on
+                Steam&apos;s{' '}
+                <a
+                  href="https://help.steampowered.com/en/wizard/HelpWithGameIssue/?appid=730&issueid=128"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
+                >
+                  Game Authentication page
+                  <ExternalLink className="size-3" aria-hidden />
+                </a>{' '}
+                (sign in to Steam first; the code looks like <span className="font-[family-name:var(--font-mono)]">XXXX-XXXXX-XXXX</span>).
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Sharecode</span> — in CS2 open{' '}
+                <span className="font-[family-name:var(--font-mono)]">Watch → Your Matches</span>, then copy the{' '}
+                <span className="font-[family-name:var(--font-mono)]">CSGO-…</span> code of your most recent match.
+                Signed in to Steam, you can also open your{' '}
+                <a
+                  href="https://steamcommunity.com/my/gcpd/730?tab=matchhistorypremier"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
+                >
+                  Premier match history
+                  <ExternalLink className="size-3" aria-hidden />
+                </a>{' '}
+                (or the Competitive / Wingman tabs) to copy a match&apos;s share link.
+              </p>
+            </div>
+          ) : null}
+        </div>
 
         {error ? (
           <p
