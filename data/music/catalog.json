@@ -1,0 +1,160 @@
+{
+  "tracks": [
+    {
+      "id": "dnb-1",
+      "title": "Drum n Bass B Drive",
+      "artist": "FreePD",
+      "genre": "drum-and-bass",
+      "durationSec": 303,
+      "ext": "mp3",
+      "license": "CC0",
+      "sourceUrl": "https://archive.org/details/freepd",
+      "downloadUrl": "https://archive.org/download/freepd/Page2%2FDrum%20n%20Bass%20B%20Drive.mp3",
+      "attributionRequired": false
+    },
+    {
+      "id": "dnb-2",
+      "title": "Electro DnB B Chaos",
+      "artist": "FreePD",
+      "genre": "drum-and-bass",
+      "durationSec": 294,
+      "ext": "mp3",
+      "license": "CC0",
+      "sourceUrl": "https://archive.org/details/freepd",
+      "downloadUrl": "https://archive.org/download/freepd/Page2%2FElectro%20DnB%20B%20Chaos.mp3",
+      "attributionRequired": false
+    },
+    {
+      "id": "edm-1",
+      "title": "Electro DnB A",
+      "artist": "FreePD",
+      "genre": "edm",
+      "durationSec": 300,
+      "ext": "mp3",
+      "license": "CC0",
+      "sourceUrl": "https://archive.org/details/freepd",
+      "downloadUrl": "https://archive.org/download/freepd/Page2%2FElectro%20DnB%20A.mp3",
+      "attributionRequired": false
+    },
+    {
+      "id": "edm-2",
+      "title": "Electronic E System is Down",
+      "artist": "FreePD",
+      "genre": "edm",
+      "durationSec": 206,
+      "ext": "mp3",
+      "license": "CC0",
+      "sourceUrl": "https://archive.org/details/freepd",
+      "downloadUrl": "https://archive.org/download/freepd/Page2%2FElectronic%20E%20System%20is%20Down.mp3",
+      "attributionRequired": false
+    },
+    {
+      "id": "edm-3",
+      "title": "Voltaic",
+      "artist": "Kevin MacLeod",
+      "genre": "edm",
+      "durationSec": 196,
+      "ext": "mp3",
+      "license": "CC-BY-4.0",
+      "sourceUrl": "https://incompetech.com/music/royalty-free/",
+      "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Voltaic.mp3",
+      "attributionRequired": true
+    },
+    {
+      "id": "trap-1",
+      "title": "Hip Hop Driver",
+      "artist": "FreePD",
+      "genre": "trap",
+      "durationSec": 107,
+      "ext": "mp3",
+      "license": "CC0",
+      "sourceUrl": "https://archive.org/details/freepd",
+      "downloadUrl": "https://archive.org/download/freepd/Page2%2FHip%20Hop%20Driver.mp3",
+      "attributionRequired": false
+    },
+    {
+      "id": "epic-1",
+      "title": "Adventure",
+      "artist": "FreePD",
+      "genre": "epic",
+      "durationSec": 85,
+      "ext": "mp3",
+      "license": "CC0",
+      "sourceUrl": "https://archive.org/details/freepd",
+      "downloadUrl": "https://archive.org/download/freepd/epic%2FAdventure.mp3",
+      "attributionRequired": false
+    },
+    {
+      "id": "epic-2",
+      "title": "Video Games Trailer",
+      "artist": "FreePD",
+      "genre": "epic",
+      "durationSec": 129,
+      "ext": "mp3",
+      "license": "CC0",
+      "sourceUrl": "https://archive.org/details/freepd",
+      "downloadUrl": "https://archive.org/download/freepd/Page2%2FVideo%20Games%20Trailer.mp3",
+      "attributionRequired": false
+    },
+    {
+      "id": "aggressive-1",
+      "title": "Hitman",
+      "artist": "Kevin MacLeod",
+      "genre": "aggressive",
+      "durationSec": 201,
+      "ext": "mp3",
+      "license": "CC-BY-4.0",
+      "sourceUrl": "https://incompetech.com/music/royalty-free/",
+      "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Hitman.mp3",
+      "attributionRequired": true
+    },
+    {
+      "id": "hardstyle-1",
+      "title": "Severe Tire Damage",
+      "artist": "Kevin MacLeod",
+      "genre": "hardstyle",
+      "durationSec": 412,
+      "ext": "mp3",
+      "license": "CC-BY-4.0",
+      "sourceUrl": "https://incompetech.com/music/royalty-free/",
+      "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Severe%20Tire%20Damage.mp3",
+      "attributionRequired": true
+    },
+    {
+      "id": "synthwave-1",
+      "title": "Cyborg Ninja",
+      "artist": "Kevin MacLeod",
+      "genre": "synthwave",
+      "durationSec": 180,
+      "ext": "mp3",
+      "license": "CC-BY-4.0",
+      "sourceUrl": "https://incompetech.com/music/royalty-free/",
+      "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Cyborg%20Ninja.mp3",
+      "attributionRequired": true
+    },
+    {
+      "id": "synthwave-2",
+      "title": "Neon and Kickboxing",
+      "artist": "FreePD",
+      "genre": "synthwave",
+      "durationSec": 164,
+      "ext": "mp3",
+      "license": "CC0",
+      "sourceUrl": "https://archive.org/details/freepd",
+      "downloadUrl": "https://archive.org/download/freepd/Page2%2FNeon%20and%20Kickboxing.mp3",
+      "attributionRequired": false
+    },
+    {
+      "id": "retro-1",
+      "title": "Itty Bitty 8 Bit",
+      "artist": "Kevin MacLeod",
+      "genre": "retro",
+      "durationSec": 194,
+      "ext": "mp3",
+      "license": "CC-BY-4.0",
+      "sourceUrl": "https://incompetech.com/music/royalty-free/",
+      "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Itty%20Bitty%208%20Bit.mp3",
+      "attributionRequired": true
+    }
+  ]
+}
