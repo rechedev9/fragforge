@@ -29,6 +29,11 @@ func run() error {
 		effectsPreset       = flag.String("effects-preset", "", "effects preset: viral-ultra-clean; defaults by preset")
 		musicPath           = flag.String("music", "", "optional external music file to mix into rendered shorts")
 		rhythmPath          = flag.String("rhythm", "", "optional rhythm JSON with segment_sync entries for compiled shorts")
+		outputFormat        = flag.String("output-format", editor.OutputFormatShort9x16, "output format: short-9x16 or landscape-16x9")
+		killEffect          = flag.String("kill-effect", editor.KillEffectPunchIn, "kill effect: clean, punch-in, velocity, freeze-flash")
+		transition          = flag.String("transition", editor.TransitionFlash, "transition style: cut, flash, whip, dip")
+		intro               = flag.Bool("intro", false, "add an intro title overlay")
+		outro               = flag.Bool("outro", false, "add an outro title overlay")
 		outputFPS           = flag.Int("fps", 0, "optional final output FPS; defaults to 60")
 		compileSegments     = flag.Bool("compile-segments", false, "render selected segments as one compilation short")
 		lineupCatalogPath   = flag.String("lineup-catalog", "", "optional directory with manual smoke lineup catalog JSON files")
@@ -74,6 +79,11 @@ func run() error {
 		EffectsPreset:       *effectsPreset,
 		MusicPath:           *musicPath,
 		RhythmPath:          *rhythmPath,
+		OutputFormat:        *outputFormat,
+		KillEffect:          *killEffect,
+		Transition:          *transition,
+		Intro:               *intro,
+		Outro:               *outro,
 		OutputFPS:           *outputFPS,
 		CompileSegments:     *compileSegments,
 		LineupCatalogPath:   *lineupCatalogPath,

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# One-box local deploy of the full FragForge pipeline for the web UI:
+# One-box local deploy of the full FragForge pipeline for the HTMX local UI:
 #   upload .dem -> scan roster -> pick player -> parse -> record (HLAE/CS2)
-#   -> render vertical reel (viral-60-clean) -> playable/downloadable in /videos.
+#   -> render reel (viral-60-clean) -> upload-ready artifacts.
 #
-# BYO-PC: capture runs on THIS machine. Requires Go, Node, FFmpeg, and — for the
+# BYO-PC: capture runs on THIS machine. Requires Go, FFmpeg, and — for the
 # record stage — HLAE and CS2 (Steam) installed locally. No Postgres/Redis: the
 # orchestrator runs in memory mode with an inline task queue.
 #
@@ -16,7 +16,6 @@ cd "$ROOT"
 BIN="${ZV_BIN_DIR:-$ROOT/bin}"
 DATA="${ZV_DATA_DIR:-$ROOT/.local/data}"
 WORK="${ZV_MEDIA_WORK_DIR:-$ROOT/.local/work}"
-WEB_PORT="${ZV_WEB_PORT:-3300}"
 HTTP_ADDR="${ZV_HTTP_ADDR:-127.0.0.1:8080}"
 
 HLAE="${ZV_HLAE_PATH:-C:/HLAE-2.190.1/HLAE.exe}"
@@ -55,17 +54,7 @@ if [ -n "$FFMPEG" ]; then
   gen_bed song-zerokull-2 130 2.25
 fi
 
-# Sample reel served same-origin by the web app (web/public) so mock "ready" and
-# feed reels are playable/downloadable in the demo with no external dependency.
-# Real pipeline reels stream from the orchestrator instead.
-SAMPLE="$ROOT/web/public/sample-reel.mp4"
-if [ -n "$FFMPEG" ] && [ ! -f "$SAMPLE" ]; then
-  "$FFMPEG" -y -f lavfi -i "testsrc=size=1080x1920:rate=30:duration=6" \
-    -f lavfi -i "sine=frequency=300:duration=6" \
-    -c:v libx264 -pix_fmt yuv420p -crf 28 -preset veryfast -c:a aac -shortest "$SAMPLE" >/dev/null 2>&1 || true
-fi
-
-echo "==> starting orchestrator on $HTTP_ADDR (parse+record+compose+render, in-memory)"
+echo "==> starting orchestrator + HTMX UI on http://$HTTP_ADDR (parse+record+compose+render, in-memory)"
 ZV_DATABASE_URL=memory ZV_HTTP_ADDR="$HTTP_ADDR" \
   ZV_DATA_DIR="$DATA" ZV_MEDIA_WORK_DIR="$WORK" \
   ZV_RECORDER_PATH="$BIN/zv-recorder.exe" ZV_HLAE_PATH="$HLAE" ZV_CS2_PATH="$CS2" \
@@ -81,15 +70,6 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
-echo "==> orchestrator up. starting web UI on http://localhost:$WEB_PORT (real API)"
-echo "    open http://localhost:$WEB_PORT/upload and drop a .dem to run the full flow."
-echo "    or http://localhost:$WEB_PORT to sign in with Steam (real OpenID)."
-
-# Steam login uses real OpenID (no key needed). Match-history import via the Steam
-# Web API needs STEAM_WEB_API_KEY; persona/avatar lookup uses it too when set.
-# ZV_SESSION_SECRET signs the session cookie (a dev default is used if unset).
-cd web
-NEXT_PUBLIC_API_BASE=/api ORCHESTRATOR_URL="http://$HTTP_ADDR" \
-  STEAM_WEB_API_KEY="${STEAM_WEB_API_KEY:-}" \
-  ZV_SESSION_SECRET="${ZV_SESSION_SECRET:-fragforge-local-dev-secret}" \
-  npm run dev -- -p "$WEB_PORT"
+echo "==> local UI ready: http://$HTTP_ADDR/"
+echo "    drop a .dem, pick a player, record through HLAE/CS2, and render from the HTMX workbench."
+wait "$ORCH_PID"

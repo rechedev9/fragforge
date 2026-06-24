@@ -31,6 +31,21 @@ const (
 	StandardVideoPreset = "slow"
 )
 
+const (
+	OutputFormatShort9x16     = "short-9x16"
+	OutputFormatLandscape16x9 = "landscape-16x9"
+
+	KillEffectClean       = "clean"
+	KillEffectPunchIn     = "punch-in"
+	KillEffectVelocity    = "velocity"
+	KillEffectFreezeFlash = "freeze-flash"
+
+	TransitionCut   = "cut"
+	TransitionFlash = "flash"
+	TransitionWhip  = "whip"
+	TransitionDip   = "dip"
+)
+
 type Config struct {
 	RecordingResultPath string
 	KillPlanPath        string
@@ -41,6 +56,11 @@ type Config struct {
 	EffectsPreset       string
 	MusicPath           string
 	RhythmPath          string
+	OutputFormat        string
+	KillEffect          string
+	Transition          string
+	Intro               bool
+	Outro               bool
 	OutputFPS           int
 	CompileSegments     bool
 	LineupCatalogPath   string
@@ -73,6 +93,11 @@ type ManifestOptions struct {
 	EffectsPreset       string
 	MusicPath           string
 	RhythmPath          string
+	OutputFormat        string
+	KillEffect          string
+	Transition          string
+	Intro               bool
+	Outro               bool
 	OutputFPS           int
 	CompileSegments     bool
 	LineupCatalogPath   string
@@ -109,6 +134,11 @@ type Manifest struct {
 	EffectsPreset     string      `json:"effects_preset,omitempty"`
 	MusicPath         string      `json:"music_path,omitempty"`
 	RhythmPath        string      `json:"rhythm_path,omitempty"`
+	OutputFormat      string      `json:"output_format,omitempty"`
+	KillEffect        string      `json:"kill_effect,omitempty"`
+	Transition        string      `json:"transition,omitempty"`
+	Intro             bool        `json:"intro,omitempty"`
+	Outro             bool        `json:"outro,omitempty"`
 	OutputFPS         int         `json:"output_fps,omitempty"`
 	CompileSegments   bool        `json:"compile_segments,omitempty"`
 	LineupCatalogPath string      `json:"lineup_catalog_path,omitempty"`
@@ -144,6 +174,11 @@ type ShortEdit struct {
 	PublishPath       string                      `json:"publish_path"`
 	MusicPath         string                      `json:"music_path,omitempty"`
 	RhythmPath        string                      `json:"rhythm_path,omitempty"`
+	OutputFormat      string                      `json:"output_format,omitempty"`
+	KillEffect        string                      `json:"kill_effect,omitempty"`
+	Transition        string                      `json:"transition,omitempty"`
+	Intro             bool                        `json:"intro,omitempty"`
+	Outro             bool                        `json:"outro,omitempty"`
 	OutputFPS         int                         `json:"output_fps,omitempty"`
 	VideoCRF          int                         `json:"video_crf,omitempty"`
 	VideoPreset       string                      `json:"video_preset,omitempty"`
@@ -235,6 +270,11 @@ type Result struct {
 	EffectsPreset     string        `json:"effects_preset,omitempty"`
 	MusicPath         string        `json:"music_path,omitempty"`
 	RhythmPath        string        `json:"rhythm_path,omitempty"`
+	OutputFormat      string        `json:"output_format,omitempty"`
+	KillEffect        string        `json:"kill_effect,omitempty"`
+	Transition        string        `json:"transition,omitempty"`
+	Intro             bool          `json:"intro,omitempty"`
+	Outro             bool          `json:"outro,omitempty"`
 	OutputFPS         int           `json:"output_fps,omitempty"`
 	CompileSegments   bool          `json:"compile_segments,omitempty"`
 	LineupCatalogPath string        `json:"lineup_catalog_path,omitempty"`
@@ -264,6 +304,11 @@ type ShortResult struct {
 	PublishPath        string                      `json:"publish_path"`
 	MusicPath          string                      `json:"music_path,omitempty"`
 	RhythmPath         string                      `json:"rhythm_path,omitempty"`
+	OutputFormat       string                      `json:"output_format,omitempty"`
+	KillEffect         string                      `json:"kill_effect,omitempty"`
+	Transition         string                      `json:"transition,omitempty"`
+	Intro              bool                        `json:"intro,omitempty"`
+	Outro              bool                        `json:"outro,omitempty"`
 	OutputFPS          int                         `json:"output_fps,omitempty"`
 	VideoCRF           int                         `json:"video_crf,omitempty"`
 	VideoPreset        string                      `json:"video_preset,omitempty"`
@@ -313,6 +358,11 @@ type PackManifest struct {
 	EffectsPreset     string        `json:"effects_preset,omitempty"`
 	MusicPath         string        `json:"music_path,omitempty"`
 	RhythmPath        string        `json:"rhythm_path,omitempty"`
+	OutputFormat      string        `json:"output_format,omitempty"`
+	KillEffect        string        `json:"kill_effect,omitempty"`
+	Transition        string        `json:"transition,omitempty"`
+	Intro             bool          `json:"intro,omitempty"`
+	Outro             bool          `json:"outro,omitempty"`
 	OutputFPS         int           `json:"output_fps,omitempty"`
 	CompileSegments   bool          `json:"compile_segments,omitempty"`
 	LineupCatalogPath string        `json:"lineup_catalog_path,omitempty"`
@@ -344,6 +394,11 @@ type PublishItem struct {
 	SourceArtifact     recording.RecordingArtifact `json:"source_artifact,omitempty"`
 	MusicPath          string                      `json:"music_path,omitempty"`
 	RhythmPath         string                      `json:"rhythm_path,omitempty"`
+	OutputFormat       string                      `json:"output_format,omitempty"`
+	KillEffect         string                      `json:"kill_effect,omitempty"`
+	Transition         string                      `json:"transition,omitempty"`
+	Intro              bool                        `json:"intro,omitempty"`
+	Outro              bool                        `json:"outro,omitempty"`
 	OutputFPS          int                         `json:"output_fps,omitempty"`
 	VideoCRF           int                         `json:"video_crf,omitempty"`
 	VideoPreset        string                      `json:"video_preset,omitempty"`

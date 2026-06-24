@@ -1,4 +1,4 @@
-import type { RenderMode } from './types';
+import type { EditConfig, RenderMode } from './types';
 
 /**
  * A reel the user asked for — the durable fact, persisted to localStorage so the
@@ -13,6 +13,7 @@ export type ReelIntent = {
   mode: RenderMode;
   /** Render variant / preset name (Kill Feed / Clean POV / Full HUD). */
   variant?: string;
+  editConfig: EditConfig;
   songId?: string;
   title: string;
   map: string;
@@ -32,6 +33,14 @@ const MAX_INTENTS = 50;
  * leaving variant undefined) keeps a later retry's re-record visually identical.
  */
 export const DEFAULT_VARIANT = 'viral-60-clean';
+
+export const DEFAULT_EDIT_CONFIG: EditConfig = {
+  format: 'short-9x16',
+  killEffect: 'punch-in',
+  transition: 'flash',
+  intro: false,
+  outro: false,
+};
 
 export function loadReelIntents(): ReelIntent[] {
   if (typeof window === 'undefined') return [];
@@ -74,6 +83,7 @@ export function coerceIntents(parsed: unknown): ReelIntent[] {
         segmentId: r.segmentId,
         mode: r.mode === 'music' ? 'music' : 'clean',
         variant: typeof r.variant === 'string' ? r.variant : DEFAULT_VARIANT,
+        editConfig: coerceEditConfig(r.editConfig),
         songId: typeof r.songId === 'string' ? r.songId : undefined,
         title: typeof r.title === 'string' ? r.title : 'Highlight',
         map: typeof r.map === 'string' ? r.map : 'Unknown',
@@ -84,4 +94,24 @@ export function coerceIntents(parsed: unknown): ReelIntent[] {
     }
   }
   return out;
+}
+
+export function coerceEditConfig(value: unknown): EditConfig {
+  if (!value || typeof value !== 'object') return DEFAULT_EDIT_CONFIG;
+  const raw = value as Partial<EditConfig>;
+  return {
+    format: raw.format === 'landscape-16x9' ? 'landscape-16x9' : DEFAULT_EDIT_CONFIG.format,
+    killEffect: isKillEffect(raw.killEffect) ? raw.killEffect : DEFAULT_EDIT_CONFIG.killEffect,
+    transition: isTransition(raw.transition) ? raw.transition : DEFAULT_EDIT_CONFIG.transition,
+    intro: raw.intro === true,
+    outro: raw.outro === true,
+  };
+}
+
+function isKillEffect(value: unknown): value is EditConfig['killEffect'] {
+  return value === 'clean' || value === 'punch-in' || value === 'velocity' || value === 'freeze-flash';
+}
+
+function isTransition(value: unknown): value is EditConfig['transition'] {
+  return value === 'cut' || value === 'flash' || value === 'whip' || value === 'dip';
 }

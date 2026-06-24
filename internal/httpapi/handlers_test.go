@@ -379,7 +379,7 @@ func TestWorkbenchServesLocalApp(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rw.Code)
 	}
 	body := rw.Body.String()
-	for _, want := range []string{"FragForge Workbench", "Mutation token", "workbench-shell", "APPROVE_RECORDING", "/api/jobs", "/api/loadouts", "/agent/captions"} {
+	for _, want := range []string{"FragForge Workbench", "Mutation token", "workbench-shell", "HTMX", `hx-post="/ui/jobs"`, `hx-get="/ui/jobs"`, `hx-get="/ui/workspace"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("workbench missing %q", want)
 		}
@@ -390,12 +390,178 @@ func TestWorkbenchServesLocalApp(t *testing.T) {
 	if strings.Contains(body, "X-ZackVideo-Token") {
 		t.Fatalf("workbench uses stale mutation token header")
 	}
-	source, err := os.ReadFile("workbench_assets/app.ts")
-	if err != nil {
+	if strings.Contains(body, "WORKBENCH_HTMX") || strings.Contains(body, "WORKBENCH_CSS") {
+		t.Fatalf("workbench contains unreplaced template markers")
+	}
+	if strings.Contains(body, "type JobStatus") || strings.Contains(body, "interface AppState") {
+		t.Fatalf("workbench still embeds the old TypeScript app")
+	}
+}
+
+func TestWorkbenchWorkspaceOnboardsAndDeepLinksSelectedJob(t *testing.T) {
+	repo := newFakeRepo()
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/workspace", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("onboarding status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	for _, want := range []string{"Start here", "Ready for local run", "No Node server required", "shortslistosparasubir"} {
+		if !strings.Contains(rw.Body.String(), want) {
+			t.Fatalf("onboarding missing %q: %s", want, rw.Body.String())
+		}
+	}
+
+	j := job.Job{ID: uuid.New(), Status: job.StatusScanned, DemoPath: "demos/deep.dem", Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	req = httptest.NewRequest(http.MethodGet, "/ui/workspace", nil)
+	req.Header.Set("HX-Current-URL", "http://127.0.0.1:8080/?job="+j.ID.String())
+	rw = httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("deep-link status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	for _, want := range []string{j.ID.String(), `hx-swap-oob="true"`, "Choose the player to parse", "deep.dem"} {
+		if !strings.Contains(rw.Body.String(), want) {
+			t.Fatalf("deep-link workspace missing %q: %s", want, rw.Body.String())
+		}
+	}
+}
+
+func TestWorkbenchHTMXFragmentsExposeLocalFlow(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	plan := killplan.NewPlan()
+	plan.Demo.Map = "de_mirage"
+	plan.Demo.Tickrate = 64
+	plan.Target.NameInDemo = "MartinezSa"
+	plan.Segments = []killplan.Segment{{
+		ID:        "seg-001",
+		Round:     4,
+		TickStart: 640,
+		TickEnd:   1280,
+		Kills: []killplan.Kill{{
+			Weapon:   "ak47",
+			Headshot: true,
+			Victim:   killplan.Player{NameInDemo: "alex"},
+		}},
+	}}
+	j := job.Job{
+		ID:            uuid.New(),
+		Status:        job.StatusRecorded,
+		DemoPath:      "demos/local.dem",
+		TargetSteamID: "76561198000000000",
+		Rules:         rules.Default(),
+		KillPlan:      &plan,
+	}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, &fakeQueue{})
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/jobs?selected="+j.ID.String(), nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("jobs status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	for _, want := range []string{j.ID.String(), `hx-get="/ui/jobs/` + j.ID.String(), `aria-selected="true"`} {
+		if !strings.Contains(rw.Body.String(), want) {
+			t.Fatalf("jobs fragment missing %q: %s", want, rw.Body.String())
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/ui/jobs/"+j.ID.String(), nil)
+	rw = httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("job status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	for _, want := range []string{"Render Upload Pack", "short-9x16", "landscape-16x9", "Punch-in", "de_mirage", "MartinezSa", "Next action", "Render the upload pack"} {
+		if !strings.Contains(rw.Body.String(), want) {
+			t.Fatalf("job fragment missing %q: %s", want, rw.Body.String())
+		}
+	}
+}
+
+func TestWorkbenchCreateJobWithTargetEnqueuesParse(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	h := NewHandlers(repo, newFakeStorage(), queue)
+	r := Routes(h)
+
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	demoPart, _ := mw.CreateFormFile("demo", "target.dem")
+	demoPart.Write(demoMagic)
+	demoPart.Write([]byte("dem-bytes"))
+	mw.WriteField("target_steamid", "76561198000000000")
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/ui/jobs", body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rw.Code, rw.Body.String())
+	}
+	if got := rw.Header().Get("HX-Redirect"); !strings.HasPrefix(got, "/?job=") {
+		t.Fatalf("HX-Redirect = %q, want job redirect", got)
+	}
+	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeParseDemo {
+		t.Fatalf("queue = %#v, want parse task", queue.enqueued)
+	}
+	for _, j := range repo.jobs {
+		if j.TargetSteamID != "76561198000000000" {
+			t.Fatalf("TargetSteamID = %q, want submitted target", j.TargetSteamID)
+		}
+	}
+}
+
+func TestWorkbenchRenderFormEnqueuesEditOptions(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	plan.Segments = []killplan.Segment{{ID: "seg-001", TickStart: 1, TickEnd: 2}}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+	r := Routes(h)
+
+	body := strings.NewReader("variant=viral-60-clean&music=synth-one&format=landscape-16x9&kill_effect=velocity&transition=whip&intro=on&outro=on")
+	req := httptest.NewRequest(http.MethodPost, "/ui/jobs/"+j.ID.String()+"/render", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeRenderVariant {
+		t.Fatalf("queue = %#v, want one render task", queue.enqueued)
+	}
+	var payload tasks.RenderVariantPayload
+	if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(source), `"X-FragForge-Token"`) || strings.Contains(string(source), "X-ZackVideo-Token") {
-		t.Fatalf("workbench TypeScript mutation token header is out of sync")
+	if payload.Variant != editor.PresetViral60Clean || payload.MusicKey != "synth-one" {
+		t.Fatalf("payload variant/music = %q/%q", payload.Variant, payload.MusicKey)
+	}
+	wantEdit := renderplan.EditRequest{
+		Format:     renderplan.FormatLandscape16x9,
+		KillEffect: renderplan.KillEffectVelocity,
+		Transition: renderplan.TransitionWhip,
+		Intro:      true,
+		Outro:      true,
+	}
+	if payload.Edit != wantEdit {
+		t.Fatalf("edit = %#v, want %#v", payload.Edit, wantEdit)
+	}
+	if !strings.Contains(rw.Body.String(), `Render: queued`) {
+		t.Fatalf("fragment missing queued render state: %s", rw.Body.String())
 	}
 }
 
@@ -1114,7 +1280,8 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(`{"music":"track01","edit":{"format":"landscape-16x9","killEffect":"velocity","transition":"whip","intro":true,"outro":true}}`))
+	req.Header.Set("Content-Type", "application/json")
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 
@@ -1133,6 +1300,12 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	}
 	if payload.JobID != j.ID || payload.Variant != editor.PresetViral60Clean {
 		t.Fatalf("payload = %#v, want job %s variant %s", payload, j.ID, editor.PresetViral60Clean)
+	}
+	if payload.MusicKey != "track01" {
+		t.Fatalf("music key = %q, want track01", payload.MusicKey)
+	}
+	if payload.Edit.Format != renderplan.FormatLandscape16x9 || payload.Edit.KillEffect != renderplan.KillEffectVelocity || payload.Edit.Transition != renderplan.TransitionWhip || !payload.Edit.Intro || !payload.Edit.Outro {
+		t.Fatalf("edit payload = %#v", payload.Edit)
 	}
 	if len(queue.options) != 1 || !hasAsynqOption(queue.options[0], "Unique(") {
 		t.Fatalf("enqueue options = %#v, want Unique option", queue.options)

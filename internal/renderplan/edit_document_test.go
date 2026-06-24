@@ -33,6 +33,7 @@ func TestNewEditDocumentSnapshotsStableRenderIntent(t *testing.T) {
 		GalleryKey:         "jobs/111/renders/viral-60-clean/index.html",
 		PublishSummaryKey:  "jobs/111/renders/viral-60-clean/publish-summary.md",
 		SegmentIDs:         []string{"seg-001"},
+		Edit:               EditRequest{Format: FormatLandscape16x9, KillEffect: KillEffectVelocity, Transition: TransitionWhip, Intro: true, Outro: true},
 	})
 
 	if doc.SchemaVersion != EditDocumentSchemaVersion {
@@ -53,6 +54,9 @@ func TestNewEditDocumentSnapshotsStableRenderIntent(t *testing.T) {
 	if len(doc.Selection.SegmentIDs) != 1 || doc.Selection.SegmentIDs[0] != "seg-001" {
 		t.Fatalf("selection = %#v", doc.Selection)
 	}
+	if doc.Edit.Format != FormatLandscape16x9 || doc.Edit.KillEffect != KillEffectVelocity || doc.Edit.Transition != TransitionWhip || !doc.Edit.Intro || !doc.Edit.Outro {
+		t.Fatalf("edit request = %#v", doc.Edit)
+	}
 	if doc.Outputs.UploadReadyRoot != "shortslistosparasubir" {
 		t.Fatalf("upload ready root = %q", doc.Outputs.UploadReadyRoot)
 	}
@@ -69,6 +73,7 @@ func TestNewEditDocumentForLoadoutDerivesStandardArtifactKeys(t *testing.T) {
 		JobID:      id,
 		Loadout:    loadout,
 		SegmentIDs: []string{"seg-001", "seg-002"},
+		Edit:       EditRequest{Format: FormatLandscape16x9},
 	})
 	if err != nil {
 		t.Fatalf("NewEditDocumentForLoadout error = %v", err)
@@ -106,5 +111,8 @@ func TestNewEditDocumentForLoadoutDerivesStandardArtifactKeys(t *testing.T) {
 	}
 	if doc.LoadoutSnapshot.Preset != editor.PresetViral60Clean || doc.LoadoutSnapshot.VideoCRF != loadout.VideoCRF {
 		t.Fatalf("loadout snapshot = %#v", doc.LoadoutSnapshot)
+	}
+	if doc.LoadoutSnapshot.Output.AspectRatio != "16:9" || doc.LoadoutSnapshot.Output.Width != 1920 || doc.LoadoutSnapshot.Output.Height != 1080 {
+		t.Fatalf("landscape output snapshot = %#v", doc.LoadoutSnapshot.Output)
 	}
 }

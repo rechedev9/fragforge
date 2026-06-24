@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+
+	"github.com/rechedev9/fragforge/internal/renderplan"
 )
 
 const (
@@ -87,6 +89,7 @@ type RenderVariantPayload struct {
 	JobID    uuid.UUID `json:"job_id"`
 	Variant  string    `json:"variant"`
 	MusicKey string    `json:"music_key,omitempty"`
+	Edit     renderplan.EditRequest `json:"edit,omitempty"`
 }
 
 type CodexAgentPayload struct {
@@ -154,14 +157,18 @@ func NewComposeFinalTask(id uuid.UUID) (*asynq.Task, error) {
 // NewRenderVariantTask returns an Asynq task for rendering one named output
 // variant for a job. musicKey is optional; when non-empty the render worker
 // mixes the named track into the reel.
-func NewRenderVariantTask(id uuid.UUID, variant, musicKey string) (*asynq.Task, error) {
+func NewRenderVariantTask(id uuid.UUID, variant, musicKey string, edit renderplan.EditRequest) (*asynq.Task, error) {
 	if !renderVariantPattern.MatchString(variant) {
 		return nil, fmt.Errorf("invalid render variant %q", variant)
 	}
 	if musicKey != "" && !renderVariantPattern.MatchString(musicKey) {
 		return nil, fmt.Errorf("invalid music key %q", musicKey)
 	}
-	payload, err := json.Marshal(RenderVariantPayload{JobID: id, Variant: variant, MusicKey: musicKey})
+	edit = renderplan.NormalizeEditRequest(edit)
+	if err := edit.Validate(); err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(RenderVariantPayload{JobID: id, Variant: variant, MusicKey: musicKey, Edit: edit})
 	if err != nil {
 		return nil, err
 	}

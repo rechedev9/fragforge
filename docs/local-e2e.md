@@ -1,81 +1,70 @@
-# Local end-to-end: upload a demo → vertical reel in the web UI
+# Local end-to-end: upload a demo to an upload-ready reel
 
-This runs the **entire** FragForge pipeline on one machine and drives it from the
-web UI: drop a `.dem`, pick a player, and get a finished vertical (9:16) reel you
-can play and download in the Library — recorded on your own rig with HLAE + CS2.
+This runs the full FragForge pipeline on one machine and drives it from the
+local HTMX workbench served by `zv-orchestrator`: drop a `.dem`, pick a player,
+record locally through HLAE + CS2, and render an upload-ready pack.
 
-It is the BYO-PC model end to end. No Postgres or Redis: the orchestrator runs in
-memory mode with an inline task queue.
+No Postgres, Redis, Node, Next.js, or TypeScript dev server is required for this
+local product flow. The orchestrator runs in memory mode with an inline task
+queue and serves the UI at the same origin as the API.
 
-## Prerequisites (this machine)
+## Prerequisites
 
-- **Go** and **Node** (see `go.mod` / `web/package.json`).
-- **FFmpeg + ffprobe** on `PATH` (compose + render).
-- **HLAE 2.190+** and **CS2** (Steam) for the record stage. Defaults:
+- Go, matching `go.mod`.
+- FFmpeg + ffprobe on `PATH`, or set `ZV_FFMPEG_PATH` and `ZV_FFPROBE_PATH`.
+- HLAE 2.190+ and CS2 installed locally for recording:
   - `ZV_HLAE_PATH=C:/HLAE-2.190.1/HLAE.exe`
   - `ZV_CS2_PATH=C:/Program Files (x86)/Steam/steamapps/common/Counter-Strike Global Offensive/game/bin/win64/cs2.exe`
-  - Override either via env. (Do **not** use `C:\HLAE\HLAE.exe`; that is the wrong install.)
 
-## Run it
+Use `C:\HLAE-2.190.1\HLAE.exe` on this machine. Do not use
+`C:\HLAE\HLAE.exe`.
+
+## Run It
 
 ```bash
 scripts/run-local.sh
 ```
 
-This builds `zv-orchestrator`, `zv-recorder`, `zv-editor`, `zv-composer` into
-`./bin`, starts the orchestrator on `127.0.0.1:8080` with **all** workers
-enabled (parse, record, compose, render), and starts the web UI on
-`http://localhost:3300` with the real API client (`NEXT_PUBLIC_API_BASE=/api`).
-Stopping the web server (Ctrl+C) also stops the orchestrator.
+The script builds `zv-orchestrator`, `zv-recorder`, `zv-editor`, and
+`zv-composer` into `./bin`, starts the orchestrator on `127.0.0.1:8080`, and
+enables parse, record, compose, and render workers inline.
 
-Then in the browser:
+Open:
 
-1. Open `http://localhost:3300/upload` and drop a `.dem` (yours or anyone's).
-2. The orchestrator scans the roster; pick the player to clip.
-3. It parses that player's highlights → `/matches/<jobId>`.
-4. Pick a highlight + **Clean POV** → **Create reel**. You land on `/videos`.
-5. The reel advances **Queued → Capturing → Editing → Ready** (CS2 launches and
-   records each segment; the editor renders the 9:16 short). Recording a full
-   match takes a few minutes — the card shows a live "LIVE ON YOUR RIG" indicator.
-6. When **Ready**, View/Download plays the real vertical reel.
+```text
+http://127.0.0.1:8080/
+```
 
-The web layer stays 100% mock unless `NEXT_PUBLIC_API_BASE` is set, so the
-default `npm run dev` is unaffected.
+Then:
 
-### Clean POV vs Music Edit
+1. Drop a `.dem`.
+2. Either provide a target SteamID64 up front or let the roster scan finish and
+   pick a player.
+3. Parse the player.
+4. Approve recording. CS2 is launched through HLAE on this PC.
+5. Render with `viral-60-clean`, optional music, 9:16 or 16:9 format, kill
+   effect, transition, intro, and outro.
+6. Open the generated gallery or artifact links for `shortslistosparasubir`.
 
-The recorder captures a **HUD-less POV with the deathnotices killfeed** (no
-scoreboard) — that is the "clean POV". Override the capture HUD with
-`ZV_RECORD_HUD` (`gameplay` | `clean` | `deathnotices`, default `deathnotices`).
+## Headless Backend Check
 
-**Music Edit** mixes a track into the reel. `run-local.sh` synthesizes
-placeholder beds into `$ZV_MUSIC_DIR` (default `.local/data/music`) named after
-the web song ids (`song-tikitaka-1.m4a`, …). Drop **real** tracks named
-`<songId>.<ext>` (`.m4a/.mp3/.ogg/.wav`) into that directory to use them. When
-the user picks Music Edit + a track, the render passes `--music <file>` to
-`zv-editor`, which ducks the game audio under the track. Clean POV renders with
-no music. (The placeholder beds are synthesized tones, not licensed music.)
-
-## Repeatable backend check
-
-`scripts/e2e-local.sh` drives the same orchestrator API headlessly and asserts a
-`1080x1920` reel is produced (it launches CS2, so it is a local integration
-check, not CI):
+`scripts/e2e-local.sh` still drives the same orchestrator API headlessly and
+asserts that a reel is produced. It launches CS2, so it is a local integration
+check, not CI:
 
 ```bash
 # with scripts/run-local.sh already running in another terminal
 ZV_E2E_DEMO=/path/to/match.dem ZV_E2E_STEAMID=7656119... scripts/e2e-local.sh
 ```
 
-## How the stages map
+## Stage Map
 
-| Stage | Binary / endpoint | Output |
+| Stage | Endpoint / binary | Output |
 | --- | --- | --- |
-| scan roster | `POST /api/jobs` (no target) → `scan:roster` | `roster.json` (players + K/D/A) |
-| parse | `POST /api/jobs/{id}/parse` → `parse:demo` | kill plan (segments) |
-| record | `POST /api/jobs/{id}/record` → `zv-recorder` (HLAE/CS2) | `segments/seg-NNN.mp4` (1080p60) |
-| render | `POST /api/jobs/{id}/renders/viral-60-clean` → `zv-editor` | `renders/viral-60-clean/videos/seg-NNN.mp4` (1080x1920) |
+| scan roster | `POST /api/jobs` without target -> `scan:roster` | `roster.json` |
+| parse | `POST /api/jobs/{id}/parse` -> `parse:demo` | kill plan |
+| record | `POST /api/jobs/{id}/record` -> `zv-recorder` via HLAE/CS2 | `segments/seg-NNN.mp4` |
+| render | `POST /api/jobs/{id}/renders/viral-60-clean` -> `zv-editor` | `shortslistosparasubir` pack |
 
-`compose` (`POST /api/jobs/{id}/compose` → `zv-composer`) produces a 16:9
-`final.mp4` and is **not** required for the vertical reel — the editor renders
-the short directly from the recorded segments.
+`compose` remains available for a 16:9 final MP4, but it is not required for the
+reel workflow.

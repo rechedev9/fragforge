@@ -115,6 +115,11 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		EffectsPreset:       cfg.EffectsPreset,
 		MusicPath:           musicPath,
 		RhythmPath:          rhythmPath,
+		OutputFormat:        cfg.OutputFormat,
+		KillEffect:          cfg.KillEffect,
+		Transition:          cfg.Transition,
+		Intro:               cfg.Intro,
+		Outro:               cfg.Outro,
 		OutputFPS:           cfg.OutputFPS,
 		CompileSegments:     cfg.CompileSegments,
 		LineupCatalogPath:   cfg.LineupCatalogPath,
@@ -226,6 +231,15 @@ func (c Config) validate() error {
 	if _, err := normalizeOutputFPS(c.OutputFPS); err != nil {
 		return err
 	}
+	if _, err := normalizeOutputFormat(c.OutputFormat); err != nil {
+		return err
+	}
+	if _, err := normalizeKillEffect(c.KillEffect); err != nil {
+		return err
+	}
+	if _, err := normalizeTransition(c.Transition); err != nil {
+		return err
+	}
 	if c.RhythmPath != "" && c.MusicPath == "" {
 		return fmt.Errorf("rhythm path requires music path")
 	}
@@ -309,6 +323,11 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 		EffectsPreset:     manifest.EffectsPreset,
 		MusicPath:         manifest.MusicPath,
 		RhythmPath:        manifest.RhythmPath,
+		OutputFormat:      manifest.OutputFormat,
+		KillEffect:        manifest.KillEffect,
+		Transition:        manifest.Transition,
+		Intro:             manifest.Intro,
+		Outro:             manifest.Outro,
 		OutputFPS:         manifest.OutputFPS,
 		CompileSegments:   manifest.CompileSegments,
 		LineupCatalogPath: manifest.LineupCatalogPath,
@@ -337,6 +356,11 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 			PublishPath:       short.PublishPath,
 			MusicPath:         short.MusicPath,
 			RhythmPath:        short.RhythmPath,
+			OutputFormat:      short.OutputFormat,
+			KillEffect:        short.KillEffect,
+			Transition:        short.Transition,
+			Intro:             short.Intro,
+			Outro:             short.Outro,
 			OutputFPS:         short.OutputFPS,
 			VideoCRF:          short.VideoCRF,
 			VideoPreset:       short.VideoPreset,

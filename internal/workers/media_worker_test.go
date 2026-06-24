@@ -392,6 +392,21 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 		if got := argValue(args, "--preset"); got != editor.PresetViral60Clean {
 			t.Fatalf("--preset = %q, want %q", got, editor.PresetViral60Clean)
 		}
+		for _, check := range []struct {
+			key  string
+			want string
+		}{
+			{"--output-format", renderplan.FormatLandscape16x9},
+			{"--kill-effect", renderplan.KillEffectFreezeFlash},
+			{"--transition", renderplan.TransitionDip},
+		} {
+			if got := argValue(args, check.key); got != check.want {
+				t.Fatalf("%s = %q, want %q", check.key, got, check.want)
+			}
+		}
+		if !hasArg(args, "--intro") || !hasArg(args, "--outro") {
+			t.Fatalf("editor args missing intro/outro flags: %#v", args)
+		}
 		var result recording.RecordingResult
 		if err := readJSONFile(recordingResultPath, &result); err != nil {
 			t.Fatal(err)
@@ -459,7 +474,17 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	})
 	w.runner = runner
 
-	if err := w.HandleRenderVariant(context.Background(), renderTask(t, id, editor.PresetViral60Clean)); err != nil {
+	task, err := tasks.NewRenderVariantTask(id, editor.PresetViral60Clean, "", renderplan.EditRequest{
+		Format:     renderplan.FormatLandscape16x9,
+		KillEffect: renderplan.KillEffectFreezeFlash,
+		Transition: renderplan.TransitionDip,
+		Intro:      true,
+		Outro:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderVariant(context.Background(), task); err != nil {
 		t.Fatalf("HandleRenderVariant error = %v", err)
 	}
 	if repo.jobs[id].Status != job.StatusRecorded {
@@ -484,6 +509,13 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	}
 	if !strings.Contains(string(store.files[mustRenderVariantEditDocumentKey(t, id, editor.PresetViral60Clean)]), "shortslistosparasubir") {
 		t.Fatalf("edit document missing upload-ready root: %s", store.files[mustRenderVariantEditDocumentKey(t, id, editor.PresetViral60Clean)])
+	}
+	var doc renderplan.EditDocument
+	if err := json.Unmarshal(store.files[mustRenderVariantEditDocumentKey(t, id, editor.PresetViral60Clean)], &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Edit.Format != renderplan.FormatLandscape16x9 || doc.LoadoutSnapshot.Output.AspectRatio != "16:9" || doc.LoadoutSnapshot.Output.Width != 1920 || doc.LoadoutSnapshot.Output.Height != 1080 {
+		t.Fatalf("edit document = %#v", doc)
 	}
 	var state renderplan.RenderVariantState
 	if err := json.Unmarshal(store.files[mustRenderVariantStatusKey(t, id, editor.PresetViral60Clean)], &state); err != nil {
@@ -755,7 +787,7 @@ func composeTask(t *testing.T, id uuid.UUID) *asynq.Task {
 
 func renderTask(t *testing.T, id uuid.UUID, variant string) *asynq.Task {
 	t.Helper()
-	task, err := tasks.NewRenderVariantTask(id, variant, "")
+	task, err := tasks.NewRenderVariantTask(id, variant, "", renderplan.EditRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,6 +801,15 @@ func argValue(args []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func hasArg(args []string, key string) bool {
+	for _, arg := range args {
+		if arg == key {
+			return true
+		}
+	}
+	return false
 }
 
 func putJSON(t *testing.T, store *fakeStorage, key string, value any) {

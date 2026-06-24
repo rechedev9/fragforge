@@ -1,5 +1,6 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig } from './types';
+import { DEFAULT_EDIT_CONFIG } from './reel-store';
 import {
   fixtureUser,
   fixtureSlots,
@@ -274,7 +275,7 @@ export class MockApiClient implements ApiClient {
     ];
   }
 
-  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string }): Promise<Video> {
+  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video> {
     await delay();
     const match = uploadedMatches.find((m) => m.id === input.matchId) ?? fixtureMatches.find((m) => m.id === input.matchId);
     const plays = uploadedPlays.get(input.matchId) ?? playsForMatch(input.matchId);
@@ -292,6 +293,7 @@ export class MockApiClient implements ApiClient {
       mode: input.mode,
       variant: input.variant,
       songId: input.songId,
+      editConfig: input.editConfig ?? DEFAULT_EDIT_CONFIG,
       status: 'queued',
       createdAt: Date.now(),
       availableForSec: 14 * 3600,

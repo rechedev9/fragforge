@@ -628,20 +628,27 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 	}
 	// Optional JSON body { "music": "<track-key>" } selects a track to mix in.
 	var musicKey string
+	editRequest := renderplan.DefaultEditRequest()
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 		var req struct {
-			Music string `json:"music"`
+			Music string                 `json:"music"`
+			Edit  renderplan.EditRequest `json:"edit"`
 		}
 		switch err := json.NewDecoder(r.Body).Decode(&req); {
 		case err == nil, errors.Is(err, io.EOF):
 			musicKey = req.Music
+			editRequest = renderplan.NormalizeEditRequest(req.Edit)
+			if err := editRequest.Validate(); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		default:
 			writeError(w, http.StatusBadRequest, "invalid render request JSON")
 			return
 		}
 	}
-	task, err := tasks.NewRenderVariantTask(j.ID, variant, musicKey)
+	task, err := tasks.NewRenderVariantTask(j.ID, variant, musicKey, editRequest)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

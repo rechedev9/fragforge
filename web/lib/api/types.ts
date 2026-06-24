@@ -4,6 +4,16 @@ export type Match = { id: string; map: string; score: string; playedAt: string; 
 export type PlayKind = 'clean' | 'highlight';
 export type Play = { id: string; matchId: string; label: string; kind: PlayKind; round: number; kills: number; weapon?: string; thumbnailUrl?: string };
 export type RenderMode = 'clean' | 'music';
+export type RenderFormat = 'short-9x16' | 'landscape-16x9';
+export type KillEffect = 'clean' | 'punch-in' | 'velocity' | 'freeze-flash';
+export type TransitionStyle = 'cut' | 'flash' | 'whip' | 'dip';
+export type EditConfig = {
+  format: RenderFormat;
+  killEffect: KillEffect;
+  transition: TransitionStyle;
+  intro: boolean;
+  outro: boolean;
+};
 export type Song = { id: string; title: string; artist: string; genre: string; previewUrl: string; durationSec: number; license?: string };
 /**
  * A user-selectable reel preset. `name` is the render variant; picking it sets
@@ -11,7 +21,7 @@ export type Song = { id: string; title: string; artist: string; genre: string; p
  */
 export type Preset = { name: string; label: string; description: string; hudMode?: string; default?: boolean };
 export type VideoStatus = 'queued' | 'recording' | 'composing' | 'ready' | 'failed';
-export type Video = { id: string; title: string; map: string; score: string; mode: RenderMode; variant?: string; songId?: string; status: VideoStatus; createdAt: number; availableForSec?: number; thumbnailUrl?: string; published: boolean; downloadUrl?: string; failureReason?: string };
+export type Video = { id: string; title: string; map: string; score: string; mode: RenderMode; variant?: string; songId?: string; editConfig?: EditConfig; status: VideoStatus; createdAt: number; availableForSec?: number; thumbnailUrl?: string; published: boolean; downloadUrl?: string; failureReason?: string };
 export type Slots = { used: number; total: number };
 export type FeedItem = { id: string; author: string; authorAvatarUrl: string; title: string; map: string; thumbnailUrl: string; likes: number; createdAt: number; videoUrl: string };
 export type Session = { user: SteamUser | null; slots: Slots; pcPaired: boolean; matchHistoryLinked: boolean };

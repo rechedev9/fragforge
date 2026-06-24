@@ -46,16 +46,17 @@ func validateEffectPosition(field, value string) error {
 }
 
 func VideoFilter(short ShortEdit) string {
+	width, height := outputDimensions(short)
 	if presetUsesFullFrame(short.Preset) {
 		return FullFrameVideoFilter(short)
 	}
-	scaleHeight := "1920"
-	if expr := zoomHeightExpression(short.Effects); expr != "" {
+	scaleHeight := fmt.Sprintf("%d", height)
+	if expr := zoomHeightExpression(short.Effects, height); expr != "" {
 		scaleHeight = "'" + expr + "'"
 	}
 	filters := []string{
 		scaleFilter(scaleHeight, short),
-		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
+		fmt.Sprintf("crop=%d:%d:(iw-ow)/2:(ih-oh)/2", width, height),
 		"setsar=1",
 		fpsFilter(short),
 	}
@@ -66,9 +67,10 @@ func VideoFilter(short ShortEdit) string {
 }
 
 func FullFrameVideoFilter(short ShortEdit) string {
+	width, height := outputDimensions(short)
 	filters := []string{
 		fullFrameBackgroundScaleFilter(short),
-		"crop=1080:1920:(iw-ow)/2:(ih-oh)/2",
+		fmt.Sprintf("crop=%d:%d:(iw-ow)/2:(ih-oh)/2", width, height),
 	}
 	filters = append(filters, "setsar=1")
 	filters = append(filters,
@@ -232,11 +234,12 @@ func outputFPS(short ShortEdit) int {
 }
 
 func fullFrameBackgroundScaleFilter(short ShortEdit) string {
-	height := "1920"
-	if expr := zoomHeightExpression(short.Effects); expr != "" {
-		height = "'" + expr + "'"
+	width, height := outputDimensions(short)
+	heightExpr := fmt.Sprintf("%d", height)
+	if expr := zoomHeightExpression(short.Effects, height); expr != "" {
+		heightExpr = "'" + expr + "'"
 	}
-	filter := fmt.Sprintf("scale=w=1080:h=%s:force_original_aspect_ratio=increase:eval=frame", height)
+	filter := fmt.Sprintf("scale=w=%d:h=%s:force_original_aspect_ratio=increase:eval=frame", width, heightExpr)
 	if short.HQFilters {
 		filter += ":flags=" + hqScaleFlags(short)
 	}
@@ -254,8 +257,8 @@ func appendTemporalSmoothingFilter(filters []string, short ShortEdit) []string {
 	return append(filters, "tmix=frames=2:weights='1 2'")
 }
 
-func zoomHeightExpression(effects []Effect) string {
-	return zoomHeightExpressionForBase(effects, 1920)
+func zoomHeightExpression(effects []Effect, baseHeight int) string {
+	return zoomHeightExpressionForBase(effects, float64(baseHeight))
 }
 
 func zoomHeightExpressionForBase(effects []Effect, baseHeight float64) string {
@@ -557,6 +560,17 @@ func escapeDrawtextOption(text string) string {
 		`%`, `\%`,
 	)
 	return replacer.Replace(text)
+}
+
+func outputDimensions(short ShortEdit) (int, int) {
+	if isLandscapeOutput(short) {
+		return 1920, 1080
+	}
+	return 1080, 1920
+}
+
+func isLandscapeOutput(short ShortEdit) bool {
+	return short.OutputFormat == OutputFormatLandscape16x9
 }
 
 func validateEffectFontFile(value string) error {

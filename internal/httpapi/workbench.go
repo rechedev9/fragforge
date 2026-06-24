@@ -7,11 +7,12 @@ import (
 	"strings"
 )
 
-//go:embed workbench_assets/index.html workbench_assets/styles.css workbench_assets/app.js
+//go:embed workbench_assets/index.html workbench_assets/styles.css workbench_assets/htmx.css workbench_assets/htmx.min.js
 var workbenchAssets embed.FS
 
-// Workbench serves the local operator UI. The app intentionally talks only to
-// the local HTTP API and does not load third-party scripts or assets.
+// Workbench serves the local operator UI. It is a Go-rendered HTMX console that
+// talks only to same-origin endpoints and does not require the Next/TypeScript
+// frontend to be running.
 func (h *Handlers) Workbench(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -36,11 +37,15 @@ func workbenchDocument() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read workbench css: %w", err)
 	}
-	js, err := workbenchAssets.ReadFile("workbench_assets/app.js")
+	htmxCSS, err := workbenchAssets.ReadFile("workbench_assets/htmx.css")
 	if err != nil {
-		return "", fmt.Errorf("read workbench js: %w", err)
+		return "", fmt.Errorf("read workbench htmx css: %w", err)
 	}
-	doc := strings.ReplaceAll(string(html), "{{WORKBENCH_CSS}}", string(css))
-	doc = strings.ReplaceAll(doc, "{{WORKBENCH_JS}}", string(js))
+	htmx, err := workbenchAssets.ReadFile("workbench_assets/htmx.min.js")
+	if err != nil {
+		return "", fmt.Errorf("read htmx: %w", err)
+	}
+	doc := strings.ReplaceAll(string(html), "{{WORKBENCH_CSS}}", string(css)+"\n"+string(htmxCSS))
+	doc = strings.ReplaceAll(doc, "{{WORKBENCH_HTMX}}", string(htmx))
 	return doc, nil
 }

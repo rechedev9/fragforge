@@ -1,11 +1,21 @@
-# CS2.VIDEO — web (Fase 1)
+# CS2.VIDEO — legacy Next.js web prototype
 
-The CS2.VIDEO frontend: turn a CS2 player's matches into short highlight videos.
+This directory contains the original Next.js prototype. It is no longer required
+for the localhost FragForge production flow.
 
 This is a standalone Next.js 15 app (App Router, React 19, TypeScript, Tailwind
 CSS v4) built on **[shadcn/ui](https://ui.shadcn.com)**. It lives inside the
 FragForge Go monorepo under `web/` but is fully independent — it does not import
 or build any Go code.
+
+The supported local UI is now the HTMX workbench served by `zv-orchestrator`:
+
+```bash
+scripts/run-local.sh
+```
+
+Open `http://127.0.0.1:8080/`. That flow does not require Node, Next.js, or a
+TypeScript dev server.
 
 ## Design
 

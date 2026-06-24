@@ -3,8 +3,9 @@
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Music } from 'lucide-react';
-import type { Match, Play, Preset } from '@/lib/api/types';
+import type { EditConfig, Match, Play, Preset } from '@/lib/api/types';
 import { api } from '@/lib/api';
+import { DEFAULT_EDIT_CONFIG } from '@/lib/api/reel-store';
 import { formatKd } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { PlayTile } from '@/components/clips/play-tile';
 import { PresetCards } from '@/components/clips/preset-cards';
 import { CreateReelBar } from '@/components/clips/create-reel-bar';
+import { EditOptions } from '@/components/clips/edit-options';
 import { SongPickerDialog } from '@/components/clips/song-picker-dialog';
 
 /** Parse "13-2" into [13, 2]; returns null if it isn't a clean rounds score. */
@@ -43,6 +45,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   const [variant, setVariant] = useState<string | null>(null);
   const [songId, setSongId] = useState<string | null>(null);
   const [songTitle, setSongTitle] = useState<string | null>(null);
+  const [editConfig, setEditConfig] = useState<EditConfig>(DEFAULT_EDIT_CONFIG);
   const [songOpen, setSongOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -100,6 +103,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         mode: songId ? 'music' : 'clean',
         songId: songId ?? undefined,
         variant,
+        editConfig,
       });
       router.push('/videos');
     } catch {
@@ -232,6 +236,14 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         </section>
       ) : null}
 
+      {/* Edit options */}
+      {n > 0 ? (
+        <section className="flex flex-col gap-4">
+          <SectionEyebrow label="Edit options" />
+          <EditOptions value={editConfig} onChange={setEditConfig} disabled={!selectedPlayId || busy} />
+        </section>
+      ) : null}
+
       {/* Soundtrack (optional) */}
       {n > 0 ? (
         <section className="flex flex-col gap-4">
@@ -282,7 +294,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
       {n > 0 ? (
         <CreateReelBar
           playLabel={selectedPlay?.label ?? null}
-          presetLabel={presetLabel}
+          presetLabel={presetLabel ? `${presetLabel} · ${editConfig.format === 'short-9x16' ? 'Short' : '16:9'}` : null}
           songTitle={songTitle}
           creating={creating}
           onCreate={onCreate}

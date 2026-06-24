@@ -1,9 +1,9 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
-import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, type ReelIntent } from './reel-store';
+import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
 
 /** Server roster row as returned by /api/demos/{jobId}/roster (steamid64). */
 type RosterPlayer = {
@@ -70,6 +70,7 @@ function videoFromIntent(intent: ReelIntent): Video {
     mode: intent.mode,
     variant: intent.variant,
     songId: intent.songId,
+    editConfig: intent.editConfig,
     status: 'queued',
     createdAt: intent.createdAt,
     availableForSec: 14 * 3600,
@@ -206,7 +207,7 @@ export class RealApiClient implements ApiClient {
    * across reloads because every step is derived from the orchestrator's state.
    * Mock matches delegate to the fallback.
    */
-  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string }): Promise<Video> {
+  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video> {
     if (!isJobId(input.matchId)) return this.fallback.createVideo(input);
 
     const videoId = `${input.matchId}__${input.playId}`;
@@ -223,6 +224,7 @@ export class RealApiClient implements ApiClient {
       segmentId: input.playId,
       mode: input.mode,
       variant,
+      editConfig: input.editConfig ?? DEFAULT_EDIT_CONFIG,
       songId: input.songId,
       title: `${play?.label ?? 'Highlight'} - ${suffix}`,
       map: match?.map ?? 'Unknown',
@@ -350,11 +352,14 @@ export class RealApiClient implements ApiClient {
           body: JSON.stringify({ preset: variant }),
         });
       } else if (action === 'render') {
-        const init: RequestInit = { method: 'POST' };
-        if (intent.mode === 'music' && intent.songId) {
-          init.headers = { 'Content-Type': 'application/json' };
-          init.body = JSON.stringify({ music: intent.songId });
-        }
+        const init: RequestInit = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            music: intent.mode === 'music' ? intent.songId : undefined,
+            edit: intent.editConfig,
+          }),
+        };
         await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, init);
       }
     } catch {

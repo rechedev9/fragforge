@@ -18,6 +18,7 @@ type EditDocument struct {
 	CreatedAt       time.Time       `json:"created_at"`
 	Source          Source          `json:"source"`
 	Selection       Selection       `json:"selection"`
+	Edit            EditRequest     `json:"edit"`
 	LoadoutSnapshot LoadoutSnapshot `json:"loadout_snapshot"`
 	Layers          Layers          `json:"layers"`
 	Publish         Publish         `json:"publish"`
@@ -96,6 +97,7 @@ type NewEditDocumentOptions struct {
 	GalleryKey         string
 	PublishSummaryKey  string
 	SegmentIDs         []string
+	Edit               EditRequest
 }
 
 // NewEditDocumentForLoadoutOptions carries the render loadout plus the current
@@ -105,6 +107,7 @@ type NewEditDocumentForLoadoutOptions struct {
 	Loadout        Loadout
 	KillPlanSource string
 	SegmentIDs     []string
+	Edit           EditRequest
 }
 
 // NewEditDocumentForLoadout derives storage keys from the loadout's variant
@@ -118,6 +121,7 @@ func NewEditDocumentForLoadout(opts NewEditDocumentForLoadoutOptions) (EditDocum
 	if killPlanSource == "" {
 		killPlanSource = "job.kill_plan"
 	}
+	edit := NormalizeEditRequest(opts.Edit)
 	return NewEditDocument(NewEditDocumentOptions{
 		JobID:              opts.JobID,
 		Variant:            opts.Loadout.Variant,
@@ -132,7 +136,7 @@ func NewEditDocumentForLoadout(opts NewEditDocumentForLoadoutOptions) (EditDocum
 		CoverSheets:        opts.Loadout.CoverSheets,
 		CoversEnabled:      opts.Loadout.CoversEnabled,
 		CaptionsEnabled:    opts.Loadout.CaptionsEnabled,
-		Output:             opts.Loadout.Output,
+		Output:             outputShapeForEdit(opts.Loadout.Output, edit),
 		UploadReadyRoot:    opts.Loadout.UploadReadyDir,
 		RecordingResultKey: recording.ResultArtifactKey(opts.JobID),
 		KillPlanSource:     killPlanSource,
@@ -143,7 +147,18 @@ func NewEditDocumentForLoadout(opts NewEditDocumentForLoadoutOptions) (EditDocum
 		GalleryKey:         refs.GalleryKey,
 		PublishSummaryKey:  refs.PublishSummaryKey,
 		SegmentIDs:         opts.SegmentIDs,
+		Edit:               edit,
 	}), nil
+}
+
+func outputShapeForEdit(base OutputShape, edit EditRequest) OutputShape {
+	if edit.Format != FormatLandscape16x9 {
+		return base
+	}
+	base.AspectRatio = "16:9"
+	base.Width = 1920
+	base.Height = 1080
+	return base
 }
 
 func NewEditDocument(opts NewEditDocumentOptions) EditDocument {
@@ -171,6 +186,7 @@ func NewEditDocument(opts NewEditDocumentOptions) EditDocument {
 		Selection: Selection{
 			SegmentIDs: append([]string(nil), opts.SegmentIDs...),
 		},
+		Edit: NormalizeEditRequest(opts.Edit),
 		LoadoutSnapshot: LoadoutSnapshot{
 			Preset:          opts.Preset,
 			EffectsPreset:   effectsPreset,

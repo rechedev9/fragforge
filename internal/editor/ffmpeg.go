@@ -127,6 +127,7 @@ func CompilationFilter(short ShortEdit) string {
 	partShort := short
 	partShort.Effects = nil
 	partShort.Parts = nil
+	width, height := outputDimensions(short)
 	clauses := []string{}
 	concatLabels := []string{}
 	concatCount := 0
@@ -135,7 +136,7 @@ func CompilationFilter(short ShortEdit) string {
 			gapV := fmt.Sprintf("gapv%d", i)
 			gapA := fmt.Sprintf("gapa%d", i)
 			clauses = append(clauses,
-				fmt.Sprintf("color=c=black:s=1080x1920:r=%d:d=%.3f[%s]", outputFPS(short), part.GapBeforeSeconds, gapV),
+				fmt.Sprintf("color=c=black:s=%dx%d:r=%d:d=%.3f[%s]", width, height, outputFPS(short), part.GapBeforeSeconds, gapV),
 				fmt.Sprintf("anullsrc=channel_layout=stereo:sample_rate=48000:d=%.3f[%s]", part.GapBeforeSeconds, gapA),
 			)
 			concatLabels = append(concatLabels, "["+gapV+"]["+gapA+"]")
@@ -275,9 +276,10 @@ func BuildCoverFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	filter := "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+	width, height := outputDimensions(short)
+	filter := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1", width, height, width, height)
 	if short.HQFilters {
-		filter = "thumbnail=30,scale=1080:1920:force_original_aspect_ratio=increase:flags=" + hqScaleFlags(short) + ",crop=1080:1920,setsar=1"
+		filter = fmt.Sprintf("thumbnail=30,scale=%d:%d:force_original_aspect_ratio=increase:flags=%s,crop=%d:%d,setsar=1", width, height, hqScaleFlags(short), width, height)
 	}
 	return []string{
 		ffmpegPath,
@@ -296,13 +298,17 @@ func BuildCoverSheetFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
+	tileW, tileH := 360, 640
+	if isLandscapeOutput(short) {
+		tileW, tileH = 640, 360
+	}
 	return []string{
 		ffmpegPath,
 		"-y",
 		"-v", "error",
 		"-i", short.Output,
 		"-frames:v", "1",
-		"-vf", "fps=2,scale=360:640:force_original_aspect_ratio=increase:flags=" + hqScaleFlags(short) + ",crop=360:640,setsar=1,tile=3x3",
+		"-vf", fmt.Sprintf("fps=2,scale=%d:%d:force_original_aspect_ratio=increase:flags=%s,crop=%d:%d,setsar=1,tile=3x3", tileW, tileH, hqScaleFlags(short), tileW, tileH),
 		"-q:v", "3",
 		short.CoverSheetPath,
 	}

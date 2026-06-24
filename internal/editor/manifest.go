@@ -71,6 +71,18 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
+	outputFormat, err := normalizeOutputFormat(opts.OutputFormat)
+	if err != nil {
+		return Manifest{Warnings: warnings}, err
+	}
+	killEffect, err := normalizeKillEffect(opts.KillEffect)
+	if err != nil {
+		return Manifest{Warnings: warnings}, err
+	}
+	transition, err := normalizeTransition(opts.Transition)
+	if err != nil {
+		return Manifest{Warnings: warnings}, err
+	}
 	hqFilters := opts.HQFilters || renderPreset.HQFilters
 	audioNormalize := opts.AudioNormalize || renderPreset.AudioNormalize
 	qualityChecks := opts.QualityChecks || renderPreset.QualityChecks
@@ -97,6 +109,11 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		EffectsPreset:     effectsSource.Preset,
 		MusicPath:         opts.MusicPath,
 		RhythmPath:        opts.RhythmPath,
+		OutputFormat:      outputFormat,
+		KillEffect:        killEffect,
+		Transition:        transition,
+		Intro:             opts.Intro,
+		Outro:             opts.Outro,
 		OutputFPS:         outputFPS,
 		CompileSegments:   opts.CompileSegments,
 		LineupCatalogPath: opts.LineupCatalogPath,
@@ -147,6 +164,11 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			RhythmSync:        rhythmSync,
 			VideoCRF:          videoCRF,
 			VideoPreset:       videoPreset,
+			OutputFormat:      outputFormat,
+			KillEffect:        killEffect,
+			Transition:        transition,
+			Intro:             opts.Intro,
+			Outro:             opts.Outro,
 			OutputFPS:         outputFPS,
 			HQFilters:         hqFilters,
 			AudioNormalize:    audioNormalize,
@@ -231,6 +253,11 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			PublishPath:       filepath.Join(opts.PublishDir, publishBase+".mp4"),
 			MusicPath:         opts.MusicPath,
 			RhythmPath:        opts.RhythmPath,
+			OutputFormat:      outputFormat,
+			KillEffect:        killEffect,
+			Transition:        transition,
+			Intro:             opts.Intro,
+			Outro:             opts.Outro,
 			OutputFPS:         outputFPS,
 			VideoCRF:          videoCRF,
 			VideoPreset:       videoPreset,
@@ -297,6 +324,11 @@ type compiledShortOptions struct {
 	VideoCRF          int
 	VideoPreset       string
 	OutputFPS         int
+	OutputFormat      string
+	KillEffect        string
+	Transition        string
+	Intro             bool
+	Outro             bool
 	HQFilters         bool
 	AudioNormalize    bool
 	TemporalSmoothing bool
@@ -384,6 +416,11 @@ func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, 
 		PublishPath:       filepath.Join(opts.PublishDir, publishBase+".mp4"),
 		MusicPath:         opts.MusicPath,
 		RhythmPath:        opts.RhythmPath,
+		OutputFormat:      c.OutputFormat,
+		KillEffect:        c.KillEffect,
+		Transition:        c.Transition,
+		Intro:             opts.Intro,
+		Outro:             opts.Outro,
 		OutputFPS:         c.OutputFPS,
 		VideoCRF:          c.VideoCRF,
 		VideoPreset:       c.VideoPreset,
@@ -488,6 +525,45 @@ func normalizeOutputFPSForPreset(preset RenderPreset, fps int) (int, error) {
 		return 0, fmt.Errorf("output fps must be between 1 and 240")
 	}
 	return fps, nil
+}
+
+func normalizeOutputFormat(format string) (string, error) {
+	format = strings.TrimSpace(format)
+	if format == "" {
+		return OutputFormatShort9x16, nil
+	}
+	switch format {
+	case OutputFormatShort9x16, OutputFormatLandscape16x9:
+		return format, nil
+	default:
+		return "", fmt.Errorf("unknown output format %q", format)
+	}
+}
+
+func normalizeKillEffect(effect string) (string, error) {
+	effect = strings.TrimSpace(effect)
+	if effect == "" {
+		return KillEffectClean, nil
+	}
+	switch effect {
+	case KillEffectClean, KillEffectPunchIn, KillEffectVelocity, KillEffectFreezeFlash:
+		return effect, nil
+	default:
+		return "", fmt.Errorf("unknown kill effect %q", effect)
+	}
+}
+
+func normalizeTransition(transition string) (string, error) {
+	transition = strings.TrimSpace(transition)
+	if transition == "" {
+		return TransitionCut, nil
+	}
+	switch transition {
+	case TransitionCut, TransitionFlash, TransitionWhip, TransitionDip:
+		return transition, nil
+	default:
+		return "", fmt.Errorf("unknown transition %q", transition)
+	}
 }
 
 func segmentIDSet(ids []string) map[string]bool {

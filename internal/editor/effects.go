@@ -94,6 +94,7 @@ func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath
 		if err != nil {
 			return fmt.Errorf("evaluate effects for %s: %w", short.SegmentID, err)
 		}
+		effects = append(effects, generatedEditEffects(*short)...)
 		short.Effects = effects
 		manifest.Warnings = append(manifest.Warnings, refineKillfeedEffects(short, killfeedProbe)...)
 		short.FFmpegCommand = BuildFFmpegCommand(ffmpegPath, *short)
@@ -109,6 +110,184 @@ func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath
 		manifest.Warnings = append(manifest.Warnings, warnings...)
 	}
 	return nil
+}
+
+func generatedEditEffects(short ShortEdit) []Effect {
+	var effects []Effect
+	effects = append(effects, generatedKillEffects(short)...)
+	effects = append(effects, generatedTransitionEffects(short)...)
+	effects = append(effects, generatedBookendEffects(short)...)
+	return effects
+}
+
+func generatedKillEffects(short ShortEdit) []Effect {
+	switch short.KillEffect {
+	case "", KillEffectClean:
+		return nil
+	}
+	effects := []Effect{}
+	for _, kill := range short.Kills {
+		switch short.KillEffect {
+		case KillEffectPunchIn:
+			effects = append(effects, Effect{
+				Type:         EffectZoom,
+				StartSeconds: clampSeconds(kill.TimeSeconds-0.16, 0, short.DurationSeconds),
+				EndSeconds:   clampSeconds(kill.TimeSeconds+0.42, 0, short.DurationSeconds),
+				AtSeconds:    kill.TimeSeconds,
+				Scale:        1.08,
+				Source:       "edit-request",
+			})
+		case KillEffectVelocity:
+			effects = append(effects,
+				Effect{
+					Type:         EffectZoom,
+					StartSeconds: clampSeconds(kill.TimeSeconds-0.22, 0, short.DurationSeconds),
+					EndSeconds:   clampSeconds(kill.TimeSeconds+0.50, 0, short.DurationSeconds),
+					AtSeconds:    kill.TimeSeconds,
+					Scale:        1.16,
+					Source:       "edit-request",
+				},
+				Effect{
+					Type:         EffectGrade,
+					StartSeconds: clampSeconds(kill.TimeSeconds-0.10, 0, short.DurationSeconds),
+					EndSeconds:   clampSeconds(kill.TimeSeconds+0.34, 0, short.DurationSeconds),
+					Contrast:     1.08,
+					Saturation:   1.18,
+					Gamma:        1.00,
+					Source:       "edit-request",
+				},
+			)
+		case KillEffectFreezeFlash:
+			effects = append(effects,
+				Effect{
+					Type:         EffectZoom,
+					StartSeconds: clampSeconds(kill.TimeSeconds-0.12, 0, short.DurationSeconds),
+					EndSeconds:   clampSeconds(kill.TimeSeconds+0.34, 0, short.DurationSeconds),
+					AtSeconds:    kill.TimeSeconds,
+					Scale:        1.10,
+					Source:       "edit-request",
+				},
+				Effect{
+					Type:         EffectFlash,
+					StartSeconds: clampSeconds(kill.TimeSeconds-0.02, 0, short.DurationSeconds),
+					EndSeconds:   clampSeconds(kill.TimeSeconds+0.10, 0, short.DurationSeconds),
+					Color:        "white",
+					Opacity:      0.34,
+					Source:       "edit-request",
+				},
+			)
+		}
+	}
+	return effects
+}
+
+func generatedTransitionEffects(short ShortEdit) []Effect {
+	switch short.Transition {
+	case "", TransitionCut:
+		return nil
+	case TransitionFlash:
+		return []Effect{
+			{Type: EffectFlash, StartSeconds: 0, EndSeconds: transitionEnd(short, 0.16), Color: "white", Opacity: 0.20, Source: "edit-request"},
+			{Type: EffectFlash, StartSeconds: transitionStart(short, 0.18), EndSeconds: short.DurationSeconds, Color: "white", Opacity: 0.16, Source: "edit-request"},
+		}
+	case TransitionWhip:
+		return []Effect{
+			{Type: EffectZoom, StartSeconds: 0, EndSeconds: transitionEnd(short, 0.22), AtSeconds: 0.08, Scale: 1.12, Source: "edit-request"},
+			{Type: EffectFlash, StartSeconds: 0, EndSeconds: transitionEnd(short, 0.12), Color: "white", Opacity: 0.12, Source: "edit-request"},
+		}
+	case TransitionDip:
+		return []Effect{
+			{Type: EffectFlash, StartSeconds: 0, EndSeconds: transitionEnd(short, 0.18), Color: "black", Opacity: 0.32, Source: "edit-request"},
+			{Type: EffectFlash, StartSeconds: transitionStart(short, 0.22), EndSeconds: short.DurationSeconds, Color: "black", Opacity: 0.34, Source: "edit-request"},
+		}
+	default:
+		return nil
+	}
+}
+
+func generatedBookendEffects(short ShortEdit) []Effect {
+	var effects []Effect
+	width, height := outputDimensions(short)
+	if short.Intro {
+		effects = append(effects, Effect{
+			Type:           EffectText,
+			Value:          bookendTitle(short),
+			X:              "48",
+			Y:              fmt.Sprintf("%d", maxInt(48, height/12)),
+			Size:           bookendFontSize(width),
+			FontColor:      "white@0.96",
+			BoxColor:       "black@0.44",
+			BoxBorder:      16,
+			StartSeconds:   0,
+			EndSeconds:     transitionEnd(short, 1.45),
+			FadeInSeconds:  0.10,
+			FadeOutSeconds: 0.18,
+			Source:         "edit-request",
+		})
+	}
+	if short.Outro {
+		effects = append(effects, Effect{
+			Type:           EffectText,
+			Value:          "FragForge",
+			X:              "48",
+			Y:              fmt.Sprintf("%d", maxInt(48, height-160)),
+			Size:           bookendFontSize(width),
+			FontColor:      "white@0.94",
+			BoxColor:       "black@0.42",
+			BoxBorder:      16,
+			StartSeconds:   transitionStart(short, 1.35),
+			EndSeconds:     short.DurationSeconds,
+			FadeInSeconds:  0.14,
+			FadeOutSeconds: 0.10,
+			Source:         "edit-request",
+		})
+	}
+	return effects
+}
+
+func bookendTitle(short ShortEdit) string {
+	if short.Headline != "" {
+		return short.Headline
+	}
+	if short.Label != "" {
+		return short.Label
+	}
+	return "CS2 Highlight"
+}
+
+func bookendFontSize(width int) int {
+	if width >= 1920 {
+		return 44
+	}
+	return 36
+}
+
+func transitionEnd(short ShortEdit, duration float64) float64 {
+	return clampSeconds(duration, 0, short.DurationSeconds)
+}
+
+func transitionStart(short ShortEdit, duration float64) float64 {
+	if short.DurationSeconds <= 0 {
+		return 0
+	}
+	return clampSeconds(short.DurationSeconds-duration, 0, short.DurationSeconds)
+}
+
+func clampSeconds(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if max > min && value > max {
+		return max
+	}
+	return value
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // compileEffectsScript parses and compiles the Lua effects source into reusable

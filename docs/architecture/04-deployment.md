@@ -2,6 +2,11 @@
 
 Topología confirmada para V1.
 
+Nota: el flujo localhost de desarrollo/producción local ya no usa el frontend
+Next.js. `zv-orchestrator` sirve el workbench HTMX en `http://127.0.0.1:8080/`
+y `scripts/run-local.sh` arranca ese entorno sin Node ni TypeScript. La
+topología VPS de este documento conserva el esquema histórico de despliegue web.
+
 ## Topología
 
 ```

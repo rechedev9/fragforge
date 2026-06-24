@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/rechedev9/fragforge/internal/renderplan"
 )
 
 const testRenderVariant = "viral-60-clean"
@@ -87,7 +89,8 @@ func TestNewComposeFinalTaskRoundtrip(t *testing.T) {
 
 func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	tk, err := NewRenderVariantTask(id, testRenderVariant, "")
+	edit := renderplan.EditRequest{Format: renderplan.FormatLandscape16x9, KillEffect: renderplan.KillEffectVelocity, Transition: renderplan.TransitionWhip, Intro: true}
+	tk, err := NewRenderVariantTask(id, testRenderVariant, "", edit)
 	if err != nil {
 		t.Fatalf("NewRenderVariantTask error = %v", err)
 	}
@@ -105,12 +108,15 @@ func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	if payload.Variant != testRenderVariant {
 		t.Errorf("Variant = %q, want %q", payload.Variant, testRenderVariant)
 	}
+	if payload.Edit != edit {
+		t.Errorf("Edit = %#v, want %#v", payload.Edit, edit)
+	}
 }
 
 func TestNewRenderVariantTaskRejectsUnsafeVariant(t *testing.T) {
 	id := uuid.New()
 	for _, variant := range []string{"", "../x", "x/y", `x\y`, "-bad", "x.mp4"} {
-		if _, err := NewRenderVariantTask(id, variant, ""); err == nil {
+		if _, err := NewRenderVariantTask(id, variant, "", renderplan.EditRequest{}); err == nil {
 			t.Fatalf("NewRenderVariantTask(%q) error = nil, want error", variant)
 		}
 	}

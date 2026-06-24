@@ -420,6 +420,75 @@ func TestBuildFFmpegCommandUsesConfiguredOutputFPS(t *testing.T) {
 	}
 }
 
+func TestBuildManifestUsesLandscapeOutputFormat(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.OutputFormat = OutputFormatLandscape16x9
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	if manifest.OutputFormat != OutputFormatLandscape16x9 {
+		t.Fatalf("manifest output format = %q, want %q", manifest.OutputFormat, OutputFormatLandscape16x9)
+	}
+	first := manifest.Shorts[0]
+	filter := argAfter(first.FFmpegCommand, "-vf")
+	for _, want := range []string{
+		"scale=w=1920:h=1080:force_original_aspect_ratio=increase",
+		"crop=1920:1080:(iw-ow)/2:(ih-oh)/2",
+	} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("landscape filter missing %q:\n%s", want, filter)
+		}
+	}
+	if got := argAfter(first.CoverCommand, "-vf"); !strings.Contains(got, "scale=1920:1080") || !strings.Contains(got, "crop=1920:1080") {
+		t.Fatalf("landscape cover filter = %s", got)
+	}
+}
+
+func TestBuildManifestAppliesExplicitEditOptions(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.KillEffect = KillEffectFreezeFlash
+	opts.Transition = TransitionDip
+	opts.Intro = true
+	opts.Outro = true
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	first := manifest.Shorts[0]
+	if first.KillEffect != KillEffectFreezeFlash || first.Transition != TransitionDip || !first.Intro || !first.Outro {
+		t.Fatalf("short edit options = %#v", first)
+	}
+	var hasZoom, hasWhiteFlash, hasBlackFlash, hasText bool
+	for _, effect := range first.Effects {
+		switch {
+		case effect.Type == EffectZoom && effect.Source == "edit-request":
+			hasZoom = true
+		case effect.Type == EffectFlash && effect.Color == "white" && effect.Source == "edit-request":
+			hasWhiteFlash = true
+		case effect.Type == EffectFlash && effect.Color == "black" && effect.Source == "edit-request":
+			hasBlackFlash = true
+		case effect.Type == EffectText && effect.Source == "edit-request":
+			hasText = true
+		}
+	}
+	if !hasZoom || !hasWhiteFlash || !hasBlackFlash || !hasText {
+		t.Fatalf("generated effects missing: zoom=%v white=%v black=%v text=%v effects=%#v", hasZoom, hasWhiteFlash, hasBlackFlash, hasText, first.Effects)
+	}
+	filter := argAfter(first.FFmpegCommand, "-vf")
+	for _, want := range []string{"drawbox", "color=0xffffff", "color=0x000000", "drawtext=text="} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("edit filter missing %q:\n%s", want, filter)
+		}
+	}
+}
+
 func TestBuildManifestCompileSegmentsCreatesOneShort(t *testing.T) {
 	dir := t.TempDir()
 	result := testRecordingResult(dir)

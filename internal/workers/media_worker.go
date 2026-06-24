@@ -663,14 +663,18 @@ func (w *RenderWorker) HandleRenderVariant(ctx context.Context, t *asynq.Task) e
 	if variant == "" {
 		variant = editor.DefaultPreset().Name
 	}
-	if err := w.render(ctx, j, variant, payload.MusicKey); err != nil {
+	if err := w.render(ctx, j, variant, payload.MusicKey, payload.Edit); err != nil {
 		logWorkerError(j.ID, tasks.TypeRenderVariant, err)
 		return err
 	}
 	return nil
 }
 
-func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey string) (err error) {
+func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey string, edit renderplan.EditRequest) (err error) {
+	edit = renderplan.NormalizeEditRequest(edit)
+	if err := edit.Validate(); err != nil {
+		return err
+	}
 	loadout, err := renderplan.LoadoutForVariant(variant)
 	if err != nil {
 		return err
@@ -766,7 +770,7 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 
 	outDir := filepath.Join(workDir, "out")
 	publishDir := filepath.Join(outDir, "shortslistosparasubir")
-	if err := w.writeEditDocument(outDir, j.ID, loadout, recordingResult); err != nil {
+	if err := w.writeEditDocument(outDir, j.ID, loadout, recordingResult, edit); err != nil {
 		return err
 	}
 	args := []string{
@@ -775,6 +779,15 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 		"--out", outDir,
 		"--publish-dir", publishDir,
 		"--preset", loadout.Preset,
+		"--output-format", edit.Format,
+		"--kill-effect", edit.KillEffect,
+		"--transition", edit.Transition,
+	}
+	if edit.Intro {
+		args = append(args, "--intro")
+	}
+	if edit.Outro {
+		args = append(args, "--outro")
 	}
 	if cfg.FFmpegPath != "" {
 		args = append(args, "--ffmpeg", cfg.FFmpegPath)
@@ -837,11 +850,12 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 	return nil
 }
 
-func (w *RenderWorker) writeEditDocument(outDir string, id uuid.UUID, loadout renderplan.Loadout, result recording.RecordingResult) error {
+func (w *RenderWorker) writeEditDocument(outDir string, id uuid.UUID, loadout renderplan.Loadout, result recording.RecordingResult, edit renderplan.EditRequest) error {
 	doc, err := renderplan.NewEditDocumentForLoadout(renderplan.NewEditDocumentForLoadoutOptions{
 		JobID:      id,
 		Loadout:    loadout,
 		SegmentIDs: recording.SegmentIDs(result),
+		Edit:       edit,
 	})
 	if err != nil {
 		return err
