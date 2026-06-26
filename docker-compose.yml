@@ -19,5 +19,16 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       retries: 5
+  # Optional local Prometheus that scrapes the orchestrator's /metrics endpoint.
+  # Opt in with: docker compose --profile observability up -d
+  # Then open http://localhost:9090 and query fragforge_errors_total.
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["observability"]
+    ports: ["9090:9090"]
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 volumes:
   pgdata:
