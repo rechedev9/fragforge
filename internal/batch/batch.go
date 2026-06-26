@@ -123,6 +123,8 @@ func Run(ctx context.Context, opts Options, rec *obs.Recorder, progress io.Write
 }
 
 // processDemo resolves a target, parses one demo, and records the outcome.
+// rec.RecordError results are intentionally ignored: a journal write failure
+// must not abort the batch or mask the underlying demo failure.
 func processDemo(ctx context.Context, opts Options, rec *obs.Recorder, demo string) Result {
 	res := Result{Demo: demo}
 
@@ -165,25 +167,38 @@ func processDemo(ctx context.Context, opts Options, rec *obs.Recorder, demo stri
 // crash the batch; it is recorded like any other failure.
 var errParsePanic = errors.New("parser panicked")
 
+// recoverParse runs fn and converts a panic into an errParsePanic error. It
+// must execute on the same goroutine that calls the parser, since recover only
+// catches panics from its own goroutine.
+func recoverParse(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %v", errParsePanic, r)
+		}
+	}()
+	return fn()
+}
+
 // safeParseDemo is parseDemo with panic recovery so one bad demo cannot abort
 // the whole run.
 func safeParseDemo(ctx context.Context, demo, target string, mode parser.SegmentMode) (plan killplan.Plan, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("%w: %v", errParsePanic, r)
-		}
-	}()
-	return parseDemo(ctx, demo, target, mode)
+	err = recoverParse(func() error {
+		var perr error
+		plan, perr = parseDemo(ctx, demo, target, mode)
+		return perr
+	})
+	return plan, err
 }
 
-// safeTopFragger is topFragger with panic recovery.
+// safeTopFragger is topFragger with panic recovery for any panic on the calling
+// goroutine; the parse goroutine inside topFragger recovers its own.
 func safeTopFragger(ctx context.Context, demo string) (id string, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("%w: %v", errParsePanic, r)
-		}
-	}()
-	return topFragger(ctx, demo)
+	err = recoverParse(func() error {
+		var terr error
+		id, terr = topFragger(ctx, demo)
+		return terr
+	})
+	return id, err
 }
 
 // parseDemo opens demo and builds a kill plan for target.
@@ -235,8 +250,11 @@ func topFragger(ctx context.Context, demo string) (string, error) {
 		}
 	})
 
+	// ParseToEnd runs in its own goroutine, so a panic on a malformed demo must
+	// be recovered HERE; a recover in the calling goroutine (safeTopFragger)
+	// cannot catch a panic raised on this one.
 	done := make(chan error, 1)
-	go func() { done <- p.ParseToEnd() }()
+	go func() { done <- recoverParse(p.ParseToEnd) }()
 	select {
 	case <-ctx.Done():
 		p.Cancel()

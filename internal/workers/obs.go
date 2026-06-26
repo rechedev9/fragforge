@@ -10,8 +10,8 @@ import (
 // journal so orchestrator failures show up in the same error log as CLI and
 // batch runs. It is best-effort: observability never blocks job processing.
 func recordWorkerFailure(id uuid.UUID, taskType string, err error) {
-	rec, rerr := obs.New(obs.DefaultDir())
-	if rerr != nil {
+	rec := obs.Default()
+	if rec == nil {
 		return
 	}
 	_ = rec.RecordError(obs.Event{

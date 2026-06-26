@@ -92,9 +92,13 @@ func runBatch(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if report != "" {
-		b, _ := json.MarshalIndent(sum, "", "  ")
-		if werr := os.WriteFile(report, append(b, '\n'), 0o600); werr != nil {
-			fmt.Fprintf(stderr, "error: writing report: %v\n", werr)
+		b, err := json.MarshalIndent(sum, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "error: marshal report: %v\n", err)
+			return exitUnexpected
+		}
+		if err := os.WriteFile(report, append(b, '\n'), 0o600); err != nil {
+			fmt.Fprintf(stderr, "error: writing report: %v\n", err)
 			return exitUnexpected
 		}
 	}
@@ -136,11 +140,9 @@ func runMetrics(args []string, stdout, stderr io.Writer) int {
 		return exitUnexpected
 	}
 	if reset {
-		for _, p := range []string{rec.MetricsPromPath(), obsDir + "/metrics.json"} {
-			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-				fmt.Fprintf(stderr, "error: reset metrics: %v\n", err)
-				return exitUnexpected
-			}
+		if err := rec.Reset(); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return exitUnexpected
 		}
 		fmt.Fprintln(stdout, "metrics reset")
 		return exitSuccess

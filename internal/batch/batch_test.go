@@ -144,6 +144,65 @@ func TestDefaultJobsAtLeastOne(t *testing.T) {
 	}
 }
 
+func TestRecoverParse(t *testing.T) {
+	t.Run("panic becomes errParsePanic", func(t *testing.T) {
+		err := recoverParse(func() error { panic("boom") })
+		if !errors.Is(err, errParsePanic) {
+			t.Fatalf("got %v, want errParsePanic", err)
+		}
+		if class, _ := classify(err); class != "panic" {
+			t.Errorf("classify: got %q want panic", class)
+		}
+	})
+	t.Run("normal error passes through", func(t *testing.T) {
+		want := errors.New("plain")
+		if got := recoverParse(func() error { return want }); got != want {
+			t.Errorf("got %v want %v", got, want)
+		}
+	})
+	t.Run("nil stays nil", func(t *testing.T) {
+		if got := recoverParse(func() error { return nil }); got != nil {
+			t.Errorf("got %v want nil", got)
+		}
+	})
+}
+
+// TestRunAutoTargetRecordsBadDemo drives the default auto-target path (empty
+// SteamID -> topFragger, which parses in its own goroutine) with a garbage demo
+// and asserts the failure is recorded rather than crashing the run. This covers
+// the goroutine panic-recovery path the SteamID test deliberately skips.
+func TestRunAutoTargetRecordsBadDemo(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "garbage.dem"), []byte("HL2DEMO\x00 not really a demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := newRecorder(t)
+	sum, err := Run(context.Background(), Options{Dir: dir}, rec, nil) // empty SteamID -> auto-target
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sum.Total != 1 || sum.Failed != 1 {
+		t.Fatalf("summary: got %+v want 1 total / 1 failed", sum)
+	}
+	events := readJournalT(t, rec.JournalPath())
+	if len(events) != 1 || events[0].Stage != obs.StageParse {
+		t.Fatalf("journal: got %+v want one parse-stage event", events)
+	}
+}
+
+func TestRecorderResetClearsCounters(t *testing.T) {
+	rec := newRecorder(t)
+	if err := rec.RecordError(obs.Event{Stage: obs.StageParse, Class: "corrupt", Message: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rec.Reset(); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if got := rec.Snapshot(); len(got) != 0 {
+		t.Errorf("after Reset: got %d counters want 0", len(got))
+	}
+}
+
 func newRecorder(t *testing.T) *obs.Recorder {
 	t.Helper()
 	rec, err := obs.New(t.TempDir())
@@ -181,7 +240,7 @@ func readJournalT(t *testing.T, path string) []obs.Event {
 		t.Fatalf("read journal: %v", err)
 	}
 	var events []obs.Event
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
 		if line == "" {
 			continue
 		}

@@ -6,6 +6,14 @@
 // an agent) can inspect without standing up Postgres, Redis, or a real
 // Prometheus server. When a Prometheus server is available it can scrape the
 // orchestrator's /metrics endpoint, which serves the same counters.
+//
+// The error journal is the authoritative record: every RecordError appends one
+// line under O_APPEND, so concurrent writers (even across processes) never lose
+// an event. The counters are a convenience derived from a load-modify-write of
+// a small file; within one process the Recorder mutex serializes them, but two
+// processes writing the same directory concurrently can lose a counter
+// increment (the journal still has the event). Share one Recorder per process
+// (see Default) and treat counts as approximate across processes.
 package obs
 
 import (
@@ -84,6 +92,38 @@ func New(dir string) (*Recorder, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+var (
+	defaultOnce sync.Once
+	defaultRec  *Recorder
+)
+
+// Default returns a process-wide Recorder rooted at DefaultDir, created once.
+// Best-effort failure paths (the worker and `zv short`) share it so the
+// Recorder mutex serializes their writes within the process. It returns nil if
+// the recorder could not be created, so callers must nil-check before use.
+func Default() *Recorder {
+	defaultOnce.Do(func() {
+		if rec, err := New(DefaultDir()); err == nil {
+			defaultRec = rec
+		}
+	})
+	return defaultRec
+}
+
+// Reset clears all counters and removes the persisted metrics files. The
+// journal is left untouched; clear it separately when starting a fresh run.
+func (r *Recorder) Reset() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.counters = map[string]int64{}
+	for _, p := range []string{r.metricsJSONPath(), r.MetricsPromPath()} {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("reset metrics: %w", err)
+		}
+	}
+	return nil
 }
 
 // JournalPath is the newline-delimited JSON error journal.
@@ -180,13 +220,39 @@ func (r *Recorder) flushLocked() error {
 	if err != nil {
 		return fmt.Errorf("marshal counters: %w", err)
 	}
-	if err := os.WriteFile(r.metricsJSONPath(), append(jb, '\n'), 0o644); err != nil {
+	if err := writeFileAtomic(r.metricsJSONPath(), append(jb, '\n')); err != nil {
 		return fmt.Errorf("write metrics json: %w", err)
 	}
 	var b strings.Builder
 	WritePrometheus(&b, r.snapshotLocked())
-	if err := os.WriteFile(r.MetricsPromPath(), []byte(b.String()), 0o644); err != nil {
+	if err := writeFileAtomic(r.MetricsPromPath(), []byte(b.String())); err != nil {
 		return fmt.Errorf("write metrics prom: %w", err)
+	}
+	return nil
+}
+
+// writeFileAtomic writes data to a temp file in the target's directory and
+// renames it over path, so a concurrent reader never observes a torn file.
+// os.Rename replaces the destination atomically on the platforms FragForge
+// targets (including Windows, via MoveFileEx).
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".obs-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
 	}
 	return nil
 }

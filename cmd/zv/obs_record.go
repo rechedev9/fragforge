@@ -10,8 +10,8 @@ import (
 // It is best-effort: observability must never block or fail the CLI, so any
 // recorder error is ignored.
 func recordShortFailure(stage shortStage, code int, demo string) {
-	rec, err := obs.New(obs.DefaultDir())
-	if err != nil {
+	rec := obs.Default()
+	if rec == nil {
 		return
 	}
 	obsStage, class := shortStageClass(stage.binary, code)
