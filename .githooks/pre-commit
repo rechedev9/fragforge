@@ -1,0 +1,13 @@
+#!/bin/sh
+# Keep AGENTS.md identical to CLAUDE.md.
+# CLAUDE.md is the single source of truth for agent instructions; edit it only.
+# This hook regenerates AGENTS.md from CLAUDE.md and stages it on every commit.
+set -e
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+if [ -f CLAUDE.md ]; then
+  cp CLAUDE.md AGENTS.md
+  git add AGENTS.md
+fi

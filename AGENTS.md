@@ -1,35 +1,68 @@
-# Codex instructions for FragForge
+# CLAUDE.md
 
-These instructions apply to the whole repository unless a deeper AGENTS.md
-overrides them.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+`AGENTS.md` is auto-generated from this file by the `.githooks/pre-commit` hook, so both agents read identical instructions.
+Edit `CLAUDE.md` only.
+Do not edit `AGENTS.md` by hand; any direct change is overwritten on the next commit.
 
 ## Project
 
 FragForge is a deterministic CS2 demo-to-video pipeline written primarily in Go.
-It parses `.dem` files, builds kill/smoke segment plans, records gameplay with
-HLAE/CS2 on Windows, and post-processes clips with FFmpeg, Lua effects, overlays,
-and publishing metadata.
+It parses `.dem` files, builds kill/smoke segment plans, records gameplay with HLAE/CS2 on Windows, and post-processes clips with FFmpeg, Lua effects, overlays, and publishing metadata.
+Everything runs locally on Windows.
 
 Module: `github.com/rechedev9/fragforge`
 Go version: `1.26.1`
 
-Important boundaries:
+## Architecture
 
-- `cmd/`: CLI entrypoints (`zv-parser`, `zv-recorder`, `zv-composer`,
-  `zv-editor`, `zv-pipeline`, `zv-orchestrator`, etc.). Keep these thin.
-- `internal/parser`: `.dem` parsing and segment extraction.
-- `internal/killplan`: shared kill/segment plan types.
-- `internal/recording`: HLAE/CS2 recording scripts, artifacts, validation.
-- `internal/composition`: concat/composition planning and FFmpeg boundaries.
-- `internal/editor`: Shorts rendering, Lua effects, metadata, validation,
-  publishing pack generation.
-- `internal/httpapi`: orchestrator HTTP routes and handlers.
-- `internal/workers`: Asynq parser/media workers.
-- `internal/storage`, `internal/job`, `internal/tasks`: persistence and job state.
-- `internal/lineups`: utility lineup catalog data.
-- `overlays/`: HyperFrames overlay experiments and generated overlay projects.
-- `data/`: generated/local media artifacts; treat as output unless the task is
-  explicitly about test fixtures or artifact cleanup.
+The pipeline is a chain of independent stages connected by on-disk artifacts and a job queue, so each stage is testable and replaceable on its own.
+The demo is the source of truth: every decision about what to record (tick ranges, camera, player) is derived from parsing the `.dem`, never from heuristics over the rendered video.
+
+End-to-end flow:
+
+```text
+.dem + prompt
+  -> parse demo into a kill plan and scored moments   (internal/parser, internal/killplan, internal/moments)
+  -> record the chosen segments with HLAE/CS2          (internal/recording, HLAE mirv JS script)
+  -> render the Short with a viral preset              (internal/editor, internal/renderplan, Lua effects, FFmpeg)
+  -> publish pack: MP4, cover, caption, gallery, manifest
+```
+
+Recording and composition are deliberately split: HLAE/CS2 only produces high-quality raw segments, and all effects (zoom, flash, slow-mo, color grade, music) are applied afterward in an FFmpeg composition stage.
+The clip "look" lives in editable Lua scripts under `effects/`, evaluated by a sandboxed `gopher-lua` DSL (`on_segment`, `on_kill`, `on_smoke`, `zoom`, `flash`, `text`, `grade`) with no filesystem/process access and a capped budget.
+
+Two ways to run the pipeline:
+
+- CLI (`zv short`, or the granular stage commands) runs the whole chain in-process on the local machine.
+- Orchestrator (`zv serve`) exposes an HTTP API and runs parser/media work on Asynq workers backed by Redis, with job state in Postgres.
+
+The orchestrator drives a job state machine: `queued -> parsing -> parsed -> recording -> recorded -> composing -> composed -> done` (or `failed`).
+Each worker is idempotent: it checks whether the durable artifact already exists and skips the external media command if so, which makes manual retries safe.
+Pure stages (parse, compose) retry automatically; recording does not retry automatically because it costs minutes and a GPU, so it is marked `failed` for the user to decide.
+
+Module boundaries (keep `cmd/` entrypoints thin):
+
+- `cmd/` - CLI entrypoints (`zv` unified binary plus `zv-parser`, `zv-recorder`, `zv-composer`, `zv-editor`, `zv-pipeline`, `zv-orchestrator`, ...).
+- `internal/parser` - `.dem` parsing and segment extraction (built on `markus-wa/demoinfocs-golang`).
+- `internal/killplan` - shared kill/segment plan types; the kill plan is the contract between parse and every later stage.
+- `internal/moments` - scored, reviewable clip candidates derived from kill plans.
+- `internal/recording` - HLAE/CS2 recording scripts, artifacts, validation.
+- `internal/editor` - Shorts rendering, the render preset registry, Lua effects, validation, publish packs.
+- `internal/renderplan` - render variants, loadouts, edit documents, QA.
+- `internal/composition` - concat/composition planning and FFmpeg boundaries.
+- `internal/httpapi` - orchestrator HTTP routes, handlers, and the embedded HTMX workbench UI.
+- `internal/workers` - Asynq parser/media/agent workers.
+- `internal/storage`, `internal/job`, `internal/tasks` - persistence and job state.
+- `internal/lineups` - utility lineup catalog data.
+- `effects/` - editable Lua effect scripts.
+- `overlays/` - HyperFrames overlay experiments and generated overlay projects.
+- `services/cs2-market` - separate Python prototype for CS2 item market research, with its own CLI (`cs2market init-db`, `ingest`, `score`, `export-shorts`).
+- `data/` - generated/local media artifacts; treat as output unless the task is explicitly about test fixtures or artifact cleanup.
+
+Note: `docs/architecture/*` describes the full design vision (object storage, a separate music mixer and encoder, a web frontend).
+The current foundation runs locally and concatenates segments into `final.mp4`; treat the README as the source of truth for what exists today.
 
 Docs worth reading before architectural changes:
 
@@ -38,10 +71,74 @@ Docs worth reading before architectural changes:
 - `docs/architecture/00-overview.md`
 - `docs/architecture/01-components.md`
 - `docs/architecture/02-data-flow.md`
+- `docs/specs/` for the specs that produced this code.
+
+## Render preset
+
+There is a single supported preset, `viral-60-clean`, defined in `internal/editor/preset.go`.
+It outputs 1080x1920 at 60fps: clean HUD-less POV with kill notices, viral hook text, kill punch-ins, a kill counter, and milestone labels.
+The loadout catalog (`internal/renderplan`), the HTTP API (`/api/presets`, `/api/loadouts`, render-variant validation), the workbench UI, and the render worker all derive from that registry, and unknown preset names are rejected with the valid list.
+List presets with `zv presets` (`--format json` for automation).
+The editing rationale (hook text in the first 1-2s, punch-ins on kills, slow-mo only on the final kill, beat-synced drops, loop-friendly endings, never cropping the killfeed) is documented in `docs/research/11-viral-cs2-vertical-editing.md`.
+
+## Common commands
+
+Build and run:
+
+```powershell
+.\scripts\build.ps1                 # build all binaries into .\bin
+.\bin\zv short match.dem --prompt "las mejores kills" --target-steamid 76561198000000000
+.\bin\zv short match.dem --prompt "all kills" --target-steamid 76561198000000000 --dry-run   # resolve the plan, run nothing
+.\bin\zv check                      # sanity-check the project contract (skills, workflows, docs)
+.\bin\zv presets                    # list render presets
+```
+
+`zv short` chains parse -> moments -> HLAE/CS2 recording -> render and interprets the prompt deterministically (Spanish and English): a 17-digit number or `--target-steamid` selects the player, `mejores`/`best`/`highlights` selects top moments (otherwise all kills are compiled), `musica`/`music`/`beat` adds beat analysis (needs `--music`), and an explicit preset name or `--preset` overrides the default `viral-60-clean`.
+Rerun a failed stage with `--from-recording <recording-result.json>` instead of recording again.
+
+Tests and the verification gate:
+
+```bash
+make test                                   # go test ./... -count=1 plus `zv check`
+go test ./... -count=1                      # all Go tests
+go test ./internal/parser -run TestFoo -count=1   # a single test (parser-only tests are safe by default)
+go test ./... -race                         # race detector for shared-state changes
+scripts/go-gate.sh                          # main gate: fmt, vet, build, tests
+scripts/go-gate.sh --no-format              # gate without formatting unrelated dirty files
+scripts/go-gate.sh --race                   # race-sensitive changes
+scripts/go-gate.sh --security               # security/dependency-sensitive changes
+scripts/go-gate.sh --race --security --build  # full gate for risky PRs
+scripts/go-format-changed.sh                # format all changed Go files (or pass explicit paths)
+```
+
+Orchestrator (HTTP API + workers), needs Docker for local Postgres and Redis:
+
+```bash
+make up                                      # Postgres + Redis via Docker
+make migrate-up                              # needs ZV_DATABASE_URL exported
+export ZV_DATABASE_URL="postgres://zackvideo:zackvideo@localhost:5432/zackvideo?sslmode=disable"
+export ZV_REDIS_ADDR="localhost:6379"
+export ZV_DATA_DIR="./data"
+./bin/zv serve                               # binds 127.0.0.1:8080; non-loopback needs ZV_MUTATION_TOKEN
+```
+
+Smoke tests:
+
+```bash
+./scripts/smoke.sh testdata/<demo>.dem <SteamID64>          # parser-only
+```
+
+```powershell
+.\scripts\smoke-real.ps1 -Demo testdata\<demo>.dem -TargetSteamID <SteamID64>   # full real run against a running orchestrator
+```
+
+If an optional tool is missing (`goimports`, `staticcheck`, `govulncheck`, `gosec`), say so and continue with the available checks.
 
 ## Go style
 
-Write boring, idiomatic Go. Optimize for the reader.
+Write boring, idiomatic Go.
+Optimize for the reader.
+Repo-local style rules are also mirrored in `.claude/rules/go-style.md`.
 
 Priorities, in order:
 
@@ -77,7 +174,7 @@ Context and concurrency:
 - Do not store `context.Context` in structs.
 - Every goroutine must have a clear owner and stop condition.
 - Respect cancellation/deadlines around DB, Redis, HTTP, subprocesses, and workers.
-- Protect shared maps/slices/state. Run race tests when touching shared state.
+- Protect shared maps/slices/state, and run race tests when touching shared state.
 
 Testing:
 
@@ -90,107 +187,77 @@ Testing:
 - Prefer public behavior tests over implementation-detail tests.
 - Avoid tests that require real CS2/HLAE/large media unless explicitly requested.
 
-## Operational rules for Codex
+## Operational rules
+
+Repo-local operational safety rules are also mirrored in `.claude/rules/zackvideo-operations.md`.
 
 Before editing:
 
 1. Run `git status --short`.
 2. Inspect the relevant files and tests.
-3. Identify whether the task touches generated media, dependencies, DB schema,
-   concurrency, security/auth, or external tools.
-4. Do not overwrite user changes. If a file has unrelated edits, preserve them.
+3. Identify whether the task touches generated media, dependencies, DB schema, concurrency, security/auth, or external tools.
+4. Do not overwrite user changes; if a file has unrelated edits, preserve them.
 
 During edits:
 
 - Keep diffs small and focused.
-- Do not commit, push, reset, clean, delete large directories, or rewrite history
-  unless explicitly asked.
+- Do not commit, push, reset, clean, delete large directories, or rewrite history unless explicitly asked.
 - Do not read `.env`, secrets, credentials, private keys, or local tokens.
 - Do not add generated video/audio/image artifacts to git.
-- Do not run HLAE, CS2, long FFmpeg renders, Docker destructive commands, or DB
-  migrations unless the user explicitly asks. Prefer `--dry-run` when available.
+- Do not run HLAE, CS2, long FFmpeg renders, Docker destructive commands, or DB migrations unless the user explicitly asks; prefer `--dry-run` when available.
 - Parser-only Go tests and pure unit tests are safe by default.
 - If a command may be slow or side-effectful, explain before running it.
 
-Media output and cleanup:
+Media output and delivery:
 
-- For CS2 Shorts, default to the most realistic demo-representative format
-  available. Preserve the captured game view and full in-game UI when present
-  (HUD, radar, killfeed, score, crosshair, health, ammo, and round context).
-  Avoid blurred top/bottom layouts, cinematic crops, or stylized framing unless
-  the user explicitly asks for that style for a specific run.
-- For kill/highlight Shorts, use the latest designed standard preset:
-  `viral-60-clean`. It is the product default for clean HUD-less 60fps POV with
-  kill notices, the viral-ultra-clean overlay pack, hook text, kill punch-ins,
-  counters, quality checks, cover sheets, CRF 16 slow encode, and audio
-  normalization.
-- For kill/highlight deliverables, default to one long vertical Short per
-  player/game containing all selected kills. Per-kill Shorts may be rendered as
-  intermediate publish inputs, but the upload-ready default should be the
-  concatenated all-kills long Short unless the user explicitly asks for
-  individual per-kill Shorts.
-- Do not use or advertise alternate render presets. `viral-60-clean` is the
-  only supported preset.
-- Put every final, upload-ready recording, Shorts pack, long compilation, cover,
-  caption, manifest, and review sheet under a folder named
-  `shortslistosparasubir` inside the run output directory. Intermediate capture,
-  parser, recorder, render, and log artifacts may remain in their normal
-  run-specific folders.
-- Final responses should point the user to the `shortslistosparasubir` folder or
-  to files inside it when delivering finished media.
-- After `.dem` files have been parsed/recorded and the final upload-ready media
-  has been validated, clean up the used `.dem` files by sending them to the
-  Windows Recycle Bin, not by permanently deleting them.
-- If demos were extracted from an archive, recycle only the extracted `.dem`
-  copies by default. Keep the original downloaded archive unless the user
-  explicitly asks to remove it.
-- Do not recycle `.dem` files until no further rerender, recapture, or parsing
-  step needs them. If that is unclear, keep them and mention the pending cleanup.
+- For CS2 Shorts, default to the most realistic demo-representative format available, preserving the captured game view and full in-game UI when present (HUD, radar, killfeed, score, crosshair, health, ammo, round context).
+  Avoid blurred top/bottom layouts, cinematic crops, or stylized framing unless the user explicitly asks for that style for a specific run.
+- For kill/highlight Shorts, use the product default preset `viral-60-clean` and the `viral-ultra-clean` overlay pack; do not use or advertise alternate presets.
+- For kill/highlight deliverables, default to one long vertical Short per player/game containing all selected kills.
+  Per-kill Shorts may be rendered as intermediate inputs, but the upload-ready default is the concatenated all-kills long Short unless the user explicitly asks for individual per-kill Shorts.
+- Put every final, upload-ready recording, Shorts pack, long compilation, cover, caption, manifest, and review sheet under a folder named `shortslistosparasubir` inside the run output directory.
+  Intermediate capture, parser, recorder, render, and log artifacts may stay in their normal run-specific folders.
+- Final responses should point the user to the `shortslistosparasubir` folder or to files inside it when delivering finished media.
+
+Demo cleanup:
+
+- After `.dem` files have been parsed/recorded and the final upload-ready media has been validated, clean up the used `.dem` files by sending them to the Windows Recycle Bin, not by permanently deleting them.
+- If demos were extracted from an archive, recycle only the extracted `.dem` copies by default; keep the original downloaded archive unless the user explicitly asks to remove it.
+- Do not recycle `.dem` files until no further rerender, recapture, or parsing step needs them; if that is unclear, keep them and mention the pending cleanup.
 
 Local capture path:
 
 - Use `C:\HLAE-2.190.1\HLAE.exe` for HLAE capture on this machine.
-- Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for FragForge
-  capture runs.
-- Always launch CS2 through HLAE in windowed mode for recording runs. The CS2
-  command line must include `-windowed`; do not record demos in fullscreen or
-  borderless fullscreen.
+- Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for FragForge capture runs.
+- Always launch CS2 through HLAE in windowed mode for recording runs; the CS2 command line must include `-windowed`, and demos must not be recorded in fullscreen or borderless fullscreen.
 
-Verification:
+## Task harnesses
 
-- Format all changed Go files: `scripts/go-format-changed.sh`
-- Format only specific files in a dirty repo: `scripts/go-format-changed.sh path/file.go ...`
-- Main gate: `scripts/go-gate.sh`
-- Gate without formatting unrelated dirty files: `scripts/go-gate.sh --no-format`
-- Race-sensitive changes: `scripts/go-gate.sh --race`
-- Security/dependency-sensitive changes: `scripts/go-gate.sh --security`
-- Full command for risky PRs: `scripts/go-gate.sh --race --security --build`
+Claude Code: repo-local slash commands live under `.claude/commands/` and reviewer agents under `.claude/agents/`.
 
-If an optional tool is missing (`goimports`, `staticcheck`, `govulncheck`,
-`gosec`), say so and continue with the available checks.
+- `/zv-plan <task>` for read-only planning.
+- `/zv-tdd <task>` for behavior changes.
+- `/zv-bugfix <task>` for bugs.
+- `/zv-parser-change <task>` for parser/killplan/lineup changes.
+- `/zv-media-change <task>` for editor/recording/FFmpeg/Lua changes.
+- `/zv-worker-api-change <task>` for orchestrator/API/worker changes.
+- `/zv-pr-ready` before review/PR.
+- `/zv-artifact-audit` for read-only generated artifact audits.
+- `/zv-toolchain-diagnose` for read-only local toolchain checks.
+- `@go-readability-reviewer`, `@go-test-reviewer`, `@go-concurrency-reviewer`, `@go-security-reviewer`, `@zv-media-pipeline-reviewer` for focused diff reviews.
 
-## Codex task harness
+Non-interactive wrappers under `scripts/claude-zv-*.sh` call Claude Code print mode with the same playbooks; `scripts/claude-run.sh .claude/commands/zv-tdd.md "..."` runs a command file directly, and `CLAUDE_DRY_RUN=1` previews the final prompt.
 
-Reusable prompt playbooks live under `.codex/prompts/`.
+Codex: reusable prompt playbooks live under `.codex/prompts/`, run through `scripts/codex-*.sh`.
 
-Run them through:
-
-- `scripts/codex-run.sh .codex/prompts/go-tdd.md "custom prompt run"` for a
-  direct prompt-file run.
-- `scripts/codex-plan.sh "plan ..."` for read-only planning.
-- `scripts/codex-go-tdd.sh "implement ..."` for behavior changes.
-- `scripts/codex-go-bugfix.sh "fix ..."` for bugs.
-- `scripts/codex-spike.sh "test whether ..."` for reversible experiments.
+- `scripts/codex-plan.sh "..."` for read-only planning.
+- `scripts/codex-go-tdd.sh "..."` for behavior changes.
+- `scripts/codex-go-bugfix.sh "..."` for bugs.
+- `scripts/codex-spike.sh "..."` for reversible experiments.
 - `scripts/codex-go-pr-ready.sh` before review/PR.
-- `scripts/codex-review-diff.sh` for read-only review.
-- `scripts/codex-go-readability-review.sh` for focused readability review.
-- `scripts/codex-go-test-review.sh` for focused test review.
-- `scripts/codex-go-concurrency-review.sh` for goroutine/race/cancellation review.
-- `scripts/codex-go-security-review.sh` for filesystem/subprocess/security review.
+- `scripts/codex-review-diff.sh` and the focused `scripts/codex-go-*-review.sh` scripts for read-only reviews.
 
-The wrappers feed Codex a selected prompt plus task text. Write-oriented scripts
-default to `workspace-write`; planning/review scripts default to `read-only`.
-Use `CODEX_DRY_RUN=1` to preview the final prompt without calling Codex.
+Write-oriented Codex scripts default to `workspace-write`; planning/review scripts default to `read-only`; `CODEX_DRY_RUN=1` previews the final prompt.
 
 ## Review output standard
 
@@ -200,5 +267,5 @@ For reviews, use:
 - `WARNING`: real maintainability or robustness issue, but possibly acceptable.
 - `NIT`: small clarity/style improvement.
 
-Every finding should include file/path, problem, why it matters, and a practical
-fix. If the diff is good, say: `No blocking issues found.`
+Every finding should include file/path, problem, why it matters, and a practical fix.
+If the diff is good, say: `No blocking issues found.`
