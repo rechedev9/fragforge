@@ -13,6 +13,11 @@ func validateSkillCommand(command []string) string {
 	switch command[0] {
 	case "short":
 		return validateShortCommand(command[1:])
+	case "batch":
+		return validateBatchCommand(command[1:])
+	case "metrics", "errors":
+		// Read-only observability commands; all flags are optional.
+		return ""
 	case "presets":
 		if issue := validateFormattedCommand("presets", command[1:]); issue != "" {
 			return issue
@@ -115,6 +120,23 @@ func validateSkillCommand(command []string) string {
 		}
 	default:
 		return fmt.Sprintf("uses non-standard zv command %q", command[0])
+	}
+	return ""
+}
+
+func validateBatchCommand(args []string) string {
+	if isSingleHelp(args) {
+		return ""
+	}
+	hasDir := false
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			hasDir = true
+			break
+		}
+	}
+	if !hasDir {
+		return `missing directory for "batch"; pass <dir>`
 	}
 	return ""
 }

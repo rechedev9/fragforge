@@ -26,6 +26,12 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 		return exitSuccess
 	case "short":
 		return runShort(args[1:], stdout, stderr, stdin, runner)
+	case "batch":
+		return runBatch(args[1:], stdout, stderr)
+	case "metrics":
+		return runMetrics(args[1:], stdout, stderr)
+	case "errors":
+		return runErrors(args[1:], stdout, stderr)
 	case "presets":
 		return runPresets(args[1:], stdout, stderr)
 	case "demo":

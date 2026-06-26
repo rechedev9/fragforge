@@ -87,6 +87,7 @@ func runShort(args []string, stdout, stderr io.Writer, stdin io.Reader, runner c
 		if code != exitSuccess {
 			fmt.Fprintf(stderr, "error: stage %d/%d (%s) failed; fix the issue and re-run, or pass --from-recording <recording-result.json> to skip parse and record once footage exists\n",
 				i+1, len(plan.stages), stage.label)
+			recordShortFailure(stage, code, opts.DemoPath)
 			return code
 		}
 	}

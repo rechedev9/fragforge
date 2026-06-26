@@ -1,5 +1,8 @@
 /bin/
 /data/*
+# Local observability output (error journal + Prometheus counters), at any depth
+# so a stray run from a package dir during tests is never tracked.
+**/data/obs/
 !/data/lineups/
 !/data/lineups/*.json
 # Music: commit only the catalog metadata + attribution (text), never the audio.

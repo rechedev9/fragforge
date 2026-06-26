@@ -14,6 +14,8 @@ func Routes(h *Handlers) chi.Router {
 	r.Use(h.rateLimiter.middleware)
 	r.Use(crossSiteGuard)
 	r.Use(h.requireMutationToken)
+	r.Get("/healthz", h.Health)
+	r.Get("/metrics", h.Metrics)
 	r.Get("/", h.Workbench)
 	r.Get("/ui/workspace", h.WorkbenchWorkspace)
 	r.Get("/ui/jobs", h.WorkbenchJobs)

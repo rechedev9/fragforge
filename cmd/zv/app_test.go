@@ -27,9 +27,18 @@ func TestMain(m *testing.M) {
 	if os.Getenv("ZV_FAKE_SUBCOMMAND") == "1" {
 		os.Exit(runFakeSubcommand())
 	}
+	// Redirect observability output to a temp dir so best-effort obs recording
+	// (e.g. a failed `zv short` stage) never writes data/obs into the source tree.
+	obsDir, _ := os.MkdirTemp("", "zv-test-obs-")
+	if obsDir != "" {
+		os.Setenv("ZV_DATA_DIR", obsDir)
+	}
 	code := m.Run()
 	if cachedZVBinaryDir != "" {
 		_ = os.RemoveAll(cachedZVBinaryDir)
+	}
+	if obsDir != "" {
+		_ = os.RemoveAll(obsDir)
 	}
 	os.Exit(code)
 }

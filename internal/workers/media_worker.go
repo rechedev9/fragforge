@@ -82,6 +82,7 @@ func recordTaskFailure(ctx context.Context, repo statusUpdater, id uuid.UUID, ta
 		return
 	}
 	markFailed(repo, id, err.Error())
+	recordWorkerFailure(id, taskType, err)
 	logWorkerTransition(id, taskType, job.StatusFailed)
 }
 

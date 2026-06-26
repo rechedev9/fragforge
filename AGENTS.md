@@ -85,16 +85,22 @@ The editing rationale (hook text in the first 1-2s, punch-ins on kills, slow-mo 
 
 Build and run:
 
+Build all binaries into `.\bin` with `.\scripts\build.ps1`, then:
+
 ```powershell
-.\scripts\build.ps1                 # build all binaries into .\bin
-.\bin\zv short match.dem --prompt "las mejores kills" --target-steamid 76561198000000000
-.\bin\zv short match.dem --prompt "all kills" --target-steamid 76561198000000000 --dry-run   # resolve the plan, run nothing
-.\bin\zv check                      # sanity-check the project contract (skills, workflows, docs)
-.\bin\zv presets                    # list render presets
+zv short match.dem --prompt "las mejores kills" --target-steamid 76561198000000000
+zv short match.dem --prompt "all kills" --target-steamid 76561198000000000 --dry-run
+zv batch C:\Users\you\Downloads\replays --recursive
+zv metrics
+zv errors --tail 20
+zv presets
+zv check
 ```
 
 `zv short` chains parse -> moments -> HLAE/CS2 recording -> render and interprets the prompt deterministically (Spanish and English): a 17-digit number or `--target-steamid` selects the player, `mejores`/`best`/`highlights` selects top moments (otherwise all kills are compiled), `musica`/`music`/`beat` adds beat analysis (needs `--music`), and an explicit preset name or `--preset` overrides the default `viral-60-clean`.
-Rerun a failed stage with `--from-recording <recording-result.json>` instead of recording again.
+`--dry-run` resolves the plan without running anything, and rerunning a failed stage with `--from-recording <recording-result.json>` skips parse and record.
+`zv check` sanity-checks the project contract (skills, workflows, docs); `zv presets` lists render presets.
+`zv batch`, `zv metrics`, and `zv errors` are the error-tracking commands (see Observability below).
 
 Tests and the verification gate:
 
@@ -119,8 +125,11 @@ make migrate-up                              # needs ZV_DATABASE_URL exported
 export ZV_DATABASE_URL="postgres://zackvideo:zackvideo@localhost:5432/zackvideo?sslmode=disable"
 export ZV_REDIS_ADDR="localhost:6379"
 export ZV_DATA_DIR="./data"
-./bin/zv serve                               # binds 127.0.0.1:8080; non-loopback needs ZV_MUTATION_TOKEN
+zv serve
 ```
+
+`zv serve` binds `127.0.0.1:8080` by default; a non-loopback bind requires `ZV_MUTATION_TOKEN`.
+It also exposes `GET /healthz` (liveness) and `GET /metrics` (Prometheus text), both unauthenticated so a Prometheus server can scrape them.
 
 Smoke tests:
 
@@ -133,6 +142,29 @@ Smoke tests:
 ```
 
 If an optional tool is missing (`goimports`, `staticcheck`, `govulncheck`, `gosec`), say so and continue with the available checks.
+
+## Observability and error tracking
+
+Pipeline failures are recorded locally by `internal/obs` so they can be inspected without standing up Postgres, Redis, or a real Prometheus server.
+The recorder writes two artifacts under `$ZV_DATA_DIR/obs` (default `data/obs`):
+
+- `journal.jsonl` - one JSON line per error: time, stage, class, message, demo, target, exit code.
+- `metrics.prom` - Prometheus text exposition of `fragforge_stage_runs_total{stage,result}` and `fragforge_errors_total{stage,class}` (with `metrics.json` as the reload sidecar).
+
+Failures are recorded at the orchestration boundaries, each owning its recording so counts are not doubled: `zv batch` (in-process parse), `zv short` stage failures, and the Asynq worker terminal failures (`recordTaskFailure`).
+The orchestrator also serves the same counters at `GET /metrics` for a Prometheus scrape, and `GET /healthz` for liveness.
+
+The autonomous loop (the goal of `zv batch`) is: run a folder of demos, read the error log, fix what it surfaces, rerun, until the log is empty.
+
+```bash
+zv batch testdata --recursive --report data/obs/batch-report.json
+zv errors --tail 50
+zv metrics
+zv errors --clear
+```
+
+`zv batch <dir>` parses every `.dem` under `<dir>` in-process (auto-picking the top fragger as the target unless `--steamid` is given), records each failure, and exits non-zero when any demo failed, so a fix loop can detect a non-empty log.
+When adding a new pipeline stage or failure path, record its errors through `internal/obs` with a stable `stage` and `class` label rather than only logging, so it shows up in the same journal and metrics.
 
 ## Go style
 
@@ -246,10 +278,12 @@ Claude Code: repo-local slash commands live under `.claude/commands/` and review
 - `/zv-toolchain-diagnose` for read-only local toolchain checks.
 - `@go-readability-reviewer`, `@go-test-reviewer`, `@go-concurrency-reviewer`, `@go-security-reviewer`, `@zv-media-pipeline-reviewer` for focused diff reviews.
 
-Non-interactive wrappers under `scripts/claude-zv-*.sh` call Claude Code print mode with the same playbooks; `scripts/claude-run.sh .claude/commands/zv-tdd.md "..."` runs a command file directly, and `CLAUDE_DRY_RUN=1` previews the final prompt.
+Non-interactive wrappers call Claude Code print mode with the same playbooks: `scripts/claude-run.sh .claude/commands/zv-tdd.md "..."` runs a command file directly, and the focused wrappers are `scripts/claude-zv-tdd.sh "..."` (behavior changes), `scripts/claude-zv-bugfix.sh "..."` (bugs), and `scripts/claude-zv-pr-ready.sh` (before review/PR).
+`CLAUDE_DRY_RUN=1` previews the final prompt without calling Claude Code.
 
 Codex: reusable prompt playbooks live under `.codex/prompts/`, run through `scripts/codex-*.sh`.
 
+- `scripts/codex-run.sh .codex/prompts/go-tdd.md "..."` runs a prompt file directly.
 - `scripts/codex-plan.sh "..."` for read-only planning.
 - `scripts/codex-go-tdd.sh "..."` for behavior changes.
 - `scripts/codex-go-bugfix.sh "..."` for bugs.

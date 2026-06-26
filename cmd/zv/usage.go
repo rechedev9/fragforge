@@ -4,6 +4,9 @@ const usage = `zv - deterministic CS2 demo-to-video workflows
 
 Usage:
   zv short <demo.dem> --prompt "<instruction>" [--preset <name>] [--out <dir>] [--music <audio>] [--target-steamid <SteamID64>] [--from-recording <recording-result.json>] [--dry-run]
+  zv batch <dir> [--recursive] [--steamid <id>] [--out <dir>] [--jobs <n>] [--format text|json] [--report <path>]
+  zv metrics [--reset]
+  zv errors [--tail <n>] [--json] [--clear]
   zv presets [--format text|json]
   zv demo parse [zv-parser parse flags]
   zv demo players [zv-demo-players flags]
@@ -64,6 +67,33 @@ Prompt rules (deterministic keywords, no model calls):
 `
 
 const presetsUsage = `usage: zv presets [--format text|json]
+`
+
+const batchUsage = `usage: zv batch <dir> [flags]
+
+Parse every .dem under <dir> in-process and record each failure to the local
+error journal, so a folder of demos can be exercised without driving the CLI
+once per demo. Exit code is non-zero when any demo failed.
+
+Flags:
+  --recursive            descend into subdirectories
+  --steamid <id>         target SteamID64 for every demo; default auto-picks the top fragger
+  --out <dir>            optional directory to write each kill plan into
+  --obs-dir <dir>        observability directory (default data/obs or $ZV_DATA_DIR/obs)
+  --jobs <n>             max concurrent demos; 0 picks a CPU-based default
+  --segment-mode <mode>  kills, smokes, or utility (default kills)
+  --format text|json     summary format (default text)
+  --report <path>        also write the JSON summary report to <path>
+`
+
+const metricsUsage = `usage: zv metrics [--obs-dir <dir>] [--reset]
+
+Print the local pipeline counters in Prometheus text format. --reset clears them.
+`
+
+const errorsUsage = `usage: zv errors [--obs-dir <dir>] [--tail <n>] [--json] [--clear]
+
+Summarize the local error journal. --clear truncates it (use between fix-loop runs).
 `
 
 const demoUsage = `usage: zv demo parse [zv-parser parse flags] | zv demo players [zv-demo-players flags]
