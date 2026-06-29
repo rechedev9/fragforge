@@ -48,6 +48,13 @@ func RosterKey(id uuid.UUID) string {
 	return path.Join(JobPrefix(id), "roster.json")
 }
 
+// GenerateIntentKey is the storage key for a job's one-click generate intent:
+// the preset, music, and edit captured when the user starts a guided run. The
+// record worker reads it to chain the matching render after a capture.
+func GenerateIntentKey(id uuid.UUID) string {
+	return path.Join(JobPrefix(id), "generate-intent.json")
+}
+
 // RenderVariantPrefix returns the durable storage prefix for a named render
 // variant, such as a vertical Shorts pack or a future mobile render.
 func RenderVariantPrefix(id uuid.UUID, variant string) (string, error) {

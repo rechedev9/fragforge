@@ -23,6 +23,8 @@ func TestKeysUseStableJobLayout(t *testing.T) {
 		CompositionResultKey(id): "jobs/11111111-1111-1111-1111-111111111111/composition/composition-result.json",
 		FinalMP4Key(id):          "jobs/11111111-1111-1111-1111-111111111111/composition/final.mp4",
 		MomentsKey(id):           "jobs/11111111-1111-1111-1111-111111111111/moments/moments.json",
+		RosterKey(id):            "jobs/11111111-1111-1111-1111-111111111111/roster.json",
+		GenerateIntentKey(id):    "jobs/11111111-1111-1111-1111-111111111111/generate-intent.json",
 	}
 	for got, want := range cases {
 		if got != want {

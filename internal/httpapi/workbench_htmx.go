@@ -43,7 +43,7 @@ type workbenchRosterPlayer struct {
 
 type workbenchJobView struct {
 	Job             job.Job
-	Loadouts        []renderplan.Loadout
+	Presets         []workbenchPreset
 	Songs           []song
 	Moments         []moments.Moment
 	MomentsError    string
@@ -52,12 +52,36 @@ type workbenchJobView struct {
 	RenderState     *renderplan.RenderVariantState
 	RenderError     string
 	Variant         string
-	DefaultEdit     renderplan.EditRequest
+	SelectedVariant string
+	SelectedEdit    renderplan.EditRequest
+	SelectedMusic   string
+	Shorts          []workbenchShort
 	CanParse        bool
-	CanRecord       bool
-	CanRender       bool
+	CanGenerate     bool
+	Generating      bool
+	Ready           bool
+	Failed          bool
 	CanCaptionAgent bool
+	Progress        int
+	PhaseLabel      string
 	ArtifactLinks   []workbenchArtifactLink
+}
+
+// workbenchPreset is the format choice shown as a card in the Generate panel.
+type workbenchPreset struct {
+	Name        string
+	Label       string
+	Description string
+}
+
+// workbenchShort is one finished vertical short, addressed for inline preview
+// and download.
+type workbenchShort struct {
+	SegmentID string
+	Title     string
+	Duration  float64
+	VideoHref string
+	CoverHref string
 }
 
 type workbenchArtifactLink struct {
@@ -280,6 +304,43 @@ func (h *Handlers) WorkbenchStartRender(w http.ResponseWriter, r *http.Request) 
 	h.WorkbenchJob(w, r)
 }
 
+// WorkbenchStartGenerate adapts the guided Generate form to POST
+// /api/jobs/{id}/generate, then re-renders the job so the user sees the run
+// advance through capture and render from a single click.
+func (h *Handlers) WorkbenchStartGenerate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		h.renderWorkbenchError(w, "parse form", err)
+		return
+	}
+	req := struct {
+		Preset string                 `json:"preset"`
+		Music  string                 `json:"music"`
+		Edit   renderplan.EditRequest `json:"edit"`
+	}{
+		Preset: strings.TrimSpace(r.FormValue("preset")),
+		Music:  strings.TrimSpace(r.FormValue("music")),
+		Edit: renderplan.NormalizeEditRequest(renderplan.EditRequest{
+			Format:     strings.TrimSpace(r.FormValue("format")),
+			KillEffect: strings.TrimSpace(r.FormValue("kill_effect")),
+			Transition: strings.TrimSpace(r.FormValue("transition")),
+			Intro:      r.FormValue("intro") != "",
+			Outro:      r.FormValue("outro") != "",
+		}),
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		h.renderWorkbenchError(w, "build generate request", err)
+		return
+	}
+	setJSONBody(r, body)
+	resp := h.capture(r, h.StartGenerate)
+	if resp.statusCode() >= 400 {
+		h.renderWorkbenchActionError(w, "start generate", resp)
+		return
+	}
+	h.WorkbenchJob(w, r)
+}
+
 // WorkbenchStartCaptionAgent adapts the publish metadata button to the existing
 // caption-agent endpoint.
 func (h *Handlers) WorkbenchStartCaptionAgent(w http.ResponseWriter, r *http.Request) {
@@ -342,24 +403,69 @@ func (h *Handlers) workbenchJobView(r *http.Request, id uuid.UUID) (workbenchJob
 	if err != nil {
 		return workbenchJobView{}, err
 	}
+
+	// The active variant follows the user's last generate choice (persisted as
+	// the intent) so status, preview, and artifacts track the short being made,
+	// not the registry default.
+	intent, intentExists := h.workbenchGenerateIntent(j.ID)
 	variant := strings.TrimSpace(r.FormValue("variant"))
+	if variant == "" && intentExists {
+		variant = intent.Variant
+	}
 	if variant == "" {
 		variant = editor.DefaultPreset().Name
 	}
+
 	renderState, renderErr := h.workbenchRenderState(j.ID, variant)
 	roster, rosterErr := h.workbenchRoster(j.ID)
 	momentRows, momentsErr := h.workbenchMoments(j)
+
+	ready := renderState != nil && renderState.Status == renderplan.RenderVariantStatusReady
+	failed := j.Status == job.StatusFailed || (renderState != nil && renderState.Status == renderplan.RenderVariantStatusFailed)
+	renderActive := renderState != nil && (renderState.Status == renderplan.RenderVariantStatusQueued || renderState.Status == renderplan.RenderVariantStatusRendering)
+	captureActive := j.Status == job.StatusRecording || j.Status == job.StatusComposing
+	// Between clicking Generate and the worker flipping to recording (and during
+	// the record->render handoff) the job sits in parsed/recorded with no render
+	// state yet; an existing intent marks that window as "generating".
+	intentPending := intentExists && renderState == nil && (j.Status == job.StatusParsed || j.Status == job.StatusRecorded)
+	generating := !ready && !failed && (captureActive || renderActive || intentPending)
+
+	selectedVariant := editor.DefaultPreset().Name
+	selectedEdit := renderplan.DefaultEditRequest()
+	selectedMusic := ""
+	if intentExists {
+		selectedVariant = intent.Variant
+		selectedEdit = renderplan.NormalizeEditRequest(intent.Edit)
+		selectedMusic = intent.MusicKey
+	}
+
+	var shorts []workbenchShort
+	if ready {
+		if s, err := h.workbenchShorts(j.ID, variant); err == nil {
+			shorts = s
+		} else {
+			renderErr = err
+		}
+	}
+
 	view := workbenchJobView{
 		Job:             j,
-		Loadouts:        renderplan.LoadoutCatalog(),
+		Presets:         workbenchPresets(),
 		Songs:           h.workbenchSongs(),
 		Moments:         momentRows,
 		Variant:         variant,
-		DefaultEdit:     renderplan.DefaultEditRequest(),
+		SelectedVariant: selectedVariant,
+		SelectedEdit:    selectedEdit,
+		SelectedMusic:   selectedMusic,
+		Shorts:          shorts,
 		CanParse:        j.Status == job.StatusScanned,
-		CanRecord:       (j.Status == job.StatusParsed || j.Status == job.StatusFailed) && j.KillPlan != nil,
-		CanRender:       j.Status == job.StatusRecorded || j.Status == job.StatusComposed || j.Status == job.StatusDone,
-		CanCaptionAgent: renderState != nil && renderState.Status == renderplan.RenderVariantStatusReady,
+		CanGenerate:     j.KillPlan != nil && !generating && generatableStatus(j.Status),
+		Generating:      generating,
+		Ready:           ready,
+		Failed:          failed,
+		CanCaptionAgent: ready,
+		Progress:        workbenchProgress(j.Status, renderState, intentPending),
+		PhaseLabel:      workbenchPhaseLabel(j.Status, renderState, intentPending, ready, failed),
 		RenderState:     renderState,
 		ArtifactLinks:   h.workbenchArtifactLinks(j, variant, renderState),
 	}
@@ -375,6 +481,151 @@ func (h *Handlers) workbenchJobView(r *http.Request, id uuid.UUID) (workbenchJob
 		view.RenderError = renderErr.Error()
 	}
 	return view, nil
+}
+
+// generatableStatus reports whether a job is in a state where the user may start
+// (or restart) a guided generate run.
+func generatableStatus(s job.Status) bool {
+	switch s {
+	case job.StatusParsed, job.StatusRecorded, job.StatusComposed, job.StatusDone, job.StatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// workbenchProgress folds the separate capture and render stages into one bar
+// for the guided flow. The render stage advances the bar even though the job row
+// stays at "recorded" while the chained render runs.
+func workbenchProgress(status job.Status, rs *renderplan.RenderVariantState, intentPending bool) int {
+	if rs != nil {
+		switch rs.Status {
+		case renderplan.RenderVariantStatusReady, renderplan.RenderVariantStatusFailed:
+			return 100
+		case renderplan.RenderVariantStatusRendering:
+			return 90
+		case renderplan.RenderVariantStatusQueued:
+			return 80
+		}
+	}
+	switch status {
+	case job.StatusRecording:
+		return 60
+	case job.StatusComposing:
+		return 78
+	case job.StatusRecorded:
+		return 70
+	}
+	if intentPending {
+		return 45
+	}
+	switch status {
+	case job.StatusQueued:
+		return 8
+	case job.StatusScanning, job.StatusParsing:
+		return 18
+	case job.StatusScanned:
+		return 26
+	case job.StatusParsed:
+		return 38
+	case job.StatusDone, job.StatusFailed:
+		return 100
+	}
+	return 0
+}
+
+// workbenchPhaseLabel names the current stage for the progress card.
+func workbenchPhaseLabel(status job.Status, rs *renderplan.RenderVariantState, intentPending, ready, failed bool) string {
+	switch {
+	case ready:
+		return "Short ready"
+	case failed:
+		return "Generation failed"
+	}
+	if rs != nil {
+		switch rs.Status {
+		case renderplan.RenderVariantStatusRendering:
+			return "Rendering your short"
+		case renderplan.RenderVariantStatusQueued:
+			return "Queued for render"
+		}
+	}
+	switch status {
+	case job.StatusRecording:
+		return "Capturing with HLAE"
+	case job.StatusComposing:
+		return "Composing"
+	}
+	if intentPending {
+		return "Starting capture"
+	}
+	return "Working"
+}
+
+func workbenchPresets() []workbenchPreset {
+	names := editor.PresetNames()
+	out := make([]workbenchPreset, 0, len(names))
+	for _, name := range names {
+		preset, ok := editor.PresetByName(name)
+		if !ok {
+			continue
+		}
+		out = append(out, workbenchPreset{Name: preset.Name, Label: preset.Label, Description: preset.Description})
+	}
+	return out
+}
+
+// workbenchGenerateIntent reads the persisted one-click choice for a job, if any.
+func (h *Handlers) workbenchGenerateIntent(id uuid.UUID) (renderplan.GenerateIntent, bool) {
+	rc, err := h.storage.Open(artifacts.GenerateIntentKey(id))
+	if err != nil {
+		return renderplan.GenerateIntent{}, false
+	}
+	defer rc.Close()
+	var intent renderplan.GenerateIntent
+	if err := json.NewDecoder(rc).Decode(&intent); err != nil {
+		return renderplan.GenerateIntent{}, false
+	}
+	return intent, true
+}
+
+// workbenchShorts reads the finished render result and returns the per-short
+// data needed for inline preview and download.
+func (h *Handlers) workbenchShorts(id uuid.UUID, variant string) ([]workbenchShort, error) {
+	ref, err := renderplan.NewRenderVariantArtifactRef(id, variant, renderplan.RenderVariantArtifactResult, "")
+	if err != nil {
+		return nil, err
+	}
+	rc, err := h.storage.Open(ref.Key)
+	if err != nil {
+		if storage.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer rc.Close()
+	var result editor.Result
+	if err := json.NewDecoder(rc).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode render result: %w", err)
+	}
+	base := "/api/jobs/" + id.String() + "/renders/" + variant
+	shorts := make([]workbenchShort, 0, len(result.Shorts))
+	for _, s := range result.Shorts {
+		if s.RenderSkipped || s.SegmentID == "" {
+			continue
+		}
+		short := workbenchShort{
+			SegmentID: s.SegmentID,
+			Title:     s.Title,
+			Duration:  s.DurationSeconds,
+			VideoHref: base + "/videos/" + s.SegmentID,
+		}
+		if !s.CoverSkipped && s.CoverPath != "" {
+			short.CoverHref = base + "/covers/" + s.SegmentID
+		}
+		shorts = append(shorts, short)
+	}
+	return shorts, nil
 }
 
 func (h *Handlers) workbenchMoments(j job.Job) ([]moments.Moment, error) {
@@ -659,15 +910,11 @@ const workbenchOnboardingTemplate = `
     </div>
     <div class="onboarding-step">
       <span class="step-index">2</span>
-      <div><strong>Parse</strong><span>Select the player and review detected moments.</span></div>
+      <div><strong>Pick player</strong><span>Select the POV and review detected moments.</span></div>
     </div>
     <div class="onboarding-step">
       <span class="step-index">3</span>
-      <div><strong>Record</strong><span>Approve HLAE/CS2 capture when the plan is ready.</span></div>
-    </div>
-    <div class="onboarding-step">
-      <span class="step-index">4</span>
-      <div><strong>Render</strong><span>Choose format, effects, transition, music, intro and outro.</span></div>
+      <div><strong>Generate</strong><span>Choose a format and effects, then make the short in one click.</span></div>
     </div>
   </div>
 </section>
@@ -694,55 +941,56 @@ const workbenchOnboardingTemplate = `
 const workbenchJobTemplate = `
 <input id="selected-job-id" type="hidden" name="selected" value="{{ .Job.ID }}" hx-swap-oob="true">
 
-<div class="workspace-status">
+<div class="workspace-status"
+  {{- if .Generating }} hx-get="/ui/jobs/{{ .Job.ID }}" hx-trigger="every 3s" hx-target="#workspace" hx-swap="innerHTML"{{ end }}>
   <span class="chip mono">{{ fileName .Job.DemoPath }}</span>
   <span class="status-badge {{ statusText .Job.Status }}">{{ statusText .Job.Status }}</span>
   <span class="chip mono">{{ shortID .Job.ID }}</span>
-  <span class="chip">Render: {{ renderStatus .RenderState }}</span>
+  <span class="chip{{ if .Ready }} good{{ else if .Failed }} bad{{ end }}">{{ .PhaseLabel }}</span>
   {{ if .Job.FailureReason }}<span class="chip bad">{{ .Job.FailureReason }}</span>{{ end }}
 </div>
 
-<section class="preview-panel" aria-label="Selected run">
-  <div class="preview-well">
-    <div class="preview-empty">
-      <span>{{ if .Job.KillPlan }}{{ .Job.KillPlan.Demo.Map }}{{ else }}Run {{ shortID .Job.ID }}{{ end }}</span>
-      <span>{{ if .Job.TargetSteamID }}Target {{ .Job.TargetSteamID }}{{ else }}Waiting for roster pick{{ end }}</span>
+<section class="preview-panel" aria-label="Preview">
+  {{ if .Shorts }}
+    <div class="short-gallery">
+      {{ range .Shorts }}
+        <figure class="short-card">
+          <video class="short-video" controls preload="metadata"{{ if .CoverHref }} poster="{{ .CoverHref }}"{{ end }} src="{{ .VideoHref }}"></video>
+          <figcaption class="short-meta">
+            <span class="short-title truncate">{{ if .Title }}{{ .Title }}{{ else }}{{ .SegmentID }}{{ end }}</span>
+            <span class="meta-label">{{ formatSeconds .Duration }}</span>
+            <a class="button send short-download" href="{{ .VideoHref }}" download>Download</a>
+          </figcaption>
+        </figure>
+      {{ end }}
     </div>
-    <div class="preview-controls">
-      <div class="control-group">
-        <span class="chip">Preset {{ .Variant }}</span>
-        <span class="chip">Task {{ taskTypeRender }}</span>
+  {{ else }}
+    <div class="preview-well">
+      <div class="preview-empty">
+        <span>{{ if .Job.KillPlan }}{{ .Job.KillPlan.Demo.Map }}{{ else }}Run {{ shortID .Job.ID }}{{ end }}</span>
+        <span>{{ if .Generating }}{{ .PhaseLabel }}{{ else if .Job.TargetSteamID }}Target {{ .Job.TargetSteamID }}{{ else }}Waiting for roster pick{{ end }}</span>
       </div>
-      <span class="mono">{{ if .Moments }}{{ formatSeconds (index .Moments 0).TimeStart }} / {{ formatSeconds (index .Moments 0).TimeEnd }}{{ else }}00:00.00 / 00:00.00{{ end }}</span>
+      <div class="preview-controls">
+        {{ if .Generating }}
+          <div class="control-group preview-progress"><span style="width: {{ .Progress }}%"></span></div>
+          <span class="mono">{{ .Progress }}%</span>
+        {{ else }}
+          <div class="control-group"><span class="chip">Format {{ .SelectedVariant }}</span></div>
+          <span class="mono">{{ if .Moments }}{{ len .Moments }} moments{{ else }}-{{ end }}</span>
+        {{ end }}
+      </div>
     </div>
-  </div>
+  {{ end }}
 </section>
 
 <section class="timeline-panel" aria-label="Actions">
-  <div class="next-action">
-    <span class="meta-label">Next action</span>
-    {{ if .CanParse }}
-      <strong>Choose the player to parse</strong>
-      <p>The roster scan is ready. Pick the POV target and FragForge will build the kill plan.</p>
-    {{ else if .CanRecord }}
-      <strong>Approve local capture</strong>
-      <p>The kill plan is ready. Recording will launch CS2 through HLAE on this PC.</p>
-    {{ else if .CanCaptionAgent }}
-      <strong>Prepare publish metadata</strong>
-      <p>The render is ready. Generate captions and titles when you want publish copy.</p>
-    {{ else if .CanRender }}
-      <strong>Render the upload pack</strong>
-      <p>Choose the delivery format and edit treatment, then create the upload-ready assets.</p>
-    {{ else if eq (statusText .Job.Status) "failed" }}
-      <strong>Inspect the failure</strong>
-      <p>Use the status message above and retry the matching stage when the input is fixed.</p>
-    {{ else }}
-      <strong>Waiting for worker progress</strong>
-      <p>The workbench refreshes the queue automatically while this job advances.</p>
-    {{ end }}
-  </div>
-  <div class="htmx-actions">
-    {{ if .CanParse }}
+  {{ if .CanParse }}
+    <div class="next-action">
+      <span class="meta-label">Pick player</span>
+      <strong>Choose the POV to clip</strong>
+      <p>The roster scan is ready. Pick the player and FragForge builds the kill plan.</p>
+    </div>
+    <div class="htmx-actions">
       <form class="inline-form" hx-post="/ui/jobs/{{ .Job.ID }}/parse" hx-target="#workspace" hx-swap="innerHTML">
         <select name="target_steamid" aria-label="Player">
           {{ range .Roster }}
@@ -752,76 +1000,92 @@ const workbenchJobTemplate = `
         <button class="button primary" type="submit">Parse Player</button>
       </form>
       {{ if .RosterError }}<span class="chip bad">{{ .RosterError }}</span>{{ end }}
-    {{ end }}
-
-    {{ if .CanRecord }}
-      <form class="inline-form" hx-post="/ui/jobs/{{ .Job.ID }}/record" hx-target="#workspace" hx-swap="innerHTML">
-        <select name="preset" aria-label="Recording preset">
-          {{ range .Loadouts }}
-                    <option value="{{ .Variant }}" {{ if eq $.Variant .Variant }}selected{{ end }}>{{ .Variant }}</option>
+    </div>
+  {{ else if .Generating }}
+    <div class="generate-status">
+      <span class="meta-label">{{ .PhaseLabel }}</span>
+      <div class="progress"><span style="width: {{ .Progress }}%"></span></div>
+      <p>FragForge is capturing with HLAE and rendering your short. This runs locally and can take a few minutes; this view refreshes automatically.</p>
+    </div>
+  {{ else if .CanGenerate }}
+    <div class="next-action">
+      <span class="meta-label">{{ if .Ready }}Generate another{{ else }}Choose your short{{ end }}</span>
+      <strong>{{ if .Ready }}Pick a different format or effects to make another short.{{ else if .Failed }}The last run failed. Adjust and try again.{{ else }}Pick a format and the effects to apply, then generate in one click.{{ end }}</strong>
+      {{ if and .Failed .Job.FailureReason }}<p class="action-error">{{ .Job.FailureReason }}</p>{{ end }}
+    </div>
+    <form class="generate-form" hx-post="/ui/jobs/{{ .Job.ID }}/generate" hx-target="#workspace" hx-swap="innerHTML">
+      <div class="preset-group">
+        <span class="meta-label">Format</span>
+        <div class="preset-cards">
+          {{ range .Presets }}
+            <label class="preset-card">
+              <input type="radio" name="preset" value="{{ .Name }}" {{ if eq $.SelectedVariant .Name }}checked{{ end }}>
+              <span class="preset-card-body">
+                <strong>{{ .Label }}</strong>
+                <span>{{ .Description }}</span>
+              </span>
+            </label>
           {{ end }}
-        </select>
-        <button class="button primary" type="submit">Record With HLAE</button>
-      </form>
-    {{ end }}
-
-    {{ if .CanRender }}
-      <form class="render-form" hx-post="/ui/jobs/{{ .Job.ID }}/render" hx-target="#workspace" hx-swap="innerHTML">
-        <label>
-          <span>Preset</span>
-          <select name="variant">
-            {{ range .Loadouts }}
-              <option value="{{ .Variant }}" {{ if eq $.Variant .Variant }}selected{{ end }}>{{ .Variant }}</option>
-            {{ end }}
+        </div>
+      </div>
+      <div class="effects-grid">
+        <label class="field">
+          <span>Aspect</span>
+          <select name="format">
+            <option value="short-9x16" {{ if eq $.SelectedEdit.Format "short-9x16" }}selected{{ end }}>Short 9:16</option>
+            <option value="landscape-16x9" {{ if eq $.SelectedEdit.Format "landscape-16x9" }}selected{{ end }}>Landscape 16:9</option>
           </select>
         </label>
-        <label>
+        <label class="field">
+          <span>Kill emphasis</span>
+          <select name="kill_effect">
+            <option value="clean" {{ if eq $.SelectedEdit.KillEffect "clean" }}selected{{ end }}>Clean</option>
+            <option value="punch-in" {{ if eq $.SelectedEdit.KillEffect "punch-in" }}selected{{ end }}>Punch-in</option>
+            <option value="velocity" {{ if eq $.SelectedEdit.KillEffect "velocity" }}selected{{ end }}>Velocity</option>
+            <option value="freeze-flash" {{ if eq $.SelectedEdit.KillEffect "freeze-flash" }}selected{{ end }}>Freeze flash</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Transition</span>
+          <select name="transition">
+            <option value="cut" {{ if eq $.SelectedEdit.Transition "cut" }}selected{{ end }}>Cut</option>
+            <option value="flash" {{ if eq $.SelectedEdit.Transition "flash" }}selected{{ end }}>Flash</option>
+            <option value="whip" {{ if eq $.SelectedEdit.Transition "whip" }}selected{{ end }}>Whip</option>
+            <option value="dip" {{ if eq $.SelectedEdit.Transition "dip" }}selected{{ end }}>Dip</option>
+          </select>
+        </label>
+        <label class="field">
           <span>Music</span>
           <select name="music">
             <option value="">No music</option>
             {{ range .Songs }}
-              <option value="{{ .ID }}">{{ .Title }}</option>
+              <option value="{{ .ID }}" {{ if eq $.SelectedMusic .ID }}selected{{ end }}>{{ .Title }}</option>
             {{ end }}
           </select>
         </label>
-        <label>
-          <span>Format</span>
-          <select name="format">
-            <option value="short-9x16" {{ if eq .DefaultEdit.Format "short-9x16" }}selected{{ end }}>Short 9:16</option>
-            <option value="landscape-16x9">16:9</option>
-          </select>
-        </label>
-        <label>
-          <span>Kill effect</span>
-          <select name="kill_effect">
-            <option value="clean">Clean</option>
-            <option value="punch-in" {{ if eq .DefaultEdit.KillEffect "punch-in" }}selected{{ end }}>Punch-in</option>
-            <option value="velocity">Velocity</option>
-            <option value="freeze-flash">Freeze flash</option>
-          </select>
-        </label>
-        <label>
-          <span>Transition</span>
-          <select name="transition">
-            <option value="cut">Cut</option>
-            <option value="flash" {{ if eq .DefaultEdit.Transition "flash" }}selected{{ end }}>Flash</option>
-            <option value="whip">Whip</option>
-            <option value="dip">Dip</option>
-          </select>
-        </label>
-        <label class="check-row"><input name="intro" type="checkbox"> Intro</label>
-        <label class="check-row"><input name="outro" type="checkbox"> Outro</label>
-        <button class="button primary" type="submit">Render Upload Pack</button>
-      </form>
-    {{ end }}
-
+      </div>
+      <div class="effects-toggles">
+        <label class="check-row"><input name="intro" type="checkbox" {{ checked .SelectedEdit.Intro }}> Intro bookend</label>
+        <label class="check-row"><input name="outro" type="checkbox" {{ checked .SelectedEdit.Outro }}> Outro bookend</label>
+      </div>
+      <div class="generate-actions">
+        <button class="button primary" type="submit">{{ if .Ready }}Generate another short{{ else }}Generate short{{ end }}</button>
+        <span class="generate-hint">Launches CS2 via HLAE on this PC to capture, then renders the upload pack.</span>
+      </div>
+    </form>
     {{ if .CanCaptionAgent }}
       <form class="inline-form" hx-post="/ui/jobs/{{ .Job.ID }}/agent/captions" hx-target="#workspace" hx-swap="innerHTML">
         <input type="hidden" name="variant" value="{{ .Variant }}">
-        <button class="button secondary" type="submit">Generate Captions</button>
+        <button class="button secondary" type="submit">Generate Captions &amp; Titles</button>
       </form>
     {{ end }}
-  </div>
+  {{ else }}
+    <div class="next-action">
+      <span class="meta-label">Next action</span>
+      <strong>Waiting for worker progress</strong>
+      <p>The workbench refreshes the queue automatically while this job advances.</p>
+    </div>
+  {{ end }}
 </section>
 
 <section class="moments-panel" aria-label="Detected moments">

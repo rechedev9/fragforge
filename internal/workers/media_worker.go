@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
+	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
@@ -56,6 +57,17 @@ type StatusRepository interface {
 type statusUpdater interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
 }
+
+// Enqueuer is the subset of the task queue the record worker uses to chain a
+// render after a successful capture. Both *asynq.Client and the inline queue
+// satisfy it. A nil Enqueuer disables chaining, which is the manual record path.
+type Enqueuer interface {
+	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
+}
+
+// chainedRenderUniqueTTL deduplicates a chained render against a render the user
+// may also have launched manually for the same job and variant within the day.
+const chainedRenderUniqueTTL = 24 * time.Hour
 
 // markFailed records a job's terminal failure on a fresh, short-lived context
 // so the write survives a handler context already cancelled by an Asynq
@@ -183,10 +195,11 @@ type StreamRenderWorkerConfig struct {
 
 // RecordWorker handles the "record:demo" Asynq task.
 type RecordWorker struct {
-	repo    StatusRepository
-	storage storage.Storage
-	cfg     RecordWorkerConfig
-	runner  commandRunner
+	repo     StatusRepository
+	storage  storage.Storage
+	cfg      RecordWorkerConfig
+	runner   commandRunner
+	enqueuer Enqueuer
 }
 
 func NewRecordWorker(repo StatusRepository, store storage.Storage, cfg RecordWorkerConfig) *RecordWorker {
@@ -196,6 +209,13 @@ func NewRecordWorker(repo StatusRepository, store storage.Storage, cfg RecordWor
 		cfg:     cfg,
 		runner:  execCommandRunner{},
 	}
+}
+
+// UseEnqueuer wires the task queue the worker uses to chain a render after a
+// successful capture. It is set once at startup, before the queue begins
+// processing tasks, so no in-flight handler observes a half-set field.
+func (w *RecordWorker) UseEnqueuer(e Enqueuer) {
+	w.enqueuer = e
 }
 
 func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) error {
@@ -221,7 +241,86 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 		return fmt.Errorf("mark recorded: %w", err)
 	}
 	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecorded)
+	// A guided "generate" run leaves an intent behind; chaining the render here
+	// turns the user's single click into capture-then-render. A chaining failure
+	// must not fail the capture (it already succeeded), so it is logged, not
+	// returned: the manual render endpoint remains a fallback.
+	w.chainRender(j.ID)
 	return nil
+}
+
+// chainRender enqueues the render described by the job's generate intent, if
+// one exists and an enqueuer is wired. It is best effort: every failure is
+// logged and swallowed so a successful capture is never reported as failed.
+func (w *RecordWorker) chainRender(id uuid.UUID) {
+	if w.enqueuer == nil {
+		return
+	}
+	intent, ok, err := w.readGenerateIntent(id)
+	if err != nil {
+		logWorkerError(id, "read generate intent", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	task, err := tasks.NewRenderVariantTask(id, intent.Variant, intent.MusicKey, intent.Edit)
+	if err != nil {
+		logWorkerError(id, "build chained render task", err)
+		return
+	}
+	// Surface "rendering is queued" immediately so the UI does not flash back to
+	// "not started" between the capture finishing and the render worker starting.
+	if err := w.writeQueuedRenderState(id, intent.Variant); err != nil {
+		logWorkerError(id, "write queued render state", err)
+	}
+	if _, err := w.enqueuer.Enqueue(task, asynq.Unique(chainedRenderUniqueTTL)); err != nil {
+		if !errors.Is(err, asynq.ErrDuplicateTask) {
+			logWorkerError(id, "enqueue chained render", err)
+		}
+		return
+	}
+	logWorkerTransition(id, tasks.TypeRenderVariant, job.StatusRecorded)
+}
+
+func (w *RecordWorker) readGenerateIntent(id uuid.UUID) (renderplan.GenerateIntent, bool, error) {
+	rc, err := w.storage.Open(artifacts.GenerateIntentKey(id))
+	if err != nil {
+		if storage.IsNotExist(err) {
+			return renderplan.GenerateIntent{}, false, nil
+		}
+		return renderplan.GenerateIntent{}, false, err
+	}
+	defer rc.Close()
+	var intent renderplan.GenerateIntent
+	if err := json.NewDecoder(rc).Decode(&intent); err != nil {
+		return renderplan.GenerateIntent{}, false, fmt.Errorf("decode generate intent: %w", err)
+	}
+	return intent, true, nil
+}
+
+func (w *RecordWorker) writeQueuedRenderState(id uuid.UUID, variant string) error {
+	loadout, err := renderplan.LoadoutForVariant(variant)
+	if err != nil {
+		return err
+	}
+	state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:   id,
+		Loadout: loadout,
+		Status:  renderplan.RenderVariantStatusQueued,
+	})
+	if err != nil {
+		return err
+	}
+	key, err := renderplan.RenderVariantStateKey(id, variant)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return w.storage.Put(key, bytes.NewReader(b))
 }
 
 func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string) error {

@@ -65,7 +65,7 @@ var renderPresets = []RenderPreset{
 	{
 		Name:           PresetViral60Clean,
 		Label:          "Kill Feed",
-		Description:    "default clean viral edit: HUD-less 60fps POV that keeps the in-game kill feed, with punch-ins and kill counter overlays",
+		Description:    "default clean viral edit: HUD-less 60fps POV that keeps the in-game kill feed, with punch-in kills",
 		FPS:            60,
 		Width:          1080,
 		Height:         1920,
@@ -81,7 +81,7 @@ var renderPresets = []RenderPreset{
 	{
 		Name:           PresetCleanPOV60,
 		Label:          "Clean POV",
-		Description:    "fully HUD-less first-person POV: cinematic kills with punch-ins and kill counter overlays, no in-game HUD or kill feed",
+		Description:    "fully HUD-less first-person POV: cinematic punch-in kills, no in-game HUD or kill feed",
 		FPS:            60,
 		Width:          1080,
 		Height:         1920,

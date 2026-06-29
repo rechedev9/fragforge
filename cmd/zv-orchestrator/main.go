@@ -73,8 +73,9 @@ func main() {
 	parserWorker := workers.NewParserWorker(repo, store)
 	taskHandlers[tasks.TypeParseDemo] = parserWorker.HandleParseDemo
 	taskHandlers[tasks.TypeScanRoster] = parserWorker.HandleScanRoster
+	var recordWorker *workers.RecordWorker
 	if cfg.recordWorkerEnabled() {
-		recordWorker := workers.NewRecordWorker(repo, store, workers.RecordWorkerConfig{
+		recordWorker = workers.NewRecordWorker(repo, store, workers.RecordWorkerConfig{
 			WorkDir:      cfg.MediaWorkDir,
 			RecorderPath: cfg.RecorderPath,
 			HLAEPath:     cfg.HLAEPath,
@@ -132,14 +133,23 @@ func main() {
 	var inline *inlineQueue
 	if cfg.QueueMode == queueModeInline {
 		inline = newInlineQueue(taskHandlers, cfg.WorkerConcurrency)
-		inline.Start(ctx)
 		queue = inline
+		// Wire the chaining queue before processing starts so the record worker
+		// never handles a task with a half-set enqueuer.
+		if recordWorker != nil {
+			recordWorker.UseEnqueuer(queue)
+		}
+		inline.Start(ctx)
 		log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
 	} else {
 		redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr}
 		client := asynq.NewClient(redisOpt)
 		defer client.Close()
 		queue = client
+		// Wire the chaining queue before the asynq server starts consuming.
+		if recordWorker != nil {
+			recordWorker.UseEnqueuer(queue)
+		}
 
 		asynqSrv = asynq.NewServer(redisOpt, asynq.Config{Concurrency: cfg.WorkerConcurrency})
 		mux := asynq.NewServeMux()

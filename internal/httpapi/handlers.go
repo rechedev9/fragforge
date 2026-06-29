@@ -583,6 +583,87 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// StartGenerate handles POST /api/jobs/{id}/generate. It captures the full
+// one-click choice (preset, music, edit) as the job's generate intent and
+// enqueues the recording. The record worker reads the intent on success and
+// enqueues the matching render, so the user acts once and the chosen treatment
+// flows automatically from capture to upload pack.
+func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	// Same entry points as recording: a parsed job, or a recorded/failed job
+	// being re-run in place. The kill plan must exist before we can record.
+	if (j.Status != job.StatusParsed && j.Status != job.StatusRecorded && j.Status != job.StatusFailed) || j.KillPlan == nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to generate (status=%s)", j.Status))
+		return
+	}
+	var req struct {
+		Preset string                 `json:"preset"`
+		Music  string                 `json:"music"`
+		Edit   renderplan.EditRequest `json:"edit"`
+	}
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+		switch err := json.NewDecoder(r.Body).Decode(&req); {
+		case err == nil, errors.Is(err, io.EOF):
+		default:
+			writeError(w, http.StatusBadRequest, "invalid generate request JSON")
+			return
+		}
+	}
+	preset, ok := editor.PresetByName(req.Preset)
+	if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset %q", req.Preset))
+		return
+	}
+	intent := renderplan.GenerateIntent{
+		Variant:  preset.Name,
+		MusicKey: req.Music,
+		Edit:     renderplan.NormalizeEditRequest(req.Edit),
+	}
+	if err := intent.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Build the render task now so an invalid music key fails fast here rather
+	// than silently dropping the chained render later in the record worker.
+	if _, err := tasks.NewRenderVariantTask(j.ID, intent.Variant, intent.MusicKey, intent.Edit); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	recordTask, err := tasks.NewRecordDemoTask(j.ID, preset.HUDMode)
+	if err != nil {
+		internalError(w, "build record task", err)
+		return
+	}
+	// Persist the intent before enqueuing so the worker always finds it, even if
+	// the capture finishes quickly. The job keeps its current status on enqueue
+	// failure so the client can retry once the queue recovers.
+	if err := h.writeGenerateIntent(j.ID, intent); err != nil {
+		internalError(w, "write generate intent", err)
+		return
+	}
+	if _, err := h.queue.Enqueue(recordTask, asynq.MaxRetry(0), asynq.Unique(renderUniqueTTL)); err != nil {
+		internalError(w, "enqueue record task", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":      j.ID,
+		"task":    tasks.TypeRecordDemo,
+		"variant": intent.Variant,
+	})
+}
+
+func (h *Handlers) writeGenerateIntent(id uuid.UUID, intent renderplan.GenerateIntent) error {
+	b, err := json.MarshalIndent(intent, "", "  ")
+	if err != nil {
+		return err
+	}
+	return h.storage.Put(artifacts.GenerateIntentKey(id), bytes.NewReader(b))
+}
+
 // StartComposition handles POST /api/jobs/{id}/compose.
 func (h *Handlers) StartComposition(w http.ResponseWriter, r *http.Request) {
 	j, ok := h.loadJob(w, r)

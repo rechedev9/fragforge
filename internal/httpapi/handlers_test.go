@@ -424,7 +424,7 @@ func TestWorkbenchWorkspaceOnboardsAndDeepLinksSelectedJob(t *testing.T) {
 	if rw.Code != http.StatusOK {
 		t.Fatalf("deep-link status = %d, want 200; body=%s", rw.Code, rw.Body.String())
 	}
-	for _, want := range []string{j.ID.String(), `hx-swap-oob="true"`, "Choose the player to parse", "deep.dem"} {
+	for _, want := range []string{j.ID.String(), `hx-swap-oob="true"`, "Choose the POV to clip", "deep.dem"} {
 		if !strings.Contains(rw.Body.String(), want) {
 			t.Fatalf("deep-link workspace missing %q: %s", want, rw.Body.String())
 		}
@@ -479,7 +479,14 @@ func TestWorkbenchHTMXFragmentsExposeLocalFlow(t *testing.T) {
 	if rw.Code != http.StatusOK {
 		t.Fatalf("job status = %d, want 200; body=%s", rw.Code, rw.Body.String())
 	}
-	for _, want := range []string{"Render Upload Pack", "short-9x16", "landscape-16x9", "Punch-in", "de_mirage", "MartinezSa", "Next action", "Render the upload pack"} {
+	for _, want := range []string{
+		"Generate short",
+		"Choose your short",
+		`hx-post="/ui/jobs/` + j.ID.String() + `/generate"`,
+		"Kill Feed", "Clean POV", "Full HUD",
+		"short-9x16", "landscape-16x9", "Punch-in",
+		"de_mirage", "MartinezSa",
+	} {
 		if !strings.Contains(rw.Body.String(), want) {
 			t.Fatalf("job fragment missing %q: %s", want, rw.Body.String())
 		}
@@ -560,7 +567,7 @@ func TestWorkbenchRenderFormEnqueuesEditOptions(t *testing.T) {
 	if payload.Edit != wantEdit {
 		t.Fatalf("edit = %#v, want %#v", payload.Edit, wantEdit)
 	}
-	if !strings.Contains(rw.Body.String(), `Render: queued`) {
+	if !strings.Contains(rw.Body.String(), `Queued for render`) {
 		t.Fatalf("fragment missing queued render state: %s", rw.Body.String())
 	}
 }
