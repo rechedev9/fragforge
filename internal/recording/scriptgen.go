@@ -14,6 +14,15 @@ type scheduledCommand struct {
 	Cmd  string `json:"cmd"`
 }
 
+// seekStep tells the runtime to seek the demo to Target once playback has passed
+// After. The runtime re-issues demo_gototick until the demo actually reaches
+// Target, because a one-shot seek issued a hair too early is silently dropped
+// ("Not currently playing back a demo").
+type seekStep struct {
+	After  int `json:"after"`
+	Target int `json:"target"`
+}
+
 // GenerateHLAEJavaScript renders a self-contained HLAE 2.x mirv-script file.
 func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 	plan.Stream = normalizeStreamConfig(plan.Stream)
@@ -21,7 +30,7 @@ func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 		return "", err
 	}
 
-	schedule := buildSchedule(plan)
+	schedule, seeks := buildSchedule(plan)
 	sort.SliceStable(schedule, func(i, j int) bool {
 		if schedule[i].Tick == schedule[j].Tick {
 			return schedule[i].Key < schedule[j].Key
@@ -29,7 +38,11 @@ func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 		return schedule[i].Tick < schedule[j].Tick
 	})
 
-	b, err := json.MarshalIndent(schedule, "    ", "  ")
+	scheduleJSON, err := json.MarshalIndent(schedule, "    ", "  ")
+	if err != nil {
+		return "", err
+	}
+	seeksJSON, err := json.MarshalIndent(seeks, "    ", "  ")
 	if err != nil {
 		return "", err
 	}
@@ -43,10 +56,16 @@ func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 	sb.WriteString("        delete globalThis[id];\n")
 	sb.WriteString("    }\n\n")
 	sb.WriteString("    const schedule = ")
-	sb.Write(b)
+	sb.Write(scheduleJSON)
+	sb.WriteString(";\n")
+	sb.WriteString("    const seeks = ")
+	sb.Write(seeksJSON)
 	sb.WriteString(";\n\n")
 	sb.WriteString("    const fired = {};\n")
 	sb.WriteString("    let armed = false;\n")
+	sb.WriteString("    let seekIdx = 0;\n")
+	sb.WriteString("    let frame = 0;\n")
+	sb.WriteString("    let lastSeekFrame = -999;\n")
 	sb.WriteString("    const run = (item) => {\n")
 	sb.WriteString("        if (fired[item.key]) return;\n")
 	sb.WriteString("        fired[item.key] = true;\n")
@@ -59,14 +78,32 @@ func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 	sb.WriteString("    mirv.events.clientFrameStageNotify.on(id, (e) => {\n")
 	sb.WriteString("        if (e.isBefore) return;\n")
 	sb.WriteString("        const tick = mirv.getDemoTick();\n")
-	sb.WriteString("        // getDemoTick is -1 in the menu / before a demo loads. Arm as soon as a\n")
-	sb.WriteString("        // demo is playing. The old check waited for the tick to jump backward,\n")
-	sb.WriteString("        // which never happens in normal forward playback, so the seek / record /\n")
-	sb.WriteString("        // quit schedule never ran and the entire demo played out with no clips.\n")
-	sb.WriteString("        if (tick < 0) return;\n")
+	sb.WriteString("        // Before playback actually starts, getDemoTick is 0 (or -1) and a seek\n")
+	sb.WriteString("        // fails with \"Not currently playing back a demo\" (the +playdemo runs after\n")
+	sb.WriteString("        // mirv_script_load). Arm only once the demo is genuinely playing (the tick\n")
+	sb.WriteString("        // has advanced past 0), so demo_gototick is never issued too early.\n")
 	sb.WriteString("        if (!armed) {\n")
+	sb.WriteString("            if (tick <= 0) return;\n")
 	sb.WriteString("            armed = true;\n")
-	sb.WriteString("            mirv.message(`[zackvideo] demo playback armed at tick ${tick}\\n`);\n")
+	sb.WriteString("            mirv.message(`[zackvideo] armed at tick ${tick}\\n`);\n")
+	sb.WriteString("        }\n")
+	sb.WriteString("        frame++;\n")
+	sb.WriteString("        // Seek to each segment in order, re-issuing demo_gototick until the demo\n")
+	sb.WriteString("        // actually reaches the target (a one-shot seek can be dropped if issued a\n")
+	sb.WriteString("        // hair too early). Hold the segment's schedule until its seek has landed.\n")
+	sb.WriteString("        if (seekIdx < seeks.length) {\n")
+	sb.WriteString("            const s = seeks[seekIdx];\n")
+	sb.WriteString("            if (tick >= s.after) {\n")
+	sb.WriteString("                if (tick + 8 < s.target) {\n")
+	sb.WriteString("                    if (frame - lastSeekFrame >= 8) {\n")
+	sb.WriteString("                        mirv.message(`[zackvideo] seek -> ${s.target} (at ${tick})\\n`);\n")
+	sb.WriteString("                        mirv.exec(`demo_gototick ${s.target}`);\n")
+	sb.WriteString("                        lastSeekFrame = frame;\n")
+	sb.WriteString("                    }\n")
+	sb.WriteString("                    return;\n")
+	sb.WriteString("                }\n")
+	sb.WriteString("                seekIdx++;\n")
+	sb.WriteString("            }\n")
 	sb.WriteString("        }\n")
 	sb.WriteString("        for (const item of schedule) {\n")
 	sb.WriteString("            if (!fired[item.key] && tick >= item.tick) run(item);\n")
@@ -79,8 +116,9 @@ func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 	return sb.String(), nil
 }
 
-func buildSchedule(plan RecordingPlan) []scheduledCommand {
+func buildSchedule(plan RecordingPlan) ([]scheduledCommand, []seekStep) {
 	commands := []scheduledCommand{}
+	seeks := []seekStep{}
 	setupTick := 25
 	for i, cmd := range streamSetupCommands(plan) {
 		commands = append(commands, scheduledCommand{
@@ -107,8 +145,11 @@ func buildSchedule(plan RecordingPlan) []scheduledCommand {
 			cameraWarmupTick = recordStart - max(2, plan.Tickrate/2)
 		}
 
+		// The seek is driven by the runtime (re-issued until it lands), not a
+		// one-shot scheduled command, so it survives being attempted too early.
+		seeks = append(seeks, seekStep{After: seekTick, Target: seekTarget})
+
 		commands = append(commands,
-			scheduledCommand{Tick: seekTick, Key: "seek-" + s.ID, Cmd: fmt.Sprintf("demo_gototick %d", seekTarget)},
 			scheduledCommand{Tick: max(seekTarget+1, cameraWarmupTick), Key: "camera-warmup-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
 			scheduledCommand{Tick: max(seekTarget+2, cameraLead3Tick), Key: "camera-lead-3s-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
 			scheduledCommand{Tick: max(seekTarget+3, cameraLead2Tick), Key: "camera-lead-2s-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
@@ -152,7 +193,7 @@ func buildSchedule(plan RecordingPlan) []scheduledCommand {
 	commands = append(commands,
 		scheduledCommand{Tick: lastEnd + pad/2, Key: "shutdown", Cmd: "disconnect; quit"},
 	)
-	return commands
+	return commands, seeks
 }
 
 func cameraCommand(targetName string, accountID uint32) string {

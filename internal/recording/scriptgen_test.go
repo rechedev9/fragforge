@@ -67,8 +67,13 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 		`camera-lead-1s-seg-001`,
 		`camera-lock-seg-001`,
 		`camera-relock-seg-001`,
-		`demo_gototick 21766`,
-		`demo_gototick 31426`,
+		// Seeks are driven by the runtime (re-issued until they land), declared as
+		// targets in the seeks array rather than one-shot demo_gototick commands.
+		`const seeks = `,
+		"\"target\": 21766",
+		"\"target\": 31426",
+		"mirv.exec(`demo_gototick ${s.target}`)",
+		`if (tick <= 0) return;`,
 		`demoui`,
 		`mirv_streams record fps 60`,
 		`mirv_streams record screen enabled 1`,
