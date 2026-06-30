@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { orchestratorUrl, mutationHeaders, forwardError } from '../_lib';
+import { orchestratorUrl, mutationHeaders, forwardError, callOrchestrator, serviceUnavailable } from '../_lib';
 
 // Runs server-side so the orchestrator URL + token stay off the client and the
 // .dem bytes are proxied without CORS. Local-first: same machine as the parser.
@@ -37,11 +37,12 @@ export async function POST(request: Request): Promise<Response> {
   const form = new FormData();
   form.append('demo', file, file.name);
 
-  const res = await fetch(`${orchestratorUrl()}/api/jobs`, {
+  const res = await callOrchestrator(`${orchestratorUrl()}/api/jobs`, {
     method: 'POST',
     headers: mutationHeaders(),
     body: form,
   });
+  if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
 
   const { id } = (await res.json()) as { id: string };

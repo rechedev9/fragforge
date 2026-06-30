@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, FileVideo, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer } from '@/lib/api/types';
 import { Wordmark } from '@/components/brand';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,11 @@ import { DemoDropzone } from '@/components/upload/demo-dropzone';
 import { PlayerPicker } from '@/components/upload/player-picker';
 
 type Stage = 'idle' | 'scanning' | 'picking' | 'parsing';
+
+/** True when an API error means the local analysis service is unreachable. */
+function isServiceUnavailable(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === SERVICE_UNAVAILABLE_CODE;
+}
 
 /**
  * Upload flow (/upload) — the no-login entry. Drop any .dem (yours or someone
@@ -48,8 +54,12 @@ export default function UploadPage() {
         setJobId(scan.jobId);
         setPlayers(scan.players);
         setStage('picking');
-      } catch {
-        reset('Could not scan that demo. Try another .dem file.');
+      } catch (err) {
+        reset(
+          isServiceUnavailable(err)
+            ? 'Analysis service is offline. Start it and try again.'
+            : 'Could not scan that demo. Try another .dem file.',
+        );
       }
     },
     [stage, reset],
@@ -63,8 +73,12 @@ export default function UploadPage() {
       try {
         const match = await api.parseDemo({ jobId, steamId });
         router.push('/matches/' + match.id);
-      } catch {
-        reset('Could not parse highlights for that player. Pick another.');
+      } catch (err) {
+        reset(
+          isServiceUnavailable(err)
+            ? 'Analysis service is offline. Start it and try again.'
+            : 'Could not parse highlights for that player. Pick another.',
+        );
       }
     },
     [stage, jobId, router, reset],

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { jobUrl, forwardError } from '../../_lib';
+import { jobUrl, forwardError, callOrchestrator, serviceUnavailable } from '../../_lib';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +13,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
   const url = jobUrl(jobId, '/roster');
   if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
 
-  const res = await fetch(url);
+  const res = await callOrchestrator(url);
+  if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
 
   const body = (await res.json()) as { players: unknown[] };

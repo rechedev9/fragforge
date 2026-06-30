@@ -55,7 +55,12 @@ async function readJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     const message = body && typeof body.error === 'string' ? body.error : `request failed (${res.status})`;
-    throw new Error(message);
+    // Carry the backend's stable `code` (e.g. SERVICE_UNAVAILABLE_CODE) onto the
+    // thrown error so callers can branch deterministically instead of sniffing
+    // the message string.
+    const err = new Error(message) as Error & { code?: string };
+    if (body && typeof body.code === 'string') err.code = body.code;
+    throw err;
   }
   return (await res.json()) as T;
 }

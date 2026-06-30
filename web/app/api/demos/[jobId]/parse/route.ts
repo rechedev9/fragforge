@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { jobUrl, mutationHeaders, forwardError } from '../../_lib';
+import { jobUrl, mutationHeaders, forwardError, callOrchestrator, serviceUnavailable } from '../../_lib';
 
 export const runtime = 'nodejs';
 
@@ -18,11 +18,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     return NextResponse.json({ error: 'steamId required' }, { status: 400 });
   }
 
-  const res = await fetch(url, {
+  const res = await callOrchestrator(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...mutationHeaders() },
     body: JSON.stringify({ target_steamid: steamId }),
   });
+  if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
 
   const body = (await res.json()) as { id: string; status: string };

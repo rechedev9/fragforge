@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { jobUrl, mutationHeaders, forwardError } from '../../../_lib';
+import { jobUrl, mutationHeaders, forwardError, callOrchestrator, serviceUnavailable } from '../../../_lib';
 
 export const runtime = 'nodejs';
 
@@ -22,7 +22,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     init.headers = { ...init.headers, 'Content-Type': 'application/json' };
     init.body = bodyText;
   }
-  const res = await fetch(url, init);
+  const res = await callOrchestrator(url, init);
+  if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
 
   return NextResponse.json((await res.json()) as unknown);
@@ -35,7 +36,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
   const url = jobUrl(jobId, `/renders/${variant}`);
   if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
 
-  const res = await fetch(url);
+  const res = await callOrchestrator(url);
+  if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
 
   return NextResponse.json((await res.json()) as unknown);

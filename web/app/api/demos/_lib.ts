@@ -1,8 +1,37 @@
 import { NextResponse } from 'next/server';
+import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 
 /** Server-side orchestrator base; local-first default. */
 export function orchestratorUrl(): string {
   return process.env.ORCHESTRATOR_URL ?? 'http://127.0.0.1:8080';
+}
+
+/**
+ * Calls the orchestrator, returning null when fetch throws so a route can return
+ * a clear 503 instead of a bare 500 that the UI would misread as a bad demo.
+ * fetch throws only before an HTTP response exists: the orchestrator being down
+ * (connection refused / DNS / socket reset) is the common case, but a malformed
+ * ORCHESTRATOR_URL or an aborted request lands here too, and all are reported as
+ * "service unavailable". The thrown error is logged server-side first so the
+ * real cause (ECONNREFUSED, a URL typo) is not lost, since the client only sees
+ * the generic 503. A reachable orchestrator's own non-2xx still comes back as a
+ * Response for forwardError to translate. Never logs demo bytes (only url+method).
+ */
+export async function callOrchestrator(url: string, init?: RequestInit): Promise<Response | null> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    console.error(`orchestrator unreachable: ${init?.method ?? 'GET'} ${url}`, err);
+    return null;
+  }
+}
+
+/** 503 for when the local analysis service (orchestrator) is unreachable. */
+export function serviceUnavailable(): Response {
+  return NextResponse.json(
+    { error: 'analysis service unavailable', code: SERVICE_UNAVAILABLE_CODE },
+    { status: 503 },
+  );
 }
 
 const UUID_RE = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -51,7 +80,8 @@ export async function forwardError(res: Response): Promise<Response> {
  * JSON error so the client can surface it. Never logs bytes.
  */
 export async function proxyStream(url: string, fallbackContentType: string): Promise<Response> {
-  const res = await fetch(url);
+  const res = await callOrchestrator(url);
+  if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
   const headers: Record<string, string> = {
     'content-type': res.headers.get('content-type') ?? fallbackContentType,

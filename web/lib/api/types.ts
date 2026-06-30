@@ -27,3 +27,11 @@ export type FeedItem = { id: string; author: string; authorAvatarUrl: string; ti
 export type Session = { user: SteamUser | null; slots: Slots; pcPaired: boolean; matchHistoryLinked: boolean };
 /** One player from a roster scan of an uploaded demo; the user picks who to clip. */
 export type DemoPlayer = { steamId: string; name: string; team: 'CT' | 'T' | ''; kills: number; deaths: number; assists: number };
+
+/**
+ * Stable error code returned by the /api/demos/* proxy routes when the local
+ * analysis service (the orchestrator) is unreachable, and the code the client
+ * branches on to tell "backend offline" apart from "bad demo". Shared so server
+ * and client agree on one string instead of sniffing messages.
+ */
+export const SERVICE_UNAVAILABLE_CODE = 'service_unavailable';
