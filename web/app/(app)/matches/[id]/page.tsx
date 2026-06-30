@@ -6,7 +6,8 @@ import { ArrowLeft, Music } from 'lucide-react';
 import type { EditConfig, Match, Play, Preset } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { DEFAULT_EDIT_CONFIG } from '@/lib/api/reel-store';
-import { formatKd } from '@/lib/format';
+import { formatKd, ratingClass } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -143,6 +144,12 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   const backHref = fromUpload ? '/upload' : '/matches';
   const backLabel = fromUpload ? 'Upload' : 'Matches';
 
+  // Scoreboard extras exist only on enriched (uploaded) matches; mock/seed
+  // matches show the classic K/D/A line. `hasRich` gates the ADR/KAST/HS row.
+  const { rating = 0, adr, kast, hsPct } = match.stats;
+  const hasRich = adr !== undefined;
+  const hasRating = rating > 0;
+
   return (
     <div className="flex min-h-[calc(100vh-5rem)] flex-col gap-8 pb-2">
       <Button
@@ -155,29 +162,50 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         {backLabel}
       </Button>
 
-      {/* Compact match summary strip */}
-      <section className="flex flex-wrap items-center gap-x-6 gap-y-4 rounded-xl border border-border bg-card px-5 py-4">
-        <div className="flex items-center gap-3">
-          <ScoreBar win={win} className="h-8" />
-          <div className="flex flex-col gap-1">
-            <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-foreground">
+      {/* Match summary */}
+      <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+        <div className="flex items-center gap-4">
+          <ScoreBar win={win} className="h-11" />
+          <div className="flex flex-col gap-2">
+            <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
               {match.map}
             </h1>
-            <Badge variant="outline" className="font-[family-name:var(--font-mono)]">
-              {hasScore ? (win ? 'WIN' : 'LOSS') : `${n} ${n === 1 ? 'HIGHLIGHT' : 'HIGHLIGHTS'}`}
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="font-[family-name:var(--font-mono)] text-[0.7rem]">
+                {hasScore ? (win ? 'WIN' : 'LOSS') : `${n} ${n === 1 ? 'HIGHLIGHT' : 'HIGHLIGHTS'}`}
+              </Badge>
+              {hasScore && score ? (
+                <span className="font-[family-name:var(--font-mono)] text-sm tabular-nums text-muted-foreground">
+                  {score[0]}-{score[1]}
+                </span>
+              ) : null}
+              {hasRating ? (
+                <span className="inline-flex items-baseline gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-0.5">
+                  <span
+                    className={cn(
+                      'font-[family-name:var(--font-mono)] text-sm font-semibold tabular-nums',
+                      ratingClass(rating),
+                    )}
+                  >
+                    {rating.toFixed(2)}
+                  </span>
+                  <span className="text-[0.6rem] font-medium uppercase tracking-wider text-muted-foreground">
+                    rating
+                  </span>
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        {hasScore ? (
-          <StatMono label="Score" value={score ? `${score[0]}-${score[1]}` : match.score} />
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="grid grid-cols-4 gap-x-5 gap-y-3 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6">
           <StatMono label="K" value={match.stats.kills} />
           <StatMono label="D" value={match.stats.deaths} />
           <StatMono label="A" value={match.stats.assists} />
-          <StatMono label="MVP" value={match.stats.mvps} />
+          {hasRich ? <StatMono label="ADR" value={Math.round(adr!)} /> : null}
+          {hasRich ? <StatMono label="KAST" value={`${Math.round(kast!)}%`} /> : null}
+          {hasRich ? <StatMono label="HS" value={`${Math.round(hsPct!)}%`} /> : null}
+          {match.stats.mvps > 0 ? <StatMono label="MVP" value={match.stats.mvps} /> : null}
           <StatMono label="K/D" value={formatKd(match.stats.kd)} accent />
         </div>
       </section>

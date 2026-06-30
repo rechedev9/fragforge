@@ -8,6 +8,14 @@ export function formatKd(n: number): string {
   return n.toFixed(2);
 }
 
+/** Tailwind text-colour class for an HLTV-1.0 rating, by performance band. */
+export function ratingClass(rating: number): string {
+  if (rating >= 1.15) return 'text-emerald-400';
+  if (rating >= 0.95) return 'text-foreground';
+  if (rating >= 0.8) return 'text-amber-400';
+  return 'text-rose-400';
+}
+
 /** Relative time like "2h" / "3d" / "just now" from an ISO string or epoch ms. */
 export function timeAgo(value: string | number): string {
   const then = typeof value === 'number' ? value : Date.parse(value);

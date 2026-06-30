@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Crosshair } from 'lucide-react';
 import type { DemoPlayer } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
+import { ratingClass } from '@/lib/format';
 
 export type PlayerPickerProps = {
   /** Roster from the scan, already sorted by kills desc. */
@@ -19,14 +20,6 @@ type Column = {
   value: (p: DemoPlayer) => string;
   tone?: (p: DemoPlayer) => string;
 };
-
-/** Rating colour by HLTV-1.0 band: green strong, amber soft, red weak. */
-function ratingTone(rating: number): string {
-  if (rating >= 1.15) return 'text-emerald-400';
-  if (rating >= 0.95) return 'text-foreground';
-  if (rating >= 0.8) return 'text-amber-400';
-  return 'text-rose-400';
-}
 
 function signed(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
@@ -51,7 +44,7 @@ export function PlayerPicker({ players, onPick }: PlayerPickerProps) {
 
   const showMvp = players.some((p) => p.mvps > 0);
   const columns: Column[] = [
-    { key: 'rating', label: 'RAT', value: (p) => p.rating.toFixed(2), tone: (p) => ratingTone(p.rating) },
+    { key: 'rating', label: 'RAT', value: (p) => p.rating.toFixed(2), tone: (p) => ratingClass(p.rating) },
     { key: 'k', label: 'K', value: (p) => `${p.kills}` },
     { key: 'd', label: 'D', value: (p) => `${p.deaths}` },
     { key: 'a', label: 'A', value: (p) => `${p.assists}` },
