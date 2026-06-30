@@ -4,62 +4,46 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"sync"
 
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
-	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/events"
 )
 
-// PlayerStat is one player's tally from a roster scan of a demo.
+// PlayerStat is one player's scoreboard line from a roster scan of a demo.
+// Kills/Deaths/Assists are raw tallies; ADR, HSPct, KAST, and Rating are derived
+// once the full match is known (see roster_stats.go). Counters are measured from
+// MatchStart so warmup is excluded; if a demo has no MatchStart, everything counts.
 type PlayerStat struct {
-	SteamID64 string `json:"steamid64"`
-	Name      string `json:"name"`
-	Team      string `json:"team"` // "CT" | "T" | "" (last observed)
-	Kills     int    `json:"kills"`
-	Deaths    int    `json:"deaths"`
-	Assists   int    `json:"assists"`
+	SteamID64 string  `json:"steamid64"`
+	Name      string  `json:"name"`
+	Team      string  `json:"team"` // "CT" | "T" | "" (last observed)
+	Kills     int     `json:"kills"`
+	Deaths    int     `json:"deaths"`
+	Assists   int     `json:"assists"`
+	Headshots int     `json:"headshots"` // headshot kills
+	MVPs      int     `json:"mvps"`      // RoundMVPAnnouncement count
+	Rounds    int     `json:"rounds"`    // rounds played (denominator for ADR/KAST)
+	ADR       float64 `json:"adr"`       // average damage per round (excl. team damage)
+	HSPct     float64 `json:"hs_pct"`    // headshot kills / kills, 0..100
+	KAST      float64 `json:"kast"`      // % of rounds with kill/assist/survive/trade, 0..100
+	Rating    float64 `json:"rating"`    // HLTV 1.0 rating, ~1.0-centered
 }
 
-// Roster does one pass over the demo and returns every human player it saw,
-// with kill/death/assist tallies, sorted by Kills desc then Name asc. Bots and
-// players with a zero SteamID are skipped. An empty demo yields an empty slice,
-// not an error; unlike Run, Roster needs no target and never reports one missing.
+// Roster does one pass over the demo and returns every human player it saw, as a
+// full scoreboard line (K/D/A plus HS%, ADR, KAST, MVPs, and an HLTV 1.0 rating),
+// sorted by Kills desc then Name asc. Bots and players with a zero SteamID are
+// skipped. An empty demo yields an empty slice, not an error; unlike Run, Roster
+// needs no target and never reports one missing.
 func Roster(p demoinfocs.Parser) ([]PlayerStat, error) {
-	tally := map[uint64]*PlayerStat{}
-
-	observe := func(pl *common.Player) *PlayerStat {
-		if pl == nil || pl.SteamID64 == 0 {
-			return nil
-		}
-		stat, ok := tally[pl.SteamID64]
-		if !ok {
-			stat = &PlayerStat{SteamID64: strconv.FormatUint(pl.SteamID64, 10)}
-			tally[pl.SteamID64] = stat
-		}
-		stat.Name = pl.Name
-		stat.Team = rosterTeam(pl.Team)
-		return stat
-	}
-
-	p.RegisterEventHandler(func(e events.Kill) {
-		if killer := observe(e.Killer); killer != nil {
-			killer.Kills++
-		}
-		if victim := observe(e.Victim); victim != nil {
-			victim.Deaths++
-		}
-		if assister := observe(e.Assister); assister != nil {
-			assister.Assists++
-		}
-	})
+	acc := newRosterAccumulator()
+	acc.register(p)
 
 	if err := parseToEnd(p); err != nil {
 		return nil, fmt.Errorf("parsing demo: %w", err)
 	}
 
-	return sortRoster(tally), nil
+	return acc.finalize(), nil
 }
 
 // RosterWithContext drives Roster but aborts parsing when ctx is cancelled,
