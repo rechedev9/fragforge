@@ -24,6 +24,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	// Auto-detect HLAE/CS2/recorder on the host so capture works without the user
+	// setting env vars; explicit env still wins. Best-effort, never fatal.
+	cfg, captureSource := detectCaptureTools(cfg)
+	for _, name := range []string{"ZV_RECORDER_PATH", "ZV_HLAE_PATH", "ZV_CS2_PATH"} {
+		if captureSource[name] == "detected" {
+			log.Printf("capture: auto-detected %s", name)
+		}
+	}
+	log.Printf("capture: record worker enabled=%v", cfg.recordWorkerEnabled())
 	if missing := cfg.missingRecordTools(); len(missing) > 0 {
 		log.Printf("capture: configured record tool path(s) not found on disk: %v", missing)
 	}
@@ -184,7 +193,7 @@ func main() {
 		httpapi.WithStreamRepository(streamRepo),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
 		httpapi.WithMusicDir(cfg.MusicDir),
-		httpapi.WithCapabilities(cfg.captureCapabilities()),
+		httpapi.WithCapabilities(cfg.captureCapabilities(captureSource)),
 	)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

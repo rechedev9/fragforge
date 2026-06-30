@@ -65,8 +65,18 @@ export type DemoPlayer = {
  */
 export const SERVICE_UNAVAILABLE_CODE = 'service_unavailable';
 
-/** One external capture tool (recorder/HLAE/CS2) and its readiness on this PC. */
-export type CaptureTool = { name: string; path?: string; configured: boolean; accessible: boolean };
+/**
+ * One external capture tool (recorder/HLAE/CS2) and its readiness on this PC.
+ * `source` is how the path was resolved: 'detected' (auto-found on the machine),
+ * 'env' (set explicitly), or 'none' (not found - the user must install/set it).
+ */
+export type CaptureTool = {
+  name: string;
+  path?: string;
+  source?: 'env' | 'detected' | 'none';
+  configured: boolean;
+  accessible: boolean;
+};
 
 /**
  * Whether gameplay capture (HLAE + CS2 recording) is set up on the local machine.

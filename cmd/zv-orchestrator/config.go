@@ -106,7 +106,10 @@ func loadConfig() (config, error) {
 }
 
 func (c config) recordWorkerEnabled() bool {
-	return c.RecorderPath != ""
+	// All three are needed to record; with auto-detection a path may be filled
+	// for some tools and not others, so require the full set (validateMediaConfig
+	// still enforces the all-or-nothing contract for explicitly-set env).
+	return c.RecorderPath != "" && c.HLAEPath != "" && c.CS2Path != ""
 }
 
 func (c config) composeWorkerEnabled() bool {
@@ -129,19 +132,30 @@ func (c config) agentWorkerEnabled() bool {
 // GET /api/capabilities and uses to gate record/generate. Worker enablement is
 // fixed here at startup; the tool paths are reported so the web UI can tell the
 // user which ones to set, and accessibility is re-checked per request.
-func (c config) captureCapabilities() httpapi.Capabilities {
+func (c config) captureCapabilities(src captureToolSource) httpapi.Capabilities {
+	recordTool := func(name, path string) httpapi.CaptureTool {
+		return httpapi.CaptureTool{Name: name, Path: path, Source: src[name]}
+	}
+	// Render tools are not auto-detected, so their source is just env-or-none.
+	renderTool := func(name, path string) httpapi.CaptureTool {
+		source := "none"
+		if path != "" {
+			source = "env"
+		}
+		return httpapi.CaptureTool{Name: name, Path: path, Source: source}
+	}
 	return httpapi.Capabilities{
 		RecordEnabled:  c.recordWorkerEnabled(),
 		ComposeEnabled: c.composeWorkerEnabled(),
 		RenderEnabled:  c.renderWorkerEnabled(),
 		RecordTools: []httpapi.CaptureTool{
-			{Name: "ZV_RECORDER_PATH", Path: c.RecorderPath},
-			{Name: "ZV_HLAE_PATH", Path: c.HLAEPath},
-			{Name: "ZV_CS2_PATH", Path: c.CS2Path},
+			recordTool("ZV_RECORDER_PATH", c.RecorderPath),
+			recordTool("ZV_HLAE_PATH", c.HLAEPath),
+			recordTool("ZV_CS2_PATH", c.CS2Path),
 		},
 		RenderTools: []httpapi.CaptureTool{
-			{Name: "ZV_EDITOR_PATH", Path: c.EditorPath},
-			{Name: "ZV_FFMPEG_PATH", Path: c.FFmpegPath},
+			renderTool("ZV_EDITOR_PATH", c.EditorPath),
+			renderTool("ZV_FFMPEG_PATH", c.FFmpegPath),
 		},
 	}
 }

@@ -10,8 +10,9 @@ import (
 // is recomputed per request so a freshly installed binary flips without a
 // restart, even though worker enablement itself is frozen at startup.
 type CaptureTool struct {
-	Name       string `json:"name"` // the env var, e.g. "ZV_HLAE_PATH"
-	Path       string `json:"path"` // configured path, "" when unset
+	Name       string `json:"name"`   // the env var, e.g. "ZV_HLAE_PATH"
+	Path       string `json:"path"`   // resolved path, "" when not found
+	Source     string `json:"source"` // "env" (set explicitly) | "detected" (auto-found) | "none"
 	Configured bool   `json:"configured"`
 	Accessible bool   `json:"accessible"`
 }

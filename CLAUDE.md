@@ -317,7 +317,8 @@ Demo cleanup:
 
 Local capture path:
 
-- Use `C:\HLAE-2.190.1\HLAE.exe` for HLAE capture on this machine.
+- The orchestrator auto-detects the capture tools on startup so the user does not set env vars: `zv-recorder` next to the orchestrator binary, HLAE at `C:\HLAE-*\HLAE.exe`, and `cs2.exe` via Steam's `libraryfolders.vdf` (`cmd/zv-orchestrator/detect.go`). Explicit `ZV_RECORDER_PATH`/`ZV_HLAE_PATH`/`ZV_CS2_PATH` still win. `GET /api/capabilities` reports each tool's `source` (`detected`/`env`/`none`) and accessibility, which the web "Capture" card surfaces (and the record/generate handlers 409 with an actionable message when capture is not configured).
+- Use `C:\HLAE-2.190.1\HLAE.exe` for HLAE capture on this machine; auto-detection prefers a versioned `C:\HLAE-*` over the bare `C:\HLAE\HLAE.exe`.
 - Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for FragForge capture runs.
 - Always launch CS2 through HLAE in windowed mode for recording runs; the CS2 command line must include `-windowed`, and demos must not be recorded in fullscreen or borderless fullscreen.
 

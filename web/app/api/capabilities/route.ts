@@ -14,7 +14,7 @@ export async function GET(): Promise<Response> {
   if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
 
-  type UpstreamTool = { name?: string; configured?: boolean; accessible?: boolean; path?: string };
+  type UpstreamTool = { name?: string; source?: string; configured?: boolean; accessible?: boolean; path?: string };
   const data = (await res.json()) as {
     record?: { enabled?: boolean; tools?: UpstreamTool[] };
     render?: { enabled?: boolean; tools?: UpstreamTool[] };
@@ -23,7 +23,7 @@ export async function GET(): Promise<Response> {
   // Forward only the fields the UI uses; drop each tool's absolute disk `path` so
   // local filesystem layout never leaves the box, even if this bind is exposed.
   const tools = (list?: UpstreamTool[]) =>
-    (list ?? []).map((t) => ({ name: String(t.name ?? ''), configured: Boolean(t.configured), accessible: Boolean(t.accessible) }));
+    (list ?? []).map((t) => ({ name: String(t.name ?? ''), source: String(t.source ?? 'none'), configured: Boolean(t.configured), accessible: Boolean(t.accessible) }));
   return NextResponse.json(
     {
       record: { enabled: Boolean(data.record?.enabled), tools: tools(data.record?.tools) },

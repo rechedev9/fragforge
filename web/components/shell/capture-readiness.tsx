@@ -16,17 +16,17 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const STATUS_META: Record<CaptureStatus, { label: string; dot: string; text: string; hint: string }> = {
-  ready: { label: 'Ready', dot: 'bg-emerald-400', text: 'text-emerald-400', hint: 'HLAE + CS2 are configured for capture.' },
-  warning: { label: 'Check paths', dot: 'bg-amber-400', text: 'text-amber-400', hint: 'A configured tool path is missing on disk.' },
-  unconfigured: { label: 'Set up', dot: 'bg-rose-400', text: 'text-rose-400', hint: 'Add your HLAE + CS2 paths to record gameplay.' },
+  ready: { label: 'Ready', dot: 'bg-emerald-400', text: 'text-emerald-400', hint: 'HLAE + CS2 detected on this PC.' },
+  warning: { label: 'Check paths', dot: 'bg-amber-400', text: 'text-amber-400', hint: 'A capture tool was set but is missing on disk.' },
+  unconfigured: { label: 'Set up', dot: 'bg-rose-400', text: 'text-rose-400', hint: "HLAE + CS2 weren't found on this PC." },
   offline: { label: 'Offline', dot: 'bg-muted-foreground', text: 'text-muted-foreground', hint: 'Start your local orchestrator (zv serve).' },
 };
 
-/** The three record tool env vars, with a typical Windows path as a hint. */
-const TOOL_GUIDE: Array<{ name: string; what: string; example: string }> = [
-  { name: 'ZV_RECORDER_PATH', what: 'the FragForge recorder', example: 'C:\\...\\bin\\zv-recorder.exe' },
-  { name: 'ZV_HLAE_PATH', what: 'HLAE', example: 'C:\\HLAE-2.190.1\\HLAE.exe' },
-  { name: 'ZV_CS2_PATH', what: 'the CS2 executable', example: 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Counter-Strike Global Offensive\\game\\bin\\win64\\cs2.exe' },
+/** The three record tools, with a friendly name and a typical Windows path. */
+const TOOL_GUIDE: Array<{ name: string; label: string; example: string }> = [
+  { name: 'ZV_RECORDER_PATH', label: 'FragForge recorder', example: 'C:\\...\\bin\\zv-recorder.exe' },
+  { name: 'ZV_HLAE_PATH', label: 'HLAE', example: 'C:\\HLAE-2.190.1\\HLAE.exe' },
+  { name: 'ZV_CS2_PATH', label: 'CS2', example: 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Counter-Strike Global Offensive\\game\\bin\\win64\\cs2.exe' },
 ];
 
 /**
@@ -77,45 +77,47 @@ export function CaptureReadiness() {
 
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Set up gameplay capture</DialogTitle>
+          <DialogTitle>Gameplay capture</DialogTitle>
           <DialogDescription>
-            FragForge records on your own PC with HLAE + CS2. Set these paths on the local orchestrator and restart it, then capture
-            becomes available.
+            FragForge records on your PC with HLAE + CS2 and finds them automatically. Here is what it detected on this machine:
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           {TOOL_GUIDE.map((tool) => {
             const state = toolState.get(tool.name);
+            const found = Boolean(state?.accessible);
+            const badge = found
+              ? { label: state?.source === 'env' ? 'Set' : 'Detected', cls: 'bg-emerald-400/10 text-emerald-400' }
+              : state?.configured
+                ? { label: 'Missing', cls: 'bg-amber-400/10 text-amber-400' }
+                : { label: 'Not found', cls: 'bg-rose-400/10 text-rose-400' };
             return (
               <div key={tool.name} className="rounded-lg border border-border bg-card p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <code className="font-[family-name:var(--font-mono)] text-sm font-semibold text-foreground">{tool.name}</code>
-                  {state ? (
-                    <span
-                      className={cn(
-                        'shrink-0 rounded-full px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold uppercase tracking-wider',
-                        state.accessible
-                          ? 'bg-emerald-400/10 text-emerald-400'
-                          : state.configured
-                            ? 'bg-amber-400/10 text-amber-400'
-                            : 'bg-muted text-muted-foreground',
-                      )}
-                    >
-                      {state.accessible ? 'OK' : state.configured ? 'Missing' : 'Not set'}
-                    </span>
-                  ) : null}
+                  <span className="text-sm font-medium text-foreground">{tool.label}</span>
+                  <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold uppercase tracking-wider', badge.cls)}>
+                    {badge.label}
+                  </span>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">Path to {tool.what}.</p>
-                <p className="mt-1 break-all font-[family-name:var(--font-mono)] text-[0.7rem] text-muted-foreground/70">{tool.example}</p>
+                {found ? (
+                  <p className="mt-1 text-xs text-muted-foreground">Ready to use.</p>
+                ) : (
+                  <>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Not found. Install it, or set <code className="font-[family-name:var(--font-mono)]">{tool.name}</code> to its path.
+                    </p>
+                    <p className="mt-1 break-all font-[family-name:var(--font-mono)] text-[0.7rem] text-muted-foreground/70">typically {tool.example}</p>
+                  </>
+                )}
               </div>
             );
           })}
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Set these as environment variables, then restart the orchestrator (re-run <code className="font-[family-name:var(--font-mono)]">zv serve</code>). Worker
-          configuration is read at startup, so changes take effect on the next launch.
+          Installed in the usual place? It is picked up automatically. To use a custom location, set the env var above and restart the
+          orchestrator (re-run <code className="font-[family-name:var(--font-mono)]">zv serve</code>); worker config is read at startup.
         </p>
 
         <div className="flex justify-end">
