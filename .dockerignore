@@ -1,0 +1,20 @@
+# Orchestrator build context (repo root). Keep Go source + go.mod/go.sum + any
+# go:embed'd assets; drop everything heavy or unrelated to the Go build.
+.git
+.gitignore
+bin/
+data/
+.local/
+.worktrees/
+.claude/
+.codex/
+.playwright-cli/
+**/node_modules
+web/
+services/cs2-market/
+*.dem
+*.mp4
+*.mov
+*.mkv
+*.webm
+**/*.log

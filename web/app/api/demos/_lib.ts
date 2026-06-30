@@ -18,8 +18,13 @@ export function orchestratorUrl(): string {
  * Response for forwardError to translate. Never logs demo bytes (only url+method).
  */
 export async function callOrchestrator(url: string, init?: RequestInit): Promise<Response | null> {
+  // Carry the orchestrator token on every call, reads included. On a non-loopback
+  // bind (e.g. the Docker deployment, where the orchestrator listens on 0.0.0.0)
+  // it gates reads behind the token too, not only mutations. mutationHeaders() is
+  // empty when no token is configured, so the loopback dev setup is unaffected.
+  const headers = { ...mutationHeaders(), ...((init?.headers as Record<string, string> | undefined) ?? {}) };
   try {
-    return await fetch(url, init);
+    return await fetch(url, { ...init, headers });
   } catch (err) {
     console.error(`orchestrator unreachable: ${init?.method ?? 'GET'} ${url}`, err);
     return null;

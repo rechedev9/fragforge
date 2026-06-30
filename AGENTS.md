@@ -107,11 +107,30 @@ Real `.dem` files are never committed, so the fixture stays local.
 
 ## Deployment
 
-There is no deploy or CI infrastructure in the repo: no GitHub Actions, no Vercel/Netlify/Fly config, no web `Dockerfile`, no deploy scripts.
-The only `docker-compose.yml` is the local Postgres+Redis for `make up`.
+There is no hosted/CI deploy in the repo: no GitHub Actions, no Vercel/Netlify/Fly config, no deploy scripts.
 "Production" therefore means: merge the working branch into `main` and push.
 A Vercel/Railway project may be connected to the GitHub repo and auto-deploy on push to `main`, but that cannot be verified from the clone, so confirm in the dashboard.
 Do not invent a VPS or Vercel setup; if real hosting is wanted, treat it as an explicit infra task and ask for the target.
+
+### Local Docker stack
+
+A two-container stack runs the web UI and the orchestrator together for a local deployment:
+
+```bash
+docker compose -f docker-compose.app.yml up --build
+# web UI:        http://localhost:3000   (the no-login /upload analyze flow)
+# orchestrator:  http://127.0.0.1:8080   (loopback-only, e.g. curl /api/capabilities)
+```
+
+Files: `Dockerfile` (orchestrator, multi-stage Go build into a distroless static image), `web/Dockerfile` (Next.js standalone; `NEXT_PUBLIC_API_BASE=/api` baked at build), and `docker-compose.app.yml` (wires the two).
+This is separate from the dev `docker-compose.yml`, which only provides Postgres+Redis for `make up`.
+
+Scope and constraints:
+
+- It does NOT do gameplay capture. HLAE + CS2 are Windows + GPU and cannot run in a Linux container, so the orchestrator runs in memory mode (in-memory job repo + inline queue, no Postgres/Redis) and serves the analyze flow only (upload -> scan roster -> scoreboard -> pick player -> match/highlights).
+- Because capture is unconfigured, the sidebar "Capture" card correctly reads "Set up capture" and a created reel surfaces a clear "recording is not configured" failure. Real capture (and rendering captured footage) still needs a host orchestrator with `ZV_RECORDER_PATH`/`ZV_HLAE_PATH`/`ZV_CS2_PATH` set (see Common commands and the HLAE path under Operational rules).
+- The orchestrator binds `0.0.0.0:8080` inside its container; a non-loopback bind requires `ZV_MUTATION_TOKEN` (defaults to `fragforge-local`, override via the `ZV_MUTATION_TOKEN` env). The web container reaches it at `ORCHESTRATOR_URL=http://orchestrator:8080` and sends the same token as `ORCHESTRATOR_TOKEN`; the `/api/demos/*` proxy carries the token on reads and writes.
+- Demo blobs and artifacts persist in the `appdata` volume; jobs live in memory and reset on orchestrator restart. For the persistent Postgres/Redis mode instead, use the dev `docker-compose.yml` plus the orchestrator env in Common commands.
 
 ## Common commands
 
