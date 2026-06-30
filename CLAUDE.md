@@ -262,8 +262,6 @@ Testing:
 
 ## Operational rules
 
-Repo-local operational safety rules are also mirrored in `.claude/rules/zackvideo-operations.md`.
-
 Before editing:
 
 1. Run `git status --short`.
