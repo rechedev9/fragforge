@@ -67,3 +67,6 @@ logs/
 # Playwright test runner output
 web/test-results/
 web/playwright-report/
+
+# Firecrawl local cache / outputs
+/.firecrawl/
