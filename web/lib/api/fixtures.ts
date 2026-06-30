@@ -199,10 +199,15 @@ const rosterNamePool = [
  */
 export function synthRoster(fileName: string): DemoPlayer[] {
   const base = hashName(fileName);
+  const rounds = 24;
   const players: DemoPlayer[] = rosterNamePool.map((name, i) => {
     const kills = 8 + ((base + i * 7) % 22);
     const deaths = 8 + ((base + i * 5) % 16);
     const assists = (base + i * 3) % 9;
+    const headshots = Math.min(kills, Math.round(kills * (0.3 + ((base + i * 9) % 45) / 100)));
+    const adr = 55 + ((base + i * 11) % 58);
+    const kast = 55 + ((base + i * 13) % 35);
+    const rating = Math.max(0.2, Math.round((0.55 + (kills - deaths) / rounds + (kills / rounds) * 0.35) * 100) / 100);
     return {
       steamId: String(76561190000000000n + BigInt(base % 1000000) + BigInt(i)),
       name,
@@ -210,6 +215,13 @@ export function synthRoster(fileName: string): DemoPlayer[] {
       kills,
       deaths,
       assists,
+      headshots,
+      mvps: Math.round(kills / 12),
+      rounds,
+      adr,
+      hsPct: kills > 0 ? Math.round((1000 * headshots) / kills) / 10 : 0,
+      kast,
+      rating,
     };
   });
   return players.sort((a, b) => b.kills - a.kills || a.name.localeCompare(b.name));

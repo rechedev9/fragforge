@@ -25,8 +25,26 @@ export type Video = { id: string; title: string; map: string; score: string; mod
 export type Slots = { used: number; total: number };
 export type FeedItem = { id: string; author: string; authorAvatarUrl: string; title: string; map: string; thumbnailUrl: string; likes: number; createdAt: number; videoUrl: string };
 export type Session = { user: SteamUser | null; slots: Slots; pcPaired: boolean; matchHistoryLinked: boolean };
-/** One player from a roster scan of an uploaded demo; the user picks who to clip. */
-export type DemoPlayer = { steamId: string; name: string; team: 'CT' | 'T' | ''; kills: number; deaths: number; assists: number };
+/**
+ * One player from a roster scan of an uploaded demo; the user picks who to clip.
+ * The scoreboard fields (headshots..rating) come from the enriched parser scan;
+ * they default to 0 on the fallback paths that predate the richer scan.
+ */
+export type DemoPlayer = {
+  steamId: string;
+  name: string;
+  team: 'CT' | 'T' | '';
+  kills: number;
+  deaths: number;
+  assists: number;
+  headshots: number;
+  mvps: number;
+  rounds: number;
+  adr: number;
+  hsPct: number;
+  kast: number;
+  rating: number;
+};
 
 /**
  * Stable error code returned by the /api/demos/* proxy routes when the local

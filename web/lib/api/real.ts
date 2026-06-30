@@ -13,6 +13,13 @@ type RosterPlayer = {
   kills: number;
   deaths: number;
   assists: number;
+  headshots?: number;
+  mvps?: number;
+  rounds?: number;
+  adr?: number;
+  hs_pct?: number;
+  kast?: number;
+  rating?: number;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -180,6 +187,13 @@ export class RealApiClient implements ApiClient {
       kills: plan.stats?.total_kills_target ?? 0,
       deaths: 0,
       assists: 0,
+      headshots: 0,
+      mvps: 0,
+      rounds: 0,
+      adr: 0,
+      hsPct: 0,
+      kast: 0,
+      rating: 0,
     };
   }
 
@@ -527,6 +541,13 @@ function toDemoPlayer(p: RosterPlayer): DemoPlayer {
     kills: p.kills,
     deaths: p.deaths,
     assists: p.assists,
+    headshots: p.headshots ?? 0,
+    mvps: p.mvps ?? 0,
+    rounds: p.rounds ?? 0,
+    adr: p.adr ?? 0,
+    hsPct: p.hs_pct ?? 0,
+    kast: p.kast ?? 0,
+    rating: p.rating ?? 0,
   };
 }
 
