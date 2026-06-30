@@ -588,6 +588,17 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	// The job stays in its parsed/recorded state on enqueue failure so the
 	// client can retry the POST once the queue recovers.
 	if _, err := h.queue.Enqueue(task, asynq.MaxRetry(0), asynq.Unique(renderUniqueTTL)); err != nil {
+		// A duplicate is success: the reconcile loop re-POSTs record on every tick
+		// until the worker dequeues the unique task, so a 202 here keeps the reel
+		// advancing instead of being marked failed mid-capture.
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"id":        j.ID,
+				"task":      tasks.TypeRecordDemo,
+				"duplicate": true,
+			})
+			return
+		}
 		internalError(w, "enqueue record task", err)
 		return
 	}
@@ -663,6 +674,17 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.queue.Enqueue(recordTask, asynq.MaxRetry(0), asynq.Unique(renderUniqueTTL)); err != nil {
+		// A duplicate is success (see StartRecording): a re-drive must not flip a
+		// reel that is already capturing to failed.
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"id":        j.ID,
+				"task":      tasks.TypeRecordDemo,
+				"variant":   intent.Variant,
+				"duplicate": true,
+			})
+			return
+		}
 		internalError(w, "enqueue record task", err)
 		return
 	}

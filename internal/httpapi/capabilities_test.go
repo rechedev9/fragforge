@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
@@ -102,6 +103,22 @@ func TestStartRecordingGatesOnCaptureReadiness(t *testing.T) {
 		}
 		if len(q.enqueued) != 1 {
 			t.Errorf("enqueued %d tasks, want 1", len(q.enqueued))
+		}
+	})
+
+	// A duplicate enqueue (the reconcile loop re-POSTs record until the worker
+	// dequeues the unique task) must be a 202, not a 500 - otherwise the web
+	// client would flip a reel that is already recording to failed.
+	t.Run("202 on duplicate enqueue, not 500", func(t *testing.T) {
+		repo, id := parsedJob()
+		q := &fakeQueue{err: asynq.ErrDuplicateTask}
+		h := NewHandlers(repo, newFakeStorage(), q, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+		rw := httptest.NewRecorder()
+		Routes(h).ServeHTTP(rw, httptest.NewRequest(http.MethodPost, "/api/jobs/"+id.String()+"/record", nil))
+
+		if rw.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202 (duplicate enqueue is success)", rw.Code)
 		}
 	})
 }

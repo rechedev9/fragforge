@@ -41,7 +41,7 @@ func TestStartGenerateEnqueuesRecordAndWritesIntent(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, store, queue)
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	rw := postGenerate(t, h, j.ID, `{"preset":"clean-pov-60","music":"phonk-01","edit":{"format":"short-9x16","killEffect":"velocity","transition":"whip","intro":true}}`)
 
@@ -100,7 +100,7 @@ func TestStartGenerateRejectsUnknownPreset(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, store, queue)
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	rw := postGenerate(t, h, j.ID, `{"preset":"no-such-preset"}`)
 
@@ -121,7 +121,7 @@ func TestStartGenerateRejectsJobNotReady(t *testing.T) {
 	// A roster-scanned job has no kill plan yet, so it cannot record.
 	j := job.Job{ID: uuid.New(), Status: job.StatusScanned, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean"}`)
 
@@ -139,7 +139,7 @@ func TestStartGenerateRejectsInvalidEdit(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean","edit":{"killEffect":"glitch"}}`)
 
@@ -158,7 +158,7 @@ func TestStartGenerateRejectsBadMusicKey(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, store, queue)
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean","music":"../evil"}`)
 
@@ -190,7 +190,7 @@ func TestWorkbenchGenerateAdapterEnqueuesAndShowsProgress(t *testing.T) {
 	plan.Segments = []killplan.Segment{{ID: "seg-001", TickStart: 1, TickEnd: 2}}
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, store, queue)
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 	r := Routes(h)
 
 	form := "preset=clean-pov-60&music=&format=short-9x16&kill_effect=punch-in&transition=flash&intro=on"

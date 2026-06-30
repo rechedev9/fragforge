@@ -1050,7 +1050,7 @@ func TestStartRecordingEnqueuesRecordTaskWhenParsed(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/record", h.StartRecording)
@@ -1078,7 +1078,7 @@ func TestStartRecordingAppliesPresetHUD(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/record", h.StartRecording)
@@ -1108,7 +1108,7 @@ func TestStartRecordingRejectsUnknownPreset(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/record", h.StartRecording)
@@ -1129,7 +1129,7 @@ func TestStartRecordingRejectsJobWithoutPlan(t *testing.T) {
 	queue := &fakeQueue{}
 	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/record", h.StartRecording)
@@ -1151,7 +1151,7 @@ func TestStartRecordingAllowsIdempotentRetryWhenRecorded(t *testing.T) {
 	plan := killplan.NewPlan()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/record", h.StartRecording)
@@ -1174,7 +1174,7 @@ func TestStartRecordingAllowsRetryWhenFailed(t *testing.T) {
 	// A capture that failed (CS2 crash) keeps its kill plan; the user retries.
 	j := job.Job{ID: uuid.New(), Status: job.StatusFailed, Rules: rules.Default(), KillPlan: &plan}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/record", h.StartRecording)
@@ -1196,7 +1196,7 @@ func TestStartRecordingRejectsFailedJobWithoutPlan(t *testing.T) {
 	// Failed before it was ever parsed: no kill plan, so re-record stays rejected.
 	j := job.Job{ID: uuid.New(), Status: job.StatusFailed, Rules: rules.Default()}
 	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue)
+	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/record", h.StartRecording)

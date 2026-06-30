@@ -505,11 +505,10 @@ export class RealApiClient implements ApiClient {
     try {
       const res = await fetch('/api/capabilities', { cache: 'no-store' });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { code?: string };
-        if (body.code === SERVICE_UNAVAILABLE_CODE) {
-          return { recordEnabled: false, status: 'offline', tools: [], reason: 'local analysis service offline' };
-        }
-        return { recordEnabled: false, status: 'unconfigured', tools: [] };
+        // Any non-ok here is a transport/backend problem (the orchestrator reports
+        // "unconfigured" via a 200 with record.enabled=false), so treat it as
+        // offline rather than blaming the user's tool paths.
+        return { recordEnabled: false, status: 'offline', tools: [], reason: 'local analysis service offline' };
       }
       const data = (await res.json()) as { record?: { enabled?: boolean; tools?: CaptureTool[] } };
       const tools = data.record?.tools ?? [];
