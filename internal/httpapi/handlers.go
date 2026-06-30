@@ -72,6 +72,7 @@ type Handlers struct {
 	rateLimiter     *rateLimiter
 	streamProber    streamclips.Prober
 	musicDir        string
+	capabilities    Capabilities
 }
 
 type Option func(*Handlers)
@@ -109,6 +110,16 @@ func WithStreamRepository(repo StreamJobRepository) Option {
 func WithStreamProber(prober streamclips.Prober) Option {
 	return func(h *Handlers) {
 		h.streamProber = prober
+	}
+}
+
+// WithCapabilities records which media workers are enabled and the tool paths
+// they use, so GET /api/capabilities can report readiness and the record/
+// generate handlers can reject a capture attempt with a clear 409 instead of
+// enqueuing a task no worker will ever consume.
+func WithCapabilities(c Capabilities) Option {
+	return func(h *Handlers) {
+		h.capabilities = c
 	}
 }
 
@@ -542,6 +553,9 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to record (status=%s)", j.Status))
 		return
 	}
+	if !h.requireRecordEnabled(w) {
+		return
+	}
 	// Optional JSON body { "preset": "<name>" } selects the recording HUD from
 	// the shared preset registry (so a "Clean POV" reel records HUD-less). An
 	// empty or absent body keeps the recorder's default HUD.
@@ -597,6 +611,9 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 	// being re-run in place. The kill plan must exist before we can record.
 	if (j.Status != job.StatusParsed && j.Status != job.StatusRecorded && j.Status != job.StatusFailed) || j.KillPlan == nil {
 		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to generate (status=%s)", j.Status))
+		return
+	}
+	if !h.requireRecordEnabled(w) {
 		return
 	}
 	var req struct {

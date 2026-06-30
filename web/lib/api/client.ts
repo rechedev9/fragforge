@@ -1,4 +1,4 @@
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness } from './types';
 
 export interface ApiClient {
   getSession(): Promise<Session>;
@@ -7,6 +7,8 @@ export interface ApiClient {
   linkMatchHistory(input: { authCode: string; knownCode: string }): Promise<{ ok: boolean; matchesFound: number }>;
   pairPc(): Promise<{ pairingCode: string }>;
   getPcStatus(): Promise<{ paired: boolean }>;
+  /** Whether gameplay capture (HLAE + CS2) is configured on the local machine. */
+  getCaptureReadiness(): Promise<CaptureReadiness>;
   listMatches(): Promise<Match[]>;
   getMatch(id: string): Promise<Match | null>;
   /** @deprecated Superseded by scanDemo + parseDemo (roster scan → target pick). */

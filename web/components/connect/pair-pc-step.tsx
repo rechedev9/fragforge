@@ -94,6 +94,22 @@ export function PairPcStep({ onEnter }: PairPcStepProps = {}) {
         <Step n={3}>Enter the code in the agent to link it to your account.</Step>
       </ol>
 
+      <div className="mt-5 rounded-xl border border-border bg-card/50 p-4">
+        <p className="text-sm font-medium text-foreground">Capture needs HLAE + CS2 on this PC</p>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          Recording drives CS2 through HLAE. Point the orchestrator at them with these
+          environment variables, then restart it:
+        </p>
+        <ul className="mt-2 space-y-1 font-[family-name:var(--font-mono)] text-xs text-muted-foreground">
+          <li>ZV_RECORDER_PATH</li>
+          <li>ZV_HLAE_PATH</li>
+          <li>ZV_CS2_PATH</li>
+        </ul>
+        <p className="mt-2 text-xs text-muted-foreground/80">
+          The Capture card in the sidebar shows if they are set and reachable.
+        </p>
+      </div>
+
       {pairingCode ? (
         <div className="mt-5 flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
           <div>

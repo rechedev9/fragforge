@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig, CaptureReadiness } from './types';
 import { DEFAULT_EDIT_CONFIG } from './reel-store';
 import {
   fixtureUser,
@@ -191,6 +191,12 @@ export class MockApiClient implements ApiClient {
     session.pcPaired = pcPaired;
     saveSession();
     return { paired: pcPaired };
+  }
+
+  // Offline/dev mode has no real orchestrator to probe, so capture reads ready.
+  async getCaptureReadiness(): Promise<CaptureReadiness> {
+    await delay();
+    return { recordEnabled: true, status: 'ready', tools: [] };
   }
 
   async listMatches(): Promise<Match[]> {

@@ -1,5 +1,6 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus } from './types';
+import { SERVICE_UNAVAILABLE_CODE } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
@@ -363,23 +364,37 @@ export class RealApiClient implements ApiClient {
     this.driving.add(intent.videoId);
     const variant = variantOf(intent);
     try {
-      if (action === 'record') {
-        // The preset (Clean POV / Full HUD / Kill Feed) sets the recording HUD.
-        await fetch(`/api/demos/${intent.jobId}/record`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ preset: variant }),
+      const res =
+        action === 'record'
+          ? // The preset (Clean POV / Full HUD / Kill Feed) sets the recording HUD.
+            await fetch(`/api/demos/${intent.jobId}/record`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ preset: variant }),
+            })
+          : await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                music: intent.mode === 'music' ? intent.songId : undefined,
+                edit: intent.editConfig,
+              }),
+            });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+        // A 503 means the orchestrator is momentarily unreachable; let the next
+        // reconcile tick retry instead of permanently failing the reel.
+        if (body.code === SERVICE_UNAVAILABLE_CODE) return;
+        // Anything else is durable (e.g. the 409 "recording is not configured on
+        // this machine; set ZV_RECORDER_PATH, ZV_HLAE_PATH and ZV_CS2_PATH and
+        // restart the orchestrator"): surface it so the Library shows why the reel
+        // stalled instead of spinning at QUEUED forever. The reconcile loop skips
+        // failed reels, and Retry re-drives once capture is configured.
+        this.applyView(intent, {
+          status: 'failed',
+          action: 'none',
+          failureReason: body.error || (action === 'record' ? 'failed to start recording' : 'failed to start rendering'),
         });
-      } else if (action === 'render') {
-        const init: RequestInit = {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            music: intent.mode === 'music' ? intent.songId : undefined,
-            edit: intent.editConfig,
-          }),
-        };
-        await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, init);
       }
     } catch {
       // network blip; the next reconcile tick re-evaluates from server truth.
@@ -478,6 +493,33 @@ export class RealApiClient implements ApiClient {
   }
   getPcStatus(): Promise<{ paired: boolean }> {
     return this.fallback.getPcStatus();
+  }
+
+  /**
+   * Reads capture readiness from the local orchestrator (/api/capabilities): is
+   * the record worker enabled and are HLAE/CS2/recorder reachable. A 503 maps to
+   * 'offline' (orchestrator down) rather than 'unconfigured', so the UI can tell
+   * "start your orchestrator" apart from "set your tool paths".
+   */
+  async getCaptureReadiness(): Promise<CaptureReadiness> {
+    try {
+      const res = await fetch('/api/capabilities', { cache: 'no-store' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { code?: string };
+        if (body.code === SERVICE_UNAVAILABLE_CODE) {
+          return { recordEnabled: false, status: 'offline', tools: [], reason: 'local analysis service offline' };
+        }
+        return { recordEnabled: false, status: 'unconfigured', tools: [] };
+      }
+      const data = (await res.json()) as { record?: { enabled?: boolean; tools?: CaptureTool[] } };
+      const tools = data.record?.tools ?? [];
+      const enabled = Boolean(data.record?.enabled);
+      const anyMissing = tools.some((t) => t.configured && !t.accessible);
+      const status: CaptureStatus = !enabled ? 'unconfigured' : anyMissing ? 'warning' : 'ready';
+      return { recordEnabled: enabled, status, tools };
+    } catch {
+      return { recordEnabled: false, status: 'offline', tools: [] };
+    }
   }
   listMatches(): Promise<Match[]> {
     return this.fallback.listMatches();

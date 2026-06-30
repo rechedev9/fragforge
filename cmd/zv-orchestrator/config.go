@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/rechedev9/fragforge/internal/httpapi"
 )
 
 type config struct {
@@ -121,6 +123,47 @@ func (c config) streamRenderWorkerEnabled() bool {
 
 func (c config) agentWorkerEnabled() bool {
 	return c.CodexPath != ""
+}
+
+// captureCapabilities is the readiness snapshot the HTTP layer serves at
+// GET /api/capabilities and uses to gate record/generate. Worker enablement is
+// fixed here at startup; the tool paths are reported so the web UI can tell the
+// user which ones to set, and accessibility is re-checked per request.
+func (c config) captureCapabilities() httpapi.Capabilities {
+	return httpapi.Capabilities{
+		RecordEnabled:  c.recordWorkerEnabled(),
+		ComposeEnabled: c.composeWorkerEnabled(),
+		RenderEnabled:  c.renderWorkerEnabled(),
+		RecordTools: []httpapi.CaptureTool{
+			{Name: "ZV_RECORDER_PATH", Path: c.RecorderPath},
+			{Name: "ZV_HLAE_PATH", Path: c.HLAEPath},
+			{Name: "ZV_CS2_PATH", Path: c.CS2Path},
+		},
+		RenderTools: []httpapi.CaptureTool{
+			{Name: "ZV_EDITOR_PATH", Path: c.EditorPath},
+			{Name: "ZV_FFMPEG_PATH", Path: c.FFmpegPath},
+		},
+	}
+}
+
+// missingRecordTools returns configured record tool paths ("NAME=path") that do
+// not exist on disk, so startup can warn non-fatally about a misconfig such as
+// the wrong HLAE install, without blocking a parse-only run.
+func (c config) missingRecordTools() []string {
+	var missing []string
+	for _, t := range []struct{ name, path string }{
+		{"ZV_RECORDER_PATH", c.RecorderPath},
+		{"ZV_HLAE_PATH", c.HLAEPath},
+		{"ZV_CS2_PATH", c.CS2Path},
+	} {
+		if t.path == "" {
+			continue
+		}
+		if _, err := os.Stat(t.path); err != nil {
+			missing = append(missing, t.name+"="+t.path)
+		}
+	}
+	return missing
 }
 
 func (c config) validateMediaConfig() error {

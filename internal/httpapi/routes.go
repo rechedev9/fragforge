@@ -26,6 +26,7 @@ func Routes(h *Handlers) chi.Router {
 	r.Post("/ui/jobs/{id}/render", h.WorkbenchStartRender)
 	r.Post("/ui/jobs/{id}/generate", h.WorkbenchStartGenerate)
 	r.Post("/ui/jobs/{id}/agent/captions", h.WorkbenchStartCaptionAgent)
+	r.Get("/api/capabilities", h.GetCapabilities)
 	r.Get("/api/loadouts", h.ListLoadouts)
 	r.Get("/api/presets", h.ListPresets)
 	r.Get("/api/songs", h.ListSongs)

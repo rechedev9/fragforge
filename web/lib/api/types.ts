@@ -64,3 +64,21 @@ export type DemoPlayer = {
  * and client agree on one string instead of sniffing messages.
  */
 export const SERVICE_UNAVAILABLE_CODE = 'service_unavailable';
+
+/** One external capture tool (recorder/HLAE/CS2) and its readiness on this PC. */
+export type CaptureTool = { name: string; path?: string; configured: boolean; accessible: boolean };
+
+/**
+ * Whether gameplay capture (HLAE + CS2 recording) is set up on the local machine.
+ * - ready: the record worker is enabled and every tool path exists.
+ * - warning: enabled but a configured path is missing (e.g. the wrong HLAE install).
+ * - unconfigured: the record worker is off (no tool paths set).
+ * - offline: the local orchestrator could not be reached.
+ */
+export type CaptureStatus = 'ready' | 'warning' | 'unconfigured' | 'offline';
+export type CaptureReadiness = {
+  recordEnabled: boolean;
+  status: CaptureStatus;
+  tools: CaptureTool[];
+  reason?: string;
+};

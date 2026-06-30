@@ -26,6 +26,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Wordmark } from '@/components/brand/wordmark';
+import { CaptureReadiness } from '@/components/shell/capture-readiness';
 import { useSession } from '@/lib/session';
 import { cn } from '@/lib/utils';
 
@@ -97,6 +98,7 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter>
+        <CaptureReadiness />
         <SlotsMeter />
         <UserMenu />
       </SidebarFooter>

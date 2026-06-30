@@ -24,6 +24,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	if missing := cfg.missingRecordTools(); len(missing) > 0 {
+		log.Printf("capture: configured record tool path(s) not found on disk: %v", missing)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -181,6 +184,7 @@ func main() {
 		httpapi.WithStreamRepository(streamRepo),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
 		httpapi.WithMusicDir(cfg.MusicDir),
+		httpapi.WithCapabilities(cfg.captureCapabilities()),
 	)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
