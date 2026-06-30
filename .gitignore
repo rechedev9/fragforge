@@ -60,3 +60,10 @@ overlays/**/out/
 # Logs
 *.log
 logs/
+
+# Playwright agent CLI session artifacts (snapshots, console/network logs)
+/.playwright-cli/
+
+# Playwright test runner output
+web/test-results/
+web/playwright-report/
