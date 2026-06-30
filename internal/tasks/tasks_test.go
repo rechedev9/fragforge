@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -51,7 +52,7 @@ func TestNewScanRosterTaskRoundtrip(t *testing.T) {
 
 func TestNewRecordDemoTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	tk, err := NewRecordDemoTask(id, "")
+	tk, err := NewRecordDemoTask(id, "", nil)
 	if err != nil {
 		t.Fatalf("NewRecordDemoTask error = %v", err)
 	}
@@ -65,6 +66,39 @@ func TestNewRecordDemoTaskRoundtrip(t *testing.T) {
 	}
 	if payload.JobID != id {
 		t.Errorf("JobID = %v, want %v", payload.JobID, id)
+	}
+	if payload.SegmentIDs != nil {
+		t.Errorf("SegmentIDs = %v, want nil", payload.SegmentIDs)
+	}
+}
+
+func TestNewRecordDemoTaskRoundtripWithSegmentIDs(t *testing.T) {
+	id := uuid.New()
+	want := []string{"seg-001", "seg-002"}
+	tk, err := NewRecordDemoTask(id, "clean", want)
+	if err != nil {
+		t.Fatalf("NewRecordDemoTask error = %v", err)
+	}
+
+	// The wire field is snake_case so the proxy and handler agree on the name.
+	if !strings.Contains(string(tk.Payload()), `"segment_ids"`) {
+		t.Errorf("payload missing segment_ids field: %s", tk.Payload())
+	}
+
+	var payload RecordDemoPayload
+	if err := json.Unmarshal(tk.Payload(), &payload); err != nil {
+		t.Fatalf("Unmarshal payload error = %v", err)
+	}
+	if payload.HUDMode != "clean" {
+		t.Errorf("HUDMode = %q, want clean", payload.HUDMode)
+	}
+	if len(payload.SegmentIDs) != len(want) {
+		t.Fatalf("SegmentIDs = %v, want %v", payload.SegmentIDs, want)
+	}
+	for i := range want {
+		if payload.SegmentIDs[i] != want[i] {
+			t.Errorf("SegmentIDs[%d] = %q, want %q", i, payload.SegmentIDs[i], want[i])
+		}
 	}
 }
 

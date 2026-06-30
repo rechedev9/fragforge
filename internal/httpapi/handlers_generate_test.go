@@ -115,6 +115,29 @@ func TestStartGenerateRejectsUnknownPreset(t *testing.T) {
 	}
 }
 
+func TestStartGenerateRejectsUnknownSegmentID(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	plan.Segments = []killplan.Segment{{ID: "seg-001"}}
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean","segment_ids":["seg-404"]}`)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for unknown segment id; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
+	}
+	if _, ok := store.puts[artifacts.GenerateIntentKey(j.ID)]; ok {
+		t.Fatal("intent written for a rejected request")
+	}
+}
+
 func TestStartGenerateRejectsJobNotReady(t *testing.T) {
 	repo := newFakeRepo()
 	queue := &fakeQueue{}

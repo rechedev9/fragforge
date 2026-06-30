@@ -148,7 +148,7 @@ func TestRecordWorkerHUDFromPayloadOverridesDefault(t *testing.T) {
 			w := NewRecordWorker(repo, store, RecordWorkerConfig{WorkDir: t.TempDir(), RecorderPath: "zv-recorder", HLAEPath: "HLAE.exe", CS2Path: "cs2.exe"})
 			w.runner = runner
 
-			task, err := tasks.NewRecordDemoTask(id, tc.hud)
+			task, err := tasks.NewRecordDemoTask(id, tc.hud, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -769,7 +769,12 @@ func recordingResultWithSegment(scriptPath, segmentPath string) recording.Record
 
 func recordTask(t *testing.T, id uuid.UUID) *asynq.Task {
 	t.Helper()
-	task, err := tasks.NewRecordDemoTask(id, "")
+	return recordTaskFor(t, id, nil)
+}
+
+func recordTaskFor(t *testing.T, id uuid.UUID, segmentIDs []string) *asynq.Task {
+	t.Helper()
+	task, err := tasks.NewRecordDemoTask(id, "", segmentIDs)
 	if err != nil {
 		t.Fatal(err)
 	}

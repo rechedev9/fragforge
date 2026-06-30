@@ -72,9 +72,13 @@ type ScanRosterPayload struct {
 // RecordDemoPayload carries the job id for a Windows recording worker.
 // HUDMode, when set, overrides the recorder's default in-game HUD for this
 // capture (one of "gameplay", "clean", "deathnotices"); empty keeps the default.
+// SegmentIDs, when non-empty, scopes the capture to those kill-plan segments so
+// a reel records only the user-selected clip instead of the whole demo; empty
+// records every segment (the CLI all-kills default).
 type RecordDemoPayload struct {
-	JobID   uuid.UUID `json:"job_id"`
-	HUDMode string    `json:"hud_mode,omitempty"`
+	JobID      uuid.UUID `json:"job_id"`
+	HUDMode    string    `json:"hud_mode,omitempty"`
+	SegmentIDs []string  `json:"segment_ids,omitempty"`
 }
 
 // ComposeFinalPayload carries the job id for the composition worker.
@@ -86,9 +90,9 @@ type ComposeFinalPayload struct {
 // orchestrator. MusicKey, when set, names a music track the render worker mixes
 // into the reel (resolved from its music directory).
 type RenderVariantPayload struct {
-	JobID    uuid.UUID `json:"job_id"`
-	Variant  string    `json:"variant"`
-	MusicKey string    `json:"music_key,omitempty"`
+	JobID    uuid.UUID              `json:"job_id"`
+	Variant  string                 `json:"variant"`
+	MusicKey string                 `json:"music_key,omitempty"`
 	Edit     renderplan.EditRequest `json:"edit,omitempty"`
 }
 
@@ -132,14 +136,17 @@ func NewScanRosterTask(id uuid.UUID) (*asynq.Task, error) {
 
 // NewRecordDemoTask returns an Asynq task for recording a job. hudMode is
 // optional; when non-empty it must be one of the known HUD modes and overrides
-// the recorder default for this capture.
-func NewRecordDemoTask(id uuid.UUID, hudMode string) (*asynq.Task, error) {
+// the recorder default for this capture. segmentIDs, when non-empty, scopes the
+// capture to those kill-plan segments (the caller validates the ids against the
+// job's kill plan); empty records every segment. Because the ids are part of the
+// payload, asynq dedup treats a task for one segment as distinct from another.
+func NewRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string) (*asynq.Task, error) {
 	switch hudMode {
 	case "", "gameplay", "clean", "deathnotices":
 	default:
 		return nil, fmt.Errorf("invalid hud mode %q", hudMode)
 	}
-	payload, err := json.Marshal(RecordDemoPayload{JobID: id, HUDMode: hudMode})
+	payload, err := json.Marshal(RecordDemoPayload{JobID: id, HUDMode: hudMode, SegmentIDs: segmentIDs})
 	if err != nil {
 		return nil, err
 	}

@@ -366,11 +366,13 @@ export class RealApiClient implements ApiClient {
     try {
       const res =
         action === 'record'
-          ? // The preset (Clean POV / Full HUD / Kill Feed) sets the recording HUD.
+          ? // The preset (Clean POV / Full HUD / Kill Feed) sets the recording HUD;
+            // segment_ids scopes the capture to the one selected clip so the
+            // recorder seeks to that kill instead of recording the whole demo.
             await fetch(`/api/demos/${intent.jobId}/record`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ preset: variant }),
+              body: JSON.stringify({ preset: variant, segment_ids: [intent.segmentId] }),
             })
           : await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, {
               method: 'POST',

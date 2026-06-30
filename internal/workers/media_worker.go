@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/recording"
 	"github.com/rechedev9/fragforge/internal/renderplan"
 	"github.com/rechedev9/fragforge/internal/storage"
@@ -200,6 +202,19 @@ type RecordWorker struct {
 	cfg      RecordWorkerConfig
 	runner   commandRunner
 	enqueuer Enqueuer
+	// jobLocks serializes recording per job so two reels for the same job (each a
+	// distinct, non-deduped task with different segment ids) never launch the
+	// recorder concurrently or race on the job-level recording result. Process-
+	// local: it covers the inline queue and a single orchestrator process.
+	jobLocks sync.Map // uuid.UUID -> *sync.Mutex
+}
+
+// lockJob acquires the per-job recording lock and returns its release func.
+func (w *RecordWorker) lockJob(id uuid.UUID) func() {
+	m, _ := w.jobLocks.LoadOrStore(id, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func NewRecordWorker(repo StatusRepository, store storage.Storage, cfg RecordWorkerConfig) *RecordWorker {
@@ -233,7 +248,7 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 	}
 	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecording)
 
-	if err := w.record(ctx, j, payload.HUDMode); err != nil {
+	if err := w.record(ctx, j, payload.HUDMode, payload.SegmentIDs); err != nil {
 		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeRecordDemo, err)
 		return err
 	}
@@ -323,11 +338,31 @@ func (w *RecordWorker) writeQueuedRenderState(id uuid.UUID, variant string) erro
 	return w.storage.Put(key, bytes.NewReader(b))
 }
 
-func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string) error {
+func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, segmentIDs []string) error {
 	if j.KillPlan == nil {
 		return fmt.Errorf("job %s has no kill plan", j.ID)
 	}
-	ready, keys, err := recordingOutputsReady(w.storage, j.ID)
+	// Serialize recording per job: two reels for the same job (each a distinct,
+	// non-deduped task with different segment ids) must not launch the recorder
+	// concurrently or race on the job-level recording result.
+	defer w.lockJob(j.ID)()
+
+	// A reel records only its selected segment(s); an empty selection means the
+	// whole kill plan (the CLI all-kills default). Resolve to concrete ids so
+	// readiness, plan filtering, and accumulation all agree on the same set.
+	requested := segmentIDs
+	if len(requested) == 0 {
+		requested = killPlanSegmentIDs(j.KillPlan)
+	}
+	// Scope the plan handed to the recorder, so everything downstream (HLAE script,
+	// take mapping, recording result, render) derives from the chosen segments
+	// alone. j is a value copy, so j.KillPlan stays the full plan for ordering.
+	recordPlan, err := filterKillPlanSegments(j.KillPlan, requested)
+	if err != nil {
+		return err
+	}
+
+	ready, keys, err := recordingOutputsReady(w.storage, j.ID, requested)
 	if err != nil {
 		return err
 	}
@@ -357,8 +392,15 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string) er
 	if err := copyStorageToFile(w.storage, j.DemoPath, demoPath); err != nil {
 		return fmt.Errorf("materialize demo: %w", err)
 	}
-	if err := writeJSONFile(killPlanPath, j.KillPlan); err != nil {
+	if err := writeJSONFile(killPlanPath, recordPlan); err != nil {
 		return fmt.Errorf("write kill plan: %w", err)
+	}
+
+	// Snapshot the previously stored result (earlier reels of this job) under the
+	// per-job lock, before the upload below overwrites it.
+	prev, hasPrev, err := tryDecodeStoredRecordingResult(w.storage, j.ID)
+	if err != nil {
+		return err
 	}
 
 	_, runErr := w.runner.Run(ctx, cfg.RecorderPath,
@@ -384,6 +426,24 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string) er
 		return err
 	}
 	logWorkerArtifacts(j.ID, tasks.TypeRecordDemo, keys)
+
+	// Accumulate across reels. The recorder result is a single job-level file, but
+	// reels are recorded one segment at a time, and uploadRecordingOutputs just
+	// overwrote it with only this run's segments. On success, union this run over
+	// the prior result (ordered by the kill plan) so result.json lists every
+	// recorded segment. On failure, restore the prior result so a flaky capture
+	// never drops an already-recorded reel. Clips live under per-segment keys and
+	// survive either way.
+	if hasPrev {
+		durable := prev
+		if runErr == nil && result.Error == "" {
+			durable = mergeRecordingResults(prev, result, j.KillPlan)
+		}
+		if err := putRecordingResult(w.storage, j.ID, durable); err != nil {
+			return fmt.Errorf("persist recording result: %w", err)
+		}
+	}
+
 	if runErr != nil {
 		return runErr
 	}
@@ -1261,7 +1321,111 @@ func readStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.R
 	return result, nil
 }
 
-func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string, error) {
+// killPlanSegmentIDs lists every segment id in the plan, in plan order.
+func killPlanSegmentIDs(plan *killplan.Plan) []string {
+	ids := make([]string, 0, len(plan.Segments))
+	for _, s := range plan.Segments {
+		ids = append(ids, s.ID)
+	}
+	return ids
+}
+
+// filterKillPlanSegments returns a copy of plan containing only the segments
+// whose ID is in ids, preserving the plan's segment order (never the request
+// order). It errors when the selection matches no segment so a stale request
+// never launches the recorder with an empty plan.
+func filterKillPlanSegments(plan *killplan.Plan, ids []string) (*killplan.Plan, error) {
+	keep := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		keep[id] = true
+	}
+	out := *plan
+	out.Segments = nil
+	for _, s := range plan.Segments {
+		if keep[s.ID] {
+			out.Segments = append(out.Segments, s)
+		}
+	}
+	if len(out.Segments) == 0 {
+		return nil, fmt.Errorf("no kill-plan segments match requested ids %v", ids)
+	}
+	return &out, nil
+}
+
+func isSegmentClip(a recording.RecordingArtifact) bool {
+	return a.Role == "segment" && a.Type == "video" && a.SegmentID != ""
+}
+
+// tryDecodeStoredRecordingResult returns the stored recording result, reporting
+// whether one exists. A missing result is not an error (the first reel of a job).
+func tryDecodeStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.RecordingResult, bool, error) {
+	exists, err := store.Exists(recording.ResultArtifactKey(id))
+	if err != nil || !exists {
+		return recording.RecordingResult{}, false, err
+	}
+	result, err := decodeStoredRecordingResult(store, id)
+	if err != nil {
+		return recording.RecordingResult{}, false, err
+	}
+	return result, true, nil
+}
+
+// mergeRecordingResults unions a freshly recorded result over a previously
+// stored one so the job-level recording result accumulates every segment any
+// reel has recorded. The new run wins for segments it covers; segments only in
+// prev are carried forward (their clips still live in storage under their
+// per-segment keys). The merged segments are reordered to follow fullPlan so the
+// result stays in kill-plan order regardless of which reel recorded when.
+func mergeRecordingResults(prev, next recording.RecordingResult, fullPlan *killplan.Plan) recording.RecordingResult {
+	merged := next
+	haveSegment := make(map[string]bool, len(next.Plan.Segments))
+	for _, s := range next.Plan.Segments {
+		haveSegment[s.ID] = true
+	}
+	for _, s := range prev.Plan.Segments {
+		if !haveSegment[s.ID] {
+			merged.Plan.Segments = append(merged.Plan.Segments, s)
+		}
+	}
+	order := make(map[string]int, len(fullPlan.Segments))
+	for i, s := range fullPlan.Segments {
+		order[s.ID] = i
+	}
+	sort.SliceStable(merged.Plan.Segments, func(a, b int) bool {
+		return order[merged.Plan.Segments[a].ID] < order[merged.Plan.Segments[b].ID]
+	})
+	haveClip := make(map[string]bool, len(next.Artifacts))
+	for _, a := range next.Artifacts {
+		if isSegmentClip(a) {
+			haveClip[a.SegmentID] = true
+		}
+	}
+	for _, a := range prev.Artifacts {
+		if isSegmentClip(a) && !haveClip[a.SegmentID] {
+			merged.Artifacts = append(merged.Artifacts, a)
+		}
+	}
+	return merged
+}
+
+// putRecordingResult overwrites the durable recording result with result.
+func putRecordingResult(store storage.Storage, id uuid.UUID, result recording.RecordingResult) error {
+	b, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	return store.Put(recording.ResultArtifactKey(id), bytes.NewReader(b))
+}
+
+// recordingOutputsReady reports whether the recorder can be skipped because
+// every requested segment's clip is already present. Callers resolve the
+// effective segment ids (whole-demo mode passes every plan segment), so a reel
+// scoped to one clip is never wrongly skipped against the job-level result.json,
+// which holds only the last run's segments until the accumulate step unions it.
+func recordingOutputsReady(store storage.Storage, id uuid.UUID, requested []string) (bool, []string, error) {
+	if len(requested) == 0 {
+		return false, nil, nil
+	}
 	resultKey := recording.ResultArtifactKey(id)
 	exists, err := store.Exists(resultKey)
 	if err != nil || !exists {
@@ -1272,19 +1436,32 @@ func recordingOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string,
 		return false, nil, err
 	}
 
-	readyArtifacts, err := recording.NewReadyArtifacts(id, result)
-	if err != nil {
+	recorded := make(map[string]bool)
+	for _, a := range result.Artifacts {
+		if isSegmentClip(a) {
+			recorded[a.SegmentID] = true
+		}
+	}
+	scriptKey := recording.ScriptArtifactKey(id)
+	if ok, err := store.Exists(scriptKey); err != nil || !ok {
 		return false, nil, err
 	}
-	keys := []string{readyArtifacts.ResultKey}
-	for _, key := range readyArtifacts.RequiredKeys {
-		exists, err := store.Exists(key)
-		if err != nil || !exists {
+	keys := []string{resultKey, scriptKey}
+	for _, segID := range requested {
+		if !recorded[segID] {
+			return false, nil, nil
+		}
+		clipKey, err := recording.SegmentClipArtifactKey(id, segID)
+		if err != nil {
 			return false, nil, err
 		}
-		keys = append(keys, key)
+		ok, err := store.Exists(clipKey)
+		if err != nil || !ok {
+			return false, nil, err
+		}
+		keys = append(keys, clipKey)
 	}
-	return readyArtifacts.SegmentCount > 0, keys, nil
+	return true, keys, nil
 }
 
 func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []string, error) {
@@ -1348,7 +1525,54 @@ func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant stri
 		}
 		keys = append(keys, key)
 	}
+	// A per-segment render is only reusable if it already produced a short for
+	// every segment in the (possibly grown) recording result. When a later reel
+	// records an additional segment, this forces a re-render so the new clip gets
+	// its short instead of being skipped as "already rendered".
+	covers, err := renderCoversRecordedSegments(store, id, result)
+	if err != nil {
+		return false, nil, err
+	}
+	if !covers {
+		return false, nil, nil
+	}
 	return true, keys, nil
+}
+
+// compilationSegmentID is the synthetic segment id the editor uses for a single
+// all-kills compilation short (see internal/editor/manifest.go).
+const compilationSegmentID = "demo-compilation"
+
+// renderCoversRecordedSegments reports whether render already has a short for
+// every recorded segment that actually has a clip. Coverage is measured against
+// clip-bearing artifacts, not all plan segments, because the editor only emits a
+// short for segments with a recorded clip - a plan segment with no clip (a
+// partial capture) must not make coverage permanently unsatisfiable. A
+// compilation render (one "demo-compilation" short) is always treated as
+// covered. An unreadable recording result falls back to covered, leaving the
+// key-based readiness check authoritative.
+func renderCoversRecordedSegments(store storage.Storage, id uuid.UUID, render editor.Result) (bool, error) {
+	exists, err := store.Exists(recording.ResultArtifactKey(id))
+	if err != nil || !exists {
+		return true, err
+	}
+	rec, err := decodeStoredRecordingResult(store, id)
+	if err != nil {
+		return true, nil
+	}
+	rendered := make(map[string]bool, len(render.Shorts))
+	for _, s := range render.Shorts {
+		if s.SegmentID == compilationSegmentID {
+			return true, nil
+		}
+		rendered[s.SegmentID] = true
+	}
+	for _, a := range rec.Artifacts {
+		if isSegmentClip(a) && !rendered[a.SegmentID] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func localizeSegmentClips(store storage.Storage, id uuid.UUID, workDir string, result *recording.RecordingResult) error {

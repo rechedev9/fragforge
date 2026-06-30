@@ -539,6 +539,27 @@ func (h *Handlers) GetFinal(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, rc)
 }
 
+// validateSegmentSelection rejects any requested segment id that is not in the
+// job's kill plan, writing a 400 and returning false. An empty selection means
+// "record every segment" and always passes. Callers guarantee a non-nil kill
+// plan via their readiness check before calling this.
+func validateSegmentSelection(w http.ResponseWriter, j job.Job, ids []string) bool {
+	if len(ids) == 0 {
+		return true
+	}
+	valid := make(map[string]bool, len(j.KillPlan.Segments))
+	for _, s := range j.KillPlan.Segments {
+		valid[s.ID] = true
+	}
+	for _, id := range ids {
+		if !valid[id] {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown segment id %q", id))
+			return false
+		}
+	}
+	return true
+}
+
 // StartRecording handles POST /api/jobs/{id}/record.
 func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	j, ok := h.loadJob(w, r)
@@ -560,10 +581,12 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	// the shared preset registry (so a "Clean POV" reel records HUD-less). An
 	// empty or absent body keeps the recorder's default HUD.
 	var hudMode string
+	var segmentIDs []string
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 		var req struct {
-			Preset string `json:"preset"`
+			Preset     string   `json:"preset"`
+			SegmentIDs []string `json:"segment_ids"`
 		}
 		switch err := json.NewDecoder(r.Body).Decode(&req); {
 		case err == nil, errors.Is(err, io.EOF):
@@ -575,12 +598,16 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 				}
 				hudMode = preset.HUDMode
 			}
+			if !validateSegmentSelection(w, j, req.SegmentIDs) {
+				return
+			}
+			segmentIDs = req.SegmentIDs
 		default:
 			writeError(w, http.StatusBadRequest, "invalid record request JSON")
 			return
 		}
 	}
-	task, err := tasks.NewRecordDemoTask(j.ID, hudMode)
+	task, err := tasks.NewRecordDemoTask(j.ID, hudMode, segmentIDs)
 	if err != nil {
 		internalError(w, "build record task", err)
 		return
@@ -628,9 +655,10 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Preset string                 `json:"preset"`
-		Music  string                 `json:"music"`
-		Edit   renderplan.EditRequest `json:"edit"`
+		Preset     string                 `json:"preset"`
+		Music      string                 `json:"music"`
+		Edit       renderplan.EditRequest `json:"edit"`
+		SegmentIDs []string               `json:"segment_ids"`
 	}
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
@@ -644,6 +672,9 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 	preset, ok := editor.PresetByName(req.Preset)
 	if !ok {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset %q", req.Preset))
+		return
+	}
+	if !validateSegmentSelection(w, j, req.SegmentIDs) {
 		return
 	}
 	intent := renderplan.GenerateIntent{
@@ -661,7 +692,7 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	recordTask, err := tasks.NewRecordDemoTask(j.ID, preset.HUDMode)
+	recordTask, err := tasks.NewRecordDemoTask(j.ID, preset.HUDMode, req.SegmentIDs)
 	if err != nil {
 		internalError(w, "build record task", err)
 		return
