@@ -58,10 +58,11 @@ Module boundaries (keep `cmd/` entrypoints thin):
 - `internal/lineups` - utility lineup catalog data.
 - `effects/` - editable Lua effect scripts.
 - `overlays/` - HyperFrames overlay experiments and generated overlay projects.
+- `web/` - standalone Next.js (App Router) frontend: the no-login `/upload` flow, match/clip/video views, and a typed API client; it reaches the orchestrator only through same-origin `/api/demos/*` proxy routes (see "Web frontend" below).
 - `services/cs2-market` - separate Python prototype for CS2 item market research, with its own CLI (`cs2market init-db`, `ingest`, `score`, `export-shorts`).
 - `data/` - generated/local media artifacts; treat as output unless the task is explicitly about test fixtures or artifact cleanup.
 
-Note: `docs/architecture/*` describes the full design vision (object storage, a separate music mixer and encoder, a web frontend).
+Note: `docs/architecture/*` describes the full design vision (object storage, a separate music mixer and encoder, a fuller web frontend than `web/` ships today).
 The current foundation runs locally and concatenates segments into `final.mp4`; treat the README as the source of truth for what exists today.
 
 Docs worth reading before architectural changes:
@@ -80,6 +81,37 @@ It outputs 1080x1920 at 60fps: clean HUD-less POV with kill notices, viral hook 
 The loadout catalog (`internal/renderplan`), the HTTP API (`/api/presets`, `/api/loadouts`, render-variant validation), the workbench UI, and the render worker all derive from that registry, and unknown preset names are rejected with the valid list.
 List presets with `zv presets` (`--format json` for automation).
 The editing rationale (hook text in the first 1-2s, punch-ins on kills, slow-mo only on the final kill, beat-synced drops, loop-friendly endings, never cropping the killfeed) is documented in `docs/research/11-viral-cs2-vertical-editing.md`.
+
+## Web frontend (web/)
+
+`web/` is a standalone Next.js app (App Router, React 19, Tailwind 4): the no-login `/upload` entry, match/clip/video views, and a typed API client under `web/lib/api`.
+It is local-first and stateless: it talks only to the orchestrator (`zv serve`) through same-origin proxy route handlers under `web/app/api/demos/*`, which forward `.dem` uploads and job calls while keeping the orchestrator URL and token server-side.
+`web/lib/api` uses the real client when `NEXT_PUBLIC_API_BASE` is set (see `web/.env.local`), otherwise an in-memory mock.
+
+Run it locally (needs the orchestrator on `127.0.0.1:8080`; orchestrator memory mode is enough for the upload -> roster -> parse path):
+
+```bash
+cd web && npm install && npm run dev   # http://localhost:3000
+npm run typecheck                      # tsc --noEmit
+npm run test:e2e                       # Playwright e2e
+```
+
+Proxy-route contract: every `/api/demos/*` route reaches the orchestrator through `callOrchestrator` (`web/app/api/demos/_lib.ts`).
+When the orchestrator is unreachable the route returns `503 {code: "service_unavailable"}` and logs the cause server-side, and the UI tells "service offline" apart from a bad demo via `SERVICE_UNAVAILABLE_CODE`.
+Keep that contract when adding `/api/demos/*` routes; do not let a bare `fetch` throw into a code-less 500.
+
+E2E lives in `web/e2e` (`playwright.config.ts`, `@playwright/test`); run it with `npm run test:e2e`.
+The error-messaging specs mock the network and need only the dev server.
+The happy-path spec uploads a real demo and is gated on a reachable orchestrator plus a demo at `ZV_E2E_DEMO` (default `../testdata/sample.dem`), so it skips rather than fails when either is absent.
+Real `.dem` files are never committed, so the fixture stays local.
+
+## Deployment
+
+There is no deploy or CI infrastructure in the repo: no GitHub Actions, no Vercel/Netlify/Fly config, no web `Dockerfile`, no deploy scripts.
+The only `docker-compose.yml` is the local Postgres+Redis for `make up`.
+"Production" therefore means: merge the working branch into `main` and push.
+A Vercel/Railway project may be connected to the GitHub repo and auto-deploy on push to `main`, but that cannot be verified from the clone, so confirm in the dashboard.
+Do not invent a VPS or Vercel setup; if real hosting is wanted, treat it as an explicit infra task and ask for the target.
 
 ## Common commands
 
@@ -130,6 +162,15 @@ zv serve
 
 `zv serve` binds `127.0.0.1:8080` by default; a non-loopback bind requires `ZV_MUTATION_TOKEN`.
 It also exposes `GET /healthz` (liveness) and `GET /metrics` (Prometheus text), both unauthenticated so a Prometheus server can scrape them.
+
+For local development without Docker, run the orchestrator fully in-process with `ZV_DATABASE_URL=memory`: it uses an in-memory job repository and auto-switches the queue to inline mode, so no Postgres and no Redis are needed.
+
+```bash
+ZV_DATABASE_URL=memory ZV_DATA_DIR=./data ./bin/zv-orchestrator.exe   # same binary as `zv serve`
+```
+
+This is enough for the parse and roster-scan stages (the parser worker is always registered); the record, compose, and render workers only start when their tool paths are set (`ZV_RECORDER_PATH`, `ZV_HLAE_PATH`, `ZV_CS2_PATH`, `ZV_EDITOR_PATH`, `ZV_FFMPEG_PATH`).
+This is the orchestrator the web frontend talks to during local upload/parse work.
 
 Smoke tests:
 
