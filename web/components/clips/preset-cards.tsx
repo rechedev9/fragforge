@@ -1,6 +1,6 @@
 'use client';
 
-import { Clapperboard, Eye, Crosshair } from 'lucide-react';
+import { Clapperboard, Eye, Crosshair, Check } from 'lucide-react';
 import type { Preset } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 
@@ -23,7 +23,8 @@ const PRESET_ICONS: Record<string, React.ReactNode> = {
  * PresetCards — the reel style picker. Each preset is one choice that sets both
  * the recording HUD (Clean POV vs Full HUD vs Kill Feed) and the render style;
  * the list comes from the orchestrator's preset registry (/api/presets). The
- * active card carries the lime selection ring.
+ * active card carries the lime ring and a filled check; the registry default is
+ * flagged so the user knows the safe pick.
  */
 export function PresetCards({ presets, value, onChange, disabled = false }: PresetCardsProps) {
   return (
@@ -35,6 +36,7 @@ export function PresetCards({ presets, value, onChange, disabled = false }: Pres
           title={preset.label}
           pitch={preset.description}
           hud={preset.hudMode}
+          isDefault={Boolean(preset.default)}
           selected={value === preset.name}
           disabled={disabled}
           onSelect={() => onChange(preset.name)}
@@ -49,12 +51,13 @@ type PresetCardProps = {
   title: string;
   pitch: string;
   hud?: string;
+  isDefault: boolean;
   selected: boolean;
   disabled: boolean;
   onSelect: () => void;
 };
 
-function PresetCard({ icon, title, pitch, hud, selected, disabled, onSelect }: PresetCardProps) {
+function PresetCard({ icon, title, pitch, hud, isDefault, selected, disabled, onSelect }: PresetCardProps) {
   return (
     <button
       type="button"
@@ -62,25 +65,48 @@ function PresetCard({ icon, title, pitch, hud, selected, disabled, onSelect }: P
       disabled={disabled}
       aria-pressed={selected}
       className={cn(
-        'flex flex-col items-start gap-3 rounded-xl border bg-card p-5 text-left transition-all',
+        'group relative flex flex-col items-start gap-3 rounded-xl border p-5 text-left transition-all',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        selected ? 'border-primary ring-2 ring-primary' : 'border-border hover:border-muted-foreground/40',
+        selected
+          ? 'border-primary bg-primary/[0.06] ring-1 ring-primary'
+          : 'border-border bg-card hover:border-muted-foreground/40 hover:bg-card/80',
       )}
     >
-      <span
-        className={cn(
-          'inline-flex size-10 items-center justify-center rounded-lg border transition-colors',
-          selected ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-muted text-muted-foreground',
-        )}
-      >
-        {icon}
-      </span>
-      <span className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
-        {title}
-      </span>
-      <span className="text-sm text-muted-foreground">{pitch}</span>
+      <div className="flex w-full items-start justify-between">
+        <span
+          className={cn(
+            'inline-flex size-10 items-center justify-center rounded-lg border transition-colors',
+            selected ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-muted text-muted-foreground group-hover:text-foreground',
+          )}
+        >
+          {icon}
+        </span>
+        <span
+          className={cn(
+            'flex size-5 items-center justify-center rounded-full border transition-colors',
+            selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-transparent text-transparent',
+          )}
+          aria-hidden
+        >
+          <Check className="size-3" />
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
+          {title}
+        </span>
+        {isDefault ? (
+          <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold uppercase tracking-wider text-primary">
+            Default
+          </span>
+        ) : null}
+      </div>
+
+      <span className="text-sm leading-relaxed text-muted-foreground">{pitch}</span>
+
       {hud ? (
-        <span className="font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-wide text-muted-foreground/70">
+        <span className="mt-auto inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 font-[family-name:var(--font-mono)] text-[0.65rem] uppercase tracking-wider text-muted-foreground">
           HUD · {hud}
         </span>
       ) : null}
