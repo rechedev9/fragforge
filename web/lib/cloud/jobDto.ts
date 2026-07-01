@@ -21,7 +21,7 @@ export type JobRow = {
 
 export type JobDto = {
   id: string;
-  status: number;
+  status: string;
   demo_path: string;
   demo_sha256: string;
   target_steamid: string;
@@ -31,7 +31,7 @@ export type JobDto = {
 export function toJobDto(row: JobRow): JobDto {
   return {
     id: row.demo_id,
-    status: GO_STATUS.queued,
+    status: STATE_FROM_GO[GO_STATUS.queued],
     demo_path: row.demos.storage_key,
     demo_sha256: row.demos.sha256,
     target_steamid: row.target_steamid,
