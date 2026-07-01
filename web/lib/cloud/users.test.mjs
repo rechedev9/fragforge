@@ -1,11 +1,9 @@
 // Unit tests for ensureUser's upsert-and-select shape.
-// Run: node --conditions=react-server --test users.test.mjs
+// Run: node --test users.test.mjs
 // Plain .mjs (invisible to tsc/Next) importing the type-stripped .ts module, so
 // ensureUser is testable against a fake Supabase client with zero new dependencies.
-// The --conditions=react-server flag is required because server.ts imports the
-// 'server-only' guard package; that condition picks its no-op export instead of
-// the one that throws "cannot be imported from a Client Component" outside Next's
-// bundler (which sets that same condition for the server layer).
+// Every case below passes a fake `db`, so the lazy `import('@/lib/supabase/server')`
+// branch (which loads the server-only Supabase client) never runs here.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ensureUser } from './users.ts';
