@@ -1,0 +1,28 @@
+// Unit tests for ensureUser's upsert-and-select shape.
+// Run: node --conditions=react-server --test users.test.mjs
+// Plain .mjs (invisible to tsc/Next) importing the type-stripped .ts module, so
+// ensureUser is testable against a fake Supabase client with zero new dependencies.
+// The --conditions=react-server flag is required because server.ts imports the
+// 'server-only' guard package; that condition picks its no-op export instead of
+// the one that throws "cannot be imported from a Client Component" outside Next's
+// bundler (which sets that same condition for the server layer).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { ensureUser } from './users.ts';
+
+function fakeDb(captured) {
+  return {
+    from() { return this; },
+    upsert(row, opts) { captured.row = row; captured.opts = opts; return this; },
+    select() { return this; },
+    async single() { return { data: { id: 'user-1' }, error: null }; },
+  };
+}
+
+test('ensureUser upserts on steam_id and returns the id', async () => {
+  const captured = {};
+  const id = await ensureUser('7656', 'zack', 'http://a', fakeDb(captured));
+  assert.equal(id, 'user-1');
+  assert.equal(captured.row.steam_id, '7656');
+  assert.equal(captured.opts.onConflict, 'steam_id');
+});
