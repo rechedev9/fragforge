@@ -20,7 +20,11 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const { persona, avatar } = await fetchPersona(steamid);
-  await ensureUser(steamid, persona, avatar);
+  try {
+    await ensureUser(steamid, persona, avatar);
+  } catch (err) {
+    console.error('ensureUser on login callback failed (continuing, will retry on pair/status)', err);
+  }
   const token = signSession({ steamid64: steamid, persona, avatar, matchHistoryLinked: false });
 
   const jar = await cookies();
