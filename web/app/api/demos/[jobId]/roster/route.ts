@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { serviceUnavailable } from '../../_lib';
+import { isLocalMode } from '@/lib/mode';
+import { localRoster } from '../../_local';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +17,10 @@ export const runtime = 'nodejs';
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ jobId: string }> }): Promise<Response> {
   const { jobId } = await params;
+
+  // Local studio: proxy the roster scan result from the local orchestrator.
+  if (isLocalMode()) return localRoster(jobId);
+
   const path = `jobs/${jobId}/roster.json`;
 
   try {

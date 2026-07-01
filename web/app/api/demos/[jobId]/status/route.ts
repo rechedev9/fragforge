@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { serviceUnavailable } from '../../_lib';
+import { isLocalMode } from '@/lib/mode';
+import { localStatus } from '../../_local';
 
 export const runtime = 'nodejs';
 
@@ -14,6 +16,9 @@ export const runtime = 'nodejs';
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ jobId: string }> }): Promise<Response> {
   const { jobId } = await params;
+
+  // Local studio: proxy the job status straight from the local orchestrator.
+  if (isLocalMode()) return localStatus(jobId);
 
   // Keep the /api/demos/* contract: a Supabase outage or misconfig must surface
   // as the {code: service_unavailable} 503 shape, not a bare code-less 500 the

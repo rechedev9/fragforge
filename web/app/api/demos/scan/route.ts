@@ -4,6 +4,8 @@ import { verifySession, SESSION_COOKIE } from '@/lib/auth/session';
 import { ensureUser } from '@/lib/cloud/users';
 import { createScanJob } from '@/lib/cloud/demos';
 import { serviceUnavailable } from '../_lib';
+import { isLocalMode } from '@/lib/mode';
+import { localScan } from '../_local';
 
 // Runs server-side so the Supabase service-role key stays off the client and
 // the .dem bytes are uploaded straight to Storage without CORS.
@@ -27,6 +29,10 @@ function isDemoHeader(head: Uint8Array): boolean {
  * and queue a scan job for the paired agent to claim.
  */
 export async function POST(request: Request): Promise<Response> {
+  // Local studio: proxy straight to the local orchestrator, no Supabase, no
+  // session (the orchestrator on this machine is the trust boundary).
+  if (isLocalMode()) return localScan(request);
+
   const jar = await cookies();
   const s = verifySession(jar.get(SESSION_COOKIE)?.value);
   if (!s) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });

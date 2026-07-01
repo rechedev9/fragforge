@@ -47,6 +47,21 @@ The command prints a plan summary before running and stage-by-stage progress
 (`[1/4] parse`, ...). If a stage fails, rerun with `--from-recording` instead of
 recording again.
 
+## Web UI (Local Studio)
+
+Prefer the browser? Local Studio runs the whole product from the web UI on your
+own Windows + GPU PC, capture included:
+
+```powershell
+.\scripts\local-studio.ps1
+```
+
+It starts the orchestrator (memory mode, HLAE/CS2 auto-detected) and the web UI
+in local mode, then opens `http://localhost:3000/upload`.
+The flow is: upload a demo -> pick a player -> pick specific kills -> create the
+reel, at which point HLAE + CS2 open to capture and the edit is applied.
+See [`docs/local-studio.md`](./docs/local-studio.md) for details.
+
 ## Render preset
 
 The single supported preset lives in `internal/editor/preset.go`: `viral-60-clean`.

@@ -5,6 +5,7 @@ import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
+import { isLocalMode } from '@/lib/mode';
 
 /** Server roster row as returned by /api/demos/{jobId}/roster (steamid64). */
 type RosterPlayer = {
@@ -126,7 +127,14 @@ export class RealApiClient implements ApiClient {
       await fetch('/api/demos/scan', { method: 'POST', body: form }),
     );
 
-    await this.waitForScan(jobId);
+    // Local studio scans synchronously on this machine (orchestrator status
+    // reaches 'scanned'); cloud scans hand off to a paired agent and also watch
+    // whether the user's PC is online (PC_OFFLINE).
+    if (isLocalMode()) {
+      await this.waitForStatus(jobId, 'scanned');
+    } else {
+      await this.waitForScan(jobId);
+    }
 
     const { players } = await readJson<{ players: RosterPlayer[] }>(
       await fetch(`/api/demos/${jobId}/roster`),
