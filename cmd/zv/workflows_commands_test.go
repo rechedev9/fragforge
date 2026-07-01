@@ -1954,6 +1954,7 @@ func TestValidateLegacyPassThroughEntrypointsCoversCurrentSurface(t *testing.T) 
 func TestValidateLegacyPassThroughEntrypointsRejectsMissingEntrypoint(t *testing.T) {
 	commands := []string{
 		"zv",
+		"zv-agent",
 		"zv-parser",
 		"zv-editor",
 		"zv-recorder",
