@@ -1966,7 +1966,7 @@ func bashPath(path string) string {
 }
 
 func findPowerShell() (string, bool) {
-	for _, name := range []string{"powershell.exe", "powershell", "pwsh"} {
+	for _, name := range []string{"pwsh", "powershell.exe", "powershell"} {
 		path, err := exec.LookPath(name)
 		if err == nil {
 			return path, true
