@@ -110,7 +110,11 @@ func ConcatList(clips []SegmentClip) string {
 	var sb strings.Builder
 	for _, clip := range clips {
 		sb.WriteString("file '")
-		sb.WriteString(escapeConcatPath(filepath.ToSlash(clip.Path)))
+		// FFmpeg concat lists always want forward slashes, so normalize
+		// backslashes unconditionally. filepath.ToSlash only rewrites on
+		// Windows, which left Windows-style paths unconverted (and this test
+		// failing) when the pipeline or its tests run on Linux/WSL.
+		sb.WriteString(escapeConcatPath(strings.ReplaceAll(clip.Path, "\\", "/")))
 		sb.WriteString("'\n")
 	}
 	return sb.String()
