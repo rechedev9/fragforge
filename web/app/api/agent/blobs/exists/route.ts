@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { resolveAgent } from '@/lib/cloud/agentAuth';
-import { agentOwnsKey } from '@/lib/cloud/blobAuth';
+import { agentOwnsKey, blobLocation } from '@/lib/cloud/blobAuth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -12,9 +12,7 @@ export async function GET(request: Request): Promise<Response> {
   if (!(await agentOwnsKey(key, agent.userId))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
-  const isDemo = key.startsWith('demos/');
-  const bucket = isDemo ? 'demos' : 'artifacts';
-  const path = isDemo ? key.slice('demos/'.length) : key;
+  const { bucket, path } = blobLocation(key);
   const slash = path.lastIndexOf('/');
   const dir = slash >= 0 ? path.slice(0, slash) : '';
   const name = slash >= 0 ? path.slice(slash + 1) : path;
