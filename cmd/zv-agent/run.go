@@ -1,10 +1,11 @@
 package main
 
-import "context"
+import (
+	"context"
 
-// run is replaced with the claim loop in Task 10.
+	"github.com/rechedev9/fragforge/internal/agent"
+)
+
 func run(ctx context.Context, cfg Config) error {
-	_ = ctx
-	_ = cfg
-	return nil
+	return agent.Run(ctx, agent.NewClient(cfg.BaseURL, cfg.Token))
 }
