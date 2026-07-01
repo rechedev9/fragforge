@@ -22,8 +22,10 @@ test('createScanJob uploads, inserts demo and a queued scan job', async () => {
   const captured = {};
   const { demoId } = await createScanJob('u1', { name: 'm.dem', size: 10, bytes: new ArrayBuffer(10) }, fakeDb(captured));
   assert.match(demoId, /[0-9a-f-]{36}/);
+  assert.equal(captured.upload, `u1/${demoId}.dem`);
   assert.equal(captured.jobs.type, 'scan');
   assert.equal(captured.jobs.state, 'queued');
   assert.equal(captured.demos.user_id, 'u1');
   assert.equal(captured.demos.id, demoId);
+  assert.equal(captured.demos.storage_key, `demos/u1/${demoId}.dem`);
 });
