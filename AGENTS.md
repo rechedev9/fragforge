@@ -112,6 +112,24 @@ There is no hosted/CI deploy in the repo: no GitHub Actions, no Vercel/Netlify/F
 A Vercel/Railway project may be connected to the GitHub repo and auto-deploy on push to `main`, but that cannot be verified from the clone, so confirm in the dashboard.
 Do not invent a VPS or Vercel setup; if real hosting is wanted, treat it as an explicit infra task and ask for the target.
 
+### Local Studio (web UI + local HLAE/CS2 capture)
+
+Local Studio runs the whole product from the web UI on the user's own Windows + GPU PC, capture included, without Supabase or a paired agent.
+The web proxies the entire `/api/demos/*` pipeline to a local orchestrator (`zv serve`) on the same machine, so the browser flow (upload -> pick player -> pick kills -> create reel) drives local HLAE/CS2 capture directly.
+
+```powershell
+.\scripts\local-studio.ps1   # starts zv serve (memory mode, capture auto-detected) + the web in local mode, opens /upload
+```
+
+One flag selects the data plane, `NEXT_PUBLIC_FRAGFORGE_MODE` (default `cloud`):
+
+- `local`: the web talks only to the local orchestrator; scan/status/roster proxy to it (`web/app/api/demos/_local.ts`), and the rest of the pipeline (parse/plan/record/renders/capabilities) already does.
+  A single orchestrator job UUID flows through scan -> parse -> record -> render, so the record button captures with the job that scan created.
+- `cloud`: uploads and scan go to Supabase and a paired desktop agent captures (the hosted control-plane).
+
+Unlike the Docker stack below, this is a native Windows run, so capture works.
+See [`docs/local-studio.md`](docs/local-studio.md) for prerequisites and what the flag switches.
+
 ### Local Docker stack
 
 A two-container stack runs the web UI and the orchestrator together for a local deployment:
