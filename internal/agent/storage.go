@@ -12,9 +12,15 @@ import (
 // CloudStorage implements storage.Storage using signed URLs minted by the cloud.
 type CloudStorage struct {
 	c *Client
+	// blobHTTP has no timeout, unlike c's client: blob bodies (hundreds of MB
+	// of demo/artifact data) can take far longer than the 60s control-call
+	// budget, so transfers rely on caller cancellation instead of a deadline.
+	blobHTTP *http.Client
 }
 
-func NewCloudStorage(c *Client) *CloudStorage { return &CloudStorage{c: c} }
+func NewCloudStorage(c *Client) *CloudStorage {
+	return &CloudStorage{c: c, blobHTTP: &http.Client{}}
+}
 
 func (s *CloudStorage) Open(key string) (io.ReadCloser, error) {
 	ctx := context.Background()
@@ -24,7 +30,7 @@ func (s *CloudStorage) Open(key string) (io.ReadCloser, error) {
 	if _, err := s.c.Do(ctx, "GET", "/api/agent/blobs/download?key="+url.QueryEscape(key), nil, &out); err != nil {
 		return nil, err
 	}
-	resp, err := s.c.http.Get(out.URL)
+	resp, err := s.blobHTTP.Get(out.URL)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +58,7 @@ func (s *CloudStorage) Put(key string, r io.Reader) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := s.c.http.Do(req)
+	resp, err := s.blobHTTP.Do(req)
 	if err != nil {
 		return err
 	}
