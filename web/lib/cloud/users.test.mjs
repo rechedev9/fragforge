@@ -19,10 +19,26 @@ function fakeDb(captured) {
   };
 }
 
+function failingDb(message) {
+  return {
+    from() { return this; },
+    upsert() { return this; },
+    select() { return this; },
+    async single() { return { data: null, error: { message } }; },
+  };
+}
+
 test('ensureUser upserts on steam_id and returns the id', async () => {
   const captured = {};
   const id = await ensureUser('7656', 'zack', 'http://a', fakeDb(captured));
   assert.equal(id, 'user-1');
   assert.equal(captured.row.steam_id, '7656');
   assert.equal(captured.opts.onConflict, 'steam_id');
+});
+
+test('ensureUser surfaces the db error instead of returning undefined', async () => {
+  await assert.rejects(
+    () => ensureUser('7656', 'zack', 'http://a', failingDb('unique_violation')),
+    /ensureUser: unique_violation/,
+  );
 });
