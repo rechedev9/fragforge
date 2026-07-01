@@ -13,7 +13,7 @@ import { Card } from '@/components/ui/card';
 import { DemoDropzone } from '@/components/upload/demo-dropzone';
 import { PlayerPicker } from '@/components/upload/player-picker';
 
-type Stage = 'idle' | 'scanning' | 'picking' | 'parsing';
+type Stage = 'idle' | 'scanning' | 'picking' | 'parsing' | 'waiting-for-pc';
 
 /** True when an API error means the local analysis service is unreachable. */
 function isServiceUnavailable(err: unknown): boolean {
@@ -34,6 +34,7 @@ export default function UploadPage() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [players, setPlayers] = useState<DemoPlayer[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const reset = useCallback((message: string) => {
     setError(message);
@@ -43,11 +44,11 @@ export default function UploadPage() {
     setPlayers([]);
   }, []);
 
-  const onFile = useCallback(
+  const runScan = useCallback(
     async (file: File) => {
-      if (stage !== 'idle') return;
       setError(null);
       setFileName(file.name);
+      setPendingFile(file);
       setStage('scanning');
       try {
         const scan = await api.scanDemo(file);
@@ -55,6 +56,12 @@ export default function UploadPage() {
         setPlayers(scan.players);
         setStage('picking');
       } catch (err) {
+        if (err instanceof Error && err.message === 'PC_OFFLINE') {
+          // Keep fileName/pendingFile so Retry can re-run the same file once
+          // the user's PC comes back online; do not clear them via reset.
+          setStage('waiting-for-pc');
+          return;
+        }
         reset(
           isServiceUnavailable(err)
             ? 'Analysis service is offline. Start it and try again.'
@@ -62,7 +69,15 @@ export default function UploadPage() {
         );
       }
     },
-    [stage, reset],
+    [reset],
+  );
+
+  const onFile = useCallback(
+    (file: File) => {
+      if (stage !== 'idle') return;
+      void runScan(file);
+    },
+    [stage, runScan],
   );
 
   const onPick = useCallback(
@@ -140,6 +155,30 @@ export default function UploadPage() {
               </div>
             ) : stage === 'picking' ? (
               <PlayerPicker players={players} onPick={onPick} />
+            ) : stage === 'waiting-for-pc' ? (
+              <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
+                <div className="flex flex-col gap-1">
+                  <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
+                    Your PC is offline
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Open FragForge Agent on your computer to analyze this demo, then retry.
+                  </p>
+                  {fileName ? (
+                    <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
+                      <FileVideo className="size-4" />
+                      {fileName}
+                    </p>
+                  ) : null}
+                </div>
+                <Button
+                  onClick={() => {
+                    if (pendingFile) void runScan(pendingFile);
+                  }}
+                >
+                  Retry
+                </Button>
+              </div>
             ) : (
               <div className="flex flex-col gap-3">
                 <DemoDropzone onFile={onFile} />
