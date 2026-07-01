@@ -226,6 +226,7 @@ type legacyPassThrough struct {
 
 func legacyPassThroughs() []legacyPassThrough {
 	return []legacyPassThrough{
+		{Command: "agent", Binary: "zv-agent"},
 		{Command: "parser", Binary: "zv-parser"},
 		{Command: "editor", Binary: "zv-editor"},
 		{Command: "recorder", Binary: "zv-recorder"},
@@ -239,6 +240,7 @@ func legacyPassThroughs() []legacyPassThrough {
 
 func defaultLegacyCommandEntrypointNames() []string {
 	return []string{
+		"zv-agent",
 		"zv-parser",
 		"zv-analysis-viewer",
 		"zv-demo-players",
