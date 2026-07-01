@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +33,10 @@ func Run(ctx context.Context, c *Client) error {
 		case "parse":
 			return pw.ProcessParseDemo(ctx, demoID)
 		default:
-			return nil
+			// Fail loudly: the jobs.type CHECK allows 'capture', which this agent
+			// cannot handle yet. Returning nil here would mark it complete having
+			// done no work, contradicting the fail-loud policy for capture stages.
+			return fmt.Errorf("unsupported job type %q", jobType)
 		}
 	}
 	go HeartbeatLoop(ctx, c, map[string]any{"parser": true}, 20*time.Second)
@@ -64,12 +68,22 @@ func loop(ctx context.Context, c *Client, proc processFunc, idle time.Duration) 
 		}
 		demoID, perr := uuid.Parse(out.Job.ID)
 		if perr != nil {
-			continue
+			// A non-UUID id can only come from a buggy control-plane; wait a beat
+			// instead of hot-looping the claim endpoint on the same bad response.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(idle):
+				continue
+			}
 		}
 		if err := proc(ctx, out.JobType, demoID); err != nil {
+			// Best-effort ack: a lost fail callback leaves the job on its claim
+			// lease for the control-plane to reclaim; the agent has nothing to do.
 			_, _ = c.Do(ctx, "POST", "/api/agent/jobs/"+demoID.String()+"/fail", map[string]string{"error": err.Error()}, nil)
 			continue
 		}
+		// Best-effort ack; see the fail callback above for why a lost ack is safe.
 		_, _ = c.Do(ctx, "POST", "/api/agent/jobs/"+demoID.String()+"/complete", nil, nil)
 	}
 }

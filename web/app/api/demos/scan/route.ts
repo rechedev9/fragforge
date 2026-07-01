@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import { verifySession, SESSION_COOKIE } from '@/lib/auth/session';
 import { ensureUser } from '@/lib/cloud/users';
 import { createScanJob } from '@/lib/cloud/demos';
-import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
+import { serviceUnavailable } from '../_lib';
 
 // Runs server-side so the Supabase service-role key stays off the client and
 // the .dem bytes are uploaded straight to Storage without CORS.
@@ -12,6 +12,15 @@ export const runtime = 'nodejs';
 // Caps how much of a .dem we hold in memory and store. Chosen to match the
 // previous orchestrator-proxy cap so behavior does not regress.
 const MAX_DEMO_BYTES = 500 * 1024 * 1024;
+
+// CS2 (Source 2) demos start with "PBDEMS2"; legacy GOTV demos with "HL2DEMO".
+// Mirrors the orchestrator's isDemoHeader so non-demo uploads are rejected at
+// submit time instead of failing deep in the agent's parser minutes later.
+function isDemoHeader(head: Uint8Array): boolean {
+  const startsWith = (magic: string) =>
+    head.length >= magic.length && [...magic].every((ch, i) => head[i] === ch.charCodeAt(0));
+  return startsWith('PBDEMS2') || startsWith('HL2DEMO');
+}
 
 /**
  * POST /api/demos/scan — accept a .dem upload, store it in Supabase Storage,
@@ -40,10 +49,13 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const userId = await ensureUser(s.steamid64, s.persona, s.avatar);
     const bytes = await file.arrayBuffer();
+    if (!isDemoHeader(new Uint8Array(bytes, 0, Math.min(8, bytes.byteLength)))) {
+      return NextResponse.json({ error: 'uploaded file is not a CS2 demo' }, { status: 400 });
+    }
     const { demoId } = await createScanJob(userId, { name: file.name, size: file.size, bytes });
     return NextResponse.json({ jobId: demoId }, { status: 201 });
   } catch (err) {
     console.error('scan create failed', err);
-    return NextResponse.json({ error: 'analysis service unavailable', code: SERVICE_UNAVAILABLE_CODE }, { status: 503 });
+    return serviceUnavailable();
   }
 }

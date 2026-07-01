@@ -518,11 +518,18 @@ export class RealApiClient implements ApiClient {
     return { ok: Boolean(data.ok), matchesFound: Number(data.matchesFound) || 0 };
   }
 
-  pairPc(): Promise<{ pairingCode: string }> {
-    return this.fallback.pairPc();
+  /** Mints a one-time pairing code for the desktop agent (POST /api/pc/pair). */
+  async pairPc(): Promise<{ pairingCode: string }> {
+    return readJson<{ pairingCode: string }>(await fetch('/api/pc/pair', { method: 'POST' }));
   }
-  getPcStatus(): Promise<{ paired: boolean }> {
-    return this.fallback.getPcStatus();
+
+  /**
+   * Reports whether the signed-in user has a redeemed agent (GET /api/pc/status).
+   * Stays false right after pairPc until the desktop agent redeems the code and
+   * heartbeats, since the pending pairing row is excluded server-side.
+   */
+  async getPcStatus(): Promise<{ paired: boolean }> {
+    return readJson<{ paired: boolean }>(await fetch('/api/pc/status', { cache: 'no-store' }));
   }
 
   /**
