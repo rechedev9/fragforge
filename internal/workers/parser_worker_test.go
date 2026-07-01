@@ -18,16 +18,41 @@ import (
 	"github.com/rechedev9/fragforge/internal/moments"
 	"github.com/rechedev9/fragforge/internal/parser"
 	"github.com/rechedev9/fragforge/internal/rules"
+	"github.com/rechedev9/fragforge/internal/storage"
 	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 // in-memory fakes -------------------------------------------------------
 
 type fakeRepo struct {
-	jobs map[uuid.UUID]*job.Job
+	jobs           map[uuid.UUID]*job.Job
+	lastStatusSeen job.Status
 }
 
 func newFakeRepo() *fakeRepo { return &fakeRepo{jobs: map[uuid.UUID]*job.Job{}} }
+
+// newFakeJobRepo seeds a fakeRepo with the given jobs, for tests that only
+// need to exercise ProcessParseDemo/ProcessScanRoster against a fixed job.
+func newFakeJobRepo(jobs ...job.Job) *fakeRepo {
+	f := newFakeRepo()
+	for i := range jobs {
+		j := jobs[i]
+		f.jobs[j.ID] = &j
+	}
+	return f
+}
+
+// only returns the single job seeded into the repo, for tests that seed
+// exactly one.
+func (f *fakeRepo) only() job.Job {
+	for _, j := range f.jobs {
+		return *j
+	}
+	return job.Job{}
+}
+
+// lastStatus returns the most recent status passed to UpdateStatus.
+func (f *fakeRepo) lastStatus() job.Status { return f.lastStatusSeen }
 func (f *fakeRepo) Get(_ context.Context, id uuid.UUID) (job.Job, error) {
 	j, ok := f.jobs[id]
 	if !ok {
@@ -49,6 +74,7 @@ func (f *fakeRepo) GetMeta(_ context.Context, id uuid.UUID) (job.Job, error) {
 	return meta, nil
 }
 func (f *fakeRepo) UpdateStatus(_ context.Context, id uuid.UUID, s job.Status, reason string) error {
+	f.lastStatusSeen = s
 	j := f.jobs[id]
 	if j == nil {
 		return job.ErrNotFound
@@ -203,6 +229,23 @@ func TestParserWorkerMarksJobFailedOnUnknownTarget(t *testing.T) {
 	}
 	if got.FailureReason == "" {
 		t.Errorf("FailureReason empty, want a message")
+	}
+}
+
+func TestProcessScanRoster_BadDemoMarksFailed(t *testing.T) {
+	repo := newFakeJobRepo(job.Job{ID: uuid.New(), Status: job.StatusQueued, DemoPath: "demos/missing.dem"})
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("storage: %v", err)
+	}
+	w := NewParserWorker(repo, store)
+
+	got := w.ProcessScanRoster(context.Background(), repo.only().ID)
+	if got == nil {
+		t.Fatalf("got nil error, want failure opening missing demo")
+	}
+	if repo.lastStatus() != job.StatusFailed {
+		t.Errorf("got status %v, want %v", repo.lastStatus(), job.StatusFailed)
 	}
 }
 

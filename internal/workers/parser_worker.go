@@ -50,12 +50,15 @@ func (w *ParserWorker) HandleParseDemo(ctx context.Context, t *asynq.Task) error
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
 	}
+	return w.ProcessParseDemo(ctx, payload.JobID)
+}
 
-	j, err := w.repo.GetMeta(ctx, payload.JobID)
+// ProcessParseDemo runs the parse stage for one job, independent of any queue.
+func (w *ParserWorker) ProcessParseDemo(ctx context.Context, jobID uuid.UUID) error {
+	j, err := w.repo.GetMeta(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("load job %s: %w", payload.JobID, err)
+		return fmt.Errorf("load job %s: %w", jobID, err)
 	}
-
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusParsing, ""); err != nil {
 		return fmt.Errorf("mark parsing: %w", err)
 	}
@@ -66,7 +69,6 @@ func (w *ParserWorker) HandleParseDemo(ctx context.Context, t *asynq.Task) error
 		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeParseDemo, parseErr)
 		return parseErr
 	}
-
 	if err := w.repo.SetKillPlan(ctx, j.ID, plan); err != nil {
 		return fmt.Errorf("save plan: %w", err)
 	}
@@ -82,20 +84,24 @@ func (w *ParserWorker) HandleParseDemo(ctx context.Context, t *asynq.Task) error
 	return nil
 }
 
-// HandleScanRoster is the Asynq handler for scan:roster. It scans the demo's
-// roster once so the user can pick a target before a full parse, mirroring
-// HandleParseDemo's status transitions and failure handling.
+// HandleScanRoster is the Asynq handler for scan:roster.
 func (w *ParserWorker) HandleScanRoster(ctx context.Context, t *asynq.Task) error {
 	var payload tasks.ScanRosterPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
 	}
+	return w.ProcessScanRoster(ctx, payload.JobID)
+}
 
-	j, err := w.repo.GetMeta(ctx, payload.JobID)
+// ProcessScanRoster runs the roster scan for one job, independent of any
+// queue. It scans the demo's roster once so the user can pick a target
+// before a full parse, mirroring ProcessParseDemo's status transitions and
+// failure handling.
+func (w *ParserWorker) ProcessScanRoster(ctx context.Context, jobID uuid.UUID) error {
+	j, err := w.repo.GetMeta(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("load job %s: %w", payload.JobID, err)
+		return fmt.Errorf("load job %s: %w", jobID, err)
 	}
-
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusScanning, ""); err != nil {
 		return fmt.Errorf("mark scanning: %w", err)
 	}
@@ -106,7 +112,6 @@ func (w *ParserWorker) HandleScanRoster(ctx context.Context, t *asynq.Task) erro
 		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeScanRoster, scanErr)
 		return scanErr
 	}
-
 	logWorkerArtifacts(j.ID, tasks.TypeScanRoster, []string{rosterKey})
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusScanned, ""); err != nil {
 		return fmt.Errorf("mark scanned: %w", err)
