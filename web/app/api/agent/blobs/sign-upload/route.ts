@@ -13,7 +13,11 @@ function bucketFor(key: string): { bucket: string; path: string } {
 export async function POST(request: Request): Promise<Response> {
   const agent = await resolveAgent(request);
   if (!agent) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  const { key } = (await request.json()) as { key: string };
+  const body = (await request.json().catch(() => null)) as { key?: string } | null;
+  const key = body?.key;
+  if (typeof key !== 'string' || key.length === 0) {
+    return NextResponse.json({ error: 'missing key' }, { status: 400 });
+  }
   const { bucket, path } = bucketFor(key);
   const { data, error } = await supabaseAdmin().storage.from(bucket).createSignedUploadUrl(path);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
