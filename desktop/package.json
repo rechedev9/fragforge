@@ -1,0 +1,42 @@
+{
+  "name": "fragforge-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
+  "author": "FragForge",
+  "main": "main.js",
+  "scripts": {
+    "assemble": "node scripts/assemble.mjs",
+    "start": "electron .",
+    "dist": "npm run assemble && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.fragforge.studio",
+    "productName": "FragForge Studio",
+    "directories": {
+      "output": "dist-installer"
+    },
+    "files": [
+      "main.js",
+      "loading.html"
+    ],
+    "extraResources": [
+      { "from": "build-resources/bin", "to": "bin" },
+      { "from": "build-resources/web", "to": "web" }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
