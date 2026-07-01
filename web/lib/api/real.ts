@@ -126,7 +126,7 @@ export class RealApiClient implements ApiClient {
       await fetch('/api/demos/scan', { method: 'POST', body: form }),
     );
 
-    await this.waitForStatus(jobId, 'scanned');
+    await this.waitForScan(jobId);
 
     const { players } = await readJson<{ players: RosterPlayer[] }>(
       await fetch(`/api/demos/${jobId}/roster`),
@@ -218,6 +218,34 @@ export class RealApiClient implements ApiClient {
       await sleep(800);
     }
     throw new Error(`timed out waiting for ${want}`);
+  }
+
+  /**
+   * Polls /status until the cloud scan job reaches 'scanned', for the async
+   * browser -> Supabase -> paired-agent scan flow. Unlike waitForStatus, this
+   * also watches `online`: the status route reports whether the user's agent
+   * heartbeat within the last minute, so a scan that never progresses because
+   * the user's PC is off is reported distinctly (PC_OFFLINE) rather than as a
+   * generic timeout, letting the UI show an actionable "open FragForge Agent"
+   * message instead of a dead spinner.
+   */
+  private async waitForScan(jobId: string, maxAttempts = 200): Promise<void> {
+    let consecutiveOffline = 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await sleep(1500);
+      const data = await readJson<{ status: string; failure_reason?: string; online?: boolean }>(
+        await fetch(`/api/demos/${jobId}/status`),
+      );
+      if (data.status === 'scanned') return;
+      if (data.status === 'failed') throw new Error(data.failure_reason || 'scan failed');
+      if (data.online === false) {
+        consecutiveOffline++;
+        if (consecutiveOffline > 4) throw new Error('PC_OFFLINE');
+      } else {
+        consecutiveOffline = 0;
+      }
+    }
+    throw new Error('scan timed out');
   }
 
   /**
