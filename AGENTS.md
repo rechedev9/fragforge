@@ -185,7 +185,7 @@ It also exposes `GET /healthz` (liveness) and `GET /metrics` (Prometheus text), 
 For local development without Docker, run the orchestrator fully in-process with `ZV_DATABASE_URL=memory`: it uses an in-memory job repository and auto-switches the queue to inline mode, so no Postgres and no Redis are needed.
 
 ```bash
-ZV_DATABASE_URL=memory ZV_DATA_DIR=./data ./bin/zv-orchestrator.exe   # same binary as `zv serve`
+ZV_DATABASE_URL=memory ZV_DATA_DIR=./data ./bin/zv serve   # in-memory job repo + inline queue, no Postgres/Redis
 ```
 
 This is enough for the parse and roster-scan stages (the parser worker is always registered); the record, compose, and render workers only start when their tool paths are set (`ZV_RECORDER_PATH`, `ZV_HLAE_PATH`, `ZV_CS2_PATH`, `ZV_EDITOR_PATH`, `ZV_FFMPEG_PATH`).
