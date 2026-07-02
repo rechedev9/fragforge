@@ -19,6 +19,8 @@ type Column = {
   label: string;
   value: (p: DemoPlayer) => string;
   tone?: (p: DemoPlayer) => string;
+  /** Secondary columns hide below the sm breakpoint so the player name never collapses. */
+  secondary?: boolean;
 };
 
 function signed(n: number): string {
@@ -48,15 +50,24 @@ export function PlayerPicker({ players, onPick }: PlayerPickerProps) {
     { key: 'k', label: 'K', value: (p) => `${p.kills}` },
     { key: 'd', label: 'D', value: (p) => `${p.deaths}` },
     { key: 'a', label: 'A', value: (p) => `${p.assists}` },
-    { key: 'pm', label: '+/-', value: (p) => signed(p.kills - p.deaths), tone: (p) => (p.kills - p.deaths >= 0 ? 'text-foreground' : 'text-muted-foreground') },
-    { key: 'adr', label: 'ADR', value: (p) => `${Math.round(p.adr)}` },
-    { key: 'kast', label: 'KAST', value: (p) => `${Math.round(p.kast)}%` },
-    { key: 'hs', label: 'HS', value: (p) => `${Math.round(p.hsPct)}%` },
-    ...(showMvp ? [{ key: 'mvp', label: 'MVP', value: (p: DemoPlayer) => `${p.mvps}` }] : []),
+    { key: 'pm', label: '+/-', secondary: true, value: (p) => signed(p.kills - p.deaths), tone: (p) => (p.kills - p.deaths >= 0 ? 'text-foreground' : 'text-muted-foreground') },
+    { key: 'adr', label: 'ADR', secondary: true, value: (p) => `${Math.round(p.adr)}` },
+    { key: 'kast', label: 'KAST', secondary: true, value: (p) => `${Math.round(p.kast)}%` },
+    { key: 'hs', label: 'HS', secondary: true, value: (p) => `${Math.round(p.hsPct)}%` },
+    ...(showMvp ? [{ key: 'mvp', label: 'MVP', secondary: true, value: (p: DemoPlayer) => `${p.mvps}` }] : []),
   ];
 
   // A fixed flexible player column plus one compact, tabular column per stat.
-  const gridStyle = { gridTemplateColumns: `minmax(0,1fr) repeat(${columns.length}, minmax(2.5rem,2.75rem))` };
+  // Narrow windows (a snapped or resized desktop window) drop the secondary
+  // columns instead of letting the grid crush the player name to zero width,
+  // so the template switches with the same sm breakpoint that hides the cells.
+  const coreCount = columns.filter((c) => !c.secondary).length;
+  const gridStyle = {
+    '--pp-cols': `minmax(0,1fr) repeat(${coreCount}, minmax(2.5rem,2.75rem))`,
+    '--pp-cols-sm': `minmax(0,1fr) repeat(${columns.length}, minmax(2.5rem,2.75rem))`,
+  } as React.CSSProperties;
+  const gridClass = '[grid-template-columns:var(--pp-cols)] sm:[grid-template-columns:var(--pp-cols-sm)]';
+  const cellClass = (c: Column) => (c.secondary ? 'hidden sm:block' : undefined);
 
   const sides: Array<DemoPlayer['team']> = ['T', 'CT', ''];
   const groups = sides
@@ -82,12 +93,15 @@ export function PlayerPicker({ players, onPick }: PlayerPickerProps) {
 
             <div className="overflow-hidden rounded-xl border border-border">
               <div
-                className="grid items-center gap-x-1 border-b border-border/70 bg-muted/30 px-3 py-2 font-[family-name:var(--font-mono)] text-[0.65rem] uppercase tracking-wider text-muted-foreground"
+                className={cn(
+                  'grid items-center gap-x-1 border-b border-border/70 bg-muted/30 px-3 py-2 font-[family-name:var(--font-mono)] text-[0.65rem] uppercase tracking-wider text-muted-foreground',
+                  gridClass,
+                )}
                 style={gridStyle}
               >
                 <span>Player</span>
                 {columns.map((c) => (
-                  <span key={c.key} className="text-right">
+                  <span key={c.key} className={cn('text-right', cellClass(c))}>
                     {c.label}
                   </span>
                 ))}
@@ -106,6 +120,7 @@ export function PlayerPicker({ players, onPick }: PlayerPickerProps) {
                     className={cn(
                       'grid w-full items-center gap-x-1 border-b border-border/40 px-3 py-2.5 text-left transition-colors last:border-b-0',
                       'focus:outline-none focus-visible:bg-primary/10',
+                      gridClass,
                       active ? 'bg-primary/10 ring-1 ring-inset ring-primary/60' : 'hover:bg-muted/40',
                     )}
                   >
@@ -123,7 +138,11 @@ export function PlayerPicker({ players, onPick }: PlayerPickerProps) {
                     {columns.map((c) => (
                       <span
                         key={c.key}
-                        className={cn('text-right font-[family-name:var(--font-mono)] text-sm tabular-nums', c.tone?.(p) ?? 'text-foreground')}
+                        className={cn(
+                          'text-right font-[family-name:var(--font-mono)] text-sm tabular-nums',
+                          cellClass(c),
+                          c.tone?.(p) ?? 'text-foreground',
+                        )}
                       >
                         {c.value(p)}
                       </span>
