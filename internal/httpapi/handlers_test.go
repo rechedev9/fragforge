@@ -196,6 +196,10 @@ func (f *fakeStorage) Exists(key string) (bool, error) {
 	_, ok := f.puts[key]
 	return ok, nil
 }
+func (f *fakeStorage) Delete(key string) error {
+	delete(f.puts, key)
+	return nil
+}
 
 // fakeQueue captures enqueued tasks.
 type fakeQueue struct {
@@ -1907,6 +1911,66 @@ func TestRenderVideoHonorsRangeRequests(t *testing.T) {
 	}
 	if got := rw.Header().Get("Content-Type"); got != "video/mp4" {
 		t.Fatalf("Content-Type = %q, want video/mp4", got)
+	}
+}
+
+func TestDeleteRenderVideoRemovesVideoCoverAndCaption(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	j := job.Job{ID: uuid.New(), Status: job.StatusDone, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	keys := make([]string, 0, 3)
+	for _, derive := range []func(uuid.UUID, string, string) (string, error){
+		artifacts.RenderVariantVideoKey,
+		artifacts.RenderVariantCoverKey,
+		artifacts.RenderVariantCaptionKey,
+	} {
+		key, err := derive(j.ID, editor.PresetViral60Clean, "seg-001_seg-002")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = store.Put(key, bytes.NewReader([]byte("artifact-bytes")))
+		keys = append(keys, key)
+	}
+	h := NewHandlers(repo, store, &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Delete("/api/jobs/{id}/renders/{variant}/videos/{name}", h.DeleteRenderVideo)
+	req := httptest.NewRequest(http.MethodDelete, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/videos/seg-001_seg-002", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rw.Code, rw.Body.String())
+	}
+	for _, key := range keys {
+		if _, ok := store.puts[key]; ok {
+			t.Errorf("artifact %q still present after delete", key)
+		}
+	}
+
+	// Deleting again is idempotent: a retry after a lost response must succeed.
+	rw = httptest.NewRecorder()
+	r.ServeHTTP(rw, httptest.NewRequest(http.MethodDelete, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/videos/seg-001_seg-002", nil))
+	if rw.Code != http.StatusNoContent {
+		t.Fatalf("repeat delete status = %d, want 204; body=%s", rw.Code, rw.Body.String())
+	}
+}
+
+func TestDeleteRenderVideoRejectsUnknownVariant(t *testing.T) {
+	repo := newFakeRepo()
+	j := job.Job{ID: uuid.New(), Status: job.StatusDone, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Delete("/api/jobs/{id}/renders/{variant}/videos/{name}", h.DeleteRenderVideo)
+	req := httptest.NewRequest(http.MethodDelete, "/api/jobs/"+j.ID.String()+"/renders/not-a-variant/videos/seg-001", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
 	}
 }
 

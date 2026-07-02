@@ -53,6 +53,7 @@ func Routes(h *Handlers) chi.Router {
 	r.Get("/api/jobs/{id}/renders/{variant}/edit-document", h.GetRenderEditDocument)
 	r.Get("/api/jobs/{id}/renders/{variant}/gallery", h.GetRenderGallery)
 	r.Get("/api/jobs/{id}/renders/{variant}/videos/{name}", h.GetRenderVideo)
+	r.Delete("/api/jobs/{id}/renders/{variant}/videos/{name}", h.DeleteRenderVideo)
 	r.Get("/api/jobs/{id}/renders/{variant}/covers/{name}", h.GetRenderCover)
 	r.Get("/api/jobs/{id}/renders/{variant}/captions/{name}", h.GetRenderCaption)
 	r.Post("/api/stream-jobs", h.CreateStreamJob)

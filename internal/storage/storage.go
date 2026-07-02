@@ -71,6 +71,19 @@ func (l *Local) Open(key string) (io.ReadCloser, error) {
 	return os.Open(path)
 }
 
+// Delete removes the file at key inside the storage root. A missing key is
+// not an error, so deletes are idempotent and safe to retry.
+func (l *Local) Delete(key string) error {
+	path, err := l.resolve(key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // Exists reports whether key exists inside the storage root.
 func (l *Local) Exists(key string) (bool, error) {
 	path, err := l.resolve(key)

@@ -347,6 +347,12 @@ export class MockApiClient implements ApiClient {
     return project(video);
   }
 
+  async deleteVideo(id: string): Promise<void> {
+    await delay();
+    const index = videos.findIndex((v) => v.id === id);
+    if (index !== -1) videos.splice(index, 1);
+  }
+
   async listFeed(): Promise<FeedItem[]> {
     await delay();
     return fixtureFeed.map((f) => ({ ...f }));

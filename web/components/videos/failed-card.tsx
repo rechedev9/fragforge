@@ -6,6 +6,7 @@ import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { DeleteVideoButton } from '@/components/videos/delete-video-button';
 
 /**
  * A reel whose pipeline failed on the rig. Shows the orchestrator's failure
@@ -44,10 +45,13 @@ export function FailedCard({ video, onChange }: { video: Video; onChange: () => 
         </p>
       </div>
 
-      <Button variant="secondary" size="sm" className="shrink-0" onClick={onRetry} disabled={retrying}>
-        <RotateCcw className="size-4" />
-        {retrying ? 'Retrying…' : 'Retry'}
-      </Button>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
+          <RotateCcw className="size-4" />
+          {retrying ? 'Retrying…' : 'Retry'}
+        </Button>
+        <DeleteVideoButton video={video} onDeleted={onChange} />
+      </div>
     </Card>
   );
 }

@@ -150,8 +150,7 @@ func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	var req createStreamJobFromURLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeError(w, http.StatusRequestEntityTooLarge, "stream job JSON is too large")
 			return
 		}
@@ -306,8 +305,7 @@ func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	var plan streamclips.EditPlan
 	if err := json.NewDecoder(r.Body).Decode(&plan); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeError(w, http.StatusRequestEntityTooLarge, "edit plan JSON is too large")
 			return
 		}

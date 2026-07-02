@@ -28,5 +28,7 @@ export interface ApiClient {
   publishVideo(id: string): Promise<Video>;
   /** Re-drive a failed reel from where it failed (re-record or re-render). */
   retryVideo(id: string): Promise<Video>;
+  /** Remove a reel from the library, deleting its rendered artifacts where possible. */
+  deleteVideo(id: string): Promise<void>;
   listFeed(): Promise<FeedItem[]>;
 }

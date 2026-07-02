@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ReelCover } from '@/components/brand';
+import { DeleteVideoButton } from '@/components/videos/delete-video-button';
 
 /**
  * A finished, downloadable video. Shows the rendered reel's cover (falling back
@@ -129,15 +130,18 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
               <span />
             )}
 
-            {video.published ? (
-              <Badge>
-                <Globe /> Published
-              </Badge>
-            ) : (
-              <Button variant="outline" size="sm" onClick={publish} disabled={publishing}>
-                <Globe /> {publishing ? 'Publishing…' : 'Publish'}
-              </Button>
-            )}
+            <div className="flex items-center gap-1">
+              {video.published ? (
+                <Badge>
+                  <Globe /> Published
+                </Badge>
+              ) : (
+                <Button variant="outline" size="sm" onClick={publish} disabled={publishing}>
+                  <Globe /> {publishing ? 'Publishing…' : 'Publish'}
+                </Button>
+              )}
+              <DeleteVideoButton video={video} onDeleted={() => onChange?.(video)} />
+            </div>
           </div>
         </div>
       </Card>

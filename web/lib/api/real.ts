@@ -407,6 +407,31 @@ export class RealApiClient implements ApiClient {
   }
 
   /**
+   * Removes a reel from the library. The orchestrator delete (video + cover +
+   * caption artifacts, freeing disk) is best-effort: the local intent is
+   * dropped regardless so the reel disappears even when the orchestrator is
+   * unreachable, matching the user's intent to clear it.
+   */
+  async deleteVideo(id: string): Promise<void> {
+    const intent = this.intents.get(id);
+    if (!intent) return this.fallback.deleteVideo(id);
+
+    try {
+      const variant = variantOf(intent);
+      const name = reelName(intent.segmentIds);
+      await fetch(`/api/demos/${intent.jobId}/renders/${variant}/videos/${name}`, {
+        method: 'DELETE',
+      });
+    } catch {
+      // Orchestrator offline: the artifacts stay on disk, but the reel still
+      // leaves the library. A future render of the same job overwrites them.
+    }
+    this.intents.delete(id);
+    this.reels.delete(id);
+    saveReelIntents(Array.from(this.intents.values()));
+  }
+
+  /**
    * Reconciles every non-terminal tracked reel against the orchestrator and drives
    * its next step. Idempotent and resumable: it reads server truth each tick, so a
    * reload simply reattaches. One reel's failure never breaks the batch.
