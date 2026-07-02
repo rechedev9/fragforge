@@ -24,6 +24,8 @@ import {
   type StreamRenderState,
   type StreamVariant,
 } from '@/lib/api/streams';
+import { api } from '@/lib/api';
+import type { Song } from '@/lib/api/types';
 import { SectionEyebrow } from '@/components/brand';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -70,6 +72,25 @@ function clipsAreValid(clips: StreamClipRange[]): boolean {
 }
 
 /**
+ * Canonical fingerprint of everything a render consumes from the plan, so the
+ * UI can tell whether the shown Shorts still match the current edits. Fields
+ * are listed explicitly (not JSON.stringify of the object) so key order and
+ * volatile fields like updated_at can never cause a false mismatch.
+ */
+function planFingerprint(plan: StreamEditPlan): string {
+  const rect = (r?: NormalizedRect) => (r ? [r.x, r.y, r.width, r.height] : null);
+  return JSON.stringify({
+    variant: plan.variant,
+    face: rect(plan.face_crop),
+    game: rect(plan.gameplay_crop),
+    clips: plan.clips.map((c) => [c.id, c.start_seconds, c.end_seconds, c.title ?? '']),
+    captions: [plan.captions?.enabled ?? false, plan.captions?.language ?? 'auto'],
+    music: [plan.music?.key ?? '', plan.music?.volume ?? 0],
+    grade: plan.effects?.grade ?? false,
+  });
+}
+
+/**
  * Stream Clips (/streams) — paste a Twitch clip/VOD URL or upload an MP4, then
  * lay out the facecam over gameplay and cut clip ranges before rendering
  * vertical Shorts. Mirrors /upload's stage machine (submit → wait → edit) but
@@ -81,6 +102,8 @@ export default function StreamsPage() {
   const [job, setJob] = useState<StreamJob | null>(null);
   const [plan, setPlan] = useState<StreamEditPlan | null>(null);
   const [renderState, setRenderState] = useState<StreamRenderState | null>(null);
+  /** The exact plan the shown render used; drives URLs and staleness. */
+  const [renderedPlan, setRenderedPlan] = useState<StreamEditPlan | null>(null);
   const [sourceUrl, setSourceUrl] = useState('');
   const [title, setTitle] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +119,7 @@ export default function StreamsPage() {
     setJob(null);
     setPlan(null);
     setRenderState(null);
+    setRenderedPlan(null);
     setFailureReason(null);
   }, []);
 
@@ -238,6 +262,7 @@ export default function StreamsPage() {
     try {
       const saved = await streamsApi.putEditPlan(job.id, plan);
       setPlan(saved);
+      setRenderedPlan(saved);
       setStage('rendering');
       setRenderState({ status: 'queued', videos: [] });
       await streamsApi.startRender(job.id, saved.variant);
@@ -313,6 +338,7 @@ export default function StreamsPage() {
           onPlanChange={setPlan}
           stage={stage as 'editing' | 'rendering' | 'rendered'}
           renderState={renderState}
+          renderedPlan={renderedPlan}
           error={error}
           saving={saving}
           onCreate={() => void createShorts()}
@@ -420,6 +446,7 @@ function StreamEditor({
   onPlanChange,
   stage,
   renderState,
+  renderedPlan,
   error,
   saving,
   onCreate,
@@ -430,6 +457,7 @@ function StreamEditor({
   onPlanChange: (plan: StreamEditPlan) => void;
   stage: 'editing' | 'rendering' | 'rendered';
   renderState: StreamRenderState | null;
+  renderedPlan: StreamEditPlan | null;
   error: string | null;
   saving: boolean;
   onCreate: () => void;
@@ -437,6 +465,7 @@ function StreamEditor({
 }) {
   const videoSrc = streamsApi.sourceUrl(job.id);
   const variantMeta = STREAM_VARIANTS.find((v) => v.value === plan.variant) ?? STREAM_VARIANTS[0];
+  const stale = renderedPlan !== null && planFingerprint(renderedPlan) !== planFingerprint(plan);
   const busy = stage === 'rendering' || saving;
 
   const setVariant = (variant: StreamVariant) => onPlanChange({ ...plan, variant });
@@ -446,6 +475,11 @@ function StreamEditor({
     onPlanChange({ ...plan, captions: { enabled, language: plan.captions?.language ?? 'auto' } });
   const setLanguage = (language: string) =>
     onPlanChange({ ...plan, captions: { enabled: plan.captions?.enabled ?? false, language } });
+  const setMusicKey = (key: string) =>
+    onPlanChange({ ...plan, music: key ? { key, volume: plan.music?.volume } : {} });
+  const setMusicVolume = (volume: number) =>
+    onPlanChange({ ...plan, music: { key: plan.music?.key, volume } });
+  const setGrade = (grade: boolean) => onPlanChange({ ...plan, effects: { grade } });
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
@@ -522,6 +556,14 @@ function StreamEditor({
           </div>
         </Card>
 
+        <MusicAndEffectsCard
+          plan={plan}
+          busy={busy}
+          onMusicKey={setMusicKey}
+          onMusicVolume={setMusicVolume}
+          onGrade={setGrade}
+        />
+
         {error ? (
           <p className="flex items-center gap-2 text-sm text-destructive">
             <AlertTriangle className="size-4" />
@@ -539,7 +581,9 @@ function StreamEditor({
           </Button>
         </div>
 
-        {stage === 'rendered' ? <RenderResults renderState={renderState} job={job} plan={plan} /> : null}
+        {stage === 'rendered' && renderedPlan ? (
+          <RenderResults renderState={renderState} job={job} renderedPlan={renderedPlan} stale={stale} />
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-4">
@@ -584,8 +628,11 @@ function ClipEditor({
             <div key={clip.id} className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 p-3">
               <div className="flex flex-wrap items-end gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label className="text-xs text-muted-foreground">Start (s)</Label>
+                  <Label htmlFor={`${clip.id}-start`} className="text-xs text-muted-foreground">
+                    Start (s)
+                  </Label>
                   <Input
+                    id={`${clip.id}-start`}
                     type="number"
                     min={0}
                     step="0.1"
@@ -596,8 +643,11 @@ function ClipEditor({
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label className="text-xs text-muted-foreground">End (s)</Label>
+                  <Label htmlFor={`${clip.id}-end`} className="text-xs text-muted-foreground">
+                    End (s)
+                  </Label>
                   <Input
+                    id={`${clip.id}-end`}
                     type="number"
                     min={0}
                     step="0.1"
@@ -609,8 +659,11 @@ function ClipEditor({
                   />
                 </div>
                 <div className="flex min-w-40 flex-1 flex-col gap-1">
-                  <Label className="text-xs text-muted-foreground">Title (optional)</Label>
+                  <Label htmlFor={`${clip.id}-title`} className="text-xs text-muted-foreground">
+                    Title (optional)
+                  </Label>
                   <Input
+                    id={`${clip.id}-title`}
                     value={clip.title ?? ''}
                     disabled={disabled}
                     onChange={(e) => updateClip(clip.id, { title: e.target.value })}
@@ -640,11 +693,14 @@ function ClipEditor({
 function RenderResults({
   renderState,
   job,
-  plan,
+  renderedPlan,
+  stale,
 }: {
   renderState: StreamRenderState | null;
   job: StreamJob;
-  plan: StreamEditPlan;
+  /** The plan the shown render actually used; URLs must come from it, never the live edits. */
+  renderedPlan: StreamEditPlan;
+  stale: boolean;
 }) {
   if (!renderState) return null;
 
@@ -652,6 +708,14 @@ function RenderResults({
     <Card className="p-6 sm:p-8">
       <div className="flex flex-col gap-4">
         <SectionEyebrow label="Rendered Shorts" count={renderState.videos.length} />
+
+        {stale ? (
+          <p className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+            <AlertTriangle className="size-3.5 shrink-0" />
+            These Shorts were rendered before your latest edits. Click Create Shorts to apply them —
+            downloads are disabled until then so you never keep an outdated file.
+          </p>
+        ) : null}
 
         {renderState.warnings && renderState.warnings.length > 0 ? (
           <ul className="flex flex-col gap-1">
@@ -672,24 +736,139 @@ function RenderResults({
         ) : (
           <div className="grid gap-5 sm:grid-cols-2">
             {renderState.videos.map((v) => {
-              const url = streamsApi.videoUrl(job.id, plan.variant, v.clip_id);
+              const url = streamsApi.videoUrl(job.id, renderedPlan.variant, v.clip_id);
               return (
                 <div key={v.clip_id} className="flex flex-col gap-2">
                   {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                   <video src={url} controls className="aspect-[9/16] w-full rounded-lg bg-black object-contain" />
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm text-foreground">{v.title || v.clip_id}</span>
-                    <Button asChild variant="outline" size="icon-sm">
-                      <a href={url} download aria-label={`Download ${v.title || v.clip_id}`}>
+                    {stale ? (
+                      <Button variant="outline" size="icon-sm" disabled aria-label={`Download ${v.title || v.clip_id} (outdated)`}>
                         <Download className="size-4" />
-                      </a>
-                    </Button>
+                      </Button>
+                    ) : (
+                      <Button asChild variant="outline" size="icon-sm">
+                        <a href={url} download aria-label={`Download ${v.title || v.clip_id}`}>
+                          <Download className="size-4" />
+                        </a>
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
         )}
+      </div>
+    </Card>
+  );
+}
+
+/** Preset music gains: quiet bed, balanced, or music-forward. */
+const MUSIC_VOLUMES = [
+  { value: 0.15, label: 'Low' },
+  { value: 0.25, label: 'Medium' },
+  { value: 0.4, label: 'High' },
+];
+
+function MusicAndEffectsCard({
+  plan,
+  busy,
+  onMusicKey,
+  onMusicVolume,
+  onGrade,
+}: {
+  plan: StreamEditPlan;
+  busy: boolean;
+  onMusicKey: (key: string) => void;
+  onMusicVolume: (volume: number) => void;
+  onGrade: (grade: boolean) => void;
+}) {
+  const [songs, setSongs] = useState<Song[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .listSongs()
+      .then((next) => {
+        if (active) setSongs(next);
+      })
+      .catch(() => {
+        if (active) setSongs([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const musicKey = plan.music?.key ?? '';
+  const volume = plan.music?.volume ?? 0.25;
+  const grade = plan.effects?.grade ?? false;
+
+  return (
+    <Card className="p-6 sm:p-8">
+      <div className="flex flex-col gap-4">
+        <SectionEyebrow label="Music & effects" />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="stream-music" className="text-xs text-muted-foreground">
+              Background music
+            </Label>
+            <select
+              id="stream-music"
+              value={musicKey}
+              disabled={busy || songs === null}
+              onChange={(e) => onMusicKey(e.target.value)}
+              className="h-9 min-w-52 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50"
+            >
+              <option value="">{songs === null ? 'Loading tracks…' : 'None'}</option>
+              {(songs ?? []).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title}
+                  {s.genre ? ` · ${s.genre}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {musicKey ? (
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs text-muted-foreground">Music volume</Label>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                value={String(volume)}
+                onValueChange={(v) => v && onMusicVolume(Number(v))}
+                disabled={busy}
+              >
+                {MUSIC_VOLUMES.map((v) => (
+                  <ToggleGroupItem key={v.value} value={String(v.value)} className="text-xs">
+                    {v.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant={grade ? 'default' : 'outline'}
+            size="sm"
+            disabled={busy}
+            onClick={() => onGrade(!grade)}
+            className="gap-1.5"
+          >
+            <Sparkles className="size-4" />
+            {grade ? 'Viral grade on' : 'Viral grade off'}
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Light contrast and saturation lift. Music mixes under the streamer&apos;s audio.
+          </p>
+        </div>
       </div>
     </Card>
   );

@@ -34,6 +34,12 @@ export type StreamClipRange = { id: string; start_seconds: number; end_seconds: 
 
 export type StreamCaptions = { enabled: boolean; language: string };
 
+/** A music catalog track mixed under the clip audio; empty key means none. */
+export type StreamMusic = { key?: string; volume?: number };
+
+/** Light post effects; grade is the mild viral contrast/saturation lift. */
+export type StreamEffects = { grade?: boolean };
+
 export type StreamEditPlan = {
   schema_version: number;
   variant: StreamVariant;
@@ -41,6 +47,8 @@ export type StreamEditPlan = {
   gameplay_crop?: NormalizedRect;
   clips: StreamClipRange[];
   captions?: StreamCaptions;
+  music?: StreamMusic;
+  effects?: StreamEffects;
   updated_at?: string;
 };
 

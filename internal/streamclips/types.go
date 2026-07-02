@@ -82,7 +82,9 @@ type EditPlan struct {
 	FaceCrop      CropRect     `json:"face_crop"`
 	GameplayCrop  CropRect     `json:"gameplay_crop"`
 	Clips         []ClipRange  `json:"clips"`
-	Captions      CaptionsPlan `json:"captions,omitempty"`
+	Captions      CaptionsPlan `json:"captions,omitzero"`
+	Music         MusicPlan    `json:"music,omitzero"`
+	Effects       EffectsPlan  `json:"effects,omitzero"`
 	UpdatedAt     time.Time    `json:"updated_at"`
 }
 
@@ -92,6 +94,31 @@ type EditPlan struct {
 type CaptionsPlan struct {
 	Enabled  bool   `json:"enabled"`
 	Language string `json:"language,omitempty"`
+}
+
+// defaultMusicVolume is the music gain mixed under the clip's original audio
+// when the plan selects a track without an explicit volume: loud enough to
+// carry the edit, quiet enough that the streamer stays intelligible.
+const defaultMusicVolume = 0.25
+
+// musicKeyPattern matches a music catalog track id (same shape the songs API
+// serves); it doubles as path-traversal defence since a valid key can never
+// contain a separator or "..".
+var musicKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// MusicPlan mixes a catalog track from the orchestrator's music dir under the
+// clip's original audio. Key is the track id ("concrete-teeth"); empty means
+// no music. Volume is the music gain in (0,1]; 0 means the default.
+type MusicPlan struct {
+	Key    string  `json:"key,omitempty"`
+	Volume float64 `json:"volume,omitempty"`
+}
+
+// EffectsPlan opts a render into light, deterministic post effects. Grade
+// applies the mild contrast/saturation lift used across FragForge's viral
+// presets; heavier looks are deliberately not offered.
+type EffectsPlan struct {
+	Grade bool `json:"grade,omitempty"`
 }
 
 type RenderState struct {
@@ -214,6 +241,12 @@ func (p EditPlan) Validate() error {
 		}
 		seen[clip.ID] = true
 	}
+	if p.Music.Key != "" && !musicKeyPattern.MatchString(p.Music.Key) {
+		return fmt.Errorf("invalid music key %q", p.Music.Key)
+	}
+	if p.Music.Volume < 0 || p.Music.Volume > 1 {
+		return fmt.Errorf("music volume must be between 0 and 1")
+	}
 	return nil
 }
 
@@ -252,6 +285,12 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 	}
 	for i := range plan.Clips {
 		plan.Clips[i].ID = strings.TrimSpace(plan.Clips[i].ID)
+	}
+	plan.Music.Key = strings.TrimSpace(plan.Music.Key)
+	if plan.Music.Key == "" {
+		plan.Music.Volume = 0
+	} else if plan.Music.Volume == 0 {
+		plan.Music.Volume = defaultMusicVolume
 	}
 	return plan
 }

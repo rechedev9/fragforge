@@ -144,6 +144,7 @@ func main() {
 			WorkDir:          cfg.MediaWorkDir,
 			FFmpegPath:       cfg.FFmpegPath,
 			Timeout:          cfg.RenderTimeout,
+			MusicDir:         cfg.MusicDir,
 			WhisperPath:      cfg.WhisperPath,
 			WhisperModelPath: cfg.WhisperModelPath,
 			GroqAPIKey:       cfg.GroqAPIKey,

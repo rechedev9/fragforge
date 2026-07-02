@@ -214,6 +214,104 @@ test.describe('stream clips — MP4 upload', () => {
   });
 });
 
+// Regression specs for the stale-download bug: after a render, further edits
+// used to leave the old Shorts grid live, so Download handed back the
+// pre-edit file (for a vertical Twitch clip, effectively the raw source).
+// Downloads must always match the current edits: editing after a render marks
+// the results stale and disables Download until Create Shorts runs again.
+test.describe('stream clips — edits, music, and downloads', () => {
+  const RENDERED_STATE = {
+    status: 'rendered',
+    videos: [{ clip_id: 'clip-1', title: 'Clutch', key: 'k', duration_seconds: 20 }],
+  };
+
+  async function mockRenderFlow(page: import('@playwright/test').Page): Promise<{ putBodies: () => unknown[] }> {
+    await mockCommonRoutes(page);
+    const putBodies: unknown[] = [];
+    await page.unroute('**/api/streams/*/edit-plan');
+    await page.route('**/api/streams/*/edit-plan', (route) => {
+      if (route.request().method() === 'PUT') {
+        const body = route.request().postDataJSON();
+        putBodies.push(body);
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(EDIT_PLAN) });
+    });
+    await page.route('**/api/streams', (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(READY_JOB) });
+    });
+    await page.route(`**/api/streams/${JOB_ID}`, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(READY_JOB) }),
+    );
+    await page.route(`**/api/streams/${JOB_ID}/renders/*`, (route) => {
+      if (route.request().method() === 'POST') {
+        return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ status: 'rendering', videos: [] }) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RENDERED_STATE) });
+    });
+    await page.route(`**/api/streams/${JOB_ID}/renders/*/videos/*`, (route) =>
+      route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.from('') }),
+    );
+    await page.route('**/api/songs', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          songs: [{ id: 'concrete-teeth', title: 'Concrete Teeth', genre: 'phonk', audioUrl: '/api/songs/concrete-teeth/audio' }],
+        }),
+      }),
+    );
+    return { putBodies: () => putBodies };
+  }
+
+  test('editing after a render marks the Shorts stale and disables Download until re-render', async ({ page }) => {
+    await mockRenderFlow(page);
+
+    await page.goto('/streams');
+    await page.locator(URL_INPUT).fill(CLIP_URL);
+    await page.getByRole('button', { name: 'Fetch clip' }).click();
+    await expect(page.getByRole('button', { name: 'Create Shorts' })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Create Shorts' }).click();
+
+    // Fresh render: Download is a live link to the rendered variant.
+    const download = page.getByRole('link', { name: 'Download Clutch' });
+    await expect(download).toBeVisible({ timeout: 15_000 });
+    await expect(download).toHaveAttribute('href', /renders\/streamer-vertical-stack-40-60\/videos\/clip-1$/);
+
+    // Edit after the render: the results are stale, Download must lock.
+    await page.getByLabel('End (s)').first().fill('12');
+    await expect(page.getByText(/rendered before your latest edits/)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Download Clutch' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Download Clutch (outdated)' })).toBeDisabled();
+
+    // Re-render applies the edits and unlocks Download again.
+    await page.getByRole('button', { name: 'Create Shorts' }).click();
+    await expect(page.getByRole('link', { name: 'Download Clutch' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/rendered before your latest edits/)).toHaveCount(0);
+  });
+
+  test('music and grade selections are saved into the edit plan on Create Shorts', async ({ page }) => {
+    const flow = await mockRenderFlow(page);
+
+    await page.goto('/streams');
+    await page.locator(URL_INPUT).fill(CLIP_URL);
+    await page.getByRole('button', { name: 'Fetch clip' }).click();
+    await expect(page.getByRole('button', { name: 'Create Shorts' })).toBeVisible({ timeout: 15_000 });
+
+    await page.getByLabel('Background music').selectOption('concrete-teeth');
+    await page.getByRole('radio', { name: 'High' }).click();
+    await page.getByRole('button', { name: 'Viral grade off' }).click();
+    await page.getByRole('button', { name: 'Create Shorts' }).click();
+    await expect(page.getByRole('link', { name: 'Download Clutch' })).toBeVisible({ timeout: 15_000 });
+
+    const saved = flow.putBodies().at(-1) as { music?: { key?: string; volume?: number }; effects?: { grade?: boolean } };
+    expect(saved.music?.key).toBe('concrete-teeth');
+    expect(saved.music?.volume).toBe(0.4);
+    expect(saved.effects?.grade).toBe(true);
+  });
+});
+
 // Full happy path against the real pipeline. Gated on a reachable orchestrator
 // so it skips - never fails - when one is not running locally.
 const ORCHESTRATOR = process.env.ZV_E2E_ORCHESTRATOR ?? 'http://127.0.0.1:8080';
@@ -234,6 +332,6 @@ test.describe('stream clips happy path (real orchestrator)', () => {
     await page.getByRole('button', { name: 'Upload an MP4' }).click();
     await page.locator('input[type=file]').setInputFiles(SAMPLE_MP4);
 
-    await expect(page.getByText('Layout')).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText('Layout', { exact: true })).toBeVisible({ timeout: 90_000 });
   });
 });

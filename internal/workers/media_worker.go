@@ -195,6 +195,10 @@ type StreamRenderWorkerConfig struct {
 	WorkDir    string
 	FFmpegPath string
 	Timeout    string
+	// MusicDir holds catalog tracks named "<key>.<ext>" that an edit plan's
+	// MusicPlan can mix under the clip audio (same directory the songs API and
+	// the reel render worker use).
+	MusicDir string
 	// WhisperPath and WhisperModelPath configure the local whisper.cpp
 	// captions transcription pass (internal/captions.Transcriber). Both must
 	// be set for it to run.
@@ -761,9 +765,21 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	defer cancel()
 	var videos []streamclips.VideoEntry
 	var warnings []string
+	musicPath := ""
+	if plan.Music.Key != "" {
+		if musicPath = resolveMusicFile(cfg.MusicDir, plan.Music.Key); musicPath == "" {
+			// Requested music is unavailable; render without it rather than fail.
+			warnings = append(warnings, fmt.Sprintf("music %q not found, rendering without music", plan.Music.Key))
+		}
+	}
 	for _, clip := range plan.Clips {
 		outPath := filepath.Join(outDir, clip.ID+".mp4")
-		args, err := streamclips.BuildFFmpegArgs(sourcePath, outPath, plan, clip)
+		args, err := streamclips.BuildFFmpegArgs(streamclips.FFmpegInputs{
+			SourcePath:     sourcePath,
+			OutputPath:     outPath,
+			MusicPath:      musicPath,
+			SourceHasAudio: j.Probe.AudioCodec != "",
+		}, plan, clip)
 		if err != nil {
 			return err
 		}
