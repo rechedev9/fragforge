@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, FileVideo, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { isLocalMode } from '@/lib/mode';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { Wordmark } from '@/components/brand';
@@ -29,6 +30,9 @@ function isServiceUnavailable(err: unknown): boolean {
  */
 export default function UploadPage() {
   const router = useRouter();
+  // "Home" depends on the data plane: the local studio lands on the dashboard
+  // (there is no login screen), the cloud on the marketing/login landing.
+  const homeHref = isLocalMode() ? '/matches' : '/';
   const [stage, setStage] = useState<Stage>('idle');
   const [fileName, setFileName] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -112,11 +116,11 @@ export default function UploadPage() {
 
       <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col px-6">
         <header className="flex h-16 items-center justify-between">
-          <Link href="/" aria-label="FragForge home">
+          <Link href={homeHref} aria-label="FragForge home">
             <Wordmark />
           </Link>
           <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
-            <Link href="/">
+            <Link href={homeHref}>
               <ArrowLeft className="size-4" />
               Back
             </Link>

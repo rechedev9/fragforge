@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Loader2, UploadCloud } from 'lucide-react';
 import { useSession } from '@/lib/session';
+import { isLocalMode } from '@/lib/mode';
 import { isOnboardingDismissed } from '@/lib/onboarding';
 import { Wordmark } from '@/components/brand';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,12 @@ export default function LoginPage() {
   const router = useRouter();
   const { session, loading, signIn } = useSession();
   const [signingIn, setSigningIn] = useState(false);
+
+  // Local studio has no Steam login: the dashboard is home, so any navigation
+  // to the cloud landing (stale links, browser Back) bounces straight there.
+  useEffect(() => {
+    if (isLocalMode()) router.replace('/matches');
+  }, [router]);
 
   // Once a session exists, send the user where they belong: onboarding if their
   // match history isn't linked yet, otherwise straight into the studio.
@@ -39,9 +46,9 @@ export default function LoginPage() {
     }
   }
 
-  // While we resolve the initial session (or are redirecting a signed-in user),
-  // show a quiet loader instead of flashing the landing page.
-  if (loading || session?.user) {
+  // While we resolve the initial session (or are redirecting a signed-in or
+  // local-studio user), show a quiet loader instead of flashing the landing.
+  if (isLocalMode() || loading || session?.user) {
     return (
       <main className="grid min-h-screen place-items-center">
         <Loader2 className="size-6 animate-spin text-primary" />
