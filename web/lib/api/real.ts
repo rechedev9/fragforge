@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch } from './types';
 import { SERVICE_UNAVAILABLE_CODE } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
@@ -22,6 +22,24 @@ type RosterPlayer = {
   hs_pct?: number;
   kast?: number;
   rating?: number;
+  rounds_2k?: number;
+  rounds_3k?: number;
+  rounds_4k?: number;
+  rounds_5k?: number;
+};
+
+/** Server match summary as returned by /api/demos/{jobId}/roster (snake_case). */
+type RosterMatchResponse = {
+  map: string;
+  score_ct: number;
+  score_t: number;
+  rounds: number;
+};
+
+/** The full roster response: players plus optional match-level context. */
+type RosterResponse = {
+  players: RosterPlayer[];
+  match?: RosterMatchResponse;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -120,7 +138,7 @@ export class RealApiClient implements ApiClient {
     }
   }
 
-  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[] }> {
+  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
     const form = new FormData();
     form.append('file', file);
     const { jobId } = await readJson<{ jobId: string }>(
@@ -136,10 +154,8 @@ export class RealApiClient implements ApiClient {
       await this.waitForScan(jobId);
     }
 
-    const { players } = await readJson<{ players: RosterPlayer[] }>(
-      await fetch(`/api/demos/${jobId}/roster`),
-    );
-    return { jobId, players: players.map(toDemoPlayer) };
+    const roster = await readJson<RosterResponse>(await fetch(`/api/demos/${jobId}/roster`));
+    return { jobId, players: roster.players.map(toDemoPlayer), match: toRosterMatch(roster.match) };
   }
 
   async parseDemo(input: { jobId: string; steamId: string }): Promise<Match> {
@@ -155,7 +171,7 @@ export class RealApiClient implements ApiClient {
 
     const [plan, roster] = await Promise.all([
       readJson<KillPlan>(await fetch(`/api/demos/${input.jobId}/plan`)),
-      readJson<{ players: RosterPlayer[] }>(await fetch(`/api/demos/${input.jobId}/roster`)),
+      readJson<RosterResponse>(await fetch(`/api/demos/${input.jobId}/roster`)),
     ]);
 
     const picked = roster.players.find((p) => p.steamid64 === input.steamId);
@@ -183,7 +199,7 @@ export class RealApiClient implements ApiClient {
    */
   private async summaryPlayer(jobId: string, plan: KillPlan): Promise<DemoPlayer> {
     try {
-      const { players } = await readJson<{ players: RosterPlayer[] }>(await fetch(`/api/demos/${jobId}/roster`));
+      const { players } = await readJson<RosterResponse>(await fetch(`/api/demos/${jobId}/roster`));
       const row = players.find((p) => p.steamid64 === plan.target?.steamid64) ?? players[0];
       if (row) return toDemoPlayer(row);
     } catch {
@@ -648,10 +664,20 @@ function toDemoPlayer(p: RosterPlayer): DemoPlayer {
     hsPct: p.hs_pct ?? 0,
     kast: p.kast ?? 0,
     rating: p.rating ?? 0,
+    rounds2k: p.rounds_2k,
+    rounds3k: p.rounds_3k,
+    rounds4k: p.rounds_4k,
+    rounds5k: p.rounds_5k,
   };
 }
 
 /** Keeps only the known sides; anything else collapses to '' (spectator/unknown). */
 function normalizeTeam(team: string): DemoPlayer['team'] {
   return team === 'CT' || team === 'T' ? team : '';
+}
+
+/** Server match summary (snake_case) → the UI's RosterMatch; undefined when the scan has none. */
+function toRosterMatch(m: RosterMatchResponse | undefined): RosterMatch | undefined {
+  if (!m) return undefined;
+  return { map: m.map, scoreCt: m.score_ct, scoreT: m.score_t, rounds: m.rounds };
 }

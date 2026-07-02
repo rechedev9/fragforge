@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, FileVideo, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
-import type { DemoPlayer } from '@/lib/api/types';
+import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { Wordmark } from '@/components/brand';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -33,6 +33,7 @@ export default function UploadPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [players, setPlayers] = useState<DemoPlayer[]>([]);
+  const [match, setMatch] = useState<RosterMatch | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
 
@@ -42,6 +43,7 @@ export default function UploadPage() {
     setFileName(null);
     setJobId(null);
     setPlayers([]);
+    setMatch(null);
   }, []);
 
   const runScan = useCallback(
@@ -54,6 +56,7 @@ export default function UploadPage() {
         const scan = await api.scanDemo(file);
         setJobId(scan.jobId);
         setPlayers(scan.players);
+        setMatch(scan.match ?? null);
         setStage('picking');
       } catch (err) {
         if (err instanceof Error && err.message === 'PC_OFFLINE') {
@@ -154,7 +157,7 @@ export default function UploadPage() {
                 </div>
               </div>
             ) : stage === 'picking' ? (
-              <PlayerPicker players={players} onPick={onPick} />
+              <PlayerPicker players={players} onPick={onPick} match={match ?? undefined} />
             ) : stage === 'waiting-for-pc' ? (
               <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
                 <div className="flex flex-col gap-1">

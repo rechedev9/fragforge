@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig, CaptureReadiness } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch } from './types';
 import { DEFAULT_EDIT_CONFIG } from './reel-store';
 import {
   fixtureUser,
@@ -11,6 +11,7 @@ import {
   seedVideos,
   synthUploadedMatch,
   synthRoster,
+  synthRosterMatch,
   SAMPLE_REEL_URL,
 } from './fixtures';
 
@@ -45,7 +46,7 @@ let uploadSeq = 0;
  * + roster so parseDemo can resolve it. In-memory only (a scan that is never
  * parsed costs nothing); not persisted, since the picker resolves it in one go.
  */
-type PendingScan = { fileName: string; seq: number; players: DemoPlayer[] };
+type PendingScan = { fileName: string; seq: number; players: DemoPlayer[]; match: RosterMatch };
 const pendingScans = new Map<string, PendingScan>();
 
 /**
@@ -221,13 +222,14 @@ export class MockApiClient implements ApiClient {
     return { ...match, stats: { ...match.stats } };
   }
 
-  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[] }> {
+  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match: RosterMatch }> {
     await delay();
     uploadSeq += 1;
     const jobId = `m-upload-${uploadSeq}`;
     const players = synthRoster(file.name);
-    pendingScans.set(jobId, { fileName: file.name, seq: uploadSeq, players });
-    return { jobId, players: players.map((p) => ({ ...p })) };
+    const match = synthRosterMatch(file.name);
+    pendingScans.set(jobId, { fileName: file.name, seq: uploadSeq, players, match });
+    return { jobId, players: players.map((p) => ({ ...p })), match: { ...match } };
   }
 
   async parseDemo(input: { jobId: string; steamId: string }): Promise<Match> {

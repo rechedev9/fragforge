@@ -1,4 +1,4 @@
-import type { Match, Play, Song, Video, FeedItem, SteamUser, Slots, DemoPlayer } from './types';
+import type { Match, Play, Song, Video, FeedItem, SteamUser, Slots, DemoPlayer, RosterMatch } from './types';
 
 /**
  * Static mock data backing the MockApiClient. None of these reference real
@@ -128,6 +128,13 @@ export function playsForMatch(matchId: string): Play[] {
 /** Maps an uploaded demo can land on; the file name picks a stable one. */
 const uploadMapPool = ['Inferno', 'Mirage', 'Nuke', 'Ancient', 'Dust2', 'Anubis', 'Overpass', 'Vertigo'];
 
+/**
+ * Raw (de_/cs_-prefixed) map pool for the roster scan's match header, mirroring
+ * the backend's wire format so the UI's map-prettifying logic is exercised in
+ * the mock too, the same way it would be against a real orchestrator response.
+ */
+const rosterMapPool = ['de_inferno', 'de_mirage', 'de_nuke', 'de_ancient', 'de_dust2', 'de_anubis', 'de_overpass', 'de_vertigo'];
+
 /** Highlight templates an uploaded demo's plays are drawn from (first N used). */
 const uploadPlaySeeds: PlaySeed[] = [
   { label: '4K - Site retake', kind: 'highlight', round: 12, kills: 4, weapon: 'AK-47' },
@@ -222,9 +229,34 @@ export function synthRoster(fileName: string): DemoPlayer[] {
       hsPct: kills > 0 ? Math.round((1000 * headshots) / kills) / 10 : 0,
       kast,
       rating,
+      // Most of the roster has no multi-kill rounds; the standout fragger
+      // (index 0) gets an ace plus a couple of 3Ks so the Highlights column
+      // and the Recommended badge are visible in dev without a real demo.
+      rounds5k: i === 0 ? 1 : 0,
+      rounds4k: 0,
+      rounds3k: i === 0 ? 2 : i === 1 ? 1 : 0,
+      rounds2k: i < 3 ? 1 : 0,
     };
   });
   return players.sort((a, b) => b.kills - a.kills || a.name.localeCompare(b.name));
+}
+
+/**
+ * Synthesizes the roster scan's match header (map, final score, rounds) for an
+ * uploaded .dem. Uses the raw de_-prefixed map name, matching the backend's
+ * wire format, so the UI's map-prettifying logic runs the same as it would
+ * against a real orchestrator response.
+ */
+export function synthRosterMatch(fileName: string): RosterMatch {
+  const base = hashName(fileName);
+  const rounds = 24;
+  const scoreCt = 9 + (base % 7);
+  return {
+    map: rosterMapPool[base % rosterMapPool.length],
+    scoreCt,
+    scoreT: rounds - scoreCt,
+    rounds,
+  };
 }
 
 export const fixtureSongs: Song[] = [

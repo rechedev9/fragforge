@@ -55,6 +55,27 @@ export type DemoPlayer = {
   hsPct: number;
   kast: number;
   rating: number;
+  /**
+   * Multi-kill round counts from the enriched scan. Optional and absent on
+   * artifacts recorded before this field existed, so callers must tolerate
+   * `undefined` (treat as 0) rather than assume every player carries them.
+   */
+  rounds2k?: number;
+  rounds3k?: number;
+  rounds4k?: number;
+  rounds5k?: number;
+};
+
+/**
+ * Match-level context for the roster scoreboard header (map, final score,
+ * rounds played). Optional on the scan response; absent on artifacts that
+ * predate this field or when the parser could not determine it.
+ */
+export type RosterMatch = {
+  map: string;
+  scoreCt: number;
+  scoreT: number;
+  rounds: number;
 };
 
 /**

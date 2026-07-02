@@ -65,6 +65,82 @@ test.describe('upload error messaging', () => {
   });
 });
 
+// Roster scoreboard enrichments: match header, multi-kill Highlights chips, and
+// the "Recommended" pick. Mocked at the network layer (scan -> status -> roster)
+// so it is fast and deterministic, exercising the same fields a real orchestrator
+// scan will eventually return.
+test.describe('upload roster scoreboard', () => {
+  test('shows the match header, highlight chips, and the recommended pick', async ({ page }) => {
+    await page.route('**/api/demos/scan', (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ jobId: '00000000-0000-4000-8000-000000000001' }),
+      }),
+    );
+    await page.route('**/api/demos/*/status', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'scanned', online: true }),
+      }),
+    );
+    await page.route('**/api/demos/*/roster', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          players: [
+            {
+              steamid64: '76561198000000001',
+              name: 'aceplayer',
+              team: 'CT',
+              kills: 31,
+              deaths: 16,
+              assists: 5,
+              rating: 1.62,
+              rounds_5k: 1,
+              rounds_4k: 0,
+              rounds_3k: 2,
+            },
+            {
+              steamid64: '76561198000000002',
+              name: 'quietplayer',
+              team: 'T',
+              kills: 12,
+              deaths: 20,
+              assists: 3,
+              rating: 0.7,
+            },
+          ],
+          match: { map: 'de_dust2', score_ct: 9, score_t: 13, rounds: 22 },
+        }),
+      }),
+    );
+
+    await page.goto('/upload');
+    await page.locator(FILE_INPUT).setInputFiles(DUMMY_DEM);
+
+    await expect(page.getByRole('heading', { name: 'Who do you want to clip?' })).toBeVisible();
+
+    // Match header: prettified map name and both sides' score.
+    await expect(page.getByText('Dust2')).toBeVisible();
+    await expect(page.getByText('22 rounds')).toBeVisible();
+
+    // Highlights chips for the ace/3K player, ACE before 3K.
+    const aceRow = page.locator('button', { hasText: 'aceplayer' });
+    await expect(aceRow.getByText('ACE ×1')).toBeVisible();
+    await expect(aceRow.getByText('3K ×2')).toBeVisible();
+
+    // The ace/3K player is the recommended pick, tagged and preselected.
+    await expect(aceRow.getByText('Recommended')).toBeVisible();
+
+    // The quiet player has no multi-kill rounds: a muted placeholder, no chips.
+    const quietRow = page.locator('button', { hasText: 'quietplayer' });
+    await expect(quietRow.getByText('Recommended')).toHaveCount(0);
+  });
+});
+
 // Full happy path against the real pipeline. Gated on a reachable orchestrator
 // and a real demo fixture (ZV_E2E_DEMO, default ../testdata/sample.dem) so it
 // skips - never fails - when those are absent.
