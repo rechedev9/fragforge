@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -144,6 +145,15 @@ func run() error {
 		_ = writeResult(plan.OutputDir, result)
 		return err
 	}
+
+	// CS2 must record in a real window: the player's own video settings
+	// (fullscreen / borderless) override the -windowed launch flag and turn the
+	// capture into a borderless topmost screen-sized window that hijacks the
+	// desktop and glitches more than a plain window. Patch the saved settings
+	// for the run and put the originals back afterwards. validateExecutables
+	// already guaranteed cs2.exe is not running, so the file is safe to edit.
+	restoreVideoConfig := forceWindowedVideoConfig(absCS2Exe)
+	defer restoreVideoConfig()
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -291,6 +301,115 @@ func launchAndWait(ctx context.Context, hlaeExe, cs2Exe string, plan recording.R
 
 func cs2LaunchCommandLine(plan recording.RecordingPlan, scriptPath string) string {
 	return fmt.Sprintf(`-insecure -condebug -windowed -w %d -h %d +cl_demo_predict 0 +playdemo "%s" +mirv_script_load "%s"`, plan.Stream.Width, plan.Stream.Height, plan.DemoPath, scriptPath)
+}
+
+// windowedVideoSettings are the CS2 saved video settings that must be off for
+// the -windowed launch flag to yield a real bordered window instead of a
+// borderless topmost screen-sized one.
+var windowedVideoSettings = []string{
+	"setting.fullscreen",
+	"setting.coop_fullscreen",
+	"setting.nowindowborder",
+}
+
+// forceWindowedVideoConfig patches every Steam cs2_video.txt so the capture
+// runs in a real window, returning a restore func that puts the original
+// bytes back after the run (a hard-killed recorder leaves the settings
+// windowed, which the next capture re-patches harmlessly). Failures only log:
+// a missing config means CS2 already follows the launch flags.
+func forceWindowedVideoConfig(cs2Exe string) func() {
+	originals := map[string][]byte{}
+	for _, path := range cs2VideoConfigPaths(cs2Exe) {
+		// #nosec G304 -- paths are discovered under the local Steam install.
+		b, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("windowed capture: read %s: %v", path, err)
+			continue
+		}
+		patched, changed := patchWindowedVideoSettings(string(b))
+		if !changed {
+			continue
+		}
+		if err := os.WriteFile(path, []byte(patched), 0o600); err != nil {
+			log.Printf("windowed capture: patch %s: %v", path, err)
+			continue
+		}
+		log.Printf("windowed capture: patched %s (fullscreen/borderless off for this run)", path)
+		originals[path] = b
+	}
+	return func() {
+		for path, b := range originals {
+			if err := os.WriteFile(path, b, 0o600); err != nil {
+				log.Printf("windowed capture: restore %s: %v", path, err)
+			}
+		}
+	}
+}
+
+// patchWindowedVideoSettings forces the fullscreen/borderless settings to "0"
+// in a cs2_video.txt body, reporting whether anything changed. Settings that
+// are absent are left absent; CS2 then follows the launch flags.
+func patchWindowedVideoSettings(content string) (string, bool) {
+	changed := false
+	for _, key := range windowedVideoSettings {
+		pattern := regexp.MustCompile(`("` + regexp.QuoteMeta(key) + `"\s+")([^"]*)(")`)
+		next := pattern.ReplaceAllStringFunc(content, func(match string) string {
+			groups := pattern.FindStringSubmatch(match)
+			if groups[2] == "0" {
+				return match
+			}
+			changed = true
+			return groups[1] + "0" + groups[3]
+		})
+		content = next
+	}
+	return content, changed
+}
+
+// cs2VideoConfigPaths finds every cs2_video.txt under the Steam userdata
+// roots: the install that owns cs2.exe (walking up from the executable) plus
+// the default Steam location, since cs2 may live in a secondary library while
+// userdata stays in the main install.
+func cs2VideoConfigPaths(cs2Exe string) []string {
+	var roots []string
+	if dir := steamRootFromCS2Path(cs2Exe); dir != "" {
+		roots = append(roots, dir)
+	}
+	if pf := os.Getenv("ProgramFiles(x86)"); pf != "" {
+		roots = append(roots, filepath.Join(pf, "Steam"))
+	}
+	roots = append(roots, `C:\Program Files (x86)\Steam`)
+
+	seen := map[string]bool{}
+	var paths []string
+	for _, root := range roots {
+		matches, _ := filepath.Glob(filepath.Join(root, "userdata", "*", "730", "local", "cfg", "cs2_video.txt"))
+		for _, match := range matches {
+			if seen[match] {
+				continue
+			}
+			seen[match] = true
+			paths = append(paths, match)
+		}
+	}
+	return paths
+}
+
+// steamRootFromCS2Path walks up from cs2.exe to the directory containing
+// steamapps, i.e. the Steam (library) root. Returns "" when cs2.exe does not
+// live under a steamapps tree.
+func steamRootFromCS2Path(cs2Exe string) string {
+	dir := filepath.Dir(cs2Exe)
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		if strings.EqualFold(filepath.Base(dir), "steamapps") {
+			return parent
+		}
+		dir = parent
+	}
 }
 
 func ensureHLAEFFmpegConfig(hlaeExe string) error {
