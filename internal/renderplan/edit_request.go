@@ -1,18 +1,25 @@
 package renderplan
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
+
+// maxBookendTextLength caps the intro/outro custom text length so an overlay
+// card never has to reflow or run off the safe frame width.
+const maxBookendTextLength = 80
 
 const (
-	FormatShort9x16      = "short-9x16"
-	FormatLandscape16x9  = "landscape-16x9"
-	KillEffectClean      = "clean"
-	KillEffectPunchIn    = "punch-in"
-	KillEffectVelocity   = "velocity"
+	FormatShort9x16       = "short-9x16"
+	FormatLandscape16x9   = "landscape-16x9"
+	KillEffectClean       = "clean"
+	KillEffectPunchIn     = "punch-in"
+	KillEffectVelocity    = "velocity"
 	KillEffectFreezeFlash = "freeze-flash"
-	TransitionCut        = "cut"
-	TransitionFlash      = "flash"
-	TransitionWhip       = "whip"
-	TransitionDip        = "dip"
+	TransitionCut         = "cut"
+	TransitionFlash       = "flash"
+	TransitionWhip        = "whip"
+	TransitionDip         = "dip"
 )
 
 // EditRequest is the user-selected editing contract captured from the UI for
@@ -24,6 +31,11 @@ type EditRequest struct {
 	Transition string `json:"transition"`
 	Intro      bool   `json:"intro"`
 	Outro      bool   `json:"outro"`
+	// IntroText and OutroText customize the intro/outro overlay card text.
+	// Setting either does not enable its bookend; Intro/Outro remain the
+	// switch, so a render can carry custom text while the bookend stays off.
+	IntroText string `json:"intro_text,omitempty"`
+	OutroText string `json:"outro_text,omitempty"`
 }
 
 func DefaultEditRequest() EditRequest {
@@ -45,6 +57,8 @@ func NormalizeEditRequest(req EditRequest) EditRequest {
 	if req.Transition == "" {
 		req.Transition = def.Transition
 	}
+	req.IntroText = strings.TrimSpace(req.IntroText)
+	req.OutroText = strings.TrimSpace(req.OutroText)
 	return req
 }
 
@@ -63,6 +77,12 @@ func (r EditRequest) Validate() error {
 	case TransitionCut, TransitionFlash, TransitionWhip, TransitionDip:
 	default:
 		return fmt.Errorf("unknown transition %q", r.Transition)
+	}
+	if len(strings.TrimSpace(r.IntroText)) > maxBookendTextLength {
+		return fmt.Errorf("intro text exceeds %d characters", maxBookendTextLength)
+	}
+	if len(strings.TrimSpace(r.OutroText)) > maxBookendTextLength {
+		return fmt.Errorf("outro text exceeds %d characters", maxBookendTextLength)
 	}
 	return nil
 }

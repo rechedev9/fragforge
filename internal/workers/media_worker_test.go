@@ -407,6 +407,12 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 		if !hasArg(args, "--intro") || !hasArg(args, "--outro") {
 			t.Fatalf("editor args missing intro/outro flags: %#v", args)
 		}
+		if got := argValue(args, "--intro-text"); got != "Watch this ace" {
+			t.Fatalf("--intro-text = %q, want %q", got, "Watch this ace")
+		}
+		if got := argValue(args, "--outro-text"); got != "follow for more" {
+			t.Fatalf("--outro-text = %q, want %q", got, "follow for more")
+		}
 		var result recording.RecordingResult
 		if err := readJSONFile(recordingResultPath, &result); err != nil {
 			t.Fatal(err)
@@ -480,6 +486,8 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 		Transition: renderplan.TransitionDip,
 		Intro:      true,
 		Outro:      true,
+		IntroText:  "Watch this ace",
+		OutroText:  "follow for more",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -538,6 +546,9 @@ func TestRenderWorkerWritesFailedStateWhenEditorFails(t *testing.T) {
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		outDir := argValue(args, "--out")
 		publishDir := argValue(args, "--publish-dir")
+		if hasArg(args, "--intro-text") || hasArg(args, "--outro-text") {
+			t.Fatalf("editor args = %#v, want no bookend text flags when unset", args)
+		}
 		if err := os.MkdirAll(publishDir, 0o750); err != nil {
 			t.Fatal(err)
 		}

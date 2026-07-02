@@ -437,7 +437,11 @@ func drawTextEffect(effect Effect) string {
 	fontOption := ""
 	fontFile := strings.TrimSpace(effect.FontFile)
 	if fontFile == "" {
-		fontFile = drawtextFontFile()
+		if effect.Bold {
+			fontFile = boldDrawtextFontFile()
+		} else {
+			fontFile = drawtextFontFile()
+		}
 	}
 	if fontFile != "" {
 		fontOption = fmt.Sprintf(":fontfile='%s'", escapeDrawtextOption(filepath.ToSlash(fontFile)))
@@ -450,12 +454,20 @@ func drawTextEffect(effect Effect) string {
 	if effect.ShadowColor != "" {
 		shadowOption = fmt.Sprintf(":shadowcolor=%s:shadowx=%d:shadowy=%d", effect.ShadowColor, effect.ShadowX, effect.ShadowY)
 	}
+	borderOption := ""
+	if effect.BorderWidth > 0 {
+		borderColor := strings.TrimSpace(effect.BorderColor)
+		if borderColor == "" {
+			borderColor = "black@0.9"
+		}
+		borderOption = fmt.Sprintf(":borderw=%d:bordercolor=%s", effect.BorderWidth, borderColor)
+	}
 	alphaOption := ""
 	if alpha := textAlphaExpression(effect.StartSeconds, effect.EndSeconds, effect.FadeInSeconds, effect.FadeOutSeconds); alpha != "" {
 		alphaOption = fmt.Sprintf(":alpha='%s'", alpha)
 	}
 	return fmt.Sprintf(
-		"drawtext=text='%s'%s:x=%s:y=%s:fontsize=%d:fontcolor=%s:%s%s%s:enable='%s'",
+		"drawtext=text='%s'%s:x=%s:y=%s:fontsize=%d:fontcolor=%s:%s%s%s%s:enable='%s'",
 		escapeDrawtextText(effect.Value),
 		fontOption,
 		effect.X,
@@ -464,6 +476,7 @@ func drawTextEffect(effect Effect) string {
 		effect.FontColor,
 		boxOption,
 		shadowOption,
+		borderOption,
 		alphaOption,
 		betweenExpression(effect.StartSeconds, effect.EndSeconds),
 	)
@@ -533,6 +546,28 @@ func defaultDrawtextFontFile() string {
 		}
 	}
 	return ""
+}
+
+// boldDrawtextFontFile resolves a bold/heavy font for viral-style titles,
+// once per process like drawtextFontFile. It degrades gracefully: if none of
+// the bold candidates exist it falls back to the regular drawtext font
+// rather than failing the render.
+var boldDrawtextFontFile = sync.OnceValue(defaultBoldDrawtextFontFile)
+
+func defaultBoldDrawtextFontFile() string {
+	if runtime.GOOS != "windows" {
+		return drawtextFontFile()
+	}
+	for _, candidate := range []string{
+		filepath.Join(`C:\Windows`, "Fonts", "ariblk.ttf"),  // Arial Black
+		filepath.Join(`C:\Windows`, "Fonts", "arialbd.ttf"), // Arial Bold
+		filepath.Join(`C:\Windows`, "Fonts", "seguisb.ttf"), // Segoe UI Semibold
+	} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return drawtextFontFile()
 }
 
 func betweenExpression(start, end float64) string {

@@ -61,6 +61,11 @@ type Config struct {
 	Transition          string
 	Intro               bool
 	Outro               bool
+	// IntroText and OutroText customize the intro/outro overlay card text;
+	// empty falls back to the generated headline (intro) or "FragForge"
+	// (outro). Neither auto-enables its bookend.
+	IntroText string
+	OutroText string
 	// HookText draws the generated headline over the first ~2s of each short.
 	HookText bool
 	// KillCounter pops a running kill count (with a 2K/3K/4K/ACE milestone on
@@ -72,24 +77,24 @@ type Config struct {
 	KillfeedOverlay bool
 	// TailTrimSeconds ends each kill clip this many seconds after its final
 	// kill, cutting the recorded quit-tick dead air. Zero disables trimming.
-	TailTrimSeconds float64
-	OutputFPS       int
-	CompileSegments     bool
-	LineupCatalogPath   string
-	SegmentIDs          []string
-	Limit               int
-	VideoCRF            int
-	VideoPreset         string
-	HQFilters           bool
-	AudioNormalize      bool
-	QualityChecks       bool
-	CoverSheets         bool
-	TemporalSmoothing   bool
-	FFmpegPath          string
-	FFprobePath         string
-	DisableCovers       bool
-	SkipExisting        bool
-	DryRun              bool
+	TailTrimSeconds   float64
+	OutputFPS         int
+	CompileSegments   bool
+	LineupCatalogPath string
+	SegmentIDs        []string
+	Limit             int
+	VideoCRF          int
+	VideoPreset       string
+	HQFilters         bool
+	AudioNormalize    bool
+	QualityChecks     bool
+	CoverSheets       bool
+	TemporalSmoothing bool
+	FFmpegPath        string
+	FFprobePath       string
+	DisableCovers     bool
+	SkipExisting      bool
+	DryRun            bool
 	// RenderJobs caps how many shorts render concurrently; 0 selects an
 	// automatic limit based on available CPUs.
 	RenderJobs int
@@ -110,6 +115,8 @@ type ManifestOptions struct {
 	Transition          string
 	Intro               bool
 	Outro               bool
+	IntroText           string
+	OutroText           string
 	HookText            bool
 	KillCounter         bool
 	KillfeedOverlay     bool
@@ -155,6 +162,8 @@ type Manifest struct {
 	Transition        string      `json:"transition,omitempty"`
 	Intro             bool        `json:"intro,omitempty"`
 	Outro             bool        `json:"outro,omitempty"`
+	IntroText         string      `json:"intro_text,omitempty"`
+	OutroText         string      `json:"outro_text,omitempty"`
 	HookText          bool        `json:"hook_text,omitempty"`
 	KillCounter       bool        `json:"kill_counter,omitempty"`
 	KillfeedOverlay   bool        `json:"killfeed_overlay,omitempty"`
@@ -199,6 +208,8 @@ type ShortEdit struct {
 	Transition        string                      `json:"transition,omitempty"`
 	Intro             bool                        `json:"intro,omitempty"`
 	Outro             bool                        `json:"outro,omitempty"`
+	IntroText         string                      `json:"intro_text,omitempty"`
+	OutroText         string                      `json:"outro_text,omitempty"`
 	HookText          bool                        `json:"hook_text,omitempty"`
 	KillCounter       bool                        `json:"kill_counter,omitempty"`
 	KillfeedOverlay   bool                        `json:"killfeed_overlay,omitempty"`
@@ -299,6 +310,8 @@ type Result struct {
 	Transition        string        `json:"transition,omitempty"`
 	Intro             bool          `json:"intro,omitempty"`
 	Outro             bool          `json:"outro,omitempty"`
+	IntroText         string        `json:"intro_text,omitempty"`
+	OutroText         string        `json:"outro_text,omitempty"`
 	HookText          bool          `json:"hook_text,omitempty"`
 	KillCounter       bool          `json:"kill_counter,omitempty"`
 	KillfeedOverlay   bool          `json:"killfeed_overlay,omitempty"`
@@ -337,6 +350,8 @@ type ShortResult struct {
 	Transition         string                      `json:"transition,omitempty"`
 	Intro              bool                        `json:"intro,omitempty"`
 	Outro              bool                        `json:"outro,omitempty"`
+	IntroText          string                      `json:"intro_text,omitempty"`
+	OutroText          string                      `json:"outro_text,omitempty"`
 	HookText           bool                        `json:"hook_text,omitempty"`
 	KillCounter        bool                        `json:"kill_counter,omitempty"`
 	KillfeedOverlay    bool                        `json:"killfeed_overlay,omitempty"`
@@ -491,6 +506,9 @@ type Effect struct {
 	ShadowColor        string     `json:"shadow_color,omitempty"`
 	ShadowX            int        `json:"shadow_x,omitempty"`
 	ShadowY            int        `json:"shadow_y,omitempty"`
+	Bold               bool       `json:"bold,omitempty"`
+	BorderWidth        int        `json:"border_width,omitempty"`
+	BorderColor        string     `json:"border_color,omitempty"`
 	FadeInSeconds      float64    `json:"fade_in_seconds,omitempty"`
 	FadeOutSeconds     float64    `json:"fade_out_seconds,omitempty"`
 	Contrast           float64    `json:"contrast,omitempty"`

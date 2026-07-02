@@ -126,29 +126,31 @@ func generatedEditEffects(short ShortEdit) []Effect {
 // generatedHookEffect draws the generated headline over the first ~2 seconds
 // as the viral hook: centered in the top safe zone, above the killfeed
 // overlay band, box-less with a drop shadow so it reads over bright skyboxes.
+// It is suppressed when the intro card is on: both draw the same headline
+// over the opening seconds, so showing both reads as a broken duplicate.
 func generatedHookEffect(short ShortEdit) []Effect {
-	if !short.HookText {
+	if !short.HookText || short.Intro {
 		return nil
 	}
 	title := bookendTitle(short)
 	if title == "" {
 		return nil
 	}
-	size := 64
-	if isLandscapeOutput(short) {
-		size = 52
-	}
+	title = strings.ToUpper(title)
 	return []Effect{{
 		Type:           EffectText,
 		Value:          title,
 		X:              "(w-text_w)/2",
 		Y:              "150",
-		Size:           size,
+		Size:           titleFontSize(short, title),
 		FontColor:      "white@0.96",
 		BoxColor:       "none",
 		ShadowColor:    "black@0.85",
 		ShadowX:        3,
 		ShadowY:        3,
+		Bold:           true,
+		BorderWidth:    titleBorderWidth(short),
+		BorderColor:    "black@0.9",
 		StartSeconds:   0,
 		EndSeconds:     transitionEnd(short, 1.8),
 		FadeInSeconds:  0.12,
@@ -347,46 +349,122 @@ func generatedTransitionEffects(short ShortEdit) []Effect {
 	}
 }
 
+// generatedBookendEffects draws the intro and outro cards as short overlays
+// over the gameplay, never as separate black cards and never delaying the
+// action: the video underneath keeps playing from frame one.
 func generatedBookendEffects(short ShortEdit) []Effect {
 	var effects []Effect
 	width, height := outputDimensions(short)
-	// The hook text already opens the short with the same headline, so the
-	// intro title only draws when the hook is off — never both.
-	if short.Intro && !short.HookText {
+	if short.Intro {
+		text := introText(short)
 		effects = append(effects, Effect{
 			Type:           EffectText,
-			Value:          bookendTitle(short),
-			X:              "48",
-			Y:              fmt.Sprintf("%d", maxInt(48, height/12)),
-			Size:           bookendFontSize(width),
-			FontColor:      "white@0.96",
-			BoxColor:       "black@0.44",
-			BoxBorder:      16,
+			Value:          text,
+			X:              "(w-text_w)/2",
+			Y:              fmt.Sprintf("%d", height/3),
+			Size:           titleFontSize(short, text),
+			FontColor:      "white@0.98",
+			BoxColor:       "black@0.55",
+			BoxBorder:      24,
+			Bold:           true,
+			BorderWidth:    titleBorderWidth(short),
+			BorderColor:    "black@0.9",
 			StartSeconds:   0,
-			EndSeconds:     transitionEnd(short, 1.45),
+			EndSeconds:     transitionEnd(short, 1.3),
 			FadeInSeconds:  0.10,
-			FadeOutSeconds: 0.18,
+			FadeOutSeconds: 0.25,
 			Source:         "edit-request",
 		})
 	}
 	if short.Outro {
 		effects = append(effects, Effect{
-			Type:           EffectText,
-			Value:          "FragForge",
-			X:              "48",
-			Y:              fmt.Sprintf("%d", maxInt(48, height-160)),
-			Size:           bookendFontSize(width),
-			FontColor:      "white@0.94",
-			BoxColor:       "black@0.42",
-			BoxBorder:      16,
-			StartSeconds:   transitionStart(short, 1.35),
-			EndSeconds:     short.DurationSeconds,
-			FadeInSeconds:  0.14,
-			FadeOutSeconds: 0.10,
-			Source:         "edit-request",
+			Type:  EffectText,
+			Value: outroText(short),
+			X:     "(w-text_w)/2",
+			// h*0.70 keeps the outro clear of the kill-counter/milestone
+			// lane at h*0.62, which can still be fading out when the card
+			// appears.
+			Y:             "h*0.70",
+			Size:          bookendFontSize(width),
+			FontColor:     "white@0.95",
+			BoxColor:      "black@0.42",
+			BoxBorder:     16,
+			Bold:          true,
+			BorderWidth:   titleBorderWidth(short),
+			BorderColor:   "black@0.9",
+			StartSeconds:  transitionStart(short, 1.6),
+			EndSeconds:    short.DurationSeconds,
+			FadeInSeconds: 0.25,
+			Source:        "edit-request",
 		})
 	}
 	return effects
+}
+
+// introText resolves the intro card's headline: the custom text set on the
+// request (shown exactly as the user wrote it), or the same generated
+// headline the hook would otherwise show, upper-cased for the viral look.
+func introText(short ShortEdit) string {
+	if text := strings.TrimSpace(short.IntroText); text != "" {
+		return text
+	}
+	return strings.ToUpper(bookendTitle(short))
+}
+
+// outroText resolves the outro card's text: the custom text set on the
+// request, or the "FragForge" default.
+func outroText(short ShortEdit) string {
+	if text := strings.TrimSpace(short.OutroText); text != "" {
+		return text
+	}
+	return "FragForge"
+}
+
+// titleFontSize picks a hook/intro title size that fits within the frame's
+// safe width: 72pt in portrait (58pt in landscape) for short titles, scaled
+// down for long ones since drawtext has no auto-wrap and would otherwise
+// overflow the frame.
+func titleFontSize(short ShortEdit, text string) int {
+	base := 72
+	if isLandscapeOutput(short) {
+		base = 58
+	}
+	width, _ := outputDimensions(short)
+	return fitFontSize(text, base, width-120)
+}
+
+// fitFontSize shrinks base down to the largest size (in steps of 2, capped at
+// a 32pt floor) whose estimated line width fits safeWidth, using a rough
+// average glyph width for a bold sans title face.
+func fitFontSize(text string, base, safeWidth int) int {
+	const avgGlyphWidth = 0.58
+	const minSize = 32
+	if safeWidth <= 0 || text == "" {
+		return base
+	}
+	size := base
+	for size > minSize {
+		estimated := float64(len([]rune(text))) * float64(size) * avgGlyphWidth
+		if estimated <= float64(safeWidth) {
+			break
+		}
+		size -= 2
+	}
+	return size
+}
+
+// titleBorderWidth scales the drawtext outline stroke with the output width:
+// ~6px at a 1080-wide portrait frame, proportionally more for landscape.
+func titleBorderWidth(short ShortEdit) int {
+	width, _ := outputDimensions(short)
+	if width <= 0 {
+		width = 1080
+	}
+	borderWidth := int(math.Round(6 * float64(width) / 1080))
+	if borderWidth < 2 {
+		borderWidth = 2
+	}
+	return borderWidth
 }
 
 func bookendTitle(short ShortEdit) string {

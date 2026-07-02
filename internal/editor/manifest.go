@@ -117,6 +117,8 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		Transition:        transition,
 		Intro:             opts.Intro,
 		Outro:             opts.Outro,
+		IntroText:         opts.IntroText,
+		OutroText:         opts.OutroText,
 		HookText:          opts.HookText,
 		KillCounter:       opts.KillCounter,
 		KillfeedOverlay:   killfeedOverlay,
@@ -182,6 +184,8 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			Transition:        transition,
 			Intro:             opts.Intro,
 			Outro:             opts.Outro,
+			IntroText:         opts.IntroText,
+			OutroText:         opts.OutroText,
 			HookText:          opts.HookText,
 			KillCounter:       opts.KillCounter,
 			KillfeedOverlay:   killfeedOverlay,
@@ -275,6 +279,8 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			Transition:        transition,
 			Intro:             opts.Intro,
 			Outro:             opts.Outro,
+			IntroText:         opts.IntroText,
+			OutroText:         opts.OutroText,
 			HookText:          opts.HookText,
 			KillCounter:       opts.KillCounter,
 			KillfeedOverlay:   killfeedOverlay,
@@ -350,6 +356,8 @@ type compiledShortOptions struct {
 	Transition        string
 	Intro             bool
 	Outro             bool
+	IntroText         string
+	OutroText         string
 	HookText          bool
 	KillCounter       bool
 	KillfeedOverlay   bool
@@ -451,6 +459,8 @@ func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, 
 		Transition:        c.Transition,
 		Intro:             opts.Intro,
 		Outro:             opts.Outro,
+		IntroText:         opts.IntroText,
+		OutroText:         opts.OutroText,
 		HookText:          c.HookText,
 		KillCounter:       c.KillCounter,
 		KillfeedOverlay:   c.KillfeedOverlay,
@@ -622,9 +632,31 @@ func premiumHeadline(mapName string, killCount int, weapon string) string {
 		parts = append(parts, "con", weapon)
 	}
 	if mapName != "" {
-		parts = append(parts, "en", mapName)
+		parts = append(parts, "en", prettifyMapName(mapName))
 	}
 	return strings.Join(parts, " ")
+}
+
+// prettifyMapName turns a raw CS2 map name such as "de_dust2" into the
+// human-readable form ("Dust2") used in headlines: it drops the de_/cs_
+// workshop prefix and capitalizes what remains. Names without one of those
+// prefixes, or that are empty, pass through unchanged.
+func prettifyMapName(mapName string) string {
+	name := strings.TrimSpace(mapName)
+	if name == "" {
+		return name
+	}
+	lower := strings.ToLower(name)
+	for _, prefix := range []string{"de_", "cs_"} {
+		if strings.HasPrefix(lower, prefix) {
+			rest := name[len(prefix):]
+			if rest == "" {
+				return name
+			}
+			return strings.ToUpper(rest[:1]) + rest[1:]
+		}
+	}
+	return name
 }
 
 func coverTimeSeconds(kills []KillCue, duration float64) float64 {
@@ -779,7 +811,7 @@ func smokeHeadline(mapName string, smoke SmokeCue) string {
 		destination = smoke.FromArea + " -> " + smoke.Destination
 	}
 	if mapName != "" {
-		return destination + " en " + mapName
+		return destination + " en " + prettifyMapName(mapName)
 	}
 	return destination
 }

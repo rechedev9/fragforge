@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -651,11 +652,14 @@ func TestGeneratedHookEffect(t *testing.T) {
 		t.Fatalf("effects = %#v, want exactly one hook", effects)
 	}
 	hook := effects[0]
-	if hook.Type != EffectText || hook.Value != short.Headline {
-		t.Fatalf("hook = %#v, want text drawing the headline", hook)
+	if hook.Type != EffectText || hook.Value != strings.ToUpper(short.Headline) {
+		t.Fatalf("hook = %#v, want upper-cased text drawing the headline", hook)
 	}
 	if hook.X != "(w-text_w)/2" || hook.Y != "150" || hook.BoxColor != "none" || hook.ShadowColor == "" {
 		t.Fatalf("hook styling = %#v, want centered box-less shadowed text", hook)
+	}
+	if !hook.Bold || hook.BorderWidth <= 0 || hook.BorderColor == "" {
+		t.Fatalf("hook styling = %#v, want a bold outlined title", hook)
 	}
 	if hook.StartSeconds != 0 || hook.EndSeconds != 1.8 {
 		t.Fatalf("hook window = %.3f..%.3f, want 0..1.8", hook.StartSeconds, hook.EndSeconds)
@@ -672,22 +676,112 @@ func TestGeneratedHookEffect(t *testing.T) {
 	}
 }
 
-func TestGeneratedHookEffectSupersedesIntro(t *testing.T) {
+// TestIntroSuppressesHook verifies the intro card and the plain hook never
+// draw at once: showing the same headline twice over the opening seconds
+// would read as a broken duplicate, so the intro card takes over from the
+// hook whenever Intro is on.
+func TestIntroSuppressesHook(t *testing.T) {
 	short := ShortEdit{Intro: true, HookText: true, Headline: "Highlight", DurationSeconds: 8}
-	for _, effect := range generatedBookendEffects(short) {
-		if effect.Type == EffectText && effect.StartSeconds == 0 {
-			t.Fatalf("intro text %#v drawn alongside the hook, want suppressed", effect)
-		}
+	if got := generatedHookEffect(short); got != nil {
+		t.Fatalf("hook effects with intro on = %#v, want none", got)
 	}
-	short.HookText = false
-	var intro int
-	for _, effect := range generatedBookendEffects(short) {
-		if effect.Type == EffectText && effect.StartSeconds == 0 {
-			intro++
-		}
+	bookends := generatedBookendEffects(short)
+	if len(bookends) != 1 || bookends[0].Value != "HIGHLIGHT" {
+		t.Fatalf("bookend effects = %#v, want exactly one upper-cased intro card", bookends)
 	}
-	if intro != 1 {
-		t.Fatalf("intro effects with hook off = %d, want 1", intro)
+
+	short.Intro = false
+	if got := generatedHookEffect(short); len(got) != 1 {
+		t.Fatalf("hook effects with intro off = %#v, want exactly one", got)
+	}
+}
+
+func TestGeneratedBookendEffectsDefaultText(t *testing.T) {
+	short := ShortEdit{Intro: true, Outro: true, Headline: "2K Highlight", DurationSeconds: 10}
+	effects := generatedBookendEffects(short)
+	if len(effects) != 2 {
+		t.Fatalf("effects = %#v, want intro and outro", effects)
+	}
+	intro, outro := effects[0], effects[1]
+	if intro.Value != "2K HIGHLIGHT" {
+		t.Fatalf("intro value = %q, want upper-cased generated headline", intro.Value)
+	}
+	if outro.Value != "FragForge" {
+		t.Fatalf("outro value = %q, want the FragForge default", outro.Value)
+	}
+	if !intro.Bold || intro.BorderWidth <= 0 || !outro.Bold || outro.BorderWidth <= 0 {
+		t.Fatalf("intro/outro styling = %#v / %#v, want bold outlined text", intro, outro)
+	}
+}
+
+func TestGeneratedBookendEffectsCustomTextIsNotUppercased(t *testing.T) {
+	short := ShortEdit{
+		Intro:           true,
+		Outro:           true,
+		Headline:        "2K Highlight",
+		IntroText:       "Watch this ace",
+		OutroText:       "follow for more",
+		DurationSeconds: 10,
+	}
+	effects := generatedBookendEffects(short)
+	if len(effects) != 2 {
+		t.Fatalf("effects = %#v, want intro and outro", effects)
+	}
+	if got := effects[0].Value; got != "Watch this ace" {
+		t.Fatalf("intro value = %q, want the custom text verbatim", got)
+	}
+	if got := effects[1].Value; got != "follow for more" {
+		t.Fatalf("outro value = %q, want the custom text verbatim", got)
+	}
+}
+
+func TestGeneratedBookendEffectsIntroWindow(t *testing.T) {
+	short := ShortEdit{Intro: true, Headline: "Highlight", DurationSeconds: 10}
+	intro := generatedBookendEffects(short)[0]
+	if intro.StartSeconds != 0 || intro.EndSeconds != 1.3 {
+		t.Fatalf("intro window = %.3f..%.3f, want 0..1.3", intro.StartSeconds, intro.EndSeconds)
+	}
+
+	short.DurationSeconds = 1.0
+	intro = generatedBookendEffects(short)[0]
+	if intro.EndSeconds != 1.0 {
+		t.Fatalf("intro end on short clip = %.3f, want clamped to 1.0", intro.EndSeconds)
+	}
+}
+
+func TestGeneratedBookendEffectsOutroWindowNeverExtendsDuration(t *testing.T) {
+	short := ShortEdit{Outro: true, DurationSeconds: 10}
+	outro := generatedBookendEffects(short)[0]
+	if outro.EndSeconds != short.DurationSeconds {
+		t.Fatalf("outro end = %.3f, want the clip duration %.3f (never extended)", outro.EndSeconds, short.DurationSeconds)
+	}
+	if got := outro.EndSeconds - outro.StartSeconds; math.Abs(got-1.6) > 1e-9 {
+		t.Fatalf("outro window = %.3fs, want 1.6s on a clip long enough for it", got)
+	}
+
+	// A clip shorter than the outro window must clamp the start to 0 rather
+	// than run negative or extend past the clip.
+	short.DurationSeconds = 2
+	outro = generatedBookendEffects(short)[0]
+	if outro.StartSeconds < 0 || outro.EndSeconds != short.DurationSeconds {
+		t.Fatalf("outro window on a 2s clip = %.3f..%.3f, want start clamped to >=0 and end at the clip duration", outro.StartSeconds, outro.EndSeconds)
+	}
+}
+
+func TestGeneratedBookendEffectsEscapeSpecialCharacters(t *testing.T) {
+	short := ShortEdit{
+		Intro:           true,
+		Outro:           true,
+		IntroText:       "Zack's: 100% Ace",
+		OutroText:       "follow @zack, now!",
+		DurationSeconds: 10,
+	}
+	short.Effects = generatedBookendEffects(short)
+	filter := VideoFilter(short)
+	for _, want := range []string{`Zack\'s\: 100\% Ace`, `follow @zack\, now!`} {
+		if !strings.Contains(filter, want) {
+			t.Fatalf("filter missing escaped text %q:\n%s", want, filter)
+		}
 	}
 }
 

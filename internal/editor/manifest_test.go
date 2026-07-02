@@ -270,6 +270,39 @@ func TestVideoFilterTextShadowAndBoxNone(t *testing.T) {
 	}
 }
 
+func TestVideoFilterTextBorderIsOmittedByDefault(t *testing.T) {
+	filter := VideoFilter(ShortEdit{
+		Effects: []Effect{
+			{Type: EffectText, Value: "HEADSHOT", StartSeconds: 1, EndSeconds: 2, BoxColor: "none"},
+		},
+	})
+	if strings.Contains(filter, "borderw=") || strings.Contains(filter, "bordercolor=") {
+		t.Fatalf("filter contains border options with BorderWidth unset:\n%s", filter)
+	}
+}
+
+func TestVideoFilterTextBorderUsesDefaultColorWhenUnset(t *testing.T) {
+	filter := VideoFilter(ShortEdit{
+		Effects: []Effect{
+			{Type: EffectText, Value: "HEADSHOT", StartSeconds: 1, EndSeconds: 2, BoxColor: "none", BorderWidth: 6},
+		},
+	})
+	if !strings.Contains(filter, "borderw=6:bordercolor=black@0.9") {
+		t.Fatalf("filter missing default-colored border:\n%s", filter)
+	}
+}
+
+func TestVideoFilterTextBorderUsesCustomColor(t *testing.T) {
+	filter := VideoFilter(ShortEdit{
+		Effects: []Effect{
+			{Type: EffectText, Value: "HEADSHOT", StartSeconds: 1, EndSeconds: 2, BoxColor: "none", BorderWidth: 6, BorderColor: "red@0.8"},
+		},
+	})
+	if !strings.Contains(filter, "borderw=6:bordercolor=red@0.8") {
+		t.Fatalf("filter missing custom-colored border:\n%s", filter)
+	}
+}
+
 func TestCompilationFilterOverlaysKillfeedFromSourcePart(t *testing.T) {
 	short := ShortEdit{
 		Output:          "compiled.mp4",
@@ -644,7 +677,7 @@ func TestGenerateCoverPromptUsesMetadata(t *testing.T) {
 			{Weapon: "AWP", Victim: "opponent-two"},
 		},
 	})
-	for _, want := range []string{"MartinezSa", "de_ancient", "2K", "AK-47", "AWP", "opponent-one", "1 headshot", "Gameplay frame", "Do not invent a face", "2K con AK-47 en de_ancient"} {
+	for _, want := range []string{"MartinezSa", "de_ancient", "2K", "AK-47", "AWP", "opponent-one", "1 headshot", "Gameplay frame", "Do not invent a face", "2K con AK-47 en Ancient"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
@@ -833,8 +866,8 @@ func TestBuildManifestAppliesRetentionOverlaysAndTailTrim(t *testing.T) {
 			killfeeds = append(killfeeds, effect)
 		}
 	}
-	if len(hooks) != 1 || hooks[0].Value != first.Headline {
-		t.Fatalf("hook effects = %#v, want one drawing headline %q", hooks, first.Headline)
+	if len(hooks) != 1 || hooks[0].Value != strings.ToUpper(first.Headline) {
+		t.Fatalf("hook effects = %#v, want one drawing upper-cased headline %q", hooks, first.Headline)
 	}
 	if len(counters) != 2 || counters[0].Value != "1" || counters[1].Value != "2K" {
 		t.Fatalf("counter effects = %#v, want values 1 and 2K", counters)
@@ -945,5 +978,43 @@ func TestBuildManifestCompiledRhythmSkipsTailTrim(t *testing.T) {
 		if arg == "-t" {
 			t.Fatalf("command = %v, want no -t under rhythm sync", short.FFmpegCommand)
 		}
+	}
+}
+
+func TestPrettifyMapName(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "de prefix", in: "de_dust2", want: "Dust2"},
+		{name: "de prefix mirage", in: "de_mirage", want: "Mirage"},
+		{name: "cs prefix", in: "cs_office", want: "Office"},
+		{name: "no known prefix", in: "workshop_map", want: "workshop_map"},
+		{name: "empty", in: "", want: ""},
+		{name: "whitespace only", in: "   ", want: ""},
+		{name: "prefix only", in: "de_", want: "de_"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := prettifyMapName(tc.in); got != tc.want {
+				t.Errorf("prettifyMapName(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPremiumHeadlinePrettifiesMap(t *testing.T) {
+	got := premiumHeadline("de_dust2", 3, "M4A1-S")
+	want := "3K con M4A1-S en Dust2"
+	if got != want {
+		t.Fatalf("premiumHeadline = %q, want %q", got, want)
+	}
+}
+
+func TestSmokeHeadlinePrettifiesMap(t *testing.T) {
+	got := smokeHeadline("de_mirage", SmokeCue{Type: "smoke", Destination: "A site"})
+	if !strings.Contains(got, "Mirage") || strings.Contains(got, "de_mirage") {
+		t.Fatalf("smokeHeadline = %q, want prettified map name", got)
 	}
 }

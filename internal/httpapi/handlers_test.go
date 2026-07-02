@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -1351,7 +1352,7 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(`{"music":"track01","edit":{"format":"landscape-16x9","killEffect":"velocity","transition":"whip","intro":true,"outro":true}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(`{"music":"track01","edit":{"format":"landscape-16x9","killEffect":"velocity","transition":"whip","intro":true,"outro":true,"intro_text":"Watch this ace","outro_text":"follow for more"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
@@ -1378,6 +1379,9 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	if payload.Edit.Format != renderplan.FormatLandscape16x9 || payload.Edit.KillEffect != renderplan.KillEffectVelocity || payload.Edit.Transition != renderplan.TransitionWhip || !payload.Edit.Intro || !payload.Edit.Outro {
 		t.Fatalf("edit payload = %#v", payload.Edit)
 	}
+	if payload.Edit.IntroText != "Watch this ace" || payload.Edit.OutroText != "follow for more" {
+		t.Fatalf("edit bookend text = %q / %q, want round-tripped custom text", payload.Edit.IntroText, payload.Edit.OutroText)
+	}
 	if len(queue.options) != 1 || !hasAsynqOption(queue.options[0], "Unique(") {
 		t.Fatalf("enqueue options = %#v, want Unique option", queue.options)
 	}
@@ -1391,6 +1395,29 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	}
 	if got, want := state.Status, renderplan.RenderVariantStatusQueued; got != want {
 		t.Fatalf("state status = %q, want %q", got, want)
+	}
+}
+
+func TestStartRenderVariantRejectsOverlongBookendText(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
+	body := fmt.Sprintf(`{"edit":{"outro_text":"%s"}}`, strings.Repeat("a", 81))
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
 	}
 }
 

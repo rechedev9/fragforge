@@ -1095,6 +1095,12 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 	if edit.Outro {
 		args = append(args, "--outro")
 	}
+	if edit.IntroText != "" {
+		args = append(args, "--intro-text", edit.IntroText)
+	}
+	if edit.OutroText != "" {
+		args = append(args, "--outro-text", edit.OutroText)
+	}
 	if cfg.FFmpegPath != "" {
 		args = append(args, "--ffmpeg", cfg.FFmpegPath)
 	}

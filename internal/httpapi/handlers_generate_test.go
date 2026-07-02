@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,6 +91,53 @@ func TestStartGenerateEnqueuesRecordAndWritesIntent(t *testing.T) {
 	}
 	if intent != want {
 		t.Fatalf("intent = %#v, want %#v", intent, want)
+	}
+}
+
+func TestStartGenerateRoundTripsBookendText(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"clean-pov-60","edit":{"format":"short-9x16","killEffect":"velocity","transition":"whip","intro":true,"outro":true,"intro_text":"Watch this ace","outro_text":"follow for more"}}`)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	raw, ok := store.puts[artifacts.GenerateIntentKey(j.ID)]
+	if !ok {
+		t.Fatalf("generate intent not written; puts=%v", keysOf(store))
+	}
+	var intent renderplan.GenerateIntent
+	if err := json.Unmarshal(raw, &intent); err != nil {
+		t.Fatalf("unmarshal intent: %v", err)
+	}
+	if intent.Edit.IntroText != "Watch this ace" || intent.Edit.OutroText != "follow for more" {
+		t.Fatalf("edit bookend text = %q / %q, want round-tripped custom text", intent.Edit.IntroText, intent.Edit.OutroText)
+	}
+}
+
+func TestStartGenerateRejectsOverlongBookendText(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	body := fmt.Sprintf(`{"preset":"viral-60-clean","edit":{"intro_text":"%s"}}`, strings.Repeat("a", 81))
+	rw := postGenerate(t, h, j.ID, body)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0", len(queue.enqueued))
 	}
 }
 
