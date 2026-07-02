@@ -14,6 +14,7 @@ import (
 const (
 	VariantStreamerVerticalStack = "streamer-vertical-stack"
 
+	StatusAcquiring Status = "acquiring"
 	StatusUploaded  Status = "uploaded"
 	StatusReady     Status = "ready"
 	StatusRendering Status = "rendering"
@@ -27,7 +28,7 @@ type Status string
 
 func ParseStatus(value string) (Status, error) {
 	switch Status(value) {
-	case StatusUploaded, StatusReady, StatusRendering, StatusRendered, StatusFailed:
+	case StatusAcquiring, StatusUploaded, StatusReady, StatusRendering, StatusRendered, StatusFailed:
 		return Status(value), nil
 	default:
 		return "", fmt.Errorf("unknown stream job status %q", value)
@@ -35,16 +36,20 @@ func ParseStatus(value string) (Status, error) {
 }
 
 type Job struct {
-	ID            uuid.UUID       `json:"id"`
-	Status        Status          `json:"status"`
-	FailureReason string          `json:"failure_reason,omitempty"`
-	SourcePath    string          `json:"source_path"`
-	SourceSHA256  string          `json:"source_sha256"`
-	Title         string          `json:"title,omitempty"`
-	Probe         SourceProbe     `json:"probe"`
-	EditPlan      json.RawMessage `json:"edit_plan,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	ID            uuid.UUID `json:"id"`
+	Status        Status    `json:"status"`
+	FailureReason string    `json:"failure_reason,omitempty"`
+	SourcePath    string    `json:"source_path"`
+	SourceSHA256  string    `json:"source_sha256"`
+	// SourceURL is set when the job was created from POST /api/stream-jobs
+	// with a source_url instead of a multipart upload; the acquire worker
+	// reads it to know what to download. Empty for uploaded jobs.
+	SourceURL string          `json:"source_url,omitempty"`
+	Title     string          `json:"title,omitempty"`
+	Probe     SourceProbe     `json:"probe"`
+	EditPlan  json.RawMessage `json:"edit_plan,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 type SourceProbe struct {
@@ -72,12 +77,21 @@ type ClipRange struct {
 }
 
 type EditPlan struct {
-	SchemaVersion string      `json:"schema_version"`
-	Variant       string      `json:"variant"`
-	FaceCrop      CropRect    `json:"face_crop"`
-	GameplayCrop  CropRect    `json:"gameplay_crop"`
-	Clips         []ClipRange `json:"clips"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	SchemaVersion string       `json:"schema_version"`
+	Variant       string       `json:"variant"`
+	FaceCrop      CropRect     `json:"face_crop"`
+	GameplayCrop  CropRect     `json:"gameplay_crop"`
+	Clips         []ClipRange  `json:"clips"`
+	Captions      CaptionsPlan `json:"captions,omitempty"`
+	UpdatedAt     time.Time    `json:"updated_at"`
+}
+
+// CaptionsPlan opts a stream render into a burned-in karaoke caption pass.
+// Language is a whisper language code ("es", "en", ...); empty means "auto".
+// Nothing is required when Enabled is false.
+type CaptionsPlan struct {
+	Enabled  bool   `json:"enabled"`
+	Language string `json:"language,omitempty"`
 }
 
 type RenderState struct {
@@ -163,11 +177,12 @@ func NewRenderState(id uuid.UUID, variant string, status Status, warnings []stri
 }
 
 func DefaultEditPlan() EditPlan {
+	variant := DefaultVariant()
 	return EditPlan{
 		SchemaVersion: "1.0",
-		Variant:       VariantStreamerVerticalStack,
-		FaceCrop:      CropRect{X: 0, Y: 0, Width: 1, Height: 0.35},
-		GameplayCrop:  CropRect{X: 0, Y: 0.35, Width: 1, Height: 0.65},
+		Variant:       variant.Name,
+		FaceCrop:      variant.DefaultFaceCrop,
+		GameplayCrop:  variant.DefaultGameplayCrop,
 		Clips:         []ClipRange{},
 		UpdatedAt:     time.Now().UTC(),
 	}
@@ -177,11 +192,14 @@ func (p EditPlan) Validate() error {
 	if p.Variant == "" {
 		return fmt.Errorf("variant is required")
 	}
-	if p.Variant != VariantStreamerVerticalStack {
-		return fmt.Errorf("unsupported stream render variant %q", p.Variant)
+	layout, ok := VariantByName(p.Variant)
+	if !ok {
+		return unknownVariantError(p.Variant)
 	}
-	if err := p.FaceCrop.Validate("face_crop"); err != nil {
-		return err
+	if !layout.FullFrame {
+		if err := p.FaceCrop.Validate("face_crop"); err != nil {
+			return err
+		}
 	}
 	if err := p.GameplayCrop.Validate("gameplay_crop"); err != nil {
 		return err
@@ -227,7 +245,7 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 		plan.SchemaVersion = "1.0"
 	}
 	if plan.Variant == "" {
-		plan.Variant = VariantStreamerVerticalStack
+		plan.Variant = DefaultVariant().Name
 	}
 	if plan.UpdatedAt.IsZero() {
 		plan.UpdatedAt = time.Now().UTC()

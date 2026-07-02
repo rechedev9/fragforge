@@ -34,9 +34,9 @@ func (r *Repository) Create(ctx context.Context, j *Job) error {
 		return fmt.Errorf("marshal probe: %w", err)
 	}
 	_, err = r.pool.Exec(ctx,
-		`INSERT INTO stream_jobs (id, status, source_path, source_sha256, title, probe, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		j.ID, string(j.Status), j.SourcePath, j.SourceSHA256, j.Title, probeJSON, j.CreatedAt, j.UpdatedAt,
+		`INSERT INTO stream_jobs (id, status, source_path, source_sha256, source_url, title, probe, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		j.ID, string(j.Status), j.SourcePath, j.SourceSHA256, j.SourceURL, j.Title, probeJSON, j.CreatedAt, j.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert stream job: %w", err)
@@ -47,7 +47,7 @@ func (r *Repository) Create(ctx context.Context, j *Job) error {
 func (r *Repository) Get(ctx context.Context, id uuid.UUID) (Job, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT id, status, COALESCE(failure_reason,''), source_path, source_sha256,
-		        COALESCE(title,''), probe, edit_plan, created_at, updated_at
+		        COALESCE(source_url,''), COALESCE(title,''), probe, edit_plan, created_at, updated_at
 		 FROM stream_jobs WHERE id = $1`, id)
 	return scanJob(row)
 }
@@ -61,7 +61,7 @@ func (r *Repository) List(ctx context.Context, limit int) ([]Job, error) {
 	}
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, status, COALESCE(failure_reason,''), source_path, source_sha256,
-		        COALESCE(title,''), probe, edit_plan, created_at, updated_at
+		        COALESCE(source_url,''), COALESCE(title,''), probe, edit_plan, created_at, updated_at
 		 FROM stream_jobs ORDER BY updated_at DESC, created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query stream jobs: %w", err)
@@ -88,6 +88,27 @@ func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status Stat
 		id, string(status), failureReason)
 	if err != nil {
 		return fmt.Errorf("update stream job status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetAcquired records a successful acquire-by-URL download: the probed source
+// metadata and sha256, moving the job to "ready". It clears any prior failure
+// reason so a retried acquire does not leave a stale message behind.
+func (r *Repository) SetAcquired(ctx context.Context, id uuid.UUID, probe SourceProbe, sha256 string) error {
+	probeJSON, err := json.Marshal(probe)
+	if err != nil {
+		return fmt.Errorf("marshal probe: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE stream_jobs SET probe = $2, source_sha256 = $3, status = $4, failure_reason = NULL, updated_at = NOW()
+		 WHERE id = $1`,
+		id, probeJSON, sha256, string(StatusReady))
+	if err != nil {
+		return fmt.Errorf("update stream job acquired: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
@@ -123,7 +144,7 @@ func scanJob(row pgx.Row) (Job, error) {
 	var probeJSON []byte
 	var planJSON []byte
 	err := row.Scan(&j.ID, &statusRaw, &j.FailureReason, &j.SourcePath, &j.SourceSHA256,
-		&j.Title, &probeJSON, &planJSON, &j.CreatedAt, &j.UpdatedAt)
+		&j.SourceURL, &j.Title, &probeJSON, &planJSON, &j.CreatedAt, &j.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}

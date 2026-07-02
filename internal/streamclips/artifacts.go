@@ -20,8 +20,8 @@ func EditPlanKey(id uuid.UUID) string {
 }
 
 func RenderPrefix(id uuid.UUID, variant string) (string, error) {
-	if variant != VariantStreamerVerticalStack {
-		return "", fmt.Errorf("unsupported stream render variant %q", variant)
+	if _, ok := VariantByName(variant); !ok {
+		return "", unknownVariantError(variant)
 	}
 	return path.Join(JobPrefix(id), "renders", variant), nil
 }
@@ -59,4 +59,17 @@ func RenderVideoKey(id uuid.UUID, variant, clipID string) (string, error) {
 		return "", fmt.Errorf("invalid clip id %q", clipID)
 	}
 	return path.Join(prefix, "videos", clipID+".mp4"), nil
+}
+
+// RenderCaptionKey returns the storage key for a clip's burned-caption ASS
+// track, stored next to the rendered videos under the render artifact prefix.
+func RenderCaptionKey(id uuid.UUID, variant, clipID string) (string, error) {
+	prefix, err := RenderPrefix(id, variant)
+	if err != nil {
+		return "", err
+	}
+	if !clipIDPattern.MatchString(clipID) {
+		return "", fmt.Errorf("invalid clip id %q", clipID)
+	}
+	return path.Join(prefix, "captions", clipID+".ass"), nil
 }
