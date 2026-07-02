@@ -534,6 +534,184 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	}
 }
 
+func TestCompileSegmentsArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		segmentIDs []string
+		want       []string
+	}{
+		{
+			name:       "no segments",
+			segmentIDs: nil,
+			want:       nil,
+		},
+		{
+			name:       "single segment keeps today's per-segment render",
+			segmentIDs: []string{"seg-001"},
+			want:       nil,
+		},
+		{
+			name:       "two segments compile into one short in plan order",
+			segmentIDs: []string{"seg-001", "seg-004"},
+			want:       []string{"--compile-segments", "--segments", "seg-001,seg-004"},
+		},
+		{
+			name:       "three segments join all ids in order",
+			segmentIDs: []string{"seg-003", "seg-001", "seg-002"},
+			want:       []string{"--compile-segments", "--segments", "seg-003,seg-001,seg-002"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compileSegmentsArgs(tt.segmentIDs)
+			if len(got) != len(tt.want) {
+				t.Fatalf("compileSegmentsArgs(%v) = %v, want %v", tt.segmentIDs, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("compileSegmentsArgs(%v) = %v, want %v", tt.segmentIDs, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderWorkerCompilesMultipleSegmentsIntoOneShort(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	id := uuid.New()
+	plan := multiSegmentKillPlan("seg-001", "seg-002")
+	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+	rec := recording.RecordingResult{
+		Plan: recording.RecordingPlan{
+			DemoPath:        "demo.dem",
+			OutputDir:       "out",
+			TargetSteamID64: "76561197960265729",
+			TargetAccountID: 1,
+			Tickrate:        64,
+			Stream:          recording.DefaultStreamConfig(),
+			Segments: []recording.RecordingSegment{
+				{ID: "seg-001", TickStart: 64, TickEnd: 128},
+				{ID: "seg-002", TickStart: 128, TickEnd: 192},
+			},
+		},
+		Artifacts: []recording.RecordingArtifact{
+			{SegmentID: "seg-001", Role: "segment", Type: "video", Path: "C:/stale/seg-001.mp4", SizeBytes: 4},
+			{SegmentID: "seg-002", Role: "segment", Type: "video", Path: "C:/stale/seg-002.mp4", SizeBytes: 4},
+		},
+	}
+	putJSON(t, store, recording.ResultArtifactKey(id), rec)
+	_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip1")))
+	_ = store.Put(mustSegmentClipKey(t, id, "seg-002"), bytes.NewReader([]byte("clip2")))
+
+	const compiledID = "demo-compilation"
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if !hasArg(args, "--compile-segments") {
+			t.Fatalf("editor args missing --compile-segments for a 2-segment render: %#v", args)
+		}
+		if got, want := argValue(args, "--segments"), "seg-001,seg-002"; got != want {
+			t.Fatalf("--segments = %q, want %q", got, want)
+		}
+		outDir := argValue(args, "--out")
+		publishDir := argValue(args, "--publish-dir")
+		videoPath := filepath.Join(publishDir, compiledID+".mp4")
+		coverPath := filepath.Join(publishDir, compiledID+".cover.jpg")
+		captionPath := filepath.Join(publishDir, compiledID+".caption.txt")
+		logPath := filepath.Join(outDir, "logs", compiledID+"-render.log")
+		for _, file := range []struct {
+			path string
+			body string
+		}{
+			{filepath.Join(outDir, "edit-manifest.json"), `{"shorts":[]}`},
+			{filepath.Join(publishDir, "pack-manifest.json"), `{"items":[]}`},
+			{filepath.Join(publishDir, "index.html"), `<html></html>`},
+			{filepath.Join(publishDir, "summary.md"), `summary`},
+			{videoPath, "video"},
+			{coverPath, "cover"},
+			{captionPath, "caption"},
+			{logPath, "log"},
+		} {
+			if err := os.MkdirAll(filepath.Dir(file.path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file.path, []byte(file.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		rendered := editor.Result{
+			Preset:      editor.PresetViral60Clean,
+			OutputDir:   outDir,
+			PublishDir:  publishDir,
+			GalleryPath: filepath.Join(publishDir, "index.html"),
+			SummaryPath: filepath.Join(publishDir, "summary.md"),
+			// A compiled render emits exactly one short covering every selected
+			// segment, not one short per segment.
+			Shorts: []editor.ShortResult{{
+				SegmentID:     compiledID,
+				Output:        videoPath,
+				PublishPath:   videoPath,
+				CoverPath:     coverPath,
+				CaptionPath:   captionPath,
+				RenderLogPath: logPath,
+			}},
+		}
+		if err := writeJSONFile(filepath.Join(outDir, "shorts-result.json"), rendered); err != nil {
+			t.Fatal(err)
+		}
+		return []byte("rendered"), nil
+	}}
+	w := NewRenderWorker(repo, store, RenderWorkerConfig{
+		WorkDir:    t.TempDir(),
+		EditorPath: "zv-editor",
+		FFmpegPath: "ffmpeg",
+	})
+	w.runner = runner
+
+	if err := w.HandleRenderVariant(context.Background(), renderTask(t, id, editor.PresetViral60Clean)); err != nil {
+		t.Fatalf("HandleRenderVariant error = %v", err)
+	}
+
+	// The published output is one compiled reel, not per-segment shorts: only
+	// the "demo-compilation" video/cover/caption keys exist.
+	for _, key := range []string{
+		mustRenderVariantVideoKey(t, id, editor.PresetViral60Clean, compiledID),
+		mustRenderVariantCoverKey(t, id, editor.PresetViral60Clean, compiledID),
+		mustRenderVariantCaptionKey(t, id, editor.PresetViral60Clean, compiledID),
+	} {
+		if _, ok := store.files[key]; !ok {
+			t.Fatalf("storage missing compiled short artifact %s", key)
+		}
+	}
+	for _, segmentID := range []string{"seg-001", "seg-002"} {
+		key, err := artifacts.RenderVariantVideoKey(id, editor.PresetViral60Clean, segmentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := store.files[key]; ok {
+			t.Fatalf("storage has a per-segment short %s; multi-segment renders must compile into one reel", key)
+		}
+	}
+
+	var state renderplan.RenderVariantState
+	if err := json.Unmarshal(store.files[mustRenderVariantStatusKey(t, id, editor.PresetViral60Clean)], &state); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := state.Status, renderplan.RenderVariantStatusReady; got != want {
+		t.Fatalf("render state = %q, want %q", got, want)
+	}
+
+	// The result artifact is the source the videos-listing endpoints
+	// (GetRenderPublishBoard, GetRenderVariant) read from; confirm it reports
+	// the single compiled short so the API/web exposes exactly one video.
+	var result editor.Result
+	if err := json.Unmarshal(store.files[mustRenderVariantResultKey(t, id, editor.PresetViral60Clean)], &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Shorts) != 1 || result.Shorts[0].SegmentID != compiledID {
+		t.Fatalf("render result shorts = %#v, want exactly one %q short", result.Shorts, compiledID)
+	}
+}
+
 func TestRenderWorkerWritesFailedStateWhenEditorFails(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()

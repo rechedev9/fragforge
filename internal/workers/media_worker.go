@@ -1089,6 +1089,7 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 		"--kill-effect", edit.KillEffect,
 		"--transition", edit.Transition,
 	}
+	args = append(args, compileSegmentsArgs(recording.SegmentIDs(recordingResult))...)
 	if edit.Intro {
 		args = append(args, "--intro")
 	}
@@ -1471,6 +1472,18 @@ func readStoredRecordingResult(store storage.Storage, id uuid.UUID) (recording.R
 		return recording.RecordingResult{}, err
 	}
 	return result, nil
+}
+
+// compileSegmentsArgs returns the zv-editor flags that compile a render's
+// segments into one upload-ready Short. Per CLAUDE.md, a multi-segment
+// selection renders as a single concatenated Short (matching the "zv short"
+// CLI's --compile-segments behavior); a single segment keeps today's
+// per-segment short unchanged.
+func compileSegmentsArgs(segmentIDs []string) []string {
+	if len(segmentIDs) < 2 {
+		return nil
+	}
+	return []string{"--compile-segments", "--segments", strings.Join(segmentIDs, ",")}
 }
 
 // killPlanSegmentIDs lists every segment id in the plan, in plan order.
