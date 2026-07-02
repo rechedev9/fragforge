@@ -261,3 +261,342 @@ func TestGroqTranscriber_Transcribe_MissingMedia(t *testing.T) {
 		t.Fatalf("got error %q, want it to mention the missing media file", err.Error())
 	}
 }
+
+func TestSpeechSpansFromSilences(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration float64
+		silences []speechSpan
+		want     []speechSpan
+	}{
+		{
+			// The real failure case: one utterance up front, callouts mid-clip,
+			// silence (game noise) between them.
+			name:     "gaming clip with sparse speech",
+			duration: 30,
+			silences: []speechSpan{{Start: 0.9, End: 4.1}, {Start: 7.4, End: 9.4}, {Start: 11.3, End: 28.4}},
+			want: []speechSpan{
+				{Start: 0, End: 1.2},
+				{Start: 3.8, End: 7.7},
+				{Start: 9.1, End: 11.6},
+				{Start: 28.1, End: 30},
+			},
+		},
+		{
+			name:     "fully silent clip yields no spans",
+			duration: 20,
+			silences: []speechSpan{{Start: 0, End: 20}},
+			want:     nil,
+		},
+		{
+			name:     "continuous speech falls back to the whole clip",
+			duration: 30,
+			silences: nil,
+			want:     nil,
+		},
+		{
+			name:     "blips shorter than the minimum are dropped",
+			duration: 10,
+			silences: []speechSpan{{Start: 0, End: 5}, {Start: 5.1, End: 10}},
+			want:     nil,
+		},
+		{
+			name:     "padded neighbours merge into one span",
+			duration: 20,
+			silences: []speechSpan{{Start: 2, End: 3}, {Start: 10, End: 18}},
+			want:     []speechSpan{{Start: 0, End: 10.3}, {Start: 17.7, End: 20}},
+		},
+		{
+			name:     "zero duration yields nothing",
+			duration: 0,
+			silences: nil,
+			want:     nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := speechSpansFromSilences(tt.duration, tt.silences)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d spans (%+v), want %d (%+v)", len(got), got, len(tt.want), tt.want)
+			}
+			for i := range got {
+				if diff := got[i].Start - tt.want[i].Start; diff > 0.001 || diff < -0.001 {
+					t.Errorf("span %d start = %v, want %v", i, got[i].Start, tt.want[i].Start)
+				}
+				if diff := got[i].End - tt.want[i].End; diff > 0.001 || diff < -0.001 {
+					t.Errorf("span %d end = %v, want %v", i, got[i].End, tt.want[i].End)
+				}
+			}
+		})
+	}
+}
+
+func TestParseSilenceDetect(t *testing.T) {
+	out := `Input #0, flac, from 'audio.flac':
+  Duration: 00:00:30.00, start: 0.000000, bitrate: 279 kb/s
+[silencedetect @ 0x1] silence_start: 0.879375
+[silencedetect @ 0x1] silence_end: 4.067063 | silence_duration: 3.187688
+[silencedetect @ 0x1] silence_start: 27.291062
+`
+	duration, silences, err := parseSilenceDetect(out)
+	if err != nil {
+		t.Fatalf("parseSilenceDetect error = %v", err)
+	}
+	if duration != 30 {
+		t.Fatalf("duration = %v, want 30", duration)
+	}
+	want := []speechSpan{{Start: 0.879375, End: 4.067063}, {Start: 27.291062, End: 30}}
+	if len(silences) != len(want) {
+		t.Fatalf("silences = %+v, want %+v", silences, want)
+	}
+	for i := range want {
+		if silences[i] != want[i] {
+			t.Errorf("silence %d = %+v, want %+v", i, silences[i], want[i])
+		}
+	}
+
+	if _, _, err := parseSilenceDetect("no duration here"); err == nil {
+		t.Fatal("parseSilenceDetect without a Duration line must error")
+	}
+}
+
+// TestGroqTranscriber_TranscribeSpansOffsetsWords is the regression test for
+// the missing-captions bug: a 30s gaming clip transcribed in one pass dropped
+// every utterance after the first. With span detection, each speech region is
+// transcribed separately and its words come back offset into clip time.
+func TestGroqTranscriber_TranscribeSpansOffsetsWords(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		switch requests {
+		case 1:
+			_, _ = w.Write([]byte(`{"words":[{"word":"Hay","start":0.1,"end":0.4},{"word":"uno","start":0.5,"end":0.8}]}`))
+		case 2:
+			// A noise-only span transcribing to nothing is normal, not an error.
+			_, _ = w.Write([]byte(`{"words":[]}`))
+		default:
+			_, _ = w.Write([]byte(`{"words":[{"word":"smoke","start":1.0,"end":1.5}]}`))
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var chunkStarts []float64
+	transcriber := GroqTranscriber{
+		APIKey:       "secret-key",
+		BaseURL:      server.URL,
+		extractAudio: fakeExtractAudio,
+		detectSpeech: func(_ context.Context, _, _ string) ([]speechSpan, error) {
+			return []speechSpan{{Start: 0, End: 1.2}, {Start: 9.1, End: 11.6}, {Start: 22.4, End: 27.6}}, nil
+		},
+		extractChunk: func(_ context.Context, _, _, chunkPath string, start, _ float64) error {
+			chunkStarts = append(chunkStarts, start)
+			return os.WriteFile(chunkPath, []byte("fake-chunk"), 0o600)
+		},
+	}
+
+	cues, err := transcriber.Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != 3 {
+		t.Fatalf("groq requests = %d, want 3 (one per span)", requests)
+	}
+	if len(chunkStarts) != 3 || chunkStarts[1] != 9.1 {
+		t.Fatalf("chunk starts = %v, want the three span starts", chunkStarts)
+	}
+	want := []WordCue{
+		{Word: "Hay", StartSeconds: 0.1, EndSeconds: 0.4},
+		{Word: "uno", StartSeconds: 0.5, EndSeconds: 0.8},
+		{Word: "smoke", StartSeconds: 23.4, EndSeconds: 23.9},
+	}
+	if len(cues) != len(want) {
+		t.Fatalf("cues = %+v, want %+v", cues, want)
+	}
+	for i := range want {
+		if cues[i].Word != want[i].Word ||
+			cues[i].StartSeconds-want[i].StartSeconds > 0.001 || want[i].StartSeconds-cues[i].StartSeconds > 0.001 {
+			t.Errorf("cue %d = %+v, want %+v", i, cues[i], want[i])
+		}
+	}
+}
+
+func TestGroqTranscriber_TranscribeFallsBackWhenDetectionFails(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(sampleGroqJSON))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	transcriber := GroqTranscriber{
+		APIKey:       "secret-key",
+		BaseURL:      server.URL,
+		extractAudio: fakeExtractAudio,
+		detectSpeech: func(_ context.Context, _, _ string) ([]speechSpan, error) {
+			return nil, context.DeadlineExceeded
+		},
+	}
+
+	cues, err := transcriber.Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("groq requests = %d, want 1 whole-clip fallback", requests)
+	}
+	if len(cues) == 0 {
+		t.Fatal("fallback returned no cues")
+	}
+}
+
+// TestParseGroqWordsDropsHallucinatedSegments: words inside a segment Whisper
+// itself scores as probably-noise (high no_speech_prob or very low logprob)
+// must not become burned captions; the classic case is "아" or a phantom
+// "Gracias." transcribed over pure game noise.
+func TestParseGroqWordsDropsHallucinatedSegments(t *testing.T) {
+	data := `{
+	  "text": "hola 아 mundo",
+	  "words": [
+	    {"word": "hola", "start": 0.2, "end": 0.6},
+	    {"word": "아", "start": 2.1, "end": 2.4},
+	    {"word": "mundo", "start": 5.0, "end": 5.5}
+	  ],
+	  "segments": [
+	    {"start": 0.0, "end": 1.0, "no_speech_prob": 0.02, "avg_logprob": -0.3},
+	    {"start": 2.0, "end": 3.0, "no_speech_prob": 0.28, "avg_logprob": -1.37},
+	    {"start": 4.5, "end": 6.0, "no_speech_prob": 0.7, "avg_logprob": -0.4}
+	  ]
+	}`
+	cues, err := parseGroqWords([]byte(data))
+	if err != nil {
+		t.Fatalf("parseGroqWords error = %v", err)
+	}
+	if len(cues) != 1 || cues[0].Word != "hola" {
+		t.Fatalf("cues = %+v, want only the confident word 'hola'", cues)
+	}
+}
+
+func TestParseGroqWordsKeepsAllWordsWithoutSegments(t *testing.T) {
+	data := `{"words":[{"word":"hola","start":0.2,"end":0.6},{"word":"mundo","start":1.0,"end":1.4}]}`
+	cues, err := parseGroqWords([]byte(data))
+	if err != nil {
+		t.Fatalf("parseGroqWords error = %v", err)
+	}
+	if len(cues) != 2 {
+		t.Fatalf("cues = %+v, want both words kept when no segment metadata exists", cues)
+	}
+}
+
+// A Whisper repetition loop over sustained noise emits the same short text in
+// several segments whose confidence metrics hover just inside the thresholds;
+// the verbatim repetition itself is the reliable signature.
+func TestParseGroqWordsDropsRepetitionLoops(t *testing.T) {
+	data := `{
+	  "text": "vale 아 아 아",
+	  "words": [
+	    {"word": "vale", "start": 0.1, "end": 0.5},
+	    {"word": "아", "start": 3.5, "end": 4.5},
+	    {"word": "아", "start": 7.0, "end": 8.6},
+	    {"word": "아", "start": 11.0, "end": 12.5}
+	  ],
+	  "segments": [
+	    {"start": 0.0, "end": 1.0, "text": " vale", "no_speech_prob": 0.05, "avg_logprob": -0.3},
+	    {"start": 3.5, "end": 5.5, "text": " 아", "no_speech_prob": 0.25, "avg_logprob": -0.6},
+	    {"start": 7.0, "end": 9.0, "text": " 아", "no_speech_prob": 0.25, "avg_logprob": -0.6},
+	    {"start": 11.0, "end": 13.0, "text": " 아", "no_speech_prob": 0.25, "avg_logprob": -0.6}
+	  ]
+	}`
+	cues, err := parseGroqWords([]byte(data))
+	if err != nil {
+		t.Fatalf("parseGroqWords error = %v", err)
+	}
+	if len(cues) != 1 || cues[0].Word != "vale" {
+		t.Fatalf("cues = %+v, want only 'vale' after dropping the repetition loop", cues)
+	}
+}
+
+// Regression for the missing "apunta apunta": on noisy chunks auto-detection
+// picks an absurd language (Korean) and decodes gibberish the hallucination
+// filter drops, losing real speech. Chunks that end up empty are retried with
+// the majority language of the rest of the clip forced.
+func TestGroqTranscriber_TranscribeRetriesEmptiedSpanWithMajorityLanguage(t *testing.T) {
+	var languages []string
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			t.Fatalf("ParseMultipartForm: %v", err)
+		}
+		languages = append(languages, r.FormValue("language"))
+		w.Header().Set("Content-Type", "application/json")
+		switch requests {
+		case 1: // confident Spanish speech
+			_, _ = w.Write([]byte(`{"language":"Spanish","words":[{"word":"joder","start":0.1,"end":0.5},{"word":"tío","start":0.5,"end":0.9}],"segments":[{"start":0,"end":1,"text":" joder tío","no_speech_prob":0.05,"avg_logprob":-0.3}]}`))
+		case 2: // noisy chunk: Korean hallucination loop, filtered to nothing
+			_, _ = w.Write([]byte(`{"language":"Korean","words":[{"word":"아","start":0.5,"end":1.0},{"word":"아","start":3.0,"end":3.5}],"segments":[{"start":0.5,"end":1.5,"text":" 아","no_speech_prob":0.3,"avg_logprob":-0.85},{"start":3.0,"end":4.0,"text":" 아","no_speech_prob":0.3,"avg_logprob":-0.85}]}`))
+		default: // retry of chunk 2 with language=es decodes real speech
+			_, _ = w.Write([]byte(`{"language":"Spanish","words":[{"word":"apunta","start":0.4,"end":0.9},{"word":"apunta","start":1.0,"end":1.5}],"segments":[{"start":0.3,"end":1.6,"text":" apunta apunta","no_speech_prob":0.06,"avg_logprob":-0.46}]}`))
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	transcriber := GroqTranscriber{
+		APIKey:       "secret-key",
+		BaseURL:      server.URL,
+		extractAudio: fakeExtractAudio,
+		detectSpeech: func(_ context.Context, _, _ string) ([]speechSpan, error) {
+			return []speechSpan{{Start: 4.0, End: 7.4}, {Start: 17.5, End: 27.6}}, nil
+		},
+		extractChunk: func(_ context.Context, _, _, chunkPath string, _, _ float64) error {
+			return os.WriteFile(chunkPath, []byte("fake-chunk"), 0o600)
+		},
+	}
+
+	cues, err := transcriber.Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != 3 {
+		t.Fatalf("groq requests = %d, want 3 (two spans + one language retry)", requests)
+	}
+	if len(languages) != 3 || languages[0] != "" || languages[1] != "" || languages[2] != "es" {
+		t.Fatalf("language fields = %v, want auto, auto, then forced es", languages)
+	}
+	var got []string
+	for _, c := range cues {
+		got = append(got, c.Word)
+	}
+	want := []string{"joder", "tío", "apunta", "apunta"}
+	if len(got) != len(want) {
+		t.Fatalf("words = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("word %d = %q, want %q (all: %v)", i, got[i], want[i], got)
+		}
+	}
+	// The retried words must sit in clip time (span start 17.5 + 0.4).
+	if diff := cues[2].StartSeconds - 17.9; diff > 0.001 || diff < -0.001 {
+		t.Fatalf("retried word start = %v, want 17.9", cues[2].StartSeconds)
+	}
+}
