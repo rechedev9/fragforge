@@ -55,9 +55,9 @@ export function DeleteVideoButton({ video, onDeleted }: { video: Video; onDelete
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Delete this reel?</DialogTitle>
-            <DialogDescription className="truncate">
-              &ldquo;{video.title}&rdquo; and its rendered file will be removed. This cannot be
-              undone.
+            <DialogDescription className="break-words">
+              <span className="font-medium text-foreground">{video.title}</span> and its rendered
+              file will be removed. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
