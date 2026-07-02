@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Target, UploadCloud, Film, Compass, LogOut, LogIn, ChevronsUpDown, Plus } from 'lucide-react';
+import { Target, UploadCloud, Film, Compass, Clapperboard, LogOut, LogIn, ChevronsUpDown, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Sidebar,
@@ -40,6 +40,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { label: 'Matches', href: '/matches', icon: Target },
   { label: 'Upload', href: '/upload', icon: UploadCloud },
+  { label: 'Stream Clips', href: '/streams', icon: Clapperboard },
   { label: 'Library', href: '/videos', icon: Film },
   { label: 'Feed', href: '/feed', icon: Compass },
 ];
