@@ -119,8 +119,11 @@ func TestGroqTranscriber_Transcribe(t *testing.T) {
 	if !strings.HasPrefix(gotContentType, "multipart/form-data") {
 		t.Fatalf("Content-Type = %q, want multipart/form-data", gotContentType)
 	}
-	if gotFields["model"] != defaultGroqModel {
-		t.Errorf("model field = %q, want %q", gotFields["model"], defaultGroqModel)
+	// The default must stay the full multilingual model: the distilled turbo
+	// variant garbles code-switched clips (Spanish stream audio with English
+	// phrases), transcribing hallucinated text in the detected language.
+	if gotFields["model"] != "whisper-large-v3" {
+		t.Errorf("model field = %q, want whisper-large-v3", gotFields["model"])
 	}
 	if gotFields["response_format"] != "verbose_json" {
 		t.Errorf("response_format field = %q, want verbose_json", gotFields["response_format"])

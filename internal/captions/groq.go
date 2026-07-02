@@ -19,8 +19,13 @@ import (
 const defaultGroqBaseURL = "https://api.groq.com/openai/v1"
 
 // defaultGroqModel is the Groq transcription model used when
-// GroqTranscriber.Model is empty.
-const defaultGroqModel = "whisper-large-v3-turbo"
+// GroqTranscriber.Model is empty. The full (non-turbo) large-v3 model is the
+// default because stream clips routinely mix languages mid-sentence
+// (Spanish commentary with English gaming terms); the distilled turbo
+// variant is markedly worse at code-switched speech and tends to hallucinate
+// plausible phrases in the detected language instead of transcribing the
+// other one. Clips are seconds long, so the extra latency is negligible.
+const defaultGroqModel = "whisper-large-v3"
 
 // GroqTranscriber transcribes media through Groq's cloud Whisper API
 // (OpenAI-compatible /audio/transcriptions endpoint) to produce word-level
@@ -31,7 +36,7 @@ const defaultGroqModel = "whisper-large-v3-turbo"
 // for transcription.
 type GroqTranscriber struct {
 	APIKey   string
-	Model    string // defaults to "whisper-large-v3-turbo"
+	Model    string // defaults to "whisper-large-v3"
 	Language string // ISO-639-1, or "auto"/"" to let Groq auto-detect
 	BaseURL  string // defaults to "https://api.groq.com/openai/v1"
 

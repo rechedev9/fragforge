@@ -187,11 +187,7 @@ func dialogueLine(window []WordCue) (string, error) {
 // sum to (approximately) the window's total duration.
 func karaokeCentiseconds(cue WordCue) int {
 	duration := cue.EndSeconds - cue.StartSeconds
-	centiseconds := int(duration*100 + 0.5)
-	if centiseconds < 1 {
-		centiseconds = 1
-	}
-	return centiseconds
+	return max(int(duration*100+0.5), 1)
 }
 
 func writeScriptInfo(b *strings.Builder, style Style) {
