@@ -73,3 +73,54 @@ func TestHLTV1Rating(t *testing.T) {
 		}
 	})
 }
+
+// TestFinalizeComputesMultiKillRoundCounts reuses the same
+// roundsByKillCount bookkeeping the KAST/rating accumulator already keeps
+// (see hltv1Rating's weighted multi-kill term) to fill in the rounds_2k..5k
+// scoreboard columns.
+func TestFinalizeComputesMultiKillRoundCounts(t *testing.T) {
+	acc := newRosterAccumulator()
+	acc.rounds = 5
+	acc.players[1] = &PlayerStat{SteamID64: "1", Name: "ace"}
+	acc.roundsByKillCount[1] = map[int]int{1: 1, 3: 1, 5: 1} // a 1k, a 3k, and an ace round
+	acc.players[2] = &PlayerStat{SteamID64: "2", Name: "quiet"}
+	// player 2 has no entry in roundsByKillCount at all: never got a kill.
+
+	roster := acc.finalize()
+
+	ace := findRosterPlayer(roster, "1")
+	if ace == nil {
+		t.Fatal("roster missing player 1")
+	}
+	if ace.Rounds2K != 0 || ace.Rounds3K != 1 || ace.Rounds4K != 0 || ace.Rounds5K != 1 {
+		t.Errorf("multi-kill rounds = {2k:%d 3k:%d 4k:%d 5k:%d}, want {0 1 0 1}",
+			ace.Rounds2K, ace.Rounds3K, ace.Rounds4K, ace.Rounds5K)
+	}
+
+	quiet := findRosterPlayer(roster, "2")
+	if quiet == nil {
+		t.Fatal("roster missing player 2")
+	}
+	if quiet.Rounds2K != 0 || quiet.Rounds3K != 0 || quiet.Rounds4K != 0 || quiet.Rounds5K != 0 {
+		t.Errorf("player with no multi-kill rounds got non-zero counts: %#v", quiet)
+	}
+}
+
+// TestFinalizeFoldsSixKillRoundIntoRounds5K guards the >=5 bucket: a CS2
+// round cannot have more than 5 kills by one player against real opponents,
+// but the fold-in should stay defensive rather than silently drop data.
+func TestFinalizeFoldsSixKillRoundIntoRounds5K(t *testing.T) {
+	acc := newRosterAccumulator()
+	acc.rounds = 1
+	acc.players[1] = &PlayerStat{SteamID64: "1", Name: "p"}
+	acc.roundsByKillCount[1] = map[int]int{5: 1, 6: 1}
+
+	roster := acc.finalize()
+	got := findRosterPlayer(roster, "1")
+	if got == nil {
+		t.Fatal("roster missing player 1")
+	}
+	if got.Rounds5K != 2 {
+		t.Errorf("Rounds5K = %d, want 2 (5k and 6k rounds folded together)", got.Rounds5K)
+	}
+}

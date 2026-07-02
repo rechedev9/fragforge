@@ -10,6 +10,7 @@ import (
 	"time"
 
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
 	dp "github.com/markus-wa/godispatch"
 
 	"github.com/rechedev9/fragforge/internal/rules"
@@ -35,6 +36,17 @@ func (p *blockingParser) RegisterEventHandler(any) dp.HandlerIdentifier      { r
 func (p *blockingParser) RegisterNetMessageHandler(any) dp.HandlerIdentifier { return nil }
 func (p *blockingParser) TickRate() float64                                  { return 64 }
 func (p *blockingParser) Close() error                                       { return nil }
+func (p *blockingParser) GameState() demoinfocs.GameState                    { return fakeGameState{} }
+
+// fakeGameState is a minimal demoinfocs.GameState double: it embeds the nil
+// interface so any unimplemented method panics loudly (same trick as
+// blockingParser), and only overrides the score lookups RosterScan needs.
+type fakeGameState struct {
+	demoinfocs.GameState
+}
+
+func (fakeGameState) TeamCounterTerrorists() *common.TeamState { return &common.TeamState{} }
+func (fakeGameState) TeamTerrorists() *common.TeamState        { return &common.TeamState{} }
 
 func (p *blockingParser) Cancel() {
 	p.cancelCalled.Store(true)

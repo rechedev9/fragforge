@@ -7,6 +7,7 @@ import (
 	demoinfocs "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
 	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/events"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/msg"
 )
 
 // tradeWindowSeconds is how long after a death a teammate kill still counts as a
@@ -42,6 +43,12 @@ type rosterAccumulator struct {
 	kastRounds        map[uint64]int
 	roundsByKillCount map[uint64]map[int]int // player -> kills-in-a-round -> count of such rounds
 	rounds            int
+
+	// mapName comes from the demo header (CSVCMsg_ServerInfo) and, like the map
+	// name callers elsewhere in this package read (see demo_smokes.go), is not
+	// cleared on MatchStart: it is set once near the start of the demo and the
+	// map never changes mid-match.
+	mapName string
 
 	// Current-round scratch, reset each RoundStart.
 	curParticipants map[uint64]string // steamid -> team, snapshot at round start
@@ -86,6 +93,12 @@ func (a *rosterAccumulator) observe(pl *common.Player) *PlayerStat {
 // register wires the demo event handlers onto the accumulator. p is captured so
 // handlers can read game state (tick, tickrate, current participants).
 func (a *rosterAccumulator) register(p demoinfocs.Parser) {
+	p.RegisterNetMessageHandler(func(info *msg.CSVCMsg_ServerInfo) {
+		if name := info.GetMapName(); name != "" {
+			a.mapName = name
+		}
+	})
+
 	p.RegisterEventHandler(func(events.MatchStart) { a.reset() })
 
 	p.RegisterEventHandler(func(events.RoundStart) {
@@ -181,6 +194,18 @@ func (a *rosterAccumulator) finalize() []PlayerStat {
 			ps.KAST = round1(100 * float64(a.kastRounds[id]) / float64(a.rounds))
 		}
 		ps.Rating = round2(hltv1Rating(ps.Kills, ps.Deaths, a.rounds, a.roundsByKillCount[id]))
+		for n, count := range a.roundsByKillCount[id] {
+			switch {
+			case n == 2:
+				ps.Rounds2K = count
+			case n == 3:
+				ps.Rounds3K = count
+			case n == 4:
+				ps.Rounds4K = count
+			case n >= 5:
+				ps.Rounds5K += count
+			}
+		}
 	}
 	return sortRoster(a.players)
 }

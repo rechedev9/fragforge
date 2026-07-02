@@ -192,12 +192,19 @@ func TestParserWorkerScansRosterAgainstRealDemo(t *testing.T) {
 	}
 	var doc struct {
 		Players []parser.PlayerStat `json:"players"`
+		Match   parser.MatchInfo    `json:"match"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
 	if len(doc.Players) == 0 {
 		t.Fatal("roster has no players, expected > 0 (regression)")
+	}
+	if doc.Match.Map == "" {
+		t.Error("roster artifact match.map is empty, want the demo header's map name")
+	}
+	if doc.Match.Rounds <= 0 {
+		t.Errorf("roster artifact match.rounds = %d, want > 0", doc.Match.Rounds)
 	}
 }
 

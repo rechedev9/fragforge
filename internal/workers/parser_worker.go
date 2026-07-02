@@ -154,11 +154,11 @@ func (w *ParserWorker) scanRoster(ctx context.Context, j job.Job) (string, error
 	p := demoinfocs.NewParser(tmp)
 	defer p.Close()
 
-	players, err := parser.RosterWithContext(ctx, p)
+	result, err := parser.RosterScanWithContext(ctx, p)
 	if err != nil {
 		return "", fmt.Errorf("scan roster: %w", err)
 	}
-	b, err := json.MarshalIndent(map[string]any{"players": players}, "", "  ")
+	b, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return "", err
 	}
