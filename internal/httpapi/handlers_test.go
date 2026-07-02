@@ -1827,6 +1827,48 @@ func TestRenderArtifactRoutesStreamKnownArtifacts(t *testing.T) {
 	}
 }
 
+func TestRenderVideoHonorsRangeRequests(t *testing.T) {
+	// Regression: the browser <video> element needs Range support (206 +
+	// Content-Range) to start playback; the handler used to always 200 with a
+	// plain copy. Uses the real Local storage because ranges apply only to
+	// seekable readers (*os.File).
+	repo := newFakeRepo()
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	videoKey, err := artifacts.RenderVariantVideoKey(j.ID, editor.PresetViral60Clean, "seg-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(videoKey, bytes.NewReader([]byte("mp4-bytes"))); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlers(repo, store, &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Get("/api/jobs/{id}/renders/{variant}/videos/{name}", h.GetRenderVideo)
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/videos/seg-001", nil)
+	req.Header.Set("Range", "bytes=0-3")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206; body=%s", rw.Code, rw.Body.String())
+	}
+	if got, want := rw.Body.String(), "mp4-"; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+	if got, want := rw.Header().Get("Content-Range"), "bytes 0-3/9"; got != want {
+		t.Fatalf("Content-Range = %q, want %q", got, want)
+	}
+	if got := rw.Header().Get("Content-Type"); got != "video/mp4" {
+		t.Fatalf("Content-Type = %q, want video/mp4", got)
+	}
+}
+
 func TestRenderArtifactRoutesRejectUnsafeArtifactName(t *testing.T) {
 	repo := newFakeRepo()
 	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}

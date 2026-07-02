@@ -12,7 +12,9 @@
 const { app, BrowserWindow } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const net = require('net');
 
 // A single running instance owns the orchestrator; a second launch just focuses
@@ -33,9 +35,84 @@ function resourcePath(...parts) {
   return path.join(base, ...parts);
 }
 
-const zvExe = resourcePath('bin', process.platform === 'win32' ? 'zv.exe' : 'zv');
+// Spawn zv-orchestrator directly instead of `zv serve`: zv only delegates to
+// the orchestrator binary next to it, and killing the zv intermediary on app
+// quit would leave the real server running as an orphan (holding its port and
+// the SQLite job db) since child.kill() does not reach grandchildren.
+const orchestratorExe = resourcePath(
+  'bin',
+  process.platform === 'win32' ? 'zv-orchestrator.exe' : 'zv-orchestrator',
+);
 const nextServer = resourcePath('web', 'server.js');
 const dataDir = path.join(app.getPath('userData'), 'data');
+const musicDir = path.join(dataDir, 'music');
+
+/** GET that follows redirects (archive.org download links bounce to mirrors). */
+function fetchStream(url, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    const get = url.startsWith('https:') ? https.get : http.get;
+    const req = get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft > 0) {
+        res.resume();
+        return resolve(fetchStream(new URL(res.headers.location, url).toString(), redirectsLeft - 1));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`GET ${url}: HTTP ${res.statusCode}`));
+      }
+      resolve(res);
+    });
+    req.on('error', reject);
+    req.setTimeout(60000, () => req.destroy(new Error(`GET ${url}: timed out`)));
+  });
+}
+
+/**
+ * Provisions the music catalog into the user's data dir (the Node port of
+ * scripts/fetch-music.sh): copies the bundled catalog.json and downloads each
+ * CC0/CC-BY track to <musicDir>/<id>.<ext> if missing. Idempotent and
+ * best-effort - an offline first boot just means the song picker shows fewer
+ * tracks until the next launch. Runs concurrently with the backend boot; the
+ * orchestrator rescans the dir on every /api/songs request, so tracks appear
+ * as they land.
+ */
+async function provisionMusic() {
+  const bundledCatalog = resourcePath('music', 'catalog.json');
+  if (!fs.existsSync(bundledCatalog)) return;
+  fs.mkdirSync(musicDir, { recursive: true });
+  fs.copyFileSync(bundledCatalog, path.join(musicDir, 'catalog.json'));
+
+  let tracks;
+  try {
+    tracks = JSON.parse(fs.readFileSync(bundledCatalog, 'utf8')).tracks ?? [];
+  } catch (err) {
+    process.stdout.write(`[music] bad catalog.json: ${err}\n`);
+    return;
+  }
+  for (const t of tracks) {
+    if (!t.id || !t.ext || !t.downloadUrl) continue;
+    const dest = path.join(musicDir, `${t.id}.${t.ext}`);
+    if (fs.existsSync(dest)) continue;
+    // Download to a temp name and rename so a half-written file never shows up
+    // as a playable track.
+    const tmp = `${dest}.part`;
+    try {
+      const res = await fetchStream(t.downloadUrl);
+      await new Promise((resolve, reject) => {
+        const out = fs.createWriteStream(tmp);
+        res.pipe(out);
+        res.on('error', reject);
+        out.on('error', reject);
+        out.on('finish', resolve);
+      });
+      fs.renameSync(tmp, dest);
+      process.stdout.write(`[music] downloaded ${t.id}.${t.ext}\n`);
+    } catch (err) {
+      fs.rmSync(tmp, { force: true });
+      process.stdout.write(`[music] skip ${t.id}: ${err}\n`);
+    }
+  }
+}
 
 /** Grabs an OS-assigned free loopback port, then releases it for the child. */
 function freePort() {
@@ -48,6 +125,43 @@ function freePort() {
       srv.close(() => resolve(port));
     });
   });
+}
+
+/** Reports whether a specific loopback port is currently free. */
+function portFree(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', () => resolve(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true)));
+  });
+}
+
+const portsFile = path.join(app.getPath('userData'), 'ports.json');
+
+/**
+ * Returns a per-install stable loopback port for the given service, falling
+ * back to a fresh OS-assigned one when the saved port is taken. The web port
+ * MUST stay stable across launches: the reel library lives in the renderer's
+ * localStorage, which is keyed by origin (host:port), so a random port per
+ * launch would empty the library on every restart even though the job state
+ * survives in SQLite.
+ */
+async function stablePort(key) {
+  let saved = {};
+  try {
+    saved = JSON.parse(fs.readFileSync(portsFile, 'utf8'));
+  } catch {
+    // first launch or unreadable file; fall through to picking a new port
+  }
+  if (Number.isInteger(saved[key]) && (await portFree(saved[key]))) return saved[key];
+  const port = await freePort();
+  try {
+    fs.writeFileSync(portsFile, JSON.stringify({ ...saved, [key]: port }));
+  } catch (err) {
+    process.stdout.write(`[ports] could not persist ${key} port: ${err}\n`);
+  }
+  return port;
 }
 
 /** Polls an HTTP URL until it answers 2xx/3xx or the timeout elapses. */
@@ -102,16 +216,23 @@ function createWindow(loadingOnly) {
 async function boot() {
   createWindow(true);
 
-  const orchPort = await freePort();
-  const webPort = await freePort();
+  const orchPort = await stablePort('orchestrator');
+  const webPort = await stablePort('web');
   const orchestratorUrl = `http://127.0.0.1:${orchPort}`;
 
-  // The orchestrator: memory mode (in-memory jobs + inline queue), capture
-  // auto-detected (HLAE/CS2/recorder). Loopback bind needs no mutation token.
-  launch('orchestrator', zvExe, ['serve'], {
-    ZV_DATABASE_URL: 'memory',
+  // Fire-and-forget: tracks land while the app boots (and even mid-session);
+  // /api/songs rescans the dir per request.
+  provisionMusic().catch((err) => process.stdout.write(`[music] provision failed: ${err}\n`));
+
+  // The orchestrator: SQLite job repo on disk (so reels survive an app restart)
+  // + inline queue, capture and render tools auto-detected (HLAE/CS2/recorder/
+  // editor/ffmpeg). "sqlite" with no path stores <dataDir>/jobs.db. Loopback
+  // bind needs no mutation token.
+  launch('orchestrator', orchestratorExe, [], {
+    ZV_DATABASE_URL: 'sqlite',
     ZV_DATA_DIR: dataDir,
     ZV_HTTP_ADDR: `127.0.0.1:${orchPort}`,
+    ZV_MUSIC_DIR: musicDir,
   });
 
   // The Next.js standalone server, run by Electron's own Node (no separate Node

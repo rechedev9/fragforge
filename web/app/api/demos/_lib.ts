@@ -80,19 +80,29 @@ export async function forwardError(res: Response): Promise<Response> {
 }
 
 /**
- * Streams a binary artifact (reel mp4 / cover jpg) from the orchestrator,
- * preserving content-type and length when present. Non-2xx is forwarded as a
- * JSON error so the client can surface it. Never logs bytes.
+ * Streams a binary artifact (reel mp4 / cover jpg / song audio) from the
+ * orchestrator, preserving content-type and length when present. Forwards the
+ * client's Range header and mirrors the upstream status (200/206) plus range
+ * headers, because the browser <video>/<audio> element needs range support to
+ * start playback and seek. Non-2xx is forwarded as a JSON error so the client
+ * can surface it. Never logs bytes.
  */
-export async function proxyStream(url: string, fallbackContentType: string): Promise<Response> {
-  const res = await callOrchestrator(url);
+export async function proxyStream(
+  url: string,
+  fallbackContentType: string,
+  request?: Request,
+): Promise<Response> {
+  const range = request?.headers.get('range');
+  const res = await callOrchestrator(url, range ? { headers: { range } } : undefined);
   if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
   const headers: Record<string, string> = {
     'content-type': res.headers.get('content-type') ?? fallbackContentType,
     'cache-control': 'no-store',
   };
-  const len = res.headers.get('content-length');
-  if (len) headers['content-length'] = len;
-  return new Response(res.body, { status: 200, headers });
+  for (const name of ['content-length', 'content-range', 'accept-ranges'] as const) {
+    const value = res.headers.get(name);
+    if (value) headers[name] = value;
+  }
+  return new Response(res.body, { status: res.status, headers });
 }

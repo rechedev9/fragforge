@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rechedev9/fragforge/internal/httpapi"
@@ -38,9 +40,29 @@ type config struct {
 
 const (
 	databaseURLMemory = "memory"
+	// databaseURLSQLite selects the on-disk SQLite job repository. Accepts the
+	// bare value "sqlite" (stores <DataDir>/jobs.db) or "sqlite:<path>".
+	databaseURLSQLite = "sqlite"
 	queueModeRedis    = "redis"
 	queueModeInline   = "inline"
 )
+
+// isLocalDatabase reports whether the database URL selects a single-machine
+// backend (in-memory or SQLite) rather than Postgres. Local backends run the
+// queue inline, since there is no Redis alongside them.
+func isLocalDatabase(url string) bool {
+	return url == databaseURLMemory || url == databaseURLSQLite || strings.HasPrefix(url, databaseURLSQLite+":")
+}
+
+// sqlitePath resolves the SQLite file path from the database URL, defaulting to
+// <dataDir>/jobs.db when only "sqlite" (no explicit path) is given.
+func sqlitePath(url, dataDir string) string {
+	path := strings.TrimPrefix(url, databaseURLSQLite+":")
+	if path == "" || url == databaseURLSQLite {
+		return filepath.Join(dataDir, "jobs.db")
+	}
+	return path
+}
 
 func loadConfig() (config, error) {
 	c := config{
@@ -66,7 +88,7 @@ func loadConfig() (config, error) {
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
 	}
-	if c.DatabaseURL == databaseURLMemory && c.QueueMode == queueModeRedis {
+	if isLocalDatabase(c.DatabaseURL) && c.QueueMode == queueModeRedis {
 		c.QueueMode = queueModeInline
 	}
 	if c.QueueMode != queueModeRedis && c.QueueMode != queueModeInline {
@@ -133,29 +155,21 @@ func (c config) agentWorkerEnabled() bool {
 // fixed here at startup; the tool paths are reported so the web UI can tell the
 // user which ones to set, and accessibility is re-checked per request.
 func (c config) captureCapabilities(src captureToolSource) httpapi.Capabilities {
-	recordTool := func(name, path string) httpapi.CaptureTool {
+	tool := func(name, path string) httpapi.CaptureTool {
 		return httpapi.CaptureTool{Name: name, Path: path, Source: src[name]}
-	}
-	// Render tools are not auto-detected, so their source is just env-or-none.
-	renderTool := func(name, path string) httpapi.CaptureTool {
-		source := "none"
-		if path != "" {
-			source = "env"
-		}
-		return httpapi.CaptureTool{Name: name, Path: path, Source: source}
 	}
 	return httpapi.Capabilities{
 		RecordEnabled:  c.recordWorkerEnabled(),
 		ComposeEnabled: c.composeWorkerEnabled(),
 		RenderEnabled:  c.renderWorkerEnabled(),
 		RecordTools: []httpapi.CaptureTool{
-			recordTool("ZV_RECORDER_PATH", c.RecorderPath),
-			recordTool("ZV_HLAE_PATH", c.HLAEPath),
-			recordTool("ZV_CS2_PATH", c.CS2Path),
+			tool("ZV_RECORDER_PATH", c.RecorderPath),
+			tool("ZV_HLAE_PATH", c.HLAEPath),
+			tool("ZV_CS2_PATH", c.CS2Path),
 		},
 		RenderTools: []httpapi.CaptureTool{
-			renderTool("ZV_EDITOR_PATH", c.EditorPath),
-			renderTool("ZV_FFMPEG_PATH", c.FFmpegPath),
+			tool("ZV_EDITOR_PATH", c.EditorPath),
+			tool("ZV_FFMPEG_PATH", c.FFmpegPath),
 		},
 	}
 }

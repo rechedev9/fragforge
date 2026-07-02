@@ -6,19 +6,21 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
-// captureToolSource records how each record-tool path was resolved, so
+// captureToolSource records how each capture/render tool path was resolved, so
 // /api/capabilities can tell the user "auto-detected" vs "you set it" vs missing.
 // Keys are env var names; values are "env" | "detected" | "none".
 type captureToolSource map[string]string
 
-// detectCaptureTools fills any empty record-tool path in cfg by probing the host
-// for a standard install, so capture works on the user's PC without setting env
-// vars. Explicit env always wins (reported "env"); a probe hit is "detected"; a
-// blank nothing matched is "none" and the UI tells the user what to install. It
-// is best-effort and never fails startup; on a container/Linux host the probes
-// simply find nothing.
+// detectCaptureTools fills any empty capture/render tool path in cfg by probing
+// the host for a standard install, so capture and rendering work on the user's
+// PC without setting env vars. Explicit env always wins (reported "env"); a
+// probe hit is "detected"; a blank nothing matched is "none" and the UI tells
+// the user what to install. It is best-effort and never fails startup; on a
+// container/Linux host the probes simply find nothing.
 func detectCaptureTools(cfg config) (config, captureToolSource) {
 	src := captureToolSource{}
 	resolve := func(name, current string, probe func() string) string {
@@ -33,20 +35,23 @@ func detectCaptureTools(cfg config) (config, captureToolSource) {
 		src[name] = "none"
 		return ""
 	}
-	cfg.RecorderPath = resolve("ZV_RECORDER_PATH", cfg.RecorderPath, detectRecorder)
+	cfg.RecorderPath = resolve("ZV_RECORDER_PATH", cfg.RecorderPath, func() string { return detectSibling("zv-recorder") })
 	cfg.HLAEPath = resolve("ZV_HLAE_PATH", cfg.HLAEPath, detectHLAE)
 	cfg.CS2Path = resolve("ZV_CS2_PATH", cfg.CS2Path, detectCS2)
+	cfg.EditorPath = resolve("ZV_EDITOR_PATH", cfg.EditorPath, func() string { return detectSibling("zv-editor") })
+	cfg.FFmpegPath = resolve("ZV_FFMPEG_PATH", cfg.FFmpegPath, recording.FindFFmpeg)
+	cfg.FFprobePath = resolve("ZV_FFPROBE_PATH", cfg.FFprobePath, recording.FindFFprobe)
 	return cfg, src
 }
 
-// detectRecorder looks for the zv-recorder binary next to this orchestrator
-// binary; the build script emits them into the same bin/ directory.
-func detectRecorder() string {
+// detectSibling looks for a pipeline binary (zv-recorder, zv-editor) next to
+// this orchestrator binary; the build script emits them into the same bin/
+// directory, and the desktop installer stages them together.
+func detectSibling(name string) string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	name := "zv-recorder"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}

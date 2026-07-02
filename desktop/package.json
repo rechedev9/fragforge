@@ -26,7 +26,8 @@
     ],
     "extraResources": [
       { "from": "build-resources/bin", "to": "bin" },
-      { "from": "build-resources/web", "to": "web" }
+      { "from": "build-resources/web", "to": "web" },
+      { "from": "build-resources/music", "to": "music" }
     ],
     "win": {
       "target": [

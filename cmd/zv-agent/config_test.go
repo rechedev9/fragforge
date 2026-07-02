@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -16,7 +17,9 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows has no POSIX permission bits: WriteFile(0600) stats as 0666
+	// there, so the owner-only check is only meaningful on POSIX hosts.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("got perms %v, want 0600", info.Mode().Perm())
 	}
 	got, err := loadConfig()

@@ -1176,8 +1176,21 @@ func (h *Handlers) streamRenderVariantArtifact(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusNotFound, "render artifact not found")
 		return
 	}
+	serveArtifact(w, r, contentType, rc)
+}
+
+// serveArtifact writes an artifact body with the given content type. When the
+// storage reader is seekable (the local filesystem backend hands out *os.File)
+// it serves through http.ServeContent so Range requests are honoured — the
+// browser <video> element needs ranges and a Content-Length to start playback
+// and seek. Non-seekable backends fall back to a plain streamed copy.
+func serveArtifact(w http.ResponseWriter, r *http.Request, contentType string, rc io.ReadCloser) {
 	defer rc.Close()
 	w.Header().Set("Content-Type", contentType)
+	if rs, ok := rc.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, rs)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, rc)
 }

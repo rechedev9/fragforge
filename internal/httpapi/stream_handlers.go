@@ -160,7 +160,7 @@ func (h *Handlers) GetStreamSource(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.streamStorageKey(w, "video/mp4", j.SourcePath)
+	h.streamStorageKey(w, r, "video/mp4", j.SourcePath)
 }
 
 func (h *Handlers) GetStreamEditPlan(w http.ResponseWriter, r *http.Request) {
@@ -358,19 +358,16 @@ func (h *Handlers) streamStreamRenderArtifact(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	h.streamStorageKey(w, contentType, key)
+	h.streamStorageKey(w, r, contentType, key)
 }
 
-func (h *Handlers) streamStorageKey(w http.ResponseWriter, contentType, key string) {
+func (h *Handlers) streamStorageKey(w http.ResponseWriter, r *http.Request, contentType, key string) {
 	rc, err := h.storage.Open(key)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "stream artifact not found")
 		return
 	}
-	defer rc.Close()
-	w.Header().Set("Content-Type", contentType)
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, rc)
+	serveArtifact(w, r, contentType, rc)
 }
 
 func (h *Handlers) writeStreamEditPlanArtifact(id uuid.UUID, plan streamclips.EditPlan) error {

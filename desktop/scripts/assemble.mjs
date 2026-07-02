@@ -1,6 +1,7 @@
 // Assembles the resources electron-builder bundles into the installer:
-//   build-resources/bin/  -> zv.exe (+ zv-recorder.exe)
-//   build-resources/web/  -> the Next.js standalone server, ready to run
+//   build-resources/bin/   -> zv.exe, zv-orchestrator.exe, zv-editor.exe (+ zv-recorder.exe)
+//   build-resources/web/   -> the Next.js standalone server, ready to run
+//   build-resources/music/ -> catalog.json (track metadata; audio is downloaded on first boot)
 //
 // The Next standalone output does NOT include .next/static or public, so we copy
 // them next to server.js the same way the web Dockerfile does. Cross-platform
@@ -18,10 +19,20 @@ const web = join(repo, 'web');
 const bin = join(repo, 'bin');
 const out = join(desktop, 'build-resources');
 
+// zv-orchestrator.exe is the backend main.js spawns (directly, not via `zv
+// serve`, so quitting the app kills the real server). zv-editor.exe must sit
+// in the same bin/ so the orchestrator auto-detects it and enables the render
+// worker; without it every created reel fails after capture with an
+// unconfigured render:variant queue. zv.exe is staged for CLI use next to the
+// app's data.
 const zvExe = join(bin, 'zv.exe');
-if (!existsSync(zvExe)) {
-  console.error(`\nmissing ${zvExe}\nBuild the Go binaries first:  .\\scripts\\build.ps1\n`);
-  process.exit(1);
+const zvOrchestrator = join(bin, 'zv-orchestrator.exe');
+const zvEditor = join(bin, 'zv-editor.exe');
+for (const required of [zvExe, zvOrchestrator, zvEditor]) {
+  if (!existsSync(required)) {
+    console.error(`\nmissing ${required}\nBuild the Go binaries first:  .\\scripts\\build.ps1\n`);
+    process.exit(1);
+  }
 }
 
 // 1. Build the web in local mode. NEXT_PUBLIC_FRAGFORGE_MODE is inlined into the
@@ -50,7 +61,14 @@ const publicDir = join(web, 'public');
 if (existsSync(publicDir)) cpSync(publicDir, join(out, 'web', 'public'), { recursive: true });
 
 cpSync(zvExe, join(out, 'bin', 'zv.exe'));
+cpSync(zvOrchestrator, join(out, 'bin', 'zv-orchestrator.exe'));
+cpSync(zvEditor, join(out, 'bin', 'zv-editor.exe'));
 const recorder = join(bin, 'zv-recorder.exe');
 if (existsSync(recorder)) cpSync(recorder, join(out, 'bin', 'zv-recorder.exe'));
+
+// Music metadata only: main.js downloads the CC0/CC-BY tracks listed in the
+// catalog into the user's data dir on first boot, keeping the installer small.
+mkdirSync(join(out, 'music'), { recursive: true });
+cpSync(join(repo, 'data', 'music', 'catalog.json'), join(out, 'music', 'catalog.json'));
 
 console.log('[assemble] done -> ' + out);

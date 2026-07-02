@@ -8,7 +8,7 @@ const NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 /** GET /api/demos/{jobId}/renders/{variant}/videos/{name} — stream a reel mp4. */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ jobId: string; variant: string; name: string }> },
 ): Promise<Response> {
   const { jobId, variant, name } = await params;
@@ -17,5 +17,5 @@ export async function GET(
   }
   const url = jobUrl(jobId, `/renders/${variant}/videos/${name}`);
   if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
-  return proxyStream(url, 'video/mp4');
+  return proxyStream(url, 'video/mp4', request);
 }

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,15 +25,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	// Auto-detect HLAE/CS2/recorder on the host so capture works without the user
-	// setting env vars; explicit env still wins. Best-effort, never fatal.
+	// Auto-detect HLAE/CS2/recorder/editor/ffmpeg on the host so capture and
+	// rendering work without the user setting env vars; explicit env still wins.
+	// Best-effort, never fatal.
 	cfg, captureSource := detectCaptureTools(cfg)
-	for _, name := range []string{"ZV_RECORDER_PATH", "ZV_HLAE_PATH", "ZV_CS2_PATH"} {
+	for _, name := range []string{"ZV_RECORDER_PATH", "ZV_HLAE_PATH", "ZV_CS2_PATH", "ZV_EDITOR_PATH", "ZV_FFMPEG_PATH", "ZV_FFPROBE_PATH"} {
 		if captureSource[name] == "detected" {
 			log.Printf("capture: auto-detected %s", name)
 		}
 	}
 	log.Printf("capture: record worker enabled=%v", cfg.recordWorkerEnabled())
+	log.Printf("capture: render worker enabled=%v", cfg.renderWorkerEnabled())
 	if missing := cfg.missingRecordTools(); len(missing) > 0 {
 		log.Printf("capture: configured record tool path(s) not found on disk: %v", missing)
 	}
@@ -47,10 +50,20 @@ func main() {
 
 	var repo orchestratorJobRepository
 	var streamRepo httpapi.StreamJobRepository
-	if cfg.DatabaseURL == databaseURLMemory {
+	switch {
+	case cfg.DatabaseURL == databaseURLMemory:
 		repo = newMemoryJobRepository()
-		log.Printf("postgres: using in-memory job repository")
-	} else {
+		log.Printf("jobs: using in-memory repository (state resets on restart)")
+	case cfg.DatabaseURL == databaseURLSQLite || strings.HasPrefix(cfg.DatabaseURL, databaseURLSQLite+":"):
+		path := sqlitePath(cfg.DatabaseURL, cfg.DataDir)
+		sqliteRepo, err := newSQLiteJobRepository(path)
+		if err != nil {
+			log.Fatalf("sqlite: %v", err)
+		}
+		defer func() { _ = sqliteRepo.Close() }()
+		repo = sqliteRepo
+		log.Printf("jobs: using sqlite repository at %s", path)
+	default:
 		poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 		if err != nil {
 			log.Fatalf("postgres config: %v", err)
