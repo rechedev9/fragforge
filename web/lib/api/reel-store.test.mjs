@@ -10,7 +10,7 @@ const valid = {
   segmentId: 'seg-001',
   mode: 'music',
   variant: 'clean-pov-60',
-  editConfig: { format: 'landscape-16x9', killEffect: 'velocity', transition: 'whip', intro: true, outro: false },
+  editConfig: { format: 'landscape-16x9', killEffect: 'velocity', transition: 'whip', intro: true, outro: false, introText: 'GG WP', outroText: '' },
   songId: 's1',
   title: 'Ace',
   map: 'de_dust2',
@@ -40,12 +40,32 @@ test('defaults soft fields, normalizes mode, migrates missing variant', () => {
 });
 
 test('coerces edit config independently', () => {
-  assert.deepEqual(coerceEditConfig({ format: 'landscape-16x9', killEffect: 'freeze-flash', transition: 'dip', intro: true, outro: true }), {
-    format: 'landscape-16x9',
-    killEffect: 'freeze-flash',
-    transition: 'dip',
-    intro: true,
-    outro: true,
-  });
+  assert.deepEqual(
+    coerceEditConfig({
+      format: 'landscape-16x9',
+      killEffect: 'freeze-flash',
+      transition: 'dip',
+      intro: true,
+      outro: true,
+      introText: 'GG WP',
+      outroText: '@handle',
+    }),
+    {
+      format: 'landscape-16x9',
+      killEffect: 'freeze-flash',
+      transition: 'dip',
+      intro: true,
+      outro: true,
+      introText: 'GG WP',
+      outroText: '@handle',
+    },
+  );
   assert.deepEqual(coerceEditConfig({ format: 'square', killEffect: 'bad', transition: 'spin', intro: 'yes' }), DEFAULT_EDIT_CONFIG);
+});
+
+test('truncates bookend text to the 80-char limit and drops non-string values', () => {
+  const longText = 'x'.repeat(120);
+  const coerced = coerceEditConfig({ format: 'short-9x16', killEffect: 'clean', transition: 'cut', intro: true, outro: true, introText: longText, outroText: 42 });
+  assert.equal(coerced.introText.length, 80);
+  assert.equal(coerced.outroText, '');
 });

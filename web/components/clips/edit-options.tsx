@@ -1,9 +1,13 @@
 'use client';
 
 import { Monitor, PanelTop, Smartphone, Sparkles, Zap } from 'lucide-react';
-import type { EditConfig } from '@/lib/api/types';
+import { BOOKEND_TEXT_MAX_LENGTH, type EditConfig } from '@/lib/api/types';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+
+/** Show the live character counter only once the input is getting close to the limit. */
+const COUNTER_THRESHOLD = BOOKEND_TEXT_MAX_LENGTH - 20;
 
 export type EditOptionsProps = {
   value: EditConfig;
@@ -111,7 +115,79 @@ export function EditOptions({ value, onChange, disabled = false }: EditOptionsPr
             Outro
           </ToggleGroupItem>
         </ToggleGroup>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <BookendTextField
+            label="Intro title"
+            value={value.introText ?? ''}
+            visible={value.intro}
+            placeholder="Intro title — leave empty to use the generated headline"
+            disabled={disabled}
+            onChange={(introText) => onChange({ ...value, introText })}
+          />
+          <BookendTextField
+            label="Outro text"
+            value={value.outroText ?? ''}
+            visible={value.outro}
+            placeholder="Outro text — e.g. your handle; empty = FragForge"
+            disabled={disabled}
+            onChange={(outroText) => onChange({ ...value, outroText })}
+          />
+        </div>
       </OptionBlock>
+    </div>
+  );
+}
+
+function BookendTextField({
+  label,
+  value,
+  visible,
+  placeholder,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  visible: boolean;
+  placeholder: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const near = value.length >= COUNTER_THRESHOLD;
+  return (
+    <div
+      className={cn(
+        'overflow-hidden transition-[max-height,opacity] duration-200 ease-out',
+        visible ? 'max-h-24 opacity-100 visible' : 'max-h-0 opacity-0 invisible',
+      )}
+    >
+      <div className="flex flex-col gap-1.5 pt-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-wide text-muted-foreground">
+            {label}
+          </span>
+          {near ? (
+            <span
+              className={cn(
+                'font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-muted-foreground',
+                value.length >= BOOKEND_TEXT_MAX_LENGTH && 'text-destructive',
+              )}
+            >
+              {value.length}/{BOOKEND_TEXT_MAX_LENGTH}
+            </span>
+          ) : null}
+        </div>
+        <Input
+          value={value}
+          placeholder={placeholder}
+          maxLength={BOOKEND_TEXT_MAX_LENGTH}
+          disabled={disabled || !visible}
+          tabIndex={visible ? 0 : -1}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={label}
+        />
+      </div>
     </div>
   );
 }

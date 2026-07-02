@@ -1,5 +1,11 @@
 import type { EditConfig, RenderMode } from './types';
 
+// Mirrors types.BOOKEND_TEXT_MAX_LENGTH. Duplicated (not imported) so this module
+// stays a type-only consumer of ./types, which keeps it runnable directly under
+// Node's native TS loader (reel-store.test.mjs) without an explicit .ts import
+// extension, which `tsc` (moduleResolution: bundler) rejects.
+const BOOKEND_TEXT_MAX_LENGTH = 80;
+
 /**
  * A reel the user asked for — the durable fact, persisted to localStorage so the
  * Library survives a hard reload / direct visit. Status, downloadUrl, and failure
@@ -40,6 +46,8 @@ export const DEFAULT_EDIT_CONFIG: EditConfig = {
   transition: 'flash',
   intro: false,
   outro: false,
+  introText: '',
+  outroText: '',
 };
 
 export function loadReelIntents(): ReelIntent[] {
@@ -105,7 +113,13 @@ export function coerceEditConfig(value: unknown): EditConfig {
     transition: isTransition(raw.transition) ? raw.transition : DEFAULT_EDIT_CONFIG.transition,
     intro: raw.intro === true,
     outro: raw.outro === true,
+    introText: coerceBookendText(raw.introText),
+    outroText: coerceBookendText(raw.outroText),
   };
+}
+
+function coerceBookendText(value: unknown): string {
+  return typeof value === 'string' ? value.slice(0, BOOKEND_TEXT_MAX_LENGTH) : '';
 }
 
 function isKillEffect(value: unknown): value is EditConfig['killEffect'] {

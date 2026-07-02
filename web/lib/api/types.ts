@@ -18,12 +18,18 @@ export type RenderMode = 'clean' | 'music';
 export type RenderFormat = 'short-9x16' | 'landscape-16x9';
 export type KillEffect = 'clean' | 'punch-in' | 'velocity' | 'freeze-flash';
 export type TransitionStyle = 'cut' | 'flash' | 'whip' | 'dip';
+/** Max length (trimmed) for the intro/outro bookend text, enforced client-side via `maxLength`. */
+export const BOOKEND_TEXT_MAX_LENGTH = 80;
 export type EditConfig = {
   format: RenderFormat;
   killEffect: KillEffect;
   transition: TransitionStyle;
   intro: boolean;
   outro: boolean;
+  /** Optional intro headline override, shown only while `intro` is on; empty = generated headline. */
+  introText?: string;
+  /** Optional outro text override, shown only while `outro` is on; empty = "FragForge". */
+  outroText?: string;
 };
 export type Song = { id: string; title: string; artist: string; genre: string; previewUrl: string; durationSec: number; license?: string };
 /**

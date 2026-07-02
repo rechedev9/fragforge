@@ -92,6 +92,38 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * The render-variant POST body shape for `edit`: the bool switches plus the
+ * bookend text keys the orchestrator expects (snake_case, unlike the rest of
+ * this camelCase struct - see internal/renderplan.EditRequest). Only sent when
+ * its toggle is on and the trimmed text is non-empty; otherwise the backend
+ * default applies (the generated headline for intro, "FragForge" for outro).
+ */
+type EditRequestBody = {
+  format: EditConfig['format'];
+  killEffect: EditConfig['killEffect'];
+  transition: EditConfig['transition'];
+  intro: boolean;
+  outro: boolean;
+  intro_text?: string;
+  outro_text?: string;
+};
+
+function buildEditRequest(edit: EditConfig): EditRequestBody {
+  const body: EditRequestBody = {
+    format: edit.format,
+    killEffect: edit.killEffect,
+    transition: edit.transition,
+    intro: edit.intro,
+    outro: edit.outro,
+  };
+  const introText = edit.introText?.trim();
+  if (edit.intro && introText) body.intro_text = introText;
+  const outroText = edit.outroText?.trim();
+  if (edit.outro && outroText) body.outro_text = outroText;
+  return body;
+}
+
 /** A queued placeholder Video for an intent; its live status is filled by reconcile. */
 function videoFromIntent(intent: ReelIntent): Video {
   return {
@@ -434,7 +466,7 @@ export class RealApiClient implements ApiClient {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 music: intent.mode === 'music' ? intent.songId : undefined,
-                edit: intent.editConfig,
+                edit: buildEditRequest(intent.editConfig),
               }),
             });
       if (!res.ok) {
