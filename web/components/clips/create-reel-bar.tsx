@@ -5,8 +5,12 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export type CreateReelBarProps = {
-  /** Label of the selected play, or null when nothing is picked. */
-  playLabel: string | null;
+  /**
+   * Selection summary, or null when nothing is picked. One highlight reuses
+   * its own label ("1K · Round 1"); 2+ summarize as a count plus rounds
+   * ("3 highlights · Rounds 1, 6, 9") — see lib/format#playsSelectionLabel.
+   */
+  selectionLabel: string | null;
   /** Label of the chosen preset, or null when none chosen. */
   presetLabel: string | null;
   /** Title of the chosen soundtrack, or null when the reel has no music. */
@@ -18,11 +22,12 @@ export type CreateReelBarProps = {
 
 /**
  * CreateReelBar — the sticky bottom action bar. Mirrors the current selection
- * (play + preset + optional music) on the left and fires the single lime
- * "Create reel" CTA. Enabled once a play and a preset are chosen.
+ * (highlight(s) + preset + optional music) on the left and fires the single
+ * lime "Create reel" CTA. Enabled once at least one highlight and a preset
+ * are chosen; 2+ selected highlights render as one concatenated reel.
  */
-export function CreateReelBar({ playLabel, presetLabel, songTitle, creating, onCreate }: CreateReelBarProps) {
-  const ready = playLabel != null && presetLabel != null;
+export function CreateReelBar({ selectionLabel, presetLabel, songTitle, creating, onCreate }: CreateReelBarProps) {
+  const ready = selectionLabel != null && presetLabel != null;
 
   return (
     <div className="sticky bottom-0 z-20 -mx-4 mt-2 border-t border-border bg-background/85 px-4 py-3 backdrop-blur md:-mx-8 md:px-8">
@@ -31,7 +36,7 @@ export function CreateReelBar({ playLabel, presetLabel, songTitle, creating, onC
           {ready ? (
             <p className="truncate text-foreground">
               <span className="text-muted-foreground">Selected </span>
-              <span className="font-medium">{playLabel}</span>
+              <span className="font-medium">{selectionLabel}</span>
               <span className="text-muted-foreground"> · </span>
               <span className="font-[family-name:var(--font-mono)] uppercase tracking-wide text-primary">
                 {presetLabel}
@@ -45,7 +50,7 @@ export function CreateReelBar({ playLabel, presetLabel, songTitle, creating, onC
             </p>
           ) : (
             <p className="truncate text-muted-foreground">
-              {playLabel == null ? 'Pick a highlight to start.' : 'Choose a preset below.'}
+              {selectionLabel == null ? 'Pick at least one highlight to start.' : 'Choose a preset below.'}
             </p>
           )}
         </div>

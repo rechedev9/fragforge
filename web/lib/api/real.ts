@@ -6,6 +6,12 @@ import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
 import { isLocalMode } from '@/lib/mode';
+import { playsSelectionLabel } from '@/lib/format';
+
+/** Segment ids joined into the one path segment the record/render/video routes key on. */
+function reelName(segmentIds: string[]): string {
+  return segmentIds.join('_');
+}
 
 /** Server roster row as returned by /api/demos/{jobId}/roster (steamid64). */
 type RosterPlayer = {
@@ -305,32 +311,34 @@ export class RealApiClient implements ApiClient {
   }
 
   /**
-   * For an uploaded job (matchId = job UUID, playId = segment id), registers a
-   * durable reel intent and returns immediately with a queued Video. The reconcile
+   * For an uploaded job (matchId = job UUID, playIds = the segment ids picked,
+   * in plan order), registers a durable reel intent and returns immediately
+   * with a queued Video. 2+ ids render as one concatenated reel. The reconcile
    * loop (driven by listVideos polling) advances it record→render; this is safe
    * across reloads because every step is derived from the orchestrator's state.
    * Mock matches delegate to the fallback.
    */
-  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video> {
+  async createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video> {
     if (!isJobId(input.matchId)) return this.fallback.createVideo(input);
 
-    const videoId = `${input.matchId}__${input.playId}`;
+    const videoId = `${input.matchId}__${reelName(input.playIds)}`;
     const existing = this.reels.get(videoId);
     if (existing && existing.status !== 'failed') return { ...existing };
 
     const [plays, match] = await Promise.all([this.findClips(input.matchId), this.getMatch(input.matchId)]);
-    const play = plays.find((p) => p.id === input.playId);
+    // Preserve the caller's (plan) order rather than the plays array's order.
+    const pickedPlays = input.playIds.map((pid) => plays.find((p) => p.id === pid)).filter((p): p is Play => Boolean(p));
     const variant = input.variant ?? REEL_VARIANT;
     const suffix = input.songId ? `${variantLabel(variant)} + Music` : variantLabel(variant);
     const intent: ReelIntent = {
       videoId,
       jobId: input.matchId,
-      segmentId: input.playId,
+      segmentIds: pickedPlays.map((p) => p.id),
       mode: input.mode,
       variant,
       editConfig: input.editConfig ?? DEFAULT_EDIT_CONFIG,
       songId: input.songId,
-      title: `${play?.label ?? 'Highlight'} - ${suffix}`,
+      title: `${playsSelectionLabel(pickedPlays) ?? 'Highlight'} - ${suffix}`,
       map: match?.map ?? 'Unknown',
       score: match?.score ?? '',
       createdAt: Date.now(),
@@ -439,8 +447,9 @@ export class RealApiClient implements ApiClient {
     const next: Video = { ...base, status: view.status, failureReason: view.failureReason };
     if (view.status === 'ready') {
       const variant = variantOf(intent);
-      next.downloadUrl = `/api/demos/${intent.jobId}/renders/${variant}/videos/${intent.segmentId}`;
-      next.thumbnailUrl = `/api/demos/${intent.jobId}/renders/${variant}/covers/${intent.segmentId}`;
+      const name = reelName(intent.segmentIds);
+      next.downloadUrl = `/api/demos/${intent.jobId}/renders/${variant}/videos/${name}`;
+      next.thumbnailUrl = `/api/demos/${intent.jobId}/renders/${variant}/covers/${name}`;
     }
     this.reels.set(intent.videoId, next);
   }
@@ -454,12 +463,13 @@ export class RealApiClient implements ApiClient {
       const res =
         action === 'record'
           ? // The preset (Clean POV / Full HUD / Kill Feed) sets the recording HUD;
-            // segment_ids scopes the capture to the one selected clip so the
-            // recorder seeks to that kill instead of recording the whole demo.
+            // segment_ids scopes the capture to exactly the selected clips (in plan
+            // order) instead of recording the whole demo. 2+ ids render as one
+            // concatenated reel.
             await fetch(`/api/demos/${intent.jobId}/record`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ preset: variant, segment_ids: [intent.segmentId] }),
+              body: JSON.stringify({ preset: variant, segment_ids: intent.segmentIds }),
             })
           : await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, {
               method: 'POST',

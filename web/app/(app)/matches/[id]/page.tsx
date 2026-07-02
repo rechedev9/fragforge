@@ -6,16 +6,15 @@ import { ArrowLeft, Music } from 'lucide-react';
 import type { EditConfig, Match, Play, Preset } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { DEFAULT_EDIT_CONFIG } from '@/lib/api/reel-store';
-import { formatKd, ratingClass } from '@/lib/format';
+import { formatKd, playsSelectionLabel, ratingClass } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Filmstrip } from '@/components/brand/filmstrip';
 import { ScoreBar } from '@/components/brand/score-bar';
 import { StatMono } from '@/components/brand/stat-mono';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
-import { PlayTile } from '@/components/clips/play-tile';
+import { PlayList } from '@/components/clips/play-list';
 import { PresetCards } from '@/components/clips/preset-cards';
 import { CreateReelBar } from '@/components/clips/create-reel-bar';
 import { EditOptions } from '@/components/clips/edit-options';
@@ -42,7 +41,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   const [loaded, setLoaded] = useState(false);
 
   const [presets, setPresets] = useState<Preset[] | null>(null);
-  const [selectedPlayId, setSelectedPlayId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [variant, setVariant] = useState<string | null>(null);
   const [songId, setSongId] = useState<string | null>(null);
   const [songTitle, setSongTitle] = useState<string | null>(null);
@@ -90,17 +89,41 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
     };
   }, []);
 
-  const selectedPlay = plays?.find((p) => p.id === selectedPlayId) ?? null;
+  // Plan order (the order plays appear in the list), not click order — the
+  // Set only tracks membership, so the source of truth for order is always
+  // the filter below.
+  const selectedPlays = (plays ?? []).filter((p) => selectedIds.has(p.id));
+  const selectionLabel = playsSelectionLabel(selectedPlays);
   const presetLabel = presets?.find((p) => p.name === variant)?.label ?? null;
   const busy = creating;
 
+  function toggleSelect(playId: string) {
+    if (busy) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(playId)) next.delete(playId);
+      else next.add(playId);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    if (busy || !plays) return;
+    setSelectedIds(new Set(plays.map((p) => p.id)));
+  }
+
+  function clearSelection() {
+    if (busy) return;
+    setSelectedIds(new Set());
+  }
+
   async function onCreate() {
-    if (busy || !selectedPlayId || variant === null) return;
+    if (busy || selectedPlays.length === 0 || variant === null) return;
     setCreating(true);
     try {
       await api.createVideo({
         matchId: id,
-        playId: selectedPlayId,
+        playIds: selectedPlays.map((p) => p.id),
         mode: songId ? 'music' : 'clean',
         songId: songId ?? undefined,
         variant,
@@ -210,7 +233,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         </div>
       </section>
 
-      {/* Highlights filmstrip */}
+      {/* Highlights list */}
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight text-foreground">
@@ -218,7 +241,9 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
             <span className="font-[family-name:var(--font-mono)] tabular-nums text-primary">{n}</span>{' '}
             {n === 1 ? 'highlight' : 'highlights'}
           </h2>
-          <p className="text-sm text-muted-foreground">Pick the play you want to forge into a reel.</p>
+          <p className="text-sm text-muted-foreground">
+            Pick the plays you want to forge into a reel — 2+ picks concatenate into one.
+          </p>
         </div>
 
         {n === 0 ? (
@@ -226,16 +251,13 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
             No highlight-worthy plays found in this match.
           </p>
         ) : (
-          <Filmstrip>
-            {playList.map((play) => (
-              <PlayTile
-                key={play.id}
-                play={play}
-                selected={selectedPlayId === play.id}
-                onSelect={() => !busy && setSelectedPlayId(play.id)}
-              />
-            ))}
-          </Filmstrip>
+          <PlayList
+            plays={playList}
+            selectedIds={selectedIds}
+            onToggle={toggleSelect}
+            onSelectAll={selectAll}
+            onClear={clearSelection}
+          />
         )}
       </section>
 
@@ -258,7 +280,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
               presets={presets}
               value={variant}
               onChange={setVariant}
-              disabled={!selectedPlayId || busy}
+              disabled={selectedIds.size === 0 || busy}
             />
           )}
         </section>
@@ -268,7 +290,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
       {n > 0 ? (
         <section className="flex flex-col gap-4">
           <SectionEyebrow label="Edit options" />
-          <EditOptions value={editConfig} onChange={setEditConfig} disabled={!selectedPlayId || busy} />
+          <EditOptions value={editConfig} onChange={setEditConfig} disabled={selectedIds.size === 0 || busy} />
         </section>
       ) : null}
 
@@ -321,7 +343,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
       {/* Sticky action bar */}
       {n > 0 ? (
         <CreateReelBar
-          playLabel={selectedPlay?.label ?? null}
+          selectionLabel={selectionLabel}
           presetLabel={presetLabel ? `${presetLabel} · ${editConfig.format === 'short-9x16' ? 'Short' : '16:9'}` : null}
           songTitle={songTitle}
           creating={creating}
@@ -346,9 +368,9 @@ function LoadingState() {
       <Skeleton className="h-20 w-full rounded-xl" />
       <div className="flex flex-col gap-4">
         <Skeleton className="h-6 w-48" />
-        <div className="flex gap-3">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-[180px] w-[220px] rounded-xl" />
+        <div className="flex flex-col gap-px overflow-hidden rounded-xl border border-border">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-[76px] w-full rounded-none" />
           ))}
         </div>
       </div>

@@ -1,6 +1,7 @@
 import type { ApiClient } from './client';
 import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch } from './types';
 import { DEFAULT_EDIT_CONFIG } from './reel-store';
+import { playsSelectionLabel } from '@/lib/format';
 import {
   fixtureUser,
   fixtureSlots,
@@ -283,14 +284,15 @@ export class MockApiClient implements ApiClient {
     ];
   }
 
-  async createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video> {
+  async createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video> {
     await delay();
     const match = uploadedMatches.find((m) => m.id === input.matchId) ?? fixtureMatches.find((m) => m.id === input.matchId);
     const plays = uploadedPlays.get(input.matchId) ?? playsForMatch(input.matchId);
-    const play = plays.find((p) => p.id === input.playId);
+    // Preserve the caller's (plan) order rather than the plays array's order.
+    const pickedPlays = input.playIds.map((pid) => plays.find((p) => p.id === pid)).filter((p): p is Play => Boolean(p));
 
     const modeLabel = input.mode === 'music' ? 'Music Edit' : 'Clean POV';
-    const playLabel = play?.label ?? 'Highlight';
+    const playLabel = playsSelectionLabel(pickedPlays) ?? 'Highlight';
     const id = `v-${Date.now()}`;
 
     const video: Video = {

@@ -7,7 +7,7 @@ import { coerceEditConfig, coerceIntents, DEFAULT_EDIT_CONFIG } from './reel-sto
 const valid = {
   videoId: 'job__seg-001',
   jobId: 'job',
-  segmentId: 'seg-001',
+  segmentIds: ['seg-001'],
   mode: 'music',
   variant: 'clean-pov-60',
   editConfig: { format: 'landscape-16x9', killEffect: 'velocity', transition: 'whip', intro: true, outro: false, introText: 'GG WP', outroText: '' },
@@ -30,13 +30,28 @@ test('non-array input → empty', () => {
 });
 
 test('drops entries missing required ids', () => {
-  assert.deepEqual(coerceIntents([{ jobId: 'j', segmentId: 's' }, 42, null]), []);
+  assert.deepEqual(coerceIntents([{ jobId: 'j', segmentIds: ['s'] }, 42, null]), []);
+});
+
+test('drops entries with no segment ids at all', () => {
+  assert.deepEqual(coerceIntents([{ videoId: 'v', jobId: 'j' }, { videoId: 'v', jobId: 'j', segmentIds: [] }]), []);
 });
 
 test('defaults soft fields, normalizes mode, migrates missing variant', () => {
-  assert.deepEqual(coerceIntents([{ videoId: 'v', jobId: 'j', segmentId: 's', mode: 'weird' }]), [
-    { videoId: 'v', jobId: 'j', segmentId: 's', mode: 'clean', variant: 'viral-60-clean', editConfig: DEFAULT_EDIT_CONFIG, songId: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0, published: false },
+  assert.deepEqual(coerceIntents([{ videoId: 'v', jobId: 'j', segmentIds: ['s'], mode: 'weird' }]), [
+    { videoId: 'v', jobId: 'j', segmentIds: ['s'], mode: 'clean', variant: 'viral-60-clean', editConfig: DEFAULT_EDIT_CONFIG, songId: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0, published: false },
   ]);
+});
+
+test('migrates a legacy singular segmentId into a one-element segmentIds array', () => {
+  assert.deepEqual(coerceIntents([{ videoId: 'v', jobId: 'j', segmentId: 'seg-001', mode: 'clean' }]), [
+    { videoId: 'v', jobId: 'j', segmentIds: ['seg-001'], mode: 'clean', variant: 'viral-60-clean', editConfig: DEFAULT_EDIT_CONFIG, songId: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0, published: false },
+  ]);
+});
+
+test('keeps multiple segment ids in plan order', () => {
+  const multi = { ...valid, videoId: 'job__seg-001_seg-006', segmentIds: ['seg-001', 'seg-006', 'seg-009'] };
+  assert.deepEqual(coerceIntents([multi]), [multi]);
 });
 
 test('coerces edit config independently', () => {

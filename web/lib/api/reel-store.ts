@@ -13,9 +13,10 @@ const BOOKEND_TEXT_MAX_LENGTH = 80;
  * (see reel-reconcile), which is the single source of truth.
  */
 export type ReelIntent = {
-  videoId: string; // `${jobId}__${segmentId}`
+  videoId: string; // `${jobId}__${segmentIds.join('_')}`
   jobId: string;
-  segmentId: string;
+  /** Segment ids in plan order; 2+ ids render as one concatenated reel. */
+  segmentIds: string[];
   mode: RenderMode;
   /** Render variant / preset name (Kill Feed / Clean POV / Full HUD). */
   variant?: string;
@@ -77,31 +78,41 @@ export function coerceIntents(parsed: unknown): ReelIntent[] {
   if (!Array.isArray(parsed)) return [];
   const out: ReelIntent[] = [];
   for (const v of parsed) {
-    if (
-      v &&
-      typeof v === 'object' &&
-      typeof (v as ReelIntent).videoId === 'string' &&
-      typeof (v as ReelIntent).jobId === 'string' &&
-      typeof (v as ReelIntent).segmentId === 'string'
-    ) {
-      const r = v as Partial<ReelIntent> & { videoId: string; jobId: string; segmentId: string };
-      out.push({
-        videoId: r.videoId,
-        jobId: r.jobId,
-        segmentId: r.segmentId,
-        mode: r.mode === 'music' ? 'music' : 'clean',
-        variant: typeof r.variant === 'string' ? r.variant : DEFAULT_VARIANT,
-        editConfig: coerceEditConfig(r.editConfig),
-        songId: typeof r.songId === 'string' ? r.songId : undefined,
-        title: typeof r.title === 'string' ? r.title : 'Highlight',
-        map: typeof r.map === 'string' ? r.map : 'Unknown',
-        score: typeof r.score === 'string' ? r.score : '',
-        createdAt: typeof r.createdAt === 'number' ? r.createdAt : 0,
-        published: r.published === true,
-      });
-    }
+    if (!v || typeof v !== 'object') continue;
+    const r = v as Record<string, unknown>;
+    if (typeof r.videoId !== 'string' || typeof r.jobId !== 'string') continue;
+    const segmentIds = coerceSegmentIds(r);
+    if (segmentIds.length === 0) continue;
+    out.push({
+      videoId: r.videoId,
+      jobId: r.jobId,
+      segmentIds,
+      mode: r.mode === 'music' ? 'music' : 'clean',
+      variant: typeof r.variant === 'string' ? r.variant : DEFAULT_VARIANT,
+      editConfig: coerceEditConfig(r.editConfig),
+      songId: typeof r.songId === 'string' ? r.songId : undefined,
+      title: typeof r.title === 'string' ? r.title : 'Highlight',
+      map: typeof r.map === 'string' ? r.map : 'Unknown',
+      score: typeof r.score === 'string' ? r.score : '',
+      createdAt: typeof r.createdAt === 'number' ? r.createdAt : 0,
+      published: r.published === true,
+    });
   }
   return out;
+}
+
+/**
+ * Reads segment ids off a parsed intent: the current `segmentIds` array, or
+ * (for reels persisted before multi-select) the legacy singular `segmentId`
+ * string wrapped into a one-element array. Non-string entries are dropped
+ * rather than coerced, so a corrupt array never smuggles a non-id through.
+ */
+function coerceSegmentIds(r: Record<string, unknown>): string[] {
+  if (Array.isArray(r.segmentIds)) {
+    return r.segmentIds.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+  }
+  if (typeof r.segmentId === 'string' && r.segmentId.length > 0) return [r.segmentId];
+  return [];
 }
 
 export function coerceEditConfig(value: unknown): EditConfig {

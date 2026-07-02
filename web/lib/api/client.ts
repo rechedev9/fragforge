@@ -21,7 +21,8 @@ export interface ApiClient {
   listSongs(): Promise<Song[]>;
   /** The user-selectable reel presets (preset name == render variant). */
   listPresets(): Promise<Preset[]>;
-  createVideo(input: { matchId: string; playId: string; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video>;
+  /** playIds is 2+ ids for a concatenated reel; pass them in plan order, not click order. */
+  createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video>;
   listVideos(): Promise<Video[]>;
   getVideo(id: string): Promise<Video | null>;
   publishVideo(id: string): Promise<Video>;

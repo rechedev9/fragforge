@@ -1,4 +1,4 @@
-import type { VideoStatus } from './api/types';
+import type { Play, VideoStatus } from './api/types';
 
 // Re-export the canonical `cn` (clsx + tailwind-merge) so legacy
 // `@/lib/format` imports keep resolving after the v2 shadcn migration.
@@ -39,6 +39,20 @@ export function formatCountdown(sec: number): string {
   if (hours <= 0) return `${minutes}m`;
   if (minutes === 0) return `${hours}h`;
   return `${hours}h ${minutes}m`;
+}
+
+/**
+ * Selection summary for a set of picked highlights, in the order given (the
+ * caller passes plan order, not click order). One pick reuses its own label
+ * ("1K · Round 1"); 2+ picks summarize as a count plus the distinct rounds in
+ * ascending order ("3 highlights · Rounds 1, 6, 9"). Used by both the sticky
+ * create-reel bar and the stored reel title so they read identically.
+ */
+export function playsSelectionLabel(plays: Play[]): string | null {
+  if (plays.length === 0) return null;
+  if (plays.length === 1) return plays[0].label;
+  const rounds = Array.from(new Set(plays.map((p) => p.round))).sort((a, b) => a - b);
+  return `${plays.length} highlights · Rounds ${rounds.join(', ')}`;
 }
 
 /**
