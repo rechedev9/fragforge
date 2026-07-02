@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/rules"
+	"github.com/rechedev9/fragforge/internal/streamclips"
 )
 
 type orchestratorJobRepository interface {
@@ -161,6 +163,147 @@ func cloneJob(j job.Job) job.Job {
 	if j.KillPlan != nil {
 		plan := *j.KillPlan
 		j.KillPlan = &plan
+	}
+	return j
+}
+
+// memoryStreamJobRepository is the in-memory equivalent of
+// streamclips.Repository, used when ZV_DATABASE_URL=memory (Local Studio)
+// so the streamer-clips flow, including acquisition-by-URL, works without
+// Postgres.
+type memoryStreamJobRepository struct {
+	mu   sync.RWMutex
+	jobs map[uuid.UUID]streamclips.Job
+}
+
+func newMemoryStreamJobRepository() *memoryStreamJobRepository {
+	return &memoryStreamJobRepository{jobs: map[uuid.UUID]streamclips.Job{}}
+}
+
+func (r *memoryStreamJobRepository) Create(ctx context.Context, j *streamclips.Job) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if j.ID == uuid.Nil {
+		j.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	j.CreatedAt = now
+	j.UpdatedAt = now
+	stored := cloneStreamJob(*j)
+	r.jobs[stored.ID] = stored
+	*j = cloneStreamJob(stored)
+	return nil
+}
+
+func (r *memoryStreamJobRepository) Get(ctx context.Context, id uuid.UUID) (streamclips.Job, error) {
+	if err := ctx.Err(); err != nil {
+		return streamclips.Job{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return streamclips.Job{}, streamclips.ErrNotFound
+	}
+	return cloneStreamJob(j), nil
+}
+
+func (r *memoryStreamJobRepository) List(ctx context.Context, limit int) ([]streamclips.Job, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]streamclips.Job, 0, len(r.jobs))
+	for _, j := range r.jobs {
+		out = append(out, cloneStreamJob(j))
+	}
+	sort.Slice(out, func(i, k int) bool {
+		if out[i].UpdatedAt.Equal(out[k].UpdatedAt) {
+			return out[i].CreatedAt.After(out[k].CreatedAt)
+		}
+		return out[i].UpdatedAt.After(out[k].UpdatedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r *memoryStreamJobRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status streamclips.Status, failureReason string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return streamclips.ErrNotFound
+	}
+	j.Status = status
+	j.FailureReason = failureReason
+	j.UpdatedAt = time.Now().UTC()
+	r.jobs[id] = j
+	return nil
+}
+
+func (r *memoryStreamJobRepository) SetEditPlan(ctx context.Context, id uuid.UUID, plan streamclips.EditPlan) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	plan = streamclips.NormalizeEditPlan(plan)
+	if err := plan.Validate(); err != nil {
+		return err
+	}
+	b, err := json.Marshal(plan)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return streamclips.ErrNotFound
+	}
+	j.EditPlan = append(json.RawMessage(nil), b...)
+	j.Status = streamclips.StatusReady
+	j.FailureReason = ""
+	j.UpdatedAt = time.Now().UTC()
+	r.jobs[id] = j
+	return nil
+}
+
+func (r *memoryStreamJobRepository) SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return streamclips.ErrNotFound
+	}
+	j.Probe = probe
+	j.SourceSHA256 = sha256
+	j.Status = streamclips.StatusReady
+	j.FailureReason = ""
+	j.UpdatedAt = time.Now().UTC()
+	r.jobs[id] = j
+	return nil
+}
+
+func cloneStreamJob(j streamclips.Job) streamclips.Job {
+	if j.EditPlan != nil {
+		j.EditPlan = append(json.RawMessage(nil), j.EditPlan...)
 	}
 	return j
 }

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"github.com/rechedev9/fragforge/internal/artifacts"
+	"github.com/rechedev9/fragforge/internal/captions"
 	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
@@ -193,6 +195,23 @@ type StreamRenderWorkerConfig struct {
 	WorkDir    string
 	FFmpegPath string
 	Timeout    string
+	// WhisperPath and WhisperModelPath configure the local whisper.cpp
+	// captions transcription pass (internal/captions.Transcriber). Both must
+	// be set for it to run.
+	WhisperPath      string
+	WhisperModelPath string
+	// GroqAPIKey and GroqModel configure the Groq cloud captions
+	// transcription pass (internal/captions.GroqTranscriber). GroqModel is
+	// optional and defaults inside GroqTranscriber when empty.
+	//
+	// A render honours EditPlan.Captions.Enabled only when at least one
+	// backend is configured; the HTTP layer rejects a render start with
+	// captions enabled before neither is configured (see
+	// requireCaptionsEnabled), but the worker still checks defensively since
+	// it may run a redriven task from before the config changed. When both
+	// are configured, Groq is preferred (see NewStreamRenderWorker).
+	GroqAPIKey string
+	GroqModel  string
 }
 
 // RecordWorker handles the "record:demo" Asynq task.
@@ -638,15 +657,36 @@ type StreamRenderWorker struct {
 	storage storage.Storage
 	cfg     StreamRenderWorkerConfig
 	runner  commandRunner
+	// transcribe runs the captions transcription pass. It defaults to
+	// captions.Transcriber (whisper-cli), but is a seam so tests can fake
+	// transcription without a real whisper binary/model on disk.
+	transcribe func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error)
 }
 
 func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, cfg StreamRenderWorkerConfig) *StreamRenderWorker {
-	return &StreamRenderWorker{
+	w := &StreamRenderWorker{
 		repo:    repo,
 		storage: store,
 		cfg:     cfg,
 		runner:  execCommandRunner{},
 	}
+	// Groq is preferred when configured: it needs no local model download and
+	// runs on a GPU the user does not have to own. Local whisper.cpp remains
+	// the offline fallback.
+	w.transcribe = func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error) {
+		if w.cfg.groqConfigured() {
+			g := captions.GroqTranscriber{
+				APIKey:     w.cfg.GroqAPIKey,
+				Model:      w.cfg.GroqModel,
+				Language:   language,
+				FFmpegPath: w.cfg.FFmpegPath,
+			}
+			return g.Transcribe(ctx, mediaPath, workDir)
+		}
+		t := captions.Transcriber{BinaryPath: w.cfg.WhisperPath, ModelPath: w.cfg.WhisperModelPath, Language: language}
+		return t.Transcribe(ctx, mediaPath, workDir)
+	}
+	return w
 }
 
 func (w *StreamRenderWorker) HandleRenderStreamClip(ctx context.Context, t *asynq.Task) error {
@@ -670,8 +710,8 @@ func (w *StreamRenderWorker) HandleRenderStreamClip(ctx context.Context, t *asyn
 }
 
 func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, variant string) error {
-	if variant != streamclips.VariantStreamerVerticalStack {
-		return fmt.Errorf("unsupported stream render variant %q", variant)
+	if _, ok := streamclips.VariantByName(variant); !ok {
+		return fmt.Errorf("unsupported stream render variant %q (valid variants: %s)", variant, strings.Join(streamclips.VariantNames(), ", "))
 	}
 	cfg := w.cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
@@ -690,6 +730,9 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	}
 	if len(plan.Clips) == 0 {
 		return fmt.Errorf("edit plan has no clips")
+	}
+	if plan.Captions.Enabled && !cfg.captionsConfigured() {
+		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL)")
 	}
 
 	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendering, ""); err != nil {
@@ -717,6 +760,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	runCtx, cancel := context.WithTimeout(ctx, cfg.timeoutDuration())
 	defer cancel()
 	var videos []streamclips.VideoEntry
+	var warnings []string
 	for _, clip := range plan.Clips {
 		outPath := filepath.Join(outDir, clip.ID+".mp4")
 		args, err := streamclips.BuildFFmpegArgs(sourcePath, outPath, plan, clip)
@@ -726,11 +770,28 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		if _, err := w.runner.Run(runCtx, cfg.FFmpegPath, args...); err != nil {
 			return fmt.Errorf("render clip %s: %w", clip.ID, err)
 		}
-		key, err := streamclips.RenderVideoKey(j.ID, variant, clip.ID)
+
+		publishPath := outPath
+		publishClipID := clip.ID
+		if plan.Captions.Enabled {
+			captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, j.ID, variant, clip.ID, plan.Captions.Language)
+			if err != nil {
+				return err
+			}
+			switch {
+			case captionedPath != "":
+				publishPath = captionedPath
+				publishClipID = clip.ID + "_captioned"
+			case warning != "":
+				warnings = append(warnings, warning)
+			}
+		}
+
+		key, err := streamclips.RenderVideoKey(j.ID, variant, publishClipID)
 		if err != nil {
 			return err
 		}
-		if err := uploadFile(w.storage, key, outPath); err != nil {
+		if err := uploadFile(w.storage, key, publishPath); err != nil {
 			return fmt.Errorf("upload stream clip %s: %w", clip.ID, err)
 		}
 		videos = append(videos, streamclips.NewVideoEntry(clip, key))
@@ -740,6 +801,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if err != nil {
 		return err
 	}
+	result.Warnings = warnings
 	resultKey, err := streamclips.RenderResultKey(j.ID, variant)
 	if err != nil {
 		return err
@@ -754,7 +816,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if err := w.storage.Put(galleryKey, strings.NewReader(streamclips.RenderGalleryHTML(j, videos))); err != nil {
 		return fmt.Errorf("write stream gallery: %w", err)
 	}
-	if err := w.writeStreamState(j.ID, variant, streamclips.StatusRendered, nil, "", videos); err != nil {
+	if err := w.writeStreamState(j.ID, variant, streamclips.StatusRendered, warnings, "", videos); err != nil {
 		return err
 	}
 	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendered, ""); err != nil {
@@ -762,6 +824,58 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	}
 	logWorkerArtifacts(j.ID, tasks.TypeRenderStreamClip, []string{resultKey, galleryKey})
 	return nil
+}
+
+// burnClipCaptions transcribes clipPath with whisper and burns the resulting
+// karaoke captions into a second copy, <clipID>_captioned.mp4, next to
+// clipPath. It returns the captioned file's path on success. If the
+// transcript has no words, it returns ("", warning, nil) so the caller
+// publishes the uncaptioned clip instead of failing the render; any other
+// transcription or burn failure is returned as an error since captions were
+// explicitly requested and whisper is configured.
+func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath string, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
+	cues, err := w.transcribe(ctx, clipPath, workDir, language)
+	if err != nil {
+		if strings.Contains(err.Error(), "no words") {
+			return "", fmt.Sprintf("clip %s: transcription produced no words, publishing without captions", clipID), nil
+		}
+		return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
+	}
+
+	assContent, err := captions.BuildASS(cues, captions.DefaultStyle())
+	if err != nil {
+		return "", "", fmt.Errorf("build captions for clip %s: %w", clipID, err)
+	}
+	assPath := filepath.Join(workDir, "captions", clipID+".ass")
+	if err := os.MkdirAll(filepath.Dir(assPath), 0o750); err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(assPath, []byte(assContent), 0o600); err != nil {
+		return "", "", fmt.Errorf("write captions for clip %s: %w", clipID, err)
+	}
+	captionKey, err := streamclips.RenderCaptionKey(id, variant, clipID)
+	if err != nil {
+		return "", "", err
+	}
+	if err := uploadFile(w.storage, captionKey, assPath); err != nil {
+		return "", "", fmt.Errorf("upload captions for clip %s: %w", clipID, err)
+	}
+
+	out := filepath.Join(filepath.Dir(clipPath), clipID+"_captioned.mp4")
+	args := []string{
+		"-y",
+		"-i", clipPath,
+		"-vf", captions.BurnFilter(assPath),
+		"-c:v", "libx264",
+		"-preset", defaultStreamCaptionPreset,
+		"-crf", strconv.Itoa(defaultStreamCaptionCRF),
+		"-c:a", "copy",
+		out,
+	}
+	if _, err := w.runner.Run(ctx, cfg.FFmpegPath, args...); err != nil {
+		return "", "", fmt.Errorf("burn captions for clip %s: %w", clipID, err)
+	}
+	return out, "", nil
 }
 
 func (w *StreamRenderWorker) writeStreamState(id uuid.UUID, variant string, status streamclips.Status, warnings []string, errMsg string, videos []streamclips.VideoEntry) error {
@@ -801,7 +915,39 @@ func (c StreamRenderWorkerConfig) timeoutDuration() time.Duration {
 	return d
 }
 
-func markStreamFailed(repo StreamRenderRepository, id uuid.UUID, reason string) {
+// whisperConfigured reports whether both the whisper binary and model path
+// are set, the minimum needed to run a local captions transcription pass.
+func (c StreamRenderWorkerConfig) whisperConfigured() bool {
+	return c.WhisperPath != "" && c.WhisperModelPath != ""
+}
+
+// groqConfigured reports whether a Groq API key is set, the minimum needed
+// to run a cloud captions transcription pass.
+func (c StreamRenderWorkerConfig) groqConfigured() bool {
+	return c.GroqAPIKey != ""
+}
+
+// captionsConfigured reports whether any captions transcription backend
+// (Groq or local whisper) is configured.
+func (c StreamRenderWorkerConfig) captionsConfigured() bool {
+	return c.groqConfigured() || c.whisperConfigured()
+}
+
+// Encoder settings for the captions burn-in pass, matching the first render
+// pass (streamclips.BuildFFmpegArgs) so a captioned clip's video quality is
+// consistent with its uncaptioned counterpart.
+const (
+	defaultStreamCaptionPreset = "slow"
+	defaultStreamCaptionCRF    = 18
+)
+
+// streamStatusUpdater is the single method markStreamFailed needs; every
+// stream repository the workers use (render, acquire) satisfies it.
+type streamStatusUpdater interface {
+	UpdateStatus(ctx context.Context, id uuid.UUID, s streamclips.Status, failureReason string) error
+}
+
+func markStreamFailed(repo streamStatusUpdater, id uuid.UUID, reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), failureWriteTimeout)
 	defer cancel()
 	if err := repo.UpdateStatus(ctx, id, streamclips.StatusFailed, reason); err != nil {

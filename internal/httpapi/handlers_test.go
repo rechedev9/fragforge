@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -93,6 +94,19 @@ func (f *fakeStreamRepo) SetEditPlan(_ context.Context, id uuid.UUID, plan strea
 	}
 	j.EditPlan = b
 	j.Status = streamclips.StatusReady
+	f.jobs[id] = j
+	return nil
+}
+
+func (f *fakeStreamRepo) SetAcquired(_ context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error {
+	j, ok := f.jobs[id]
+	if !ok {
+		return streamclips.ErrNotFound
+	}
+	j.Probe = probe
+	j.SourceSHA256 = sha256
+	j.Status = streamclips.StatusReady
+	j.FailureReason = ""
 	f.jobs[id] = j
 	return nil
 }
@@ -2129,6 +2143,29 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 	}
 }
 
+// TestStreamJobEndpointsReturn501WhenRepositoryNotConfigured guards against a
+// nil h.streamRepo (e.g. a deployment mode that never calls
+// WithStreamRepository) crashing the handler instead of returning a clear
+// error. See streamReady in stream_handlers.go.
+func TestStreamJobEndpointsReturn501WhenRepositoryNotConfigured(t *testing.T) {
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{})
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream-jobs", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusNotImplemented {
+		t.Fatalf("list status = %d, want 501; body=%s", rw.Code, rw.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/stream-jobs/"+uuid.New().String(), nil)
+	rw = httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusNotImplemented {
+		t.Fatalf("get status = %d, want 501; body=%s", rw.Code, rw.Body.String())
+	}
+}
+
 func TestStreamJobFlowSavesPlanAndEnqueuesRender(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	store := newFakeStorage()
@@ -2247,6 +2284,232 @@ func TestStreamVideoRejectsUnsafeClipID(t *testing.T) {
 	r.ServeHTTP(rw, req)
 	if rw.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+}
+
+func TestStreamVideoServesCaptionedKeyFromRenderResult(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	const variant = "streamer-vertical-stack-40-60"
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusRendered, SourcePath: streamclips.SourceKey(id)}
+
+	store := newFakeStorage()
+	captionedKey, err := streamclips.RenderVideoKey(id, variant, "clip-1_captioned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(captionedKey, strings.NewReader("captioned-bytes")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := streamclips.NewRenderResult(id, variant, []streamclips.VideoEntry{{ClipID: "clip-1", Key: captionedKey}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultKey, err := streamclips.RenderResultKey(id, variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(resultKey, bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandlers(newFakeRepo(), store, &fakeQueue{}, WithStreamRepository(streamRepo))
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream-jobs/"+id.String()+"/renders/"+variant+"/videos/clip-1", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	if got, want := rw.Body.String(), "captioned-bytes"; got != want {
+		t.Fatalf("body = %q, want %q (captioned key from render result)", got, want)
+	}
+}
+
+func TestStreamVideoFallsBackToPlainKeyWithoutRenderResult(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	const variant = "streamer-vertical-stack-40-60"
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusRendered, SourcePath: streamclips.SourceKey(id)}
+
+	store := newFakeStorage()
+	plainKey, err := streamclips.RenderVideoKey(id, variant, "clip-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(plainKey, strings.NewReader("plain-bytes")); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandlers(newFakeRepo(), store, &fakeQueue{}, WithStreamRepository(streamRepo))
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream-jobs/"+id.String()+"/renders/"+variant+"/videos/clip-1", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	if got, want := rw.Body.String(), "plain-bytes"; got != want {
+		t.Fatalf("body = %q, want %q (conventional key fallback)", got, want)
+	}
+}
+
+func TestCreateStreamJobFromURLAcquiresAndEnqueues(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	queue := &fakeQueue{}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue,
+		WithStreamRepository(streamRepo),
+		WithCapabilities(Capabilities{YtdlpEnabled: true}),
+	)
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", strings.NewReader(`{"source_url":"https://clips.twitch.tv/SomeSlug","title":"clutch"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	var created struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Status != string(streamclips.StatusAcquiring) {
+		t.Fatalf("status = %q, want %q", created.Status, streamclips.StatusAcquiring)
+	}
+	id, err := uuid.Parse(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := streamRepo.jobs[id]
+	if !ok {
+		t.Fatal("stream job not created")
+	}
+	if job.SourceURL != "https://clips.twitch.tv/SomeSlug" {
+		t.Fatalf("source url = %q", job.SourceURL)
+	}
+	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeStreamAcquire {
+		t.Fatalf("queue = %#v", queue.enqueued)
+	}
+}
+
+func TestCreateStreamJobFromURLRejectsInvalidURL(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{},
+		WithStreamRepository(streamRepo),
+		WithCapabilities(Capabilities{YtdlpEnabled: true}),
+	)
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", strings.NewReader(`{"source_url":"not-a-url"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(streamRepo.jobs) != 0 {
+		t.Fatalf("stream job created for an invalid url: %#v", streamRepo.jobs)
+	}
+}
+
+func TestCreateStreamJobFromURLRejectsWhenYtdlpMissing(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{}, WithStreamRepository(streamRepo))
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", strings.NewReader(`{"source_url":"https://clips.twitch.tv/SomeSlug"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(streamRepo.jobs) != 0 {
+		t.Fatalf("stream job created while yt-dlp is unconfigured: %#v", streamRepo.jobs)
+	}
+}
+
+func TestStartStreamRenderAcceptsRegistryVariantsAndRejectsUnknown(t *testing.T) {
+	for _, variant := range streamclips.VariantNames() {
+		t.Run(variant, func(t *testing.T) {
+			streamRepo := newFakeStreamRepo()
+			id := uuid.New()
+			streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+			queue := &fakeQueue{}
+			h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo))
+			r := Routes(h)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+variant, nil)
+			rw := httptest.NewRecorder()
+			r.ServeHTTP(rw, req)
+
+			if rw.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+			}
+			if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeRenderStreamClip {
+				t.Fatalf("queue = %#v", queue.enqueued)
+			}
+		})
+	}
+
+	t.Run("unknown variant lists valid names", func(t *testing.T) {
+		streamRepo := newFakeStreamRepo()
+		id := uuid.New()
+		streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+		h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{}, WithStreamRepository(streamRepo))
+		r := Routes(h)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/not-a-real-variant", nil)
+		rw := httptest.NewRecorder()
+		r.ServeHTTP(rw, req)
+
+		if rw.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+		}
+		for _, name := range streamclips.VariantNames() {
+			if !strings.Contains(rw.Body.String(), name) {
+				t.Errorf("error body missing valid variant %q: %s", name, rw.Body.String())
+			}
+		}
+	})
+}
+
+func TestStartStreamRenderRejectsCaptionsWithoutWhisper(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	plan := streamclips.DefaultEditPlan()
+	plan.Captions = streamclips.CaptionsPlan{Enabled: true}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON}
+	queue := &fakeQueue{}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo)) // no WithCapabilities -> WhisperEnabled/GroqEnabled false
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+streamclips.DefaultVariant().Name, nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued %d tasks, want 0", len(queue.enqueued))
 	}
 }
 

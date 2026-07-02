@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -41,7 +42,26 @@ func detectCaptureTools(cfg config) (config, captureToolSource) {
 	cfg.EditorPath = resolve("ZV_EDITOR_PATH", cfg.EditorPath, func() string { return detectSibling("zv-editor") })
 	cfg.FFmpegPath = resolve("ZV_FFMPEG_PATH", cfg.FFmpegPath, recording.FindFFmpeg)
 	cfg.FFprobePath = resolve("ZV_FFPROBE_PATH", cfg.FFprobePath, recording.FindFFprobe)
+	cfg.YtdlpPath = resolve("ZV_YTDLP_PATH", cfg.YtdlpPath, func() string { return lookPath("yt-dlp") })
+	cfg.WhisperPath = resolve("ZV_WHISPER_PATH", cfg.WhisperPath, func() string { return lookPath("whisper-cli") })
+	// The whisper model is a data file, not a binary on PATH; it can only come
+	// from explicit config, so it is either "env" or "none", never "detected".
+	if cfg.WhisperModelPath != "" {
+		src["ZV_WHISPER_MODEL"] = "env"
+	} else {
+		src["ZV_WHISPER_MODEL"] = "none"
+	}
 	return cfg, src
+}
+
+// lookPath resolves name on PATH, returning "" instead of an error when it is
+// not found so callers can treat it like the other best-effort probes.
+func lookPath(name string) string {
+	p, err := exec.LookPath(name)
+	if err != nil {
+		return ""
+	}
+	return p
 }
 
 // detectSibling looks for a pipeline binary (zv-recorder, zv-editor) next to

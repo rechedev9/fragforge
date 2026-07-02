@@ -54,6 +54,7 @@ type StreamJobRepository interface {
 	List(ctx context.Context, limit int) ([]streamclips.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s streamclips.Status, failureReason string) error
 	SetEditPlan(ctx context.Context, id uuid.UUID, plan streamclips.EditPlan) error
+	SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error
 }
 
 // Enqueuer is the subset of *asynq.Client used by handlers.

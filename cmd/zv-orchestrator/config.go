@@ -36,6 +36,11 @@ type config struct {
 	CodexPath         string
 	CodexModel        string
 	AgentTimeout      string
+	YtdlpPath         string
+	WhisperPath       string
+	WhisperModelPath  string
+	GroqAPIKey        string
+	GroqModel         string
 }
 
 const (
@@ -66,24 +71,33 @@ func sqlitePath(url, dataDir string) string {
 
 func loadConfig() (config, error) {
 	c := config{
-		HTTPAddr:      envOr("ZV_HTTP_ADDR", "127.0.0.1:8080"),
-		DatabaseURL:   os.Getenv("ZV_DATABASE_URL"),
-		RedisAddr:     envOr("ZV_REDIS_ADDR", "localhost:6379"),
-		QueueMode:     envOr("ZV_QUEUE_MODE", queueModeRedis),
-		DataDir:       envOr("ZV_DATA_DIR", "./data"),
-		MediaWorkDir:  os.Getenv("ZV_MEDIA_WORK_DIR"),
-		RecorderPath:  os.Getenv("ZV_RECORDER_PATH"),
-		ComposerPath:  os.Getenv("ZV_COMPOSER_PATH"),
-		EditorPath:    os.Getenv("ZV_EDITOR_PATH"),
-		HLAEPath:      os.Getenv("ZV_HLAE_PATH"),
-		CS2Path:       os.Getenv("ZV_CS2_PATH"),
-		RecordHUD:     os.Getenv("ZV_RECORD_HUD"),
-		FFmpegPath:    os.Getenv("ZV_FFMPEG_PATH"),
-		FFprobePath:   os.Getenv("ZV_FFPROBE_PATH"),
-		MusicDir:      os.Getenv("ZV_MUSIC_DIR"),
-		MutationToken: os.Getenv("ZV_MUTATION_TOKEN"),
-		CodexPath:     os.Getenv("ZV_CODEX_PATH"),
-		CodexModel:    os.Getenv("ZV_CODEX_MODEL"),
+		HTTPAddr:         envOr("ZV_HTTP_ADDR", "127.0.0.1:8080"),
+		DatabaseURL:      os.Getenv("ZV_DATABASE_URL"),
+		RedisAddr:        envOr("ZV_REDIS_ADDR", "localhost:6379"),
+		QueueMode:        envOr("ZV_QUEUE_MODE", queueModeRedis),
+		DataDir:          envOr("ZV_DATA_DIR", "./data"),
+		MediaWorkDir:     os.Getenv("ZV_MEDIA_WORK_DIR"),
+		RecorderPath:     os.Getenv("ZV_RECORDER_PATH"),
+		ComposerPath:     os.Getenv("ZV_COMPOSER_PATH"),
+		EditorPath:       os.Getenv("ZV_EDITOR_PATH"),
+		HLAEPath:         os.Getenv("ZV_HLAE_PATH"),
+		CS2Path:          os.Getenv("ZV_CS2_PATH"),
+		RecordHUD:        os.Getenv("ZV_RECORD_HUD"),
+		FFmpegPath:       os.Getenv("ZV_FFMPEG_PATH"),
+		FFprobePath:      os.Getenv("ZV_FFPROBE_PATH"),
+		MusicDir:         os.Getenv("ZV_MUSIC_DIR"),
+		MutationToken:    os.Getenv("ZV_MUTATION_TOKEN"),
+		CodexPath:        os.Getenv("ZV_CODEX_PATH"),
+		CodexModel:       os.Getenv("ZV_CODEX_MODEL"),
+		YtdlpPath:        os.Getenv("ZV_YTDLP_PATH"),
+		WhisperPath:      os.Getenv("ZV_WHISPER_PATH"),
+		WhisperModelPath: os.Getenv("ZV_WHISPER_MODEL"),
+		// GROQ_API_KEY is the key's conventional name across Groq's own tooling;
+		// ZV_GROQ_API_KEY is an explicit override for when a user-level
+		// GROQ_API_KEY is set for something unrelated. Neither is auto-detected
+		// (an API key cannot be probed on PATH or disk).
+		GroqAPIKey: firstNonEmpty(os.Getenv("ZV_GROQ_API_KEY"), os.Getenv("GROQ_API_KEY")),
+		GroqModel:  os.Getenv("ZV_GROQ_MODEL"),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
@@ -150,6 +164,25 @@ func (c config) agentWorkerEnabled() bool {
 	return c.CodexPath != ""
 }
 
+func (c config) ytdlpEnabled() bool {
+	return c.YtdlpPath != ""
+}
+
+func (c config) whisperEnabled() bool {
+	return c.WhisperPath != "" && c.WhisperModelPath != ""
+}
+
+func (c config) groqEnabled() bool {
+	return c.GroqAPIKey != ""
+}
+
+// streamAcquireWorkerEnabled reports whether the acquire-by-URL worker can
+// run. It only needs yt-dlp; stream rendering (ffmpeg) is gated separately by
+// streamRenderWorkerEnabled.
+func (c config) streamAcquireWorkerEnabled() bool {
+	return c.ytdlpEnabled()
+}
+
 // captureCapabilities is the readiness snapshot the HTTP layer serves at
 // GET /api/capabilities and uses to gate record/generate. Worker enablement is
 // fixed here at startup; the tool paths are reported so the web UI can tell the
@@ -162,6 +195,9 @@ func (c config) captureCapabilities(src captureToolSource) httpapi.Capabilities 
 		RecordEnabled:  c.recordWorkerEnabled(),
 		ComposeEnabled: c.composeWorkerEnabled(),
 		RenderEnabled:  c.renderWorkerEnabled(),
+		YtdlpEnabled:   c.ytdlpEnabled(),
+		WhisperEnabled: c.whisperEnabled(),
+		GroqEnabled:    c.groqEnabled(),
 		RecordTools: []httpapi.CaptureTool{
 			tool("ZV_RECORDER_PATH", c.RecorderPath),
 			tool("ZV_HLAE_PATH", c.HLAEPath),
@@ -170,6 +206,11 @@ func (c config) captureCapabilities(src captureToolSource) httpapi.Capabilities 
 		RenderTools: []httpapi.CaptureTool{
 			tool("ZV_EDITOR_PATH", c.EditorPath),
 			tool("ZV_FFMPEG_PATH", c.FFmpegPath),
+		},
+		StreamTools: []httpapi.CaptureTool{
+			tool("ZV_YTDLP_PATH", c.YtdlpPath),
+			tool("ZV_WHISPER_PATH", c.WhisperPath),
+			tool("ZV_WHISPER_MODEL", c.WhisperModelPath),
 		},
 	}
 }
@@ -229,6 +270,16 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// firstNonEmpty returns the first non-empty value, or "" if all are empty.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func isLoopbackHTTPAddr(addr string) bool {

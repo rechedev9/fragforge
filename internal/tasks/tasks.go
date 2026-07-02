@@ -39,6 +39,11 @@ const (
 	// TypeRenderStreamClip is the Asynq task type for rendering manually
 	// selected clips from a streamer MP4 upload.
 	TypeRenderStreamClip = "render:stream-clip"
+
+	// TypeStreamAcquire is the Asynq task type for downloading a stream job's
+	// source video from a URL (Twitch clip/VOD or any yt-dlp-supported site)
+	// before it can be edited and rendered.
+	TypeStreamAcquire = "stream:acquire"
 )
 
 const (
@@ -105,6 +110,14 @@ type CodexAgentPayload struct {
 type RenderStreamClipPayload struct {
 	JobID   uuid.UUID `json:"job_id"`
 	Variant string    `json:"variant"`
+}
+
+// StreamAcquirePayload carries the job id for the acquire-by-URL worker. The
+// source URL itself lives on the stream job row (StreamJob.SourceURL), not
+// the payload, so a retried/redriven task always re-reads the current state
+// instead of a possibly-stale copy.
+type StreamAcquirePayload struct {
+	JobID uuid.UUID `json:"job_id"`
 }
 
 // NewParseDemoTask returns an Asynq task that, when consumed, processes the
@@ -205,4 +218,16 @@ func NewRenderStreamClipTask(id uuid.UUID, variant string) (*asynq.Task, error) 
 		return nil, err
 	}
 	return asynq.NewTask(TypeRenderStreamClip, payload), nil
+}
+
+// NewStreamAcquireTask returns an Asynq task that downloads a stream job's
+// source video. Callers enqueue it with asynq.MaxRetry(0): acquisition is an
+// expensive network step, so a failure is terminal for the user to retry
+// explicitly rather than something Asynq should retry automatically.
+func NewStreamAcquireTask(id uuid.UUID) (*asynq.Task, error) {
+	payload, err := json.Marshal(StreamAcquirePayload{JobID: id})
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(TypeStreamAcquire, payload), nil
 }

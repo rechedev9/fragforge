@@ -53,6 +53,7 @@ func main() {
 	switch {
 	case cfg.DatabaseURL == databaseURLMemory:
 		repo = newMemoryJobRepository()
+		streamRepo = newMemoryStreamJobRepository()
 		log.Printf("jobs: using in-memory repository (state resets on restart)")
 	case cfg.DatabaseURL == databaseURLSQLite || strings.HasPrefix(cfg.DatabaseURL, databaseURLSQLite+":"):
 		path := sqlitePath(cfg.DatabaseURL, cfg.DataDir)
@@ -62,6 +63,11 @@ func main() {
 		}
 		defer func() { _ = sqliteRepo.Close() }()
 		repo = sqliteRepo
+		sqliteStreamRepo, err := newSQLiteStreamJobRepository(sqliteRepo.db)
+		if err != nil {
+			log.Fatalf("sqlite stream jobs: %v", err)
+		}
+		streamRepo = sqliteStreamRepo
 		log.Printf("jobs: using sqlite repository at %s", path)
 	default:
 		poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
@@ -135,12 +141,26 @@ func main() {
 	}
 	if cfg.streamRenderWorkerEnabled() && streamRepo != nil {
 		streamWorker := workers.NewStreamRenderWorker(streamRepo, store, workers.StreamRenderWorkerConfig{
-			WorkDir:    cfg.MediaWorkDir,
-			FFmpegPath: cfg.FFmpegPath,
-			Timeout:    cfg.RenderTimeout,
+			WorkDir:          cfg.MediaWorkDir,
+			FFmpegPath:       cfg.FFmpegPath,
+			Timeout:          cfg.RenderTimeout,
+			WhisperPath:      cfg.WhisperPath,
+			WhisperModelPath: cfg.WhisperModelPath,
+			GroqAPIKey:       cfg.GroqAPIKey,
+			GroqModel:        cfg.GroqModel,
 		})
 		taskHandlers[tasks.TypeRenderStreamClip] = streamWorker.HandleRenderStreamClip
 		log.Printf("worker: stream render enabled")
+	}
+	if cfg.streamAcquireWorkerEnabled() && streamRepo != nil {
+		acquireWorker := workers.NewAcquireWorker(streamRepo, store, workers.AcquireWorkerConfig{
+			WorkDir:     cfg.MediaWorkDir,
+			YtdlpPath:   cfg.YtdlpPath,
+			FFprobePath: cfg.FFprobePath,
+			Timeout:     cfg.RenderTimeout,
+		})
+		taskHandlers[tasks.TypeStreamAcquire] = acquireWorker.HandleStreamAcquire
+		log.Printf("worker: stream acquire enabled")
 	}
 	if cfg.agentWorkerEnabled() {
 		agentWorker := workers.NewAgentWorker(store, workers.AgentWorkerConfig{

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,22 +20,34 @@ import (
 
 	"github.com/rechedev9/fragforge/internal/streamclips"
 	"github.com/rechedev9/fragforge/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/vodfetch"
 )
 
 const (
 	maxStreamVideoBytes     = 8 << 30
 	maxStreamMultipartBytes = maxStreamVideoBytes + 2<<20
 	streamRenderUniqueTTL   = 24 * time.Hour
+	streamAcquireUniqueTTL  = 24 * time.Hour
 	defaultStreamListLimit  = 50
-	streamerVerticalVariant = streamclips.VariantStreamerVerticalStack
 )
 
 type createStreamJobConfig struct {
 	Title string `json:"title,omitempty"`
 }
 
+// createStreamJobFromURLRequest is the JSON body for POST /api/stream-jobs
+// when acquiring a source video by URL instead of uploading it directly.
+type createStreamJobFromURLRequest struct {
+	SourceURL string `json:"source_url"`
+	Title     string `json:"title,omitempty"`
+}
+
 func (h *Handlers) CreateStreamJob(w http.ResponseWriter, r *http.Request) {
 	if !h.streamReady(w) {
+		return
+	}
+	if isJSONContentType(r.Header.Get("Content-Type")) {
+		h.createStreamJobFromURL(w, r)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxStreamMultipartBytes)
@@ -126,6 +139,74 @@ func (h *Handlers) CreateStreamJob(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// createStreamJobFromURL handles POST /api/stream-jobs with a JSON body
+// {"source_url": ..., "title": ...}: it validates the URL, creates the job in
+// "acquiring" status, and enqueues the download. The AcquireWorker fills in
+// the source, probe, and sha256 and moves the job to "ready".
+func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request) {
+	if !h.requireYtdlpEnabled(w) {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	var req createStreamJobFromURLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "stream job JSON is too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid stream job JSON")
+		return
+	}
+	if _, err := vodfetch.ClassifySource(req.SourceURL); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid source_url: "+err.Error())
+		return
+	}
+
+	id := uuid.New()
+	j := &streamclips.Job{
+		ID:         id,
+		Status:     streamclips.StatusAcquiring,
+		SourcePath: streamclips.SourceKey(id),
+		SourceURL:  req.SourceURL,
+		Title:      req.Title,
+	}
+	if err := h.streamRepo.Create(r.Context(), j); err != nil {
+		internalError(w, "create stream job", err)
+		return
+	}
+
+	task, err := tasks.NewStreamAcquireTask(j.ID)
+	if err != nil {
+		internalError(w, "build stream acquire task", err)
+		return
+	}
+	if _, err := h.queue.Enqueue(task, asynq.MaxRetry(0), asynq.Unique(streamAcquireUniqueTTL)); err != nil {
+		if !errors.Is(err, asynq.ErrDuplicateTask) {
+			// The job row is already persisted; mark it failed so it is not
+			// stranded in "acquiring" with no task to advance it.
+			if uerr := h.streamRepo.UpdateStatus(r.Context(), j.ID, streamclips.StatusFailed, "enqueue stream acquire task: "+err.Error()); uerr != nil {
+				internalError(w, "mark stream job failed after enqueue error", uerr)
+				return
+			}
+			internalError(w, "enqueue stream acquire task", err)
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":     j.ID,
+		"status": j.Status,
+		"probe":  j.Probe,
+	})
+}
+
+// isJSONContentType reports whether the request's Content-Type is (or starts
+// with) application/json, ignoring an optional charset parameter.
+func isJSONContentType(contentType string) bool {
+	return strings.HasPrefix(strings.TrimSpace(contentType), "application/json")
+}
+
 func (h *Handlers) ListStreamJobs(w http.ResponseWriter, r *http.Request) {
 	if !h.streamReady(w) {
 		return
@@ -190,6 +271,33 @@ func (h *Handlers) GetStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, streamclips.DefaultEditPlan())
 }
 
+// currentStreamEditPlan returns the job's edit plan the same way
+// GetStreamEditPlan does (the job row, else the storage artifact, else the
+// default plan), so StartStreamRender can gate on plan.Captions without
+// duplicating the fallback chain.
+func (h *Handlers) currentStreamEditPlan(j streamclips.Job) (streamclips.EditPlan, error) {
+	if len(j.EditPlan) > 0 {
+		var plan streamclips.EditPlan
+		if err := json.Unmarshal(j.EditPlan, &plan); err != nil {
+			return streamclips.EditPlan{}, err
+		}
+		return plan, nil
+	}
+	rc, err := h.storage.Open(streamclips.EditPlanKey(j.ID))
+	if err == nil {
+		defer rc.Close()
+		var plan streamclips.EditPlan
+		if err := json.NewDecoder(rc).Decode(&plan); err != nil {
+			return streamclips.EditPlan{}, err
+		}
+		return plan, nil
+	}
+	if !storageNotExist(err) {
+		return streamclips.EditPlan{}, err
+	}
+	return streamclips.DefaultEditPlan(), nil
+}
+
 func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 	j, ok := h.loadStreamJob(w, r)
 	if !ok {
@@ -233,12 +341,20 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	variant := chi.URLParam(r, "variant")
-	if variant != streamerVerticalVariant {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("unsupported stream render variant %q", variant))
+	if _, ok := streamclips.VariantByName(variant); !ok {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("unsupported stream render variant %q (valid variants: %s)", variant, strings.Join(streamclips.VariantNames(), ", ")))
 		return
 	}
 	if j.Status != streamclips.StatusReady && j.Status != streamclips.StatusRendered {
 		writeError(w, http.StatusConflict, fmt.Sprintf("stream job is not ready to render (status=%s)", j.Status))
+		return
+	}
+	plan, err := h.currentStreamEditPlan(j)
+	if err != nil {
+		internalError(w, "load stream edit plan", err)
+		return
+	}
+	if plan.Captions.Enabled && !h.requireCaptionsEnabled(w) {
 		return
 	}
 	task, err := tasks.NewRenderStreamClipTask(j.ID, variant)
@@ -314,8 +430,39 @@ func (h *Handlers) GetStreamGallery(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) GetStreamVideo(w http.ResponseWriter, r *http.Request) {
 	clipID := chi.URLParam(r, "clip_id")
 	h.streamStreamRenderArtifact(w, r, "video/mp4", func(id uuid.UUID, variant string) (string, error) {
-		return streamclips.RenderVideoKey(id, variant, clipID)
+		return h.streamVideoKey(id, variant, clipID)
 	})
+}
+
+// streamVideoKey resolves the storage key for a rendered clip. The render
+// result is the source of truth because the published entry may not sit at
+// the plain clip key (a captioned render publishes <clip_id>_captioned.mp4);
+// recomputing the key from the clip id alone 404s those clips. Falls back to
+// the conventional key when the result is missing or does not list the clip.
+func (h *Handlers) streamVideoKey(id uuid.UUID, variant, clipID string) (string, error) {
+	fallback, err := streamclips.RenderVideoKey(id, variant, clipID)
+	if err != nil {
+		return "", err
+	}
+	resultKey, err := streamclips.RenderResultKey(id, variant)
+	if err != nil {
+		return fallback, nil
+	}
+	rc, err := h.storage.Open(resultKey)
+	if err != nil {
+		return fallback, nil
+	}
+	defer rc.Close()
+	var result streamclips.RenderResult
+	if err := json.NewDecoder(rc).Decode(&result); err != nil {
+		return fallback, nil
+	}
+	for _, video := range result.Clips {
+		if video.ClipID == clipID && video.Key != "" {
+			return video.Key, nil
+		}
+	}
+	return fallback, nil
 }
 
 func (h *Handlers) streamReady(w http.ResponseWriter) bool {

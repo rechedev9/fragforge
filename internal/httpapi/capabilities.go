@@ -25,8 +25,26 @@ type Capabilities struct {
 	RecordEnabled  bool
 	ComposeEnabled bool
 	RenderEnabled  bool
-	RecordTools    []CaptureTool // recorder, HLAE, CS2
-	RenderTools    []CaptureTool // editor, ffmpeg
+	// YtdlpEnabled reports whether acquisition-by-URL (POST /api/stream-jobs
+	// with a source_url) can run: a yt-dlp binary is configured.
+	YtdlpEnabled bool
+	// WhisperEnabled reports whether a stream render can burn in captions using
+	// the local whisper.cpp backend: both a whisper-cli binary and a model
+	// file are configured.
+	WhisperEnabled bool
+	// GroqEnabled reports whether a stream render can burn in captions using
+	// the Groq cloud backend: a Groq API key is configured. The key itself is
+	// never reported, only this boolean.
+	GroqEnabled bool
+	RecordTools []CaptureTool // recorder, HLAE, CS2
+	RenderTools []CaptureTool // editor, ffmpeg
+	StreamTools []CaptureTool // yt-dlp, whisper binary, whisper model
+}
+
+// captionsEnabled reports whether at least one captions transcription
+// backend (Groq or local whisper) is configured.
+func (c Capabilities) captionsEnabled() bool {
+	return c.WhisperEnabled || c.GroqEnabled
 }
 
 // GetCapabilities handles GET /api/capabilities. It is read-only: the web UI
@@ -38,6 +56,12 @@ func (h *Handlers) GetCapabilities(w http.ResponseWriter, _ *http.Request) {
 		"record":  map[string]any{"enabled": c.RecordEnabled, "tools": resolveTools(c.RecordTools)},
 		"render":  map[string]any{"enabled": c.RenderEnabled, "tools": resolveTools(c.RenderTools)},
 		"compose": map[string]any{"enabled": c.ComposeEnabled},
+		"stream": map[string]any{
+			"ytdlp_enabled":   c.YtdlpEnabled,
+			"whisper_enabled": c.WhisperEnabled,
+			"groq_enabled":    c.GroqEnabled,
+			"tools":           resolveTools(c.StreamTools),
+		},
 	})
 }
 
@@ -68,5 +92,30 @@ func (h *Handlers) requireRecordEnabled(w http.ResponseWriter) bool {
 		return true
 	}
 	writeError(w, http.StatusConflict, "recording is not configured on this machine; set ZV_RECORDER_PATH, ZV_HLAE_PATH and ZV_CS2_PATH and restart the orchestrator")
+	return false
+}
+
+// requireYtdlpEnabled reports whether acquisition-by-URL is configured. When
+// it is not, it writes a 409 naming the env var to set, so POST
+// /api/stream-jobs with a source_url fails as an actionable 4xx instead of
+// creating a job no worker will ever advance.
+func (h *Handlers) requireYtdlpEnabled(w http.ResponseWriter) bool {
+	if h.capabilities.YtdlpEnabled {
+		return true
+	}
+	writeError(w, http.StatusConflict, "acquiring a stream job by URL is not configured on this machine; install yt-dlp on PATH (or set ZV_YTDLP_PATH) and restart the orchestrator")
+	return false
+}
+
+// requireCaptionsEnabled reports whether burned-in captions are configured,
+// via either the Groq cloud backend or the local whisper backend. When
+// neither is, it writes a 409 naming the env vars to set, so starting a
+// render with captions enabled fails fast instead of the worker failing
+// mid-render.
+func (h *Handlers) requireCaptionsEnabled(w http.ResponseWriter) bool {
+	if h.capabilities.captionsEnabled() {
+		return true
+	}
+	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but no transcription backend is configured on this machine; set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, and restart the orchestrator")
 	return false
 }
