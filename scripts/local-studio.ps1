@@ -52,8 +52,9 @@ New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 Write-Host "[local-studio] starting orchestrator (memory mode, capture auto-detected)..."
 # Set in the session so the orchestrator child inherits them (works on both
 # Windows PowerShell 5.1 and PowerShell 7; Start-Process -Environment is 7.4+).
-# memory mode = in-memory job repo + inline queue, no Postgres/Redis.
-$env:ZV_DATABASE_URL = "memory"
+# sqlite = on-disk job repo (<dataDir>/jobs.db) + inline queue, no Postgres/Redis,
+# so jobs survive a restart.
+$env:ZV_DATABASE_URL = "sqlite"
 $env:ZV_DATA_DIR = $dataDir
 $orchestrator = Start-Process -FilePath $binZv -ArgumentList "serve" -PassThru -NoNewWindow
 

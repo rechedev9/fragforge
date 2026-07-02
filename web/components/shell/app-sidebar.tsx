@@ -28,6 +28,7 @@ import { Progress } from '@/components/ui/progress';
 import { Wordmark } from '@/components/brand/wordmark';
 import { CaptureReadiness } from '@/components/shell/capture-readiness';
 import { useSession } from '@/lib/session';
+import { isLocalMode } from '@/lib/mode';
 import { cn } from '@/lib/utils';
 
 type NavItem = {
@@ -99,8 +100,10 @@ export function AppSidebar() {
 
       <SidebarFooter>
         <CaptureReadiness />
-        <SlotsMeter />
-        <UserMenu />
+        {/* Slots quota and Steam sign-in are cloud-only; local studio runs on
+            this PC, so the footer shows just capture readiness. */}
+        {!isLocalMode() && <SlotsMeter />}
+        {!isLocalMode() && <UserMenu />}
       </SidebarFooter>
     </Sidebar>
   );

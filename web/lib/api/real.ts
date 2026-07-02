@@ -300,6 +300,9 @@ export class RealApiClient implements ApiClient {
     const reels = Array.from(this.reels.values())
       .sort((a, b) => b.createdAt - a.createdAt)
       .map((v) => ({ ...v }));
+    // Local studio shows only the user's own real reels (persisted on this PC).
+    // Cloud/preview additionally shows demo seed videos for the design surface.
+    if (isLocalMode()) return reels;
     const seeds = await this.fallback.listVideos();
     return [...reels, ...seeds];
   }
@@ -528,6 +531,9 @@ export class RealApiClient implements ApiClient {
 
   /** Mints a one-time pairing code for the desktop agent (POST /api/pc/pair). */
   async pairPc(): Promise<{ pairingCode: string }> {
+    // Cloud-only: pairing hands work to a remote agent via Supabase. Local studio
+    // runs capture on this same machine, so there is nothing to pair.
+    if (isLocalMode()) return { pairingCode: '' };
     return readJson<{ pairingCode: string }>(await fetch('/api/pc/pair', { method: 'POST' }));
   }
 
@@ -537,6 +543,9 @@ export class RealApiClient implements ApiClient {
    * heartbeats, since the pending pairing row is excluded server-side.
    */
   async getPcStatus(): Promise<{ paired: boolean }> {
+    // Local studio is the machine itself; report paired without hitting the
+    // cloud-only /api/pc/status route (which needs Supabase).
+    if (isLocalMode()) return { paired: true };
     return readJson<{ paired: boolean }>(await fetch('/api/pc/status', { cache: 'no-store' }));
   }
 
@@ -566,6 +575,9 @@ export class RealApiClient implements ApiClient {
     }
   }
   listMatches(): Promise<Match[]> {
+    // Local studio has no cloud match library; the mock seeds are a design-only
+    // surface. A local match is opened by job id from the upload flow, not listed.
+    if (isLocalMode()) return Promise.resolve([]);
     return this.fallback.listMatches();
   }
   /** @deprecated Superseded by scanDemo + parseDemo. */
@@ -614,6 +626,8 @@ export class RealApiClient implements ApiClient {
   }
 
   listFeed(): Promise<FeedItem[]> {
+    // The community feed is a cloud surface; local studio shows no seeded feed.
+    if (isLocalMode()) return Promise.resolve([]);
     return this.fallback.listFeed();
   }
 }

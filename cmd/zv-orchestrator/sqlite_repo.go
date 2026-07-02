@@ -1,0 +1,213 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	_ "modernc.org/sqlite"
+
+	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/rules"
+)
+
+// sqliteJobRepository persists jobs in a local SQLite file so job state survives
+// an orchestrator restart, unlike the in-memory repository. It is the default
+// for the local desktop studio, which has no Postgres: the whole job.Job is
+// stored as a JSON document keyed by id, with status/created_at/updated_at
+// mirrored into columns for List ordering. modernc.org/sqlite is a pure-Go
+// driver, so no CGO or C toolchain is needed on Windows or in the static build.
+type sqliteJobRepository struct {
+	db *sql.DB
+}
+
+// newSQLiteJobRepository opens (creating if needed) the SQLite database at path
+// and ensures the jobs table exists. A single connection fully serializes
+// access, which for a local single-user studio removes all "database is locked"
+// contention; WAL keeps that durable and fast.
+func newSQLiteJobRepository(path string) (*sqliteJobRepository, error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA busy_timeout=5000",
+		"PRAGMA synchronous=NORMAL",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("sqlite %s: %w", pragma, err)
+		}
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS jobs (
+		id         TEXT PRIMARY KEY,
+		data       BLOB    NOT NULL,
+		status     TEXT    NOT NULL,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("create jobs table: %w", err)
+	}
+	return &sqliteJobRepository{db: db}, nil
+}
+
+// Close releases the underlying database handle.
+func (r *sqliteJobRepository) Close() error { return r.db.Close() }
+
+func (r *sqliteJobRepository) Create(ctx context.Context, j *job.Job) error {
+	if j.ID == uuid.Nil {
+		j.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	j.CreatedAt = now
+	j.UpdatedAt = now
+	data, err := json.Marshal(j)
+	if err != nil {
+		return fmt.Errorf("marshal job: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO jobs (id, data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		j.ID.String(), data, j.Status.String(), now.UnixNano(), now.UnixNano(),
+	)
+	if err != nil {
+		return fmt.Errorf("insert job: %w", err)
+	}
+	return nil
+}
+
+func (r *sqliteJobRepository) Get(ctx context.Context, id uuid.UUID) (job.Job, error) {
+	var data []byte
+	err := r.db.QueryRowContext(ctx, `SELECT data FROM jobs WHERE id = ?`, id.String()).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return job.Job{}, job.ErrNotFound
+	}
+	if err != nil {
+		return job.Job{}, fmt.Errorf("query job: %w", err)
+	}
+	var j job.Job
+	if err := json.Unmarshal(data, &j); err != nil {
+		return job.Job{}, fmt.Errorf("unmarshal job: %w", err)
+	}
+	return j, nil
+}
+
+func (r *sqliteJobRepository) GetMeta(ctx context.Context, id uuid.UUID) (job.Job, error) {
+	j, err := r.Get(ctx, id)
+	if err != nil {
+		return job.Job{}, err
+	}
+	j.KillPlan = nil
+	return j, nil
+}
+
+func (r *sqliteJobRepository) List(ctx context.Context, limit int) ([]job.Job, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT data FROM jobs ORDER BY updated_at DESC, created_at DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query jobs: %w", err)
+	}
+	defer rows.Close()
+
+	out := []job.Job{}
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("scan job: %w", err)
+		}
+		var j job.Job
+		if err := json.Unmarshal(data, &j); err != nil {
+			return nil, fmt.Errorf("unmarshal job: %w", err)
+		}
+		j.KillPlan = nil
+		out = append(out, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate jobs: %w", err)
+	}
+	return out, nil
+}
+
+func (r *sqliteJobRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status job.Status, failureReason string) error {
+	return r.mutate(ctx, id, func(j *job.Job) error {
+		j.Status = status
+		j.FailureReason = failureReason
+		return nil
+	})
+}
+
+func (r *sqliteJobRepository) SetParseInputs(ctx context.Context, id uuid.UUID, steamID string, rl rules.Rules) error {
+	return r.mutate(ctx, id, func(j *job.Job) error {
+		// Same status guard as the memory/Postgres repos: only a scanned or
+		// already-parsed job can be (re)claimed for a parse.
+		if j.Status != job.StatusScanned && j.Status != job.StatusParsed {
+			return job.ErrConflict
+		}
+		j.TargetSteamID = steamID
+		j.Rules = rl
+		j.Status = job.StatusParsing
+		return nil
+	})
+}
+
+func (r *sqliteJobRepository) SetKillPlan(ctx context.Context, id uuid.UUID, plan killplan.Plan) error {
+	return r.mutate(ctx, id, func(j *job.Job) error {
+		planCopy := plan
+		j.KillPlan = &planCopy
+		return nil
+	})
+}
+
+// mutate loads a job inside a transaction, applies fn, bumps UpdatedAt, and
+// writes the whole document back. The single-connection pool serializes writers,
+// so the read-modify-write is race-free. fn's error (e.g. job.ErrConflict) is
+// returned verbatim so callers can errors.Is on it.
+func (r *sqliteJobRepository) mutate(ctx context.Context, id uuid.UUID, fn func(*job.Job) error) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var data []byte
+	err = tx.QueryRowContext(ctx, `SELECT data FROM jobs WHERE id = ?`, id.String()).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return job.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("query job: %w", err)
+	}
+	var j job.Job
+	if err := json.Unmarshal(data, &j); err != nil {
+		return fmt.Errorf("unmarshal job: %w", err)
+	}
+	if err := fn(&j); err != nil {
+		return err
+	}
+	j.UpdatedAt = time.Now().UTC()
+	updated, err := json.Marshal(&j)
+	if err != nil {
+		return fmt.Errorf("marshal job: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE jobs SET data = ?, status = ?, updated_at = ? WHERE id = ?`,
+		updated, j.Status.String(), j.UpdatedAt.UnixNano(), id.String(),
+	); err != nil {
+		return fmt.Errorf("update job: %w", err)
+	}
+	return tx.Commit()
+}
