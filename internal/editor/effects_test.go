@@ -643,3 +643,143 @@ end)
 		t.Fatalf("manifest effects metadata missing: %#v", manifest)
 	}
 }
+
+func TestGeneratedHookEffect(t *testing.T) {
+	short := ShortEdit{HookText: true, Headline: "2K con AK-47 en de_ancient", DurationSeconds: 8}
+	effects := generatedHookEffect(short)
+	if len(effects) != 1 {
+		t.Fatalf("effects = %#v, want exactly one hook", effects)
+	}
+	hook := effects[0]
+	if hook.Type != EffectText || hook.Value != short.Headline {
+		t.Fatalf("hook = %#v, want text drawing the headline", hook)
+	}
+	if hook.X != "(w-text_w)/2" || hook.Y != "150" || hook.BoxColor != "none" || hook.ShadowColor == "" {
+		t.Fatalf("hook styling = %#v, want centered box-less shadowed text", hook)
+	}
+	if hook.StartSeconds != 0 || hook.EndSeconds != 1.8 {
+		t.Fatalf("hook window = %.3f..%.3f, want 0..1.8", hook.StartSeconds, hook.EndSeconds)
+	}
+
+	short.DurationSeconds = 1.0
+	if got := generatedHookEffect(short)[0].EndSeconds; got != 1.0 {
+		t.Fatalf("hook end on short clip = %.3f, want clamped to 1.0", got)
+	}
+
+	short.HookText = false
+	if got := generatedHookEffect(short); got != nil {
+		t.Fatalf("effects with hook disabled = %#v, want none", got)
+	}
+}
+
+func TestGeneratedHookEffectSupersedesIntro(t *testing.T) {
+	short := ShortEdit{Intro: true, HookText: true, Headline: "Highlight", DurationSeconds: 8}
+	for _, effect := range generatedBookendEffects(short) {
+		if effect.Type == EffectText && effect.StartSeconds == 0 {
+			t.Fatalf("intro text %#v drawn alongside the hook, want suppressed", effect)
+		}
+	}
+	short.HookText = false
+	var intro int
+	for _, effect := range generatedBookendEffects(short) {
+		if effect.Type == EffectText && effect.StartSeconds == 0 {
+			intro++
+		}
+	}
+	if intro != 1 {
+		t.Fatalf("intro effects with hook off = %d, want 1", intro)
+	}
+}
+
+func TestGeneratedKillCounterEffects(t *testing.T) {
+	short := ShortEdit{
+		KillCounter:     true,
+		DurationSeconds: 8,
+		Kills: []KillCue{
+			{TimeSeconds: 1.0, Tick: 100},
+			{TimeSeconds: 1.5, Tick: 132},
+			{TimeSeconds: 5.0, Tick: 356},
+		},
+	}
+	effects := generatedKillCounterEffects(short)
+	if len(effects) != 3 {
+		t.Fatalf("effects = %#v, want 3 counter pops", effects)
+	}
+	if effects[0].Value != "1" || effects[1].Value != "2" || effects[2].Value != "3K" {
+		t.Fatalf("values = %q %q %q, want 1, 2, 3K", effects[0].Value, effects[1].Value, effects[2].Value)
+	}
+	if effects[2].Size <= effects[0].Size {
+		t.Fatalf("milestone size = %d, want larger than %d", effects[2].Size, effects[0].Size)
+	}
+	// The first pop would run past the second kill; it must end when the next
+	// kill lands so pops never stack.
+	if effects[0].EndSeconds != 1.5 {
+		t.Fatalf("first pop end = %.3f, want clamped to next kill at 1.5", effects[0].EndSeconds)
+	}
+	if effects[1].EndSeconds != 2.45 {
+		t.Fatalf("second pop end = %.3f, want 2.45", effects[1].EndSeconds)
+	}
+
+	single := ShortEdit{KillCounter: true, DurationSeconds: 8, Kills: []KillCue{{TimeSeconds: 2}}}
+	got := generatedKillCounterEffects(single)
+	if len(got) != 1 || got[0].Value != "1" {
+		t.Fatalf("single-kill effects = %#v, want one plain 1 pop", got)
+	}
+
+	short.KillCounter = false
+	if got := generatedKillCounterEffects(short); got != nil {
+		t.Fatalf("effects with counter disabled = %#v, want none", got)
+	}
+}
+
+func TestKillMilestoneLabel(t *testing.T) {
+	tests := []struct {
+		kills int
+		want  string
+	}{
+		{kills: 1, want: ""},
+		{kills: 2, want: "2K"},
+		{kills: 3, want: "3K"},
+		{kills: 4, want: "4K"},
+		{kills: 5, want: "ACE"},
+		{kills: 7, want: "ACE"},
+	}
+	for _, tt := range tests {
+		if got := killMilestoneLabel(tt.kills); got != tt.want {
+			t.Errorf("killMilestoneLabel(%d) = %q, want %q", tt.kills, got, tt.want)
+		}
+	}
+}
+
+func TestGeneratedKillfeedEffects(t *testing.T) {
+	short := ShortEdit{
+		KillfeedOverlay: true,
+		DurationSeconds: 8,
+		Kills:           []KillCue{{TimeSeconds: 1.0, Tick: 100}, {TimeSeconds: 4.578, Tick: 329}},
+	}
+	effects := generatedKillfeedEffects(short)
+	if len(effects) != 2 {
+		t.Fatalf("effects = %#v, want one overlay per kill", effects)
+	}
+	first := effects[0]
+	if first.Type != EffectKillfeed || first.X != "W-w-18" || first.Y != "300" {
+		t.Fatalf("overlay = %#v, want killfeed near the top of the frame", first)
+	}
+	if first.CropX != 1558 || first.CropY != 64 || first.CropWidth != 360 || first.CropHeight != 110 || first.Width != 430 {
+		t.Fatalf("overlay crop = %#v, want the static killfeed defaults", first)
+	}
+	if first.StartSeconds != 0.65 || first.EndSeconds != 3.8 || first.AtSeconds != 1.0 {
+		t.Fatalf("overlay window = %.3f..%.3f at %.3f, want 0.65..3.80 at 1.0", first.StartSeconds, first.EndSeconds, first.AtSeconds)
+	}
+	if second := effects[1]; second.EndSeconds != 7.378 {
+		t.Fatalf("second overlay end = %.3f, want clamped 7.378", second.EndSeconds)
+	}
+
+	short.KillfeedOverlay = false
+	if got := generatedKillfeedEffects(short); got != nil {
+		t.Fatalf("effects with overlay disabled = %#v, want none", got)
+	}
+	if got := generatedKillfeedEffects(ShortEdit{KillfeedOverlay: true}); got != nil {
+		t.Fatalf("effects without kills = %#v, want none", got)
+	}
+}

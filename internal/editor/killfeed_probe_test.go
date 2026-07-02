@@ -224,3 +224,36 @@ func TestRefineKillfeedEffectsUsesShortInputWithoutParts(t *testing.T) {
 		t.Fatalf("probe at = %.3f, want %.3f", gotAt, want)
 	}
 }
+
+func TestRefineKillfeedEffectsDropsGeneratedOverlayWithoutHighlight(t *testing.T) {
+	short := ShortEdit{
+		Input:           "seg-001.mp4",
+		DurationSeconds: 12,
+		Effects: []Effect{
+			{Type: EffectZoom, StartSeconds: 0.8, EndSeconds: 1.4, Scale: 1.08},
+			{Type: EffectKillfeed, StartSeconds: 1, EndSeconds: 4, AtSeconds: 1.05, CropX: 1558, CropY: 64, CropWidth: 360, CropHeight: 110, Width: 430, Source: "edit-request"},
+			{Type: EffectKillfeed, StartSeconds: 5, EndSeconds: 8, AtSeconds: 5.05, CropX: 1558, CropY: 64, CropWidth: 360, CropHeight: 110, Width: 430, Source: "kill"},
+		},
+	}
+	probe := func(string, float64) (image.Image, error) {
+		return image.NewRGBA(image.Rect(0, 0, 1920, 1080)), nil
+	}
+
+	warnings := refineKillfeedEffects(&short, probe)
+	if len(warnings) != 2 {
+		t.Fatalf("warnings = %v, want one per killfeed effect", warnings)
+	}
+	if !strings.Contains(warnings[0], "dropping overlay") || !strings.Contains(warnings[1], "keeping default crop") {
+		t.Fatalf("warnings = %v, want generated dropped and scripted kept", warnings)
+	}
+	if len(short.Effects) != 2 {
+		t.Fatalf("effects = %#v, want the generated overlay removed", short.Effects)
+	}
+	if short.Effects[0].Type != EffectZoom {
+		t.Fatalf("effects[0] = %#v, want the zoom untouched", short.Effects[0])
+	}
+	kept := short.Effects[1]
+	if kept.Type != EffectKillfeed || kept.Source != "kill" || kept.CropX != 1558 {
+		t.Fatalf("effects[1] = %#v, want the scripted killfeed with default crop", kept)
+	}
+}

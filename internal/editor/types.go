@@ -61,7 +61,19 @@ type Config struct {
 	Transition          string
 	Intro               bool
 	Outro               bool
-	OutputFPS           int
+	// HookText draws the generated headline over the first ~2s of each short.
+	HookText bool
+	// KillCounter pops a running kill count (with a 2K/3K/4K/ACE milestone on
+	// the final kill) at each kill cue.
+	KillCounter bool
+	// KillfeedOverlay re-overlays the source's kill notices near the top of
+	// the frame, so the killfeed survives the 9:16 center crop. Only applies
+	// to presets whose capture actually shows a killfeed.
+	KillfeedOverlay bool
+	// TailTrimSeconds ends each kill clip this many seconds after its final
+	// kill, cutting the recorded quit-tick dead air. Zero disables trimming.
+	TailTrimSeconds float64
+	OutputFPS       int
 	CompileSegments     bool
 	LineupCatalogPath   string
 	SegmentIDs          []string
@@ -98,6 +110,10 @@ type ManifestOptions struct {
 	Transition          string
 	Intro               bool
 	Outro               bool
+	HookText            bool
+	KillCounter         bool
+	KillfeedOverlay     bool
+	TailTrimSeconds     float64
 	OutputFPS           int
 	CompileSegments     bool
 	LineupCatalogPath   string
@@ -139,6 +155,10 @@ type Manifest struct {
 	Transition        string      `json:"transition,omitempty"`
 	Intro             bool        `json:"intro,omitempty"`
 	Outro             bool        `json:"outro,omitempty"`
+	HookText          bool        `json:"hook_text,omitempty"`
+	KillCounter       bool        `json:"kill_counter,omitempty"`
+	KillfeedOverlay   bool        `json:"killfeed_overlay,omitempty"`
+	TailTrimSeconds   float64     `json:"tail_trim_seconds,omitempty"`
 	OutputFPS         int         `json:"output_fps,omitempty"`
 	CompileSegments   bool        `json:"compile_segments,omitempty"`
 	LineupCatalogPath string      `json:"lineup_catalog_path,omitempty"`
@@ -179,6 +199,10 @@ type ShortEdit struct {
 	Transition        string                      `json:"transition,omitempty"`
 	Intro             bool                        `json:"intro,omitempty"`
 	Outro             bool                        `json:"outro,omitempty"`
+	HookText          bool                        `json:"hook_text,omitempty"`
+	KillCounter       bool                        `json:"kill_counter,omitempty"`
+	KillfeedOverlay   bool                        `json:"killfeed_overlay,omitempty"`
+	TailTrimSeconds   float64                     `json:"tail_trim_seconds,omitempty"`
 	OutputFPS         int                         `json:"output_fps,omitempty"`
 	VideoCRF          int                         `json:"video_crf,omitempty"`
 	VideoPreset       string                      `json:"video_preset,omitempty"`
@@ -275,6 +299,10 @@ type Result struct {
 	Transition        string        `json:"transition,omitempty"`
 	Intro             bool          `json:"intro,omitempty"`
 	Outro             bool          `json:"outro,omitempty"`
+	HookText          bool          `json:"hook_text,omitempty"`
+	KillCounter       bool          `json:"kill_counter,omitempty"`
+	KillfeedOverlay   bool          `json:"killfeed_overlay,omitempty"`
+	TailTrimSeconds   float64       `json:"tail_trim_seconds,omitempty"`
 	OutputFPS         int           `json:"output_fps,omitempty"`
 	CompileSegments   bool          `json:"compile_segments,omitempty"`
 	LineupCatalogPath string        `json:"lineup_catalog_path,omitempty"`
@@ -309,6 +337,10 @@ type ShortResult struct {
 	Transition         string                      `json:"transition,omitempty"`
 	Intro              bool                        `json:"intro,omitempty"`
 	Outro              bool                        `json:"outro,omitempty"`
+	HookText           bool                        `json:"hook_text,omitempty"`
+	KillCounter        bool                        `json:"kill_counter,omitempty"`
+	KillfeedOverlay    bool                        `json:"killfeed_overlay,omitempty"`
+	TailTrimSeconds    float64                     `json:"tail_trim_seconds,omitempty"`
 	OutputFPS          int                         `json:"output_fps,omitempty"`
 	VideoCRF           int                         `json:"video_crf,omitempty"`
 	VideoPreset        string                      `json:"video_preset,omitempty"`

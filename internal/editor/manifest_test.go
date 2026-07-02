@@ -778,3 +778,172 @@ func containsArg(args []string, want string) bool {
 	}
 	return false
 }
+
+func TestTailTrimmedDuration(t *testing.T) {
+	kills := []KillCue{{TimeSeconds: 1.0}, {TimeSeconds: 4.578}}
+	tests := []struct {
+		name     string
+		kills    []KillCue
+		duration float64
+		tail     float64
+		want     float64
+	}{
+		{name: "no kills keeps duration", kills: nil, duration: 8, tail: 1.5, want: 8},
+		{name: "zero tail disables trim", kills: kills, duration: 8, tail: 0, want: 8},
+		{name: "trims dead air after final kill", kills: kills, duration: 8, tail: 1.5, want: 6.078},
+		{name: "tail beyond clip end keeps duration", kills: kills, duration: 5, tail: 1.5, want: 5},
+		{name: "unknown duration stays unknown", kills: kills, duration: 0, tail: 1.5, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tailTrimmedDuration(tt.kills, tt.duration, tt.tail); got != tt.want {
+				t.Fatalf("tailTrimmedDuration = %.3f, want %.3f", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildManifestAppliesRetentionOverlaysAndTailTrim(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.HookText = true
+	opts.KillCounter = true
+	opts.KillfeedOverlay = true
+	opts.TailTrimSeconds = 1.5
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	first := manifest.Shorts[0]
+	lastKill := first.Kills[len(first.Kills)-1].TimeSeconds
+	if want := roundMillis(lastKill + 1.5); first.DurationSeconds != want {
+		t.Fatalf("duration = %.3f, want tail-trimmed %.3f", first.DurationSeconds, want)
+	}
+
+	var hooks, counters, killfeeds []Effect
+	for _, effect := range first.Effects {
+		switch {
+		case effect.Type == EffectText && effect.Y == "150":
+			hooks = append(hooks, effect)
+		case effect.Type == EffectText && effect.Y == "h*0.62":
+			counters = append(counters, effect)
+		case effect.Type == EffectKillfeed:
+			killfeeds = append(killfeeds, effect)
+		}
+	}
+	if len(hooks) != 1 || hooks[0].Value != first.Headline {
+		t.Fatalf("hook effects = %#v, want one drawing headline %q", hooks, first.Headline)
+	}
+	if len(counters) != 2 || counters[0].Value != "1" || counters[1].Value != "2K" {
+		t.Fatalf("counter effects = %#v, want values 1 and 2K", counters)
+	}
+	if len(killfeeds) != len(first.Kills) {
+		t.Fatalf("killfeed effects = %d, want one per kill (%d)", len(killfeeds), len(first.Kills))
+	}
+	command := strings.Join(first.FFmpegCommand, " ")
+	if !strings.Contains(command, "-filter_complex") || !strings.Contains(command, "split=3[main][kfsrc0][kfsrc1]") {
+		t.Fatalf("command = %q, want killfeed filter_complex split", command)
+	}
+	if !strings.Contains(command, "-t 6.078") {
+		t.Fatalf("command = %q, want tail trim -t 6.078", command)
+	}
+}
+
+func TestBuildManifestKillfeedOverlayRequiresKillfeedSourcePreset(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.Preset = PresetCleanPOV60
+	opts.HookText = true
+	opts.KillfeedOverlay = true
+
+	manifest := BuildManifest(result, opts)
+	first := manifest.Shorts[0]
+	if first.KillfeedOverlay {
+		t.Fatal("KillfeedOverlay = true, want disabled for clean-pov capture")
+	}
+	for _, effect := range first.Effects {
+		if effect.Type == EffectKillfeed {
+			t.Fatalf("unexpected killfeed effect %#v for clean-pov preset", effect)
+		}
+	}
+	var hooks int
+	for _, effect := range first.Effects {
+		if effect.Type == EffectText && effect.Y == "150" {
+			hooks++
+		}
+	}
+	if hooks != 1 {
+		t.Fatalf("hook effects = %d, want 1 (hook is preset-independent)", hooks)
+	}
+}
+
+func TestBuildManifestCompiledTailTrimsParts(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.CompileSegments = true
+	opts.TailTrimSeconds = 1.5
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	short := manifest.Shorts[0]
+	for i, part := range short.Parts {
+		lastKill := part.Kills[len(part.Kills)-1].TimeSeconds
+		want := roundMillis(lastKill + 1.5)
+		if part.DurationSeconds != want {
+			t.Fatalf("part[%d] duration = %.3f, want tail-trimmed %.3f", i, part.DurationSeconds, want)
+		}
+	}
+	command := short.FFmpegCommand
+	for i, arg := range command {
+		if arg == "-t" && i+2 < len(command) && command[i+1] == "6.078" && command[i+2] == "-i" {
+			return
+		}
+	}
+	t.Fatalf("command = %v, want input-level -t 6.078 before the first part input", command)
+}
+
+func TestBuildManifestCompiledRhythmSkipsTailTrim(t *testing.T) {
+	dir := t.TempDir()
+	rhythmPath := filepath.Join(dir, "rhythm.json")
+	if err := os.WriteFile(rhythmPath, []byte(`{
+		"schema_version":"1.0",
+		"segment_sync":[
+			{"segment_id":"seg-001","timeline_start_seconds":0.500,"gap_before_seconds":0.500},
+			{"segment_id":"seg-002","timeline_start_seconds":9.000,"gap_before_seconds":1.000}
+		]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.CompileSegments = true
+	opts.MusicPath = filepath.Join(dir, "music", "beat.wav")
+	opts.RhythmPath = rhythmPath
+	opts.TailTrimSeconds = 1.5
+
+	manifest := BuildManifest(result, opts)
+	found := false
+	for _, warning := range manifest.Warnings {
+		if strings.Contains(warning, "tail trim skipped") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %v, want tail trim skipped notice", manifest.Warnings)
+	}
+	short := manifest.Shorts[0]
+	if got := short.Parts[0].DurationSeconds; got != 8 {
+		t.Fatalf("part[0] duration = %.3f, want untrimmed 8.000", got)
+	}
+	for _, arg := range short.FFmpegCommand {
+		if arg == "-t" {
+			t.Fatalf("command = %v, want no -t under rhythm sync", short.FFmpegCommand)
+		}
+	}
+}

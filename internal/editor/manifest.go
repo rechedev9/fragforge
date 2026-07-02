@@ -83,6 +83,9 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
+	// The killfeed overlay only makes sense when the capture actually shows a
+	// killfeed; a clean-pov capture has nothing to crop.
+	killfeedOverlay := opts.KillfeedOverlay && renderPreset.KillfeedSource
 	hqFilters := opts.HQFilters || renderPreset.HQFilters
 	audioNormalize := opts.AudioNormalize || renderPreset.AudioNormalize
 	qualityChecks := opts.QualityChecks || renderPreset.QualityChecks
@@ -114,6 +117,10 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		Transition:        transition,
 		Intro:             opts.Intro,
 		Outro:             opts.Outro,
+		HookText:          opts.HookText,
+		KillCounter:       opts.KillCounter,
+		KillfeedOverlay:   killfeedOverlay,
+		TailTrimSeconds:   opts.TailTrimSeconds,
 		OutputFPS:         outputFPS,
 		CompileSegments:   opts.CompileSegments,
 		LineupCatalogPath: opts.LineupCatalogPath,
@@ -152,6 +159,12 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		if err != nil {
 			return manifest, err
 		}
+		if rhythmSync != nil && opts.TailTrimSeconds > 0 {
+			// Rhythm sync placed each segment on the beat grid using the full
+			// clip durations; trimming tails here would shift every later
+			// segment off its beat.
+			manifest.Warnings = append(manifest.Warnings, "tail trim skipped: rhythm sync uses untrimmed segment durations")
+		}
 		compiled, err := buildCompiledShort(result, opts, compiledShortOptions{
 			BaseDir:           baseDir,
 			PromptDir:         promptDir,
@@ -169,6 +182,10 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			Transition:        transition,
 			Intro:             opts.Intro,
 			Outro:             opts.Outro,
+			HookText:          opts.HookText,
+			KillCounter:       opts.KillCounter,
+			KillfeedOverlay:   killfeedOverlay,
+			TailTrimSeconds:   opts.TailTrimSeconds,
 			OutputFPS:         outputFPS,
 			HQFilters:         hqFilters,
 			AudioNormalize:    audioNormalize,
@@ -231,7 +248,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		if smokeCount > 0 && killCount == 0 {
 			publishBase = publishSmokeFileBase(index, safeID, player, mapName, smokes[0])
 		}
-		duration := clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds)
+		duration := tailTrimmedDuration(kills, clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds), opts.TailTrimSeconds)
 		coverTime := coverTimeSeconds(kills, duration)
 		if len(kills) == 0 && len(smokes) > 0 {
 			coverTime = coverTimeSecondsForSmoke(smokes[0], duration)
@@ -258,6 +275,10 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			Transition:        transition,
 			Intro:             opts.Intro,
 			Outro:             opts.Outro,
+			HookText:          opts.HookText,
+			KillCounter:       opts.KillCounter,
+			KillfeedOverlay:   killfeedOverlay,
+			TailTrimSeconds:   opts.TailTrimSeconds,
 			OutputFPS:         outputFPS,
 			VideoCRF:          videoCRF,
 			VideoPreset:       videoPreset,
@@ -329,6 +350,10 @@ type compiledShortOptions struct {
 	Transition        string
 	Intro             bool
 	Outro             bool
+	HookText          bool
+	KillCounter       bool
+	KillfeedOverlay   bool
+	TailTrimSeconds   float64
 	HQFilters         bool
 	AudioNormalize    bool
 	TemporalSmoothing bool
@@ -354,7 +379,13 @@ func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, 
 		if !ok {
 			continue
 		}
+		partKills := killCues(segment, result.Plan.Tickrate)
 		duration := clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds)
+		if c.RhythmSync == nil {
+			// Rhythm sync placed segments using untrimmed durations, so tails
+			// are only trimmed on beat-free compilations (see buildManifest).
+			duration = tailTrimmedDuration(partKills, duration, c.TailTrimSeconds)
+		}
 		if duration <= 0 {
 			continue
 		}
@@ -374,7 +405,6 @@ func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, 
 				return ShortEdit{}, fmt.Errorf("rhythm sync for %s starts before previous segment", segment.ID)
 			}
 		}
-		partKills := killCues(segment, result.Plan.Tickrate)
 		for _, kill := range partKills {
 			kill.TimeSeconds += partStart
 			kills = append(kills, kill)
@@ -421,6 +451,10 @@ func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, 
 		Transition:        c.Transition,
 		Intro:             opts.Intro,
 		Outro:             opts.Outro,
+		HookText:          c.HookText,
+		KillCounter:       c.KillCounter,
+		KillfeedOverlay:   c.KillfeedOverlay,
+		TailTrimSeconds:   tailTrimForRhythm(c),
 		OutputFPS:         c.OutputFPS,
 		VideoCRF:          c.VideoCRF,
 		VideoPreset:       c.VideoPreset,
@@ -777,6 +811,39 @@ func coverTimeSecondsForSmoke(smoke SmokeCue, duration float64) float64 {
 		return duration
 	}
 	return t
+}
+
+// tailTrimmedDuration shortens a clip to end tailSeconds after its final kill,
+// cutting the recorded quit-tick dead air. Kill-less clips (smoke lineups) and
+// a zero tail keep the full duration, and the trim never lands before the last
+// kill itself so a tick/frame offset cannot clip the payoff off-screen.
+func tailTrimmedDuration(kills []KillCue, duration, tailSeconds float64) float64 {
+	if tailSeconds <= 0 || len(kills) == 0 || duration <= 0 {
+		return duration
+	}
+	lastKill := kills[0].TimeSeconds
+	for _, kill := range kills[1:] {
+		if kill.TimeSeconds > lastKill {
+			lastKill = kill.TimeSeconds
+		}
+	}
+	trimmed := lastKill + tailSeconds
+	if trimmed >= duration {
+		return duration
+	}
+	if trimmed < lastKill {
+		return lastKill
+	}
+	return roundMillis(trimmed)
+}
+
+// tailTrimForRhythm reports the effective tail trim for a compiled short: zero
+// under rhythm sync, where trimming is skipped to keep segments on the beat.
+func tailTrimForRhythm(c compiledShortOptions) float64 {
+	if c.RhythmSync != nil {
+		return 0
+	}
+	return c.TailTrimSeconds
 }
 
 func clipDuration(segment recording.RecordingSegment, tickrate int, clipDuration float64) float64 {

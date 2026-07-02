@@ -31,31 +31,43 @@ const (
 // refineKillfeedEffects replaces the static killfeed crop defaults with a
 // per-kill measurement: it samples the source frame just after each kill,
 // finds the red highlight box CS2 draws around the recording player's own
-// kill notice, and crops exactly that entry. Detection failures keep the
-// static crop and are reported as warnings.
+// kill notice, and crops exactly that entry. Probe errors keep the static
+// crop and are reported as warnings. When the probe runs but explicitly finds
+// no highlight, generated ("edit-request") overlays are dropped instead —
+// overlaying the static region would paint arbitrary scene pixels — while
+// script-authored effects keep the crop the author asked for.
 func refineKillfeedEffects(short *ShortEdit, probe func(input string, atSeconds float64) (image.Image, error)) []string {
 	if probe == nil {
 		return nil
 	}
 	var warnings []string
+	kept := short.Effects[:0]
 	for i := range short.Effects {
 		effect := &short.Effects[i]
 		if effect.Type != EffectKillfeed {
+			kept = append(kept, *effect)
 			continue
 		}
 		input, sampleAt := killfeedSampleSource(short, *effect)
 		if input == "" {
 			warnings = append(warnings, fmt.Sprintf("killfeed crop at %.2fs: no source input to probe; keeping default crop", effect.StartSeconds))
+			kept = append(kept, *effect)
 			continue
 		}
 		frame, err := probe(input, sampleAt)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("killfeed crop at %.2fs: %v; keeping default crop", effect.StartSeconds, err))
+			kept = append(kept, *effect)
 			continue
 		}
 		rect, ok := detectKillfeedHighlight(frame)
 		if !ok {
+			if effect.Source == "edit-request" {
+				warnings = append(warnings, fmt.Sprintf("killfeed crop at %.2fs: no highlighted kill notice detected in %s; dropping overlay", effect.StartSeconds, input))
+				continue
+			}
 			warnings = append(warnings, fmt.Sprintf("killfeed crop at %.2fs: no highlighted kill notice detected in %s; keeping default crop", effect.StartSeconds, input))
+			kept = append(kept, *effect)
 			continue
 		}
 		effect.CropX = rect.Min.X
@@ -63,7 +75,9 @@ func refineKillfeedEffects(short *ShortEdit, probe func(input string, atSeconds 
 		effect.CropWidth = rect.Dx()
 		effect.CropHeight = rect.Dy()
 		effect.Width = int(float64(rect.Dx())*killfeedOverlayScale + 0.5)
+		kept = append(kept, *effect)
 	}
+	short.Effects = kept
 	return warnings
 }
 

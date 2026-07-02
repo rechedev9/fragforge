@@ -120,6 +120,10 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		Transition:          cfg.Transition,
 		Intro:               cfg.Intro,
 		Outro:               cfg.Outro,
+		HookText:            cfg.HookText,
+		KillCounter:         cfg.KillCounter,
+		KillfeedOverlay:     cfg.KillfeedOverlay,
+		TailTrimSeconds:     cfg.TailTrimSeconds,
 		OutputFPS:           cfg.OutputFPS,
 		CompileSegments:     cfg.CompileSegments,
 		LineupCatalogPath:   cfg.LineupCatalogPath,
@@ -240,6 +244,9 @@ func (c Config) validate() error {
 	if _, err := normalizeTransition(c.Transition); err != nil {
 		return err
 	}
+	if c.TailTrimSeconds < 0 || c.TailTrimSeconds > 10 {
+		return fmt.Errorf("tail trim seconds must be between 0 and 10")
+	}
 	if c.RhythmPath != "" && c.MusicPath == "" {
 		return fmt.Errorf("rhythm path requires music path")
 	}
@@ -328,6 +335,10 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 		Transition:        manifest.Transition,
 		Intro:             manifest.Intro,
 		Outro:             manifest.Outro,
+		HookText:          manifest.HookText,
+		KillCounter:       manifest.KillCounter,
+		KillfeedOverlay:   manifest.KillfeedOverlay,
+		TailTrimSeconds:   manifest.TailTrimSeconds,
 		OutputFPS:         manifest.OutputFPS,
 		CompileSegments:   manifest.CompileSegments,
 		LineupCatalogPath: manifest.LineupCatalogPath,
@@ -361,6 +372,10 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 			Transition:        short.Transition,
 			Intro:             short.Intro,
 			Outro:             short.Outro,
+			HookText:          short.HookText,
+			KillCounter:       short.KillCounter,
+			KillfeedOverlay:   short.KillfeedOverlay,
+			TailTrimSeconds:   short.TailTrimSeconds,
 			OutputFPS:         short.OutputFPS,
 			VideoCRF:          short.VideoCRF,
 			VideoPreset:       short.VideoPreset,

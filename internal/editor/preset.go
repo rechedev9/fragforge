@@ -47,6 +47,11 @@ type RenderPreset struct {
 	CoverSheets       bool
 	TemporalSmoothing bool
 
+	// KillfeedSource reports whether the preset's capture shows an in-game
+	// killfeed, i.e. whether there is a death-notice region worth cropping and
+	// re-overlaying into the 9:16 frame.
+	KillfeedSource bool
+
 	// HUDMode is the recording-stage HUD hint passed to zv-recorder --hud.
 	// Empty means the recorder default (full gameplay HUD). The render
 	// stage never reads it; it only travels through `zv short`.
@@ -76,6 +81,7 @@ var renderPresets = []RenderPreset{
 		AudioNormalize: true,
 		QualityChecks:  true,
 		CoverSheets:    true,
+		KillfeedSource: true,
 		HUDMode:        "deathnotices",
 	},
 	{
@@ -108,6 +114,7 @@ var renderPresets = []RenderPreset{
 		AudioNormalize: true,
 		QualityChecks:  true,
 		CoverSheets:    true,
+		KillfeedSource: true,
 		HUDMode:        "gameplay",
 	},
 }

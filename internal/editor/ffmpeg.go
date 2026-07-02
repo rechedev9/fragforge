@@ -25,18 +25,32 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		"-y",
 		"-v", "error",
 		"-i", short.Input,
-		"-map", "0:v:0",
-		"-map", "0:a?",
-		"-vf", VideoFilter(short),
+	}
+	// Killfeed overlays need the source stream twice (program feed + crop
+	// branches), which -vf cannot express; plain renders keep the historical
+	// -vf command.
+	if killfeeds := killfeedEffects(short.Effects); len(killfeeds) > 0 {
+		command = append(command,
+			"-filter_complex", strings.Join(singleClipVideoClauses(short, killfeeds), ";"),
+			"-map", "[v]",
+			"-map", "0:a?",
+		)
+	} else {
+		command = append(command,
+			"-map", "0:v:0",
+			"-map", "0:a?",
+			"-vf", VideoFilter(short),
+		)
+	}
+	command = append(command,
 		"-c:v", "libx264",
 		"-preset", videoPresetForCommand(short.VideoPreset),
 		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
-	}
-	command = appendAudioEncodeArgs(command, short)
-	return append(command,
-		"-movflags", "+faststart",
-		short.Output,
 	)
+	command = appendAudioEncodeArgs(command, short)
+	command = append(command, "-movflags", "+faststart")
+	command = append(command, tailTrimArgs(short)...)
+	return append(command, short.Output)
 }
 
 func BuildMusicFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
@@ -48,9 +62,13 @@ func BuildMusicFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		audioOut += ",loudnorm=I=-16:TP=-1.5:LRA=11"
 	}
 	audioOut += "[a]"
+	videoClauses := []string{fmt.Sprintf("[0:v]%s[v]", VideoFilter(short))}
+	if killfeeds := killfeedEffects(short.Effects); len(killfeeds) > 0 {
+		videoClauses = singleClipVideoClauses(short, killfeeds)
+	}
 	filter := fmt.Sprintf(
-		"[0:v]%s[v];[0:a]volume=0.20[game];[1:a]volume=1.00[music];%s",
-		VideoFilter(short),
+		"%s;[0:a]volume=0.20[game];[1:a]volume=1.00[music];%s",
+		strings.Join(videoClauses, ";"),
 		audioOut,
 	)
 	command := []string{
@@ -68,11 +86,54 @@ func BuildMusicFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		"-crf", fmt.Sprintf("%d", videoCRFForCommand(short.VideoCRF)),
 	}
 	command = appendAudioCodecArgs(command)
-	return append(command,
-		"-movflags", "+faststart",
-		"-shortest",
-		short.Output,
-	)
+	command = append(command, "-movflags", "+faststart")
+	command = append(command, tailTrimArgs(short)...)
+	return append(command, "-shortest", short.Output)
+}
+
+// tailTrimArgs bounds the output to the tail-trimmed duration. Emitted only
+// when a trim is in play (a positive tail and kills to anchor it), so
+// untrimmed renders keep their historical commands.
+func tailTrimArgs(short ShortEdit) []string {
+	if short.TailTrimSeconds <= 0 || short.DurationSeconds <= 0 || len(short.Kills) == 0 {
+		return nil
+	}
+	return []string{"-t", fmt.Sprintf("%.3f", short.DurationSeconds)}
+}
+
+// singleClipVideoClauses builds the filter_complex video clauses for a
+// single-clip short with killfeed overlays: the source splits into the main
+// program feed plus one branch per overlay, each branch crops and freezes its
+// kill notice, and the frozen badges chain onto the filtered main feed. Same
+// clause shape as the compiled path in CompilationFilter.
+func singleClipVideoClauses(short ShortEdit, killfeeds []Effect) []string {
+	split := fmt.Sprintf("[0:v]split=%d[main]", len(killfeeds)+1)
+	for i := range killfeeds {
+		split += fmt.Sprintf("[kfsrc%d]", i)
+	}
+	clauses := []string{
+		split,
+		fmt.Sprintf("[main]%s[vbase]", VideoFilter(short)),
+	}
+	current := "vbase"
+	for i, effect := range killfeeds {
+		_, sampleSeconds := killfeedSamplePart(&short, effect)
+		killfeedLabel := fmt.Sprintf("kf%d", i)
+		next := fmt.Sprintf("vkf%d", i)
+		clauses = append(clauses,
+			fmt.Sprintf("[kfsrc%d]%s[%s]", i, killfeedCropFilter(effect, short, sampleSeconds), killfeedLabel),
+			fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
+				current,
+				killfeedLabel,
+				effectPosition(effect.X, "W-w-18"),
+				effectPosition(effect.Y, "438"),
+				betweenExpression(effect.StartSeconds, effect.EndSeconds),
+				next,
+			),
+		)
+		current = next
+	}
+	return append(clauses, fmt.Sprintf("[%s]format=yuv420p[v]", current))
 }
 
 func appendAudioEncodeArgs(command []string, short ShortEdit) []string {
@@ -99,6 +160,11 @@ func BuildCompilationFFmpegCommand(ffmpegPath string, short ShortEdit) []string 
 		"-v", "error",
 	}
 	for _, part := range short.Parts {
+		// Input-level trim keeps the concat filtergraph untouched while the
+		// tail-trimmed part durations stay the timeline source of truth.
+		if short.TailTrimSeconds > 0 && len(part.Kills) > 0 {
+			command = append(command, "-t", fmt.Sprintf("%.3f", part.DurationSeconds))
+		}
 		command = append(command, "-i", part.Input)
 	}
 	if short.MusicPath != "" {
@@ -167,7 +233,7 @@ func CompilationFilter(short ShortEdit) string {
 			killfeedLabel := fmt.Sprintf("kf%d", i)
 			next := fmt.Sprintf("vkf%d", i)
 			clauses = append(clauses,
-				fmt.Sprintf("[%d:v]%s[%s]", partIndex, compilationKillfeedCropFilter(effect, short, sampleSeconds), killfeedLabel),
+				fmt.Sprintf("[%d:v]%s[%s]", partIndex, killfeedCropFilter(effect, short, sampleSeconds), killfeedLabel),
 				fmt.Sprintf("[%s][%s]overlay=x=%s:y=%s:format=auto:enable='%s'[%s]",
 					current,
 					killfeedLabel,
@@ -223,11 +289,11 @@ func compilationPartIndexAt(parts []ShortPart, effect Effect) int {
 	return index
 }
 
-// compilationKillfeedCropFilter crops the killfeed region from the probed
+// killfeedCropFilter crops the killfeed region from the probed
 // source frame and freezes it for the whole compiled timeline. The notice
 // background is translucent, so playing it live would carry moving source
 // footage inside the overlay; a frozen frame reads as a static badge.
-func compilationKillfeedCropFilter(effect Effect, short ShortEdit, sampleSeconds float64) string {
+func killfeedCropFilter(effect Effect, short ShortEdit, sampleSeconds float64) string {
 	cropWidth := effect.CropWidth
 	if cropWidth == 0 {
 		cropWidth = 360

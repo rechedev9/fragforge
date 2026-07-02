@@ -34,6 +34,10 @@ func run() error {
 		transition          = flag.String("transition", editor.TransitionFlash, "transition style: cut, flash, whip, dip")
 		intro               = flag.Bool("intro", false, "add an intro title overlay")
 		outro               = flag.Bool("outro", false, "add an outro title overlay")
+		hook                = flag.Bool("hook", true, "draw the generated headline as a hook over the first ~2s")
+		killCounter         = flag.Bool("kill-counter", true, "pop a running kill count with 2K/3K/4K/ACE milestones")
+		killfeedOverlay     = flag.Bool("killfeed-overlay", true, "re-overlay the source kill notices near the top of the 9:16 frame")
+		tailTrim            = flag.Float64("tail-trim", 1.5, "end each kill clip this many seconds after its final kill; 0 disables")
 		outputFPS           = flag.Int("fps", 0, "optional final output FPS; defaults to 60")
 		compileSegments     = flag.Bool("compile-segments", false, "render selected segments as one compilation short")
 		lineupCatalogPath   = flag.String("lineup-catalog", "", "optional directory with manual smoke lineup catalog JSON files")
@@ -84,6 +88,10 @@ func run() error {
 		Transition:          *transition,
 		Intro:               *intro,
 		Outro:               *outro,
+		HookText:            *hook,
+		KillCounter:         *killCounter,
+		KillfeedOverlay:     *killfeedOverlay,
+		TailTrimSeconds:     *tailTrim,
 		OutputFPS:           *outputFPS,
 		CompileSegments:     *compileSegments,
 		LineupCatalogPath:   *lineupCatalogPath,

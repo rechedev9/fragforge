@@ -116,7 +116,149 @@ func generatedEditEffects(short ShortEdit) []Effect {
 	var effects []Effect
 	effects = append(effects, generatedKillEffects(short)...)
 	effects = append(effects, generatedTransitionEffects(short)...)
+	effects = append(effects, generatedHookEffect(short)...)
+	effects = append(effects, generatedKillCounterEffects(short)...)
+	effects = append(effects, generatedKillfeedEffects(short)...)
 	effects = append(effects, generatedBookendEffects(short)...)
+	return effects
+}
+
+// generatedHookEffect draws the generated headline over the first ~2 seconds
+// as the viral hook: centered in the top safe zone, above the killfeed
+// overlay band, box-less with a drop shadow so it reads over bright skyboxes.
+func generatedHookEffect(short ShortEdit) []Effect {
+	if !short.HookText {
+		return nil
+	}
+	title := bookendTitle(short)
+	if title == "" {
+		return nil
+	}
+	size := 64
+	if isLandscapeOutput(short) {
+		size = 52
+	}
+	return []Effect{{
+		Type:           EffectText,
+		Value:          title,
+		X:              "(w-text_w)/2",
+		Y:              "150",
+		Size:           size,
+		FontColor:      "white@0.96",
+		BoxColor:       "none",
+		ShadowColor:    "black@0.85",
+		ShadowX:        3,
+		ShadowY:        3,
+		StartSeconds:   0,
+		EndSeconds:     transitionEnd(short, 1.8),
+		FadeInSeconds:  0.12,
+		FadeOutSeconds: 0.35,
+		Source:         "edit-request",
+	}}
+}
+
+// generatedKillCounterEffects pops a running kill count at each kill cue, with
+// a milestone label (2K/3K/4K/ACE) replacing the plain number on the final
+// kill of a multi-kill. Pops end at the next kill when kills land closer than
+// the pop window, so labels never stack.
+func generatedKillCounterEffects(short ShortEdit) []Effect {
+	if !short.KillCounter || len(short.Kills) == 0 {
+		return nil
+	}
+	effects := make([]Effect, 0, len(short.Kills))
+	for i, kill := range short.Kills {
+		value := fmt.Sprintf("%d", i+1)
+		size := 60
+		if i == len(short.Kills)-1 && len(short.Kills) >= 2 {
+			value = killMilestoneLabel(len(short.Kills))
+			size = 72
+		}
+		start := clampSeconds(kill.TimeSeconds+0.05, 0, short.DurationSeconds)
+		end := kill.TimeSeconds + 0.95
+		if i+1 < len(short.Kills) && short.Kills[i+1].TimeSeconds < end {
+			end = short.Kills[i+1].TimeSeconds
+		}
+		end = clampSeconds(end, 0, short.DurationSeconds)
+		if end <= start {
+			continue
+		}
+		effects = append(effects, Effect{
+			Type:               EffectText,
+			Value:              value,
+			X:                  "(w-text_w)/2",
+			Y:                  "h*0.62",
+			Size:               size,
+			FontColor:          "white@0.95",
+			BoxColor:           "none",
+			ShadowColor:        "black@0.85",
+			ShadowX:            3,
+			ShadowY:            3,
+			StartSeconds:       start,
+			EndSeconds:         end,
+			FadeOutSeconds:     0.25,
+			Source:             "edit-request",
+			SourceKillTick:     kill.Tick,
+			SourceKillWeapon:   kill.Weapon,
+			SourceKillVictim:   kill.Victim,
+			SourceKillHeadshot: kill.Headshot,
+		})
+	}
+	return effects
+}
+
+// killMilestoneLabel names the multi-kill milestone for the final kill pop.
+func killMilestoneLabel(kills int) string {
+	switch {
+	case kills >= 5:
+		return "ACE"
+	case kills == 4:
+		return "4K"
+	case kills == 3:
+		return "3K"
+	case kills == 2:
+		return "2K"
+	default:
+		return ""
+	}
+}
+
+// generatedKillfeedEffects re-overlays the source's kill notice for each kill,
+// so the killfeed survives the 9:16 center crop that discards the 16:9
+// top-right corner. The static crop defaults mirror the proven Lua killfeed
+// defaults; refineKillfeedEffects replaces them with a per-kill probe of the
+// real highlight box.
+func generatedKillfeedEffects(short ShortEdit) []Effect {
+	if !short.KillfeedOverlay || len(short.Kills) == 0 {
+		return nil
+	}
+	effects := make([]Effect, 0, len(short.Kills))
+	for _, kill := range short.Kills {
+		start := clampSeconds(kill.TimeSeconds-0.35, 0, short.DurationSeconds)
+		end := clampSeconds(kill.TimeSeconds+2.80, 0, short.DurationSeconds)
+		if end <= start {
+			continue
+		}
+		effects = append(effects, Effect{
+			Type:               EffectKillfeed,
+			StartSeconds:       start,
+			EndSeconds:         end,
+			AtSeconds:          kill.TimeSeconds,
+			X:                  "W-w-18",
+			Y:                  "300",
+			Width:              430,
+			CropX:              1558,
+			CropY:              64,
+			CropWidth:          360,
+			CropHeight:         110,
+			FadeInSeconds:      0.12,
+			FadeOutSeconds:     0.30,
+			Source:             "edit-request",
+			SourceKillTick:     kill.Tick,
+			SourceKillWeapon:   kill.Weapon,
+			SourceKillVictim:   kill.Victim,
+			SourceKillHeadshot: kill.Headshot,
+		})
+	}
 	return effects
 }
 
@@ -208,7 +350,9 @@ func generatedTransitionEffects(short ShortEdit) []Effect {
 func generatedBookendEffects(short ShortEdit) []Effect {
 	var effects []Effect
 	width, height := outputDimensions(short)
-	if short.Intro {
+	// The hook text already opens the short with the same headline, so the
+	// intro title only draws when the hook is off — never both.
+	if short.Intro && !short.HookText {
 		effects = append(effects, Effect{
 			Type:           EffectText,
 			Value:          bookendTitle(short),
