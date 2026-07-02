@@ -4,12 +4,29 @@ This catalog contains royalty-free / open-license instrumental tracks used as
 background music for FragForge highlight reels. All tracks permit redistribution
 and use in user-generated videos.
 
-Two license families are present:
+Three license families are present:
 
+- **AI-generated**: tracks generated in-house with Google Gemini music
+  generation for FragForge. No attribution required.
 - **CC0** (Creative Commons Zero / public domain): no attribution required.
 - **CC-BY-4.0** (Creative Commons Attribution 4.0): attribution **required**
   whenever the track is published in a video. Use the exact credit line given
   below for each track.
+
+---
+
+## AI-generated tracks (no attribution required)
+
+Generated with Google Gemini music generation (2026-07-02) from FragForge's
+viral CS2 phonk prompt templates. Owned by this project; no credit line needed.
+
+| id                   | title                | genre           | license      |
+|----------------------|----------------------|-----------------|--------------|
+| concrete-teeth       | Concrete Teeth       | phonk           | AI-generated |
+| night-ambush         | Night Ambush         | phonk           | AI-generated |
+| shadow-pursuit       | Shadow Pursuit       | phonk           | AI-generated |
+| late-winter-latitude | Late Winter Latitude | phonk           | AI-generated |
+| concrete-tamborzao   | Concrete Tamborzão   | brazilian-phonk | AI-generated |
 
 ---
 

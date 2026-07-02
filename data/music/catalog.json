@@ -1,6 +1,56 @@
 {
   "tracks": [
     {
+      "id": "concrete-teeth",
+      "title": "Concrete Teeth",
+      "artist": "FragForge (Gemini)",
+      "genre": "phonk",
+      "durationSec": 31,
+      "ext": "mp3",
+      "license": "AI-generated",
+      "attributionRequired": false
+    },
+    {
+      "id": "night-ambush",
+      "title": "Night Ambush",
+      "artist": "FragForge (Gemini)",
+      "genre": "phonk",
+      "durationSec": 31,
+      "ext": "mp3",
+      "license": "AI-generated",
+      "attributionRequired": false
+    },
+    {
+      "id": "shadow-pursuit",
+      "title": "Shadow Pursuit",
+      "artist": "FragForge (Gemini)",
+      "genre": "phonk",
+      "durationSec": 31,
+      "ext": "mp3",
+      "license": "AI-generated",
+      "attributionRequired": false
+    },
+    {
+      "id": "late-winter-latitude",
+      "title": "Late Winter Latitude",
+      "artist": "FragForge (Gemini)",
+      "genre": "phonk",
+      "durationSec": 30,
+      "ext": "mp3",
+      "license": "AI-generated",
+      "attributionRequired": false
+    },
+    {
+      "id": "concrete-tamborzao",
+      "title": "Concrete Tamborzão",
+      "artist": "FragForge (Gemini)",
+      "genre": "brazilian-phonk",
+      "durationSec": 31,
+      "ext": "mp3",
+      "license": "AI-generated",
+      "attributionRequired": false
+    },
+    {
       "id": "dnb-1",
       "title": "Drum n Bass B Drive",
       "artist": "FreePD",
