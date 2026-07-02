@@ -90,9 +90,21 @@ async function provisionMusic() {
     return;
   }
   for (const t of tracks) {
-    if (!t.id || !t.ext || !t.downloadUrl) continue;
+    if (!t.id || !t.ext) continue;
     const dest = path.join(musicDir, `${t.id}.${t.ext}`);
     if (fs.existsSync(dest)) continue;
+    // Local-only tracks (no downloadUrl, e.g. AI-generated) ship inside the
+    // installer's music resources; copy them instead of downloading.
+    if (!t.downloadUrl) {
+      const bundledAudio = resourcePath('music', `${t.id}.${t.ext}`);
+      if (fs.existsSync(bundledAudio)) {
+        fs.copyFileSync(bundledAudio, dest);
+        process.stdout.write(`[music] copied bundled ${t.id}.${t.ext}\n`);
+      } else {
+        process.stdout.write(`[music] skip ${t.id}: no downloadUrl and no bundled audio\n`);
+      }
+      continue;
+    }
     // Download to a temp name and rename so a half-written file never shows up
     // as a playable track.
     const tmp = `${dest}.part`;
@@ -261,7 +273,10 @@ async function boot() {
     return;
   }
 
-  if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${webPort}/upload`);
+  // Land on the dashboard (the app shell), not a single flow: Studio has both
+  // the demo-upload flow and the Twitch stream-clips flow, and the sidebar is
+  // the only place that offers both.
+  if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${webPort}/matches`);
 }
 
 function shutdown() {

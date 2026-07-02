@@ -8,7 +8,7 @@
 // (pure Node fs), because the real build runs on Windows.
 
 import { execSync } from 'node:child_process';
-import { existsSync, rmSync, mkdirSync, cpSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, cpSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,9 +66,21 @@ cpSync(zvEditor, join(out, 'bin', 'zv-editor.exe'));
 const recorder = join(bin, 'zv-recorder.exe');
 if (existsSync(recorder)) cpSync(recorder, join(out, 'bin', 'zv-recorder.exe'));
 
-// Music metadata only: main.js downloads the CC0/CC-BY tracks listed in the
-// catalog into the user's data dir on first boot, keeping the installer small.
+// Music: catalog.json plus any local-only audio (tracks without a downloadUrl,
+// e.g. the AI-generated ones). Remote CC0/CC-BY tracks are still downloaded by
+// main.js on first boot, keeping the installer small.
 mkdirSync(join(out, 'music'), { recursive: true });
-cpSync(join(repo, 'data', 'music', 'catalog.json'), join(out, 'music', 'catalog.json'));
+const musicSrc = join(repo, 'data', 'music');
+cpSync(join(musicSrc, 'catalog.json'), join(out, 'music', 'catalog.json'));
+const musicCatalog = JSON.parse(readFileSync(join(musicSrc, 'catalog.json'), 'utf8'));
+for (const t of musicCatalog.tracks ?? []) {
+  if (t.downloadUrl || !t.id || !t.ext) continue;
+  const audio = join(musicSrc, `${t.id}.${t.ext}`);
+  if (!existsSync(audio)) {
+    console.error(`\nmissing local-only track audio ${audio} (catalog id ${t.id})\n`);
+    process.exit(1);
+  }
+  cpSync(audio, join(out, 'music', `${t.id}.${t.ext}`));
+}
 
 console.log('[assemble] done -> ' + out);
