@@ -103,13 +103,18 @@ async function provisionHlae() {
   if (fs.existsSync(hlaeExe)) return hlaeExe;
 
   fs.mkdirSync(hlaeDir, { recursive: true });
-  const zipPath = path.join(hlaeDir, 'hlae.zip.part');
+  const zipPart = path.join(hlaeDir, 'hlae.zip.part');
+  const zipPath = path.join(hlaeDir, 'hlae.zip');
   try {
     logLine(`[hlae] downloading HLAE ${HLAE_VERSION}...\n`);
-    const digest = await downloadFile(HLAE_ZIP_URL, zipPath);
+    const digest = await downloadFile(HLAE_ZIP_URL, zipPart);
     if (digest !== HLAE_ZIP_SHA256) {
       throw new Error(`sha256 mismatch: got ${digest}, want ${HLAE_ZIP_SHA256}`);
     }
+    // Only a fully-downloaded, hash-verified archive gets the .zip name:
+    // Expand-Archive refuses any other extension, and the rename doubles as
+    // the "download completed" marker a .part convention provides.
+    fs.renameSync(zipPart, zipPath);
     // Expand-Archive ships with every Windows 10/11 PowerShell; no unzip dep.
     await new Promise((resolve, reject) => {
       const ps = spawn(
@@ -130,6 +135,7 @@ async function provisionHlae() {
     logLine(`[hlae] provisioning failed (capture falls back to a manual install): ${err}\n`);
     return '';
   } finally {
+    fs.rmSync(zipPart, { force: true });
     fs.rmSync(zipPath, { force: true });
   }
 }
@@ -395,7 +401,7 @@ async function boot() {
     logLine(`[boot] failed: ${err}\n`);
     if (mainWindow) {
       mainWindow.loadURL(
-        'data:text/html,' +
+        'data:text/html;charset=utf-8,' +
           encodeURIComponent(`<body style="font:16px system-ui;background:#0a0a0a;color:#eee;padding:2rem">
             <h2>FragForge Studio no pudo arrancar</h2>
             <p>${String(err).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>
