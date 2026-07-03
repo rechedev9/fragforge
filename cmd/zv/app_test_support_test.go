@@ -1474,7 +1474,7 @@ func writeWorkflowDocs(t *testing.T, root string) {
 	claudeReadmeLines := []string{
 		"# Claude",
 		"",
-		"Rules: .claude/rules/go-style.md and .claude/rules/zackvideo-operations.md",
+		"Style and operational rules live in CLAUDE.md.",
 		"",
 		"```bash",
 		"scripts/claude-run.sh",
@@ -1498,8 +1498,17 @@ func writeWorkflowDocs(t *testing.T, root string) {
 	writeFile(t, filepath.Join(root, "CLAUDE.md"), strings.Join([]string{
 		"# Claude",
 		"",
-		"Style rules: .claude/rules/go-style.md",
-		"Operational rules: .claude/rules/zackvideo-operations.md",
+		"Write boring, idiomatic Go.",
+		"Do not introduce `util`, `common`, `helper`, `manager`, or vague service layers.",
+		"Add useful context when returning errors.",
+		"Every goroutine must have a clear owner and stop condition.",
+		"",
+		"## TypeScript style (web/)",
+		"",
+		"No `any`, ever: use `unknown` and narrow it.",
+		"No re-exports: update every import when moving code.",
+		"",
+		"Do not add generated video/audio/image artifacts to git.",
 		"",
 		"```bash",
 		`CLAUDE_DRY_RUN=1 scripts/claude-run.sh .claude/commands/zv-tdd.md "custom prompt run"`,
@@ -1525,30 +1534,6 @@ func writeWorkflowDocs(t *testing.T, root string) {
 	for _, fixture := range claudeReviewerAgentFixtures() {
 		writeFile(t, filepath.Join(root, filepath.FromSlash(fixture.path)), fixture.body)
 	}
-	writeFile(t, filepath.Join(root, ".claude", "rules", "go-style.md"), strings.Join([]string{
-		"# Go style rule",
-		"",
-		"Use Google-style Go: clarity, simplicity, concision, maintainability, and repo consistency.",
-		"Avoid `util`, `common`, `helper`, `manager`, and generic service layers.",
-		"Return errors with context.",
-		"Respect context cancellation around subprocesses, DB, Redis, HTTP, and workers.",
-		"Every goroutine needs an owner, a stop condition, and a test strategy.",
-		"",
-	}, "\n"))
-	writeFile(t, filepath.Join(root, ".claude", "rules", "zackvideo-operations.md"), strings.Join([]string{
-		"# FragForge operational rule",
-		"",
-		"Safe by default:",
-		"- `scripts/go-gate.sh --no-format` after targeted tests pass",
-		"",
-		"Ask first:",
-		"- HLAE/CS2 launch or real capture",
-		"- Docker compose and database migrations",
-		"- cleanup scripts that delete artifacts",
-		"",
-		"Never add generated `.mp4`, `.mov`, `.webm`, `.avi`, `.mkv`, `.dem`, frame, or large render artifacts to git.",
-		"",
-	}, "\n"))
 	writeFile(t, filepath.Join(root, ".claude", "settings.json"), claudeSettingsFixture())
 }
 

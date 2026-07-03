@@ -248,7 +248,6 @@ When adding a new pipeline stage or failure path, record its errors through `int
 
 Write boring, idiomatic Go.
 Optimize for the reader.
-Repo-local style rules are also mirrored in `.claude/rules/go-style.md`.
 
 Priorities, in order:
 

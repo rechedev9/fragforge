@@ -1142,7 +1142,7 @@ func TestRunWorkflowsCheckRejectsUndocumentedClaudeReviewerAgent(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowsCheckRejectsRelaxedClaudeOperationRule(t *testing.T) {
+func TestRunWorkflowsCheckRejectsClaudeRulesMirror(t *testing.T) {
 	tempDir := t.TempDir()
 	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
 		"---",
@@ -1156,17 +1156,10 @@ func TestRunWorkflowsCheckRejectsRelaxedClaudeOperationRule(t *testing.T) {
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	writeFile(t, filepath.Join(tempDir, ".claude", "rules", "zackvideo-operations.md"), strings.Join([]string{
-		"# FragForge operational rule",
+	writeFile(t, filepath.Join(tempDir, ".claude", "rules", "go-style.md"), strings.Join([]string{
+		"# Go style rule",
 		"",
-		"Safe by default:",
-		"",
-		"- `scripts/go-gate.sh --no-format` after targeted tests pass",
-		"",
-		"Ask first:",
-		"",
-		"- HLAE/CS2 launch or real capture",
-		"- Docker compose and database migrations",
+		"A stray mirror of the CLAUDE.md style section.",
 		"",
 	}, "\n"))
 	withWorkingDir(t, tempDir)
@@ -1177,9 +1170,44 @@ func TestRunWorkflowsCheckRejectsRelaxedClaudeOperationRule(t *testing.T) {
 	if got, want := code, exitInvalidArgs; got != want {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
+	if want := `.claude/rules/go-style.md: style rules live in CLAUDE.md; remove this .claude/rules mirror`; !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
+func TestRunWorkflowsCheckRejectsMissingClaudeStyleGuidance(t *testing.T) {
+	tempDir := t.TempDir()
+	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
+		"---",
+		"name: alpha",
+		`description: "Alpha workflow"`,
+		"---",
+		"",
+		"```powershell",
+		`.\bin\zv.exe workflows run demo-parse -- --demo demo.dem --steamid 76561198000000000 --out plan.json`,
+		"```",
+		"",
+	}, "\n"))
+	writeWorkflowDocs(t, tempDir)
+	claudePath := filepath.Join(tempDir, "CLAUDE.md")
+	body, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read CLAUDE.md fixture: %v", err)
+	}
+	stripped := strings.ReplaceAll(string(body), "Every goroutine must have a clear owner and stop condition.", "")
+	stripped = strings.ReplaceAll(stripped, "No `any`, ever: use `unknown` and narrow it.", "")
+	writeFile(t, claudePath, stripped)
+	withWorkingDir(t, tempDir)
+
+	var stdout, stderr strings.Builder
+	code := Run([]string{"zv", "workflows", "check"}, &stdout, &stderr, nil, &fakeRunner{})
+
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d", got, want)
+	}
 	for _, want := range []string{
-		`.claude/rules/zackvideo-operations.md: missing claude rule guidance "cleanup scripts that delete artifacts"`,
-		`.claude/rules/zackvideo-operations.md: missing claude rule guidance "Never add generated ` + "`.mp4`" + `"`,
+		`CLAUDE.md: missing style guidance "Every goroutine must have a clear owner and stop condition."`,
+		`CLAUDE.md: missing style guidance "No ` + "`any`" + `, ever"`,
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
