@@ -63,19 +63,48 @@ function logLine(text) {
   }
 }
 
-// HLAE is a hard requirement for capture but is third-party (advancedfx, MIT)
-// and was previously left for the user to install by hand — the #1 "NO
-// ENCONTRADA" support report. Provision it like the music catalog: download
-// the official release zip (pinned version + sha256) into userData on first
-// boot, extract it, and point the orchestrator at it via ZV_HLAE_PATH (env
-// always wins over auto-detection). The zip ships its LICENSES/ folder, so
-// attribution travels with the install.
-const HLAE_VERSION = '2.190.1';
-const HLAE_ZIP_URL =
-  'https://github.com/advancedfx/advancedfx/releases/download/v2.190.1/hlae_2_190_1.zip';
-const HLAE_ZIP_SHA256 = 'b8c0a6d99201ba017e877c3ba95fd1c3a60b33dc1159218828c7c0a785e59ca3';
-const hlaeDir = path.join(app.getPath('userData'), 'hlae', HLAE_VERSION);
-const hlaeExe = path.join(hlaeDir, 'HLAE.exe');
+// Third-party tools the pipeline needs at runtime but that cannot ship inside
+// the installer (size, licensing hygiene): they are provisioned into userData
+// on first boot from pinned release URLs with pinned sha256 digests, then
+// handed to the orchestrator via env vars (env always wins over its
+// auto-detection). Every download is best-effort: a failure just leaves that
+// feature unconfigured, the UI explains, and the next boot retries.
+//
+// - HLAE (advancedfx, MIT): drives CS2 capture. Zip ships its LICENSES/.
+// - FFmpeg (BtbN autobuild, GPL): every render (reels and stream clips) shells
+//   out to ffmpeg/ffprobe; without it nothing can be rendered on a clean PC.
+//   Pinned to a dated autobuild tag because the "latest" tag's assets are
+//   replaced daily and would break the hash.
+// - yt-dlp (Unlicense): fetches Twitch/YouTube sources for Stream Clips.
+const toolsRoot = () => path.join(app.getPath('userData'), 'tools');
+const TOOLS = {
+  hlae: {
+    version: '2.190.1',
+    url: 'https://github.com/advancedfx/advancedfx/releases/download/v2.190.1/hlae_2_190_1.zip',
+    sha256: 'b8c0a6d99201ba017e877c3ba95fd1c3a60b33dc1159218828c7c0a785e59ca3',
+    kind: 'zip',
+    exeRel: 'HLAE.exe',
+    timeoutMs: 90_000,
+    // Pre-tools-dir layout kept for installs provisioned by 0.2.11/0.2.12.
+    legacyDir: () => path.join(app.getPath('userData'), 'hlae', '2.190.1'),
+  },
+  ffmpeg: {
+    version: 'n8.1.2',
+    url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-03-13-21/ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1.zip',
+    sha256: 'e0337e822bc66d01747bfa917080561739252aaceef3bccc049bcb299d6f9be0',
+    kind: 'zip',
+    exeRel: path.join('ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1', 'bin', 'ffmpeg.exe'),
+    timeoutMs: 300_000, // ~80 MB; generous for slow lines, capped so boot never wedges
+  },
+  ytdlp: {
+    version: '2026.06.09',
+    url: 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp.exe',
+    sha256: '3a48cb955d55c8821b60ccbdbbc6f61bc958f2f3d3b7ad5eaf3d83a543293a27',
+    kind: 'exe',
+    exeRel: 'yt-dlp.exe',
+    timeoutMs: 90_000,
+  },
+};
 
 /** Downloads url to destPath and returns its sha256 hex digest. */
 async function downloadFile(url, destPath) {
@@ -92,52 +121,104 @@ async function downloadFile(url, destPath) {
   return hash.digest('hex');
 }
 
-/**
- * Ensures HLAE is installed under userData and returns the HLAE.exe path, or
- * '' when provisioning failed (offline, bad hash); the orchestrator then falls
- * back to auto-detecting a manual C:\HLAE-* install. Idempotent: subsequent
- * boots see the existing exe and return instantly.
- */
-async function provisionHlae() {
-  if (process.platform !== 'win32') return '';
-  if (fs.existsSync(hlaeExe)) return hlaeExe;
+/** Single-quote a string for a PowerShell command ('' escapes ' inside). */
+function psQuote(s) {
+  return `'${s.replace(/'/g, "''")}'`;
+}
 
-  fs.mkdirSync(hlaeDir, { recursive: true });
-  const zipPart = path.join(hlaeDir, 'hlae.zip.part');
-  const zipPath = path.join(hlaeDir, 'hlae.zip');
-  try {
-    logLine(`[hlae] downloading HLAE ${HLAE_VERSION}...\n`);
-    const digest = await downloadFile(HLAE_ZIP_URL, zipPart);
-    if (digest !== HLAE_ZIP_SHA256) {
-      throw new Error(`sha256 mismatch: got ${digest}, want ${HLAE_ZIP_SHA256}`);
-    }
-    // Only a fully-downloaded, hash-verified archive gets the .zip name:
-    // Expand-Archive refuses any other extension, and the rename doubles as
-    // the "download completed" marker a .part convention provides.
-    fs.renameSync(zipPart, zipPath);
-    // Expand-Archive ships with every Windows 10/11 PowerShell; no unzip dep.
-    await new Promise((resolve, reject) => {
-      const ps = spawn(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command',
-          `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${hlaeDir}' -Force`],
-        { windowsHide: true },
-      );
-      let stderr = '';
-      ps.stderr.on('data', (b) => { stderr += b; });
-      ps.on('error', reject);
-      ps.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`Expand-Archive exited ${code}: ${stderr.trim()}`))));
-    });
-    if (!fs.existsSync(hlaeExe)) throw new Error(`HLAE.exe missing after extraction in ${hlaeDir}`);
-    logLine(`[hlae] installed ${hlaeExe}\n`);
-    return hlaeExe;
-  } catch (err) {
-    logLine(`[hlae] provisioning failed (capture falls back to a manual install): ${err}\n`);
-    return '';
-  } finally {
-    fs.rmSync(zipPart, { force: true });
-    fs.rmSync(zipPath, { force: true });
+/** Expand-Archive via PowerShell (ships with every Windows 10/11). */
+function expandArchive(zipPath, destDir) {
+  return new Promise((resolve, reject) => {
+    const ps = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command',
+        `Expand-Archive -LiteralPath ${psQuote(zipPath)} -DestinationPath ${psQuote(destDir)} -Force`],
+      { windowsHide: true },
+    );
+    let stderr = '';
+    ps.stderr.on('data', (b) => { stderr += b; });
+    ps.on('error', reject);
+    ps.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`Expand-Archive exited ${code}: ${stderr.trim()}`))));
+  });
+}
+
+/**
+ * Ensures one tool from TOOLS is installed under userData\tools and returns
+ * its exe path, or '' on failure (offline, bad hash, timeout); the caller then
+ * simply omits the env var and the orchestrator falls back to auto-detection.
+ * Idempotent: a cached install returns instantly. Each tool is capped by its
+ * own timeout so one stalled download can never wedge the boot.
+ */
+async function provisionTool(name) {
+  const tool = TOOLS[name];
+  const dir = path.join(toolsRoot(), name, tool.version);
+  const exe = path.join(dir, tool.exeRel);
+  if (fs.existsSync(exe)) return exe;
+  if (tool.legacyDir) {
+    const legacy = path.join(tool.legacyDir(), tool.exeRel);
+    if (fs.existsSync(legacy)) return legacy;
   }
+
+  const work = (async () => {
+    fs.mkdirSync(dir, { recursive: true });
+    const part = path.join(dir, 'download.part');
+    const zipPath = path.join(dir, 'download.zip');
+    try {
+      logLine(`[tools] downloading ${name} ${tool.version}...\n`);
+      const digest = await downloadFile(tool.url, part);
+      if (digest !== tool.sha256) {
+        throw new Error(`sha256 mismatch: got ${digest}, want ${tool.sha256}`);
+      }
+      if (tool.kind === 'exe') {
+        fs.renameSync(part, exe);
+      } else {
+        // Only a fully-downloaded, hash-verified archive gets the .zip name:
+        // Expand-Archive refuses any other extension, and the rename doubles
+        // as the "download completed" marker a .part convention provides.
+        fs.renameSync(part, zipPath);
+        await expandArchive(zipPath, dir);
+      }
+      if (!fs.existsSync(exe)) throw new Error(`${tool.exeRel} missing after install in ${dir}`);
+      logLine(`[tools] installed ${exe}\n`);
+      return exe;
+    } finally {
+      fs.rmSync(part, { force: true });
+      fs.rmSync(zipPath, { force: true });
+    }
+  })();
+
+  try {
+    return await Promise.race([
+      work,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`timed out after ${tool.timeoutMs}ms`)), tool.timeoutMs)),
+    ]);
+  } catch (err) {
+    logLine(`[tools] ${name} provisioning failed (feature stays unconfigured, retried next boot): ${err}\n`);
+    return '';
+  }
+}
+
+/**
+ * Provisions all runtime tools concurrently and returns the env vars to hand
+ * the orchestrator. ffprobe.exe sits next to ffmpeg.exe in the same archive.
+ */
+async function provisionTools() {
+  if (process.platform !== 'win32') return {};
+  const [hlae, ffmpeg, ytdlp] = await Promise.all([
+    provisionTool('hlae'),
+    provisionTool('ffmpeg'),
+    provisionTool('ytdlp'),
+  ]);
+  const env = {};
+  if (hlae) env.ZV_HLAE_PATH = hlae;
+  if (ffmpeg) {
+    env.ZV_FFMPEG_PATH = ffmpeg;
+    const ffprobe = path.join(path.dirname(ffmpeg), 'ffprobe.exe');
+    if (fs.existsSync(ffprobe)) env.ZV_FFPROBE_PATH = ffprobe;
+  }
+  if (ytdlp) env.ZV_YTDLP_PATH = ytdlp;
+  return env;
 }
 
 /** GET that follows redirects (archive.org download links bounce to mirrors). */
@@ -359,25 +440,23 @@ async function boot() {
   // /api/songs rescans the dir per request.
   provisionMusic().catch((err) => logLine(`[music] provision failed: ${err}\n`));
 
-  // HLAE must be resolved before the orchestrator spawns (tool paths are read
-  // once at startup). First boot downloads ~9 MB; later boots return the
-  // cached install instantly. Capped so a stalled download can never wedge the
-  // app: worst case we boot without HLAE and the capture card says so.
-  const hlaePath = await Promise.race([
-    provisionHlae(),
-    new Promise((resolve) => setTimeout(() => resolve(''), 45000)),
-  ]);
+  // Runtime tools (HLAE, FFmpeg, yt-dlp) must be resolved before the
+  // orchestrator spawns (tool paths are read once at startup). First boot
+  // downloads ~110 MB total; later boots return the cached installs instantly.
+  // Each tool has its own timeout, so worst case the app boots without one and
+  // the UI says which feature is unconfigured.
+  const toolEnv = await provisionTools();
 
   // The orchestrator: SQLite job repo on disk (so reels survive an app restart)
-  // + inline queue, capture and render tools auto-detected (HLAE/CS2/recorder/
-  // editor/ffmpeg). "sqlite" with no path stores <dataDir>/jobs.db. Loopback
-  // bind needs no mutation token.
+  // + inline queue, capture and render tools from the provisioned env above,
+  // anything missing auto-detected (CS2/recorder/editor). "sqlite" with no
+  // path stores <dataDir>/jobs.db. Loopback bind needs no mutation token.
   const orch = launch('orchestrator', orchestratorExe, [], {
     ZV_DATABASE_URL: 'sqlite',
     ZV_DATA_DIR: dataDir,
     ZV_HTTP_ADDR: `127.0.0.1:${orchPort}`,
     ZV_MUSIC_DIR: musicDir,
-    ...(hlaePath ? { ZV_HLAE_PATH: hlaePath } : {}),
+    ...toolEnv,
   });
 
   // The Next.js standalone server, run by Electron's own Node (no separate Node

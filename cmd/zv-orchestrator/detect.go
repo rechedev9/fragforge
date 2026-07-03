@@ -110,6 +110,9 @@ func detectCS2() string {
 		roots = append(roots, steam)
 		roots = append(roots, steamLibraryPaths(filepath.Join(steam, `steamapps\libraryfolders.vdf`))...)
 	}
+	// The registry is the most authoritative root: it covers Steam installed
+	// anywhere (D:\Steam, a second drive), which the fixed-path probes miss.
+	addRoot(steamRootFromRegistry())
 	addRoot(`C:\Program Files (x86)\Steam`)
 	if pf := os.Getenv("ProgramFiles(x86)"); pf != "" {
 		addRoot(filepath.Join(pf, "Steam"))
@@ -118,6 +121,37 @@ func detectCS2() string {
 		if p := firstExisting(filepath.Join(root, rel)); p != "" {
 			return p
 		}
+	}
+	return ""
+}
+
+// steamRootFromRegistry reads the user's Steam install dir from the registry
+// (HKCU\Software\Valve\Steam, value SteamPath). Best-effort like the other
+// probes: any failure returns "".
+func steamRootFromRegistry() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	out, err := exec.Command("reg", "query", `HKCU\Software\Valve\Steam`, "/v", "SteamPath").Output()
+	if err != nil {
+		return ""
+	}
+	return filepath.FromSlash(steamPathFromRegOutput(string(out)))
+}
+
+// steamPathFromRegOutput extracts the SteamPath REG_SZ value from `reg query`
+// output. The value may contain spaces, so everything after the REG_SZ column
+// is the path.
+func steamPathFromRegOutput(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "SteamPath") {
+			continue
+		}
+		_, value, found := strings.Cut(line, "REG_SZ")
+		if !found {
+			continue
+		}
+		return strings.TrimSpace(value)
 	}
 	return ""
 }

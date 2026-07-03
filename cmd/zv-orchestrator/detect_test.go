@@ -104,3 +104,41 @@ func TestFirstExisting(t *testing.T) {
 		t.Errorf("firstExisting = %q, want empty", got)
 	}
 }
+
+func TestSteamPathFromRegOutput(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		want string
+	}{
+		{
+			name: "standard output",
+			out: "\r\nHKEY_CURRENT_USER\\Software\\Valve\\Steam\r\n" +
+				"    SteamPath    REG_SZ    d:/steam\r\n\r\n",
+			want: `d:/steam`,
+		},
+		{
+			name: "path with spaces",
+			out: "\r\nHKEY_CURRENT_USER\\Software\\Valve\\Steam\r\n" +
+				"    SteamPath    REG_SZ    D:\\My Games\\Steam\r\n",
+			want: `D:\My Games\Steam`,
+		},
+		{
+			name: "value missing",
+			out:  "\r\nHKEY_CURRENT_USER\\Software\\Valve\\Steam\r\n",
+			want: "",
+		},
+		{
+			name: "empty output",
+			out:  "",
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := steamPathFromRegOutput(tt.out); got != tt.want {
+				t.Errorf("steamPathFromRegOutput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
