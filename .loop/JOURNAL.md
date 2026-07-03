@@ -2,14 +2,13 @@
 
 ## Current state
 
-Iteración 1 de 25 (en curso).
-Modo: ejecución directa en sesión; Fable orquesta/verifica/juzga, subagentes Opus implementan.
-Luis durmiendo desde ~01:00; orden explícita: "continúa con todo". El PR de F5 se deja abierto (nunca auto-merge).
-Rama: landing-vercel (creada desde origin/main = 5c1e82c; refactorwindows ya estaba mergeado, 0 commits de diferencia).
-Vercel CLI autenticada como rechedev9 (device flow completado por Luis 2026-07-03 ~00:55); gh autenticado; repo público.
-Baseline del verificador: no existe baseline; `landing/` no existe todavía, construir el verificador es trabajo de F1 (regla cero, fallback registrado).
-Fases: F0 OK, F1 OK, F2 OK; F3 en curso; F4..F6 pendientes.
-URL canónica del instalador (de gh, para F3): https://github.com/rechedev9/fragforge/releases/download/v0.2.7/FragForge.Studio.Setup.0.2.7.exe
+CERRADO tras la iteración 7 de 25 (pasada de cierre completada, token emitido).
+Modo: ejecución directa en sesión; Fable orquestó/verificó/juzgó, subagentes Opus implementaron.
+Resultado: F0-F6 completadas y verificadas; única excepción parcial en B1 (rootDirectory de Vercel, ver BLOCKED.md).
+Rama: landing-vercel (desde origin/main = 5c1e82c), pusheada; PR #6 abierto contra main (NO mergeado, decisión de Luis).
+Producción: https://fragforge-landing.vercel.app (proyecto rechedevs-projects/fragforge-landing, deploy por CLI).
+Release: https://github.com/rechedev9/fragforge/releases/tag/v0.2.7 con el instalador (130050278 bytes, verificado 200).
+URL canónica del instalador: https://github.com/rechedev9/fragforge/releases/download/v0.2.7/FragForge.Studio.Setup.0.2.7.exe
 Entrevista: Luis AFK a los 60 s; decisiones (auto) = opciones Recommended, ver SPEC.md.
 
 ## Learnings
@@ -63,3 +62,20 @@ Progress: sí (F4 rojo->verde; streak 0 de 3).
 Discovered: ninguno.
 Blocked: ninguno.
 Next: checkpoint git + F5 (push + PR) + F6 (Vercel CLI).
+
+## Iteración 6 de 25
+Done: F5 y F6. Checkpoint 59bb128 (25 ficheros, solo landing/ + .loop/), push a origin/landing-vercel, PR #6 abierto contra main (OPEN, no se mergea). Vercel: link --yes -> rechedevs-projects/fragforge-landing, deploy --prod (build remota verde, Next 15.5.20), alias de producción https://fragforge-landing.vercel.app.
+Verifier: gh pr view -> {"state":"OPEN"}; curl -sI prod -> HTTP/1.1 200 OK; e2e completo contra producción con e2e/prod.config.ts -> 7 passed (26.4s).
+Progress: sí (F5 y F6 rojo->verde; streak 0 de 3).
+Discovered: Root Directory del proyecto = "." y la CLI no puede fijarlo a "landing" -> B1 en BLOCKED.md (sin impacto hoy: no hay integración git y la CLI solo sube landing/).
+Blocked: B1 (BLOCKED.md actualizado).
+Next: pasada de cierre.
+
+## Iteración 7 de 25 (pasada de cierre)
+Done: prueba de mutación + re-verificación completa desde cero + diff-audit + informe.
+Mutación [demostración]: CTA href -> v9.9.9/mutation-broken.exe y script console.error("mutation-closing-pass") plantados sin commitear -> `npm run test:e2e` = 5 failed (hero desktop, hero reduced-motion, CTA equality+200, landing console, smoke), 2 passed; revertido con git checkout.
+Verifier (desde cero, limpio): TSC_EXIT=0; next build OK; e2e local 7 passed (30.9s); e2e producción 7 passed (26.4s); asset Release HTTP 200 Content-Length 130050278; prod HTTP 200.
+Diff-audit: `git diff --stat origin/main...HEAD` = 25 ficheros, todos bajo landing/ o .loop/; cero cambios fuera de la allowlist; sin binarios en git.
+Progress: sí (cierre).
+Blocked: B1 (único).
+Cierre: LOOP-COMPLETE-fragforge-landing (token emitido en el informe de handoff al usuario).
