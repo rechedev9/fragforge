@@ -1,5 +1,4 @@
 import {
-  Flame,
   Crosshair,
   Cpu,
   Clapperboard,
@@ -21,28 +20,25 @@ const DOWNLOAD_URL =
   "https://github.com/rechedev9/fragforge/releases/download/v0.2.7/FragForge.Studio.Setup.0.2.7.exe";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
+// NEON HUD wordmark: FRAG//FORGE in Chakra Petch, the "//" in signal cyan —
+// same motif as web/components/brand/wordmark.tsx.
 function Wordmark({ size = "md" }: { size?: "md" | "sm" }) {
-  const chip = size === "sm" ? "h-8 w-8" : "h-9 w-9";
-  const glyph = size === "sm" ? "h-4 w-4" : "h-5 w-5";
-  const text = size === "sm" ? "text-xl" : "text-2xl";
+  const text = size === "sm" ? "text-lg" : "text-2xl";
   return (
-    <span className="inline-flex items-center gap-2.5 font-display font-bold tracking-tight">
-      <span
-        className={`flex items-center justify-center rounded-lg bg-primary text-primary-foreground ${chip}`}
-      >
-        <Flame className={glyph} strokeWidth={2.5} />
-      </span>
-      <span className={text}>
-        <span className="text-primary">Frag</span>
-        <span className="text-foreground">Forge</span>
-      </span>
+    <span className={`font-display font-bold tracking-[0.04em] ${text}`}>
+      FRAG
+      <span className="text-primary">{"//"}</span>
+      FORGE
     </span>
   );
 }
 
+// Mono eyebrow with a "//" mark, HUD-style. The mark is aria-hidden so the
+// accessible name stays exactly the section label passed in.
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <p className="font-mono text-xs font-medium uppercase tracking-[0.2em] text-primary/90">
+    <p className="font-mono text-xs font-medium uppercase tracking-[0.3em] text-primary/90">
+      <span aria-hidden>{"// "}</span>
       {children}
     </p>
   );
@@ -113,7 +109,7 @@ export default function Home() {
         <div className="relative z-10 flex max-w-3xl flex-col items-center gap-7">
           <Wordmark />
 
-          <h1 className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-foreground drop-shadow-[0_2px_24px_rgba(0,0,0,0.7)] sm:text-6xl">
+          <h1 className="font-display text-4xl font-bold uppercase leading-[1.05] tracking-[0.01em] text-foreground [text-shadow:0_0_28px_color-mix(in_oklch,var(--primary)_35%,transparent)] sm:text-6xl">
             Turn CS2 demos into
             <br className="hidden sm:block" /> viral{" "}
             <span className="text-primary">Shorts</span>
@@ -127,21 +123,21 @@ export default function Home() {
           <div className="mt-2 flex flex-col items-center gap-4 sm:flex-row">
             <a
               href={DOWNLOAD_URL}
-              className="group inline-flex items-center gap-2.5 rounded-lg bg-primary px-7 py-3.5 font-display text-base font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="neon-notch neon-glow group inline-flex items-center gap-2.5 bg-primary px-7 py-3.5 font-display text-base font-semibold text-primary-foreground transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <Download className="h-5 w-5" strokeWidth={2.5} />
               Download for Windows
             </a>
             <a
               href={REPO_URL}
-              className="inline-flex items-center gap-2 rounded-lg border border-border px-6 py-3.5 text-base font-medium text-foreground/90 transition hover:border-primary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="neon-notch inline-flex items-center gap-2 border-[1.5px] border-primary/40 px-6 py-3.5 text-base font-medium text-foreground/90 transition hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <Github className="h-5 w-5" />
               View on GitHub
             </a>
           </div>
 
-          <p className="font-mono text-sm text-muted-foreground">
+          <p className="font-mono text-sm tracking-[0.08em] text-muted-foreground">
             v0.2.7 <span className="text-primary/70">·</span> 124 MB{" "}
             <span className="text-primary/70">·</span> Windows 10/11
           </p>
@@ -169,12 +165,12 @@ export default function Home() {
             {FEATURES.map(({ icon: Icon, title, body }) => (
               <div
                 key={title}
-                className="flex flex-col gap-4 rounded-xl border border-border bg-card p-7 transition hover:border-primary/40"
+                className="neon-brackets relative flex flex-col gap-4 border border-border bg-card p-7 transition hover:border-primary/40"
               >
-                <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-background text-primary">
+                <span className="flex h-11 w-11 items-center justify-center border border-border bg-background text-primary">
                   <Icon className="h-6 w-6" strokeWidth={2} />
                 </span>
-                <h3 className="font-display text-xl font-semibold text-foreground">
+                <h3 className="font-display text-xl font-semibold uppercase tracking-[0.02em] text-foreground">
                   {title}
                 </h3>
                 <p className="text-[15px] leading-relaxed text-muted-foreground">
@@ -206,12 +202,12 @@ export default function Home() {
             {STEPS.map(({ title, body }, i) => (
               <li
                 key={title}
-                className="flex flex-col gap-4 rounded-xl border border-border bg-card p-7"
+                className="neon-brackets relative flex flex-col gap-4 border border-border bg-card p-7"
               >
-                <span className="font-mono text-3xl font-bold text-primary">
+                <span className="font-mono text-3xl font-bold text-primary [text-shadow:0_0_10px_color-mix(in_oklch,var(--primary)_60%,transparent)]">
                   {String(i + 1).padStart(2, "0")}
                 </span>
-                <h3 className="font-display text-lg font-semibold text-foreground">
+                <h3 className="font-display text-lg font-semibold uppercase tracking-[0.02em] text-foreground">
                   {title}
                 </h3>
                 <p className="text-[15px] leading-relaxed text-muted-foreground">
@@ -240,13 +236,13 @@ export default function Home() {
             </p>
           </div>
 
-          <ul className="grid gap-3 rounded-xl border border-border bg-card p-6 sm:p-8">
+          <ul className="neon-brackets relative grid gap-3 border border-border bg-card p-6 sm:p-8">
             {REQUIREMENTS.map(({ icon: Icon, label }) => (
               <li
                 key={label}
                 className="flex items-center gap-3.5 border-b border-border/60 py-3 last:border-b-0"
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-primary">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-border bg-background text-primary">
                   <Icon className="h-5 w-5" strokeWidth={2} />
                 </span>
                 <span className="text-[15px] text-foreground">{label}</span>
@@ -261,8 +257,8 @@ export default function Home() {
         id="smartscreen"
         className="w-full border-t border-border px-6 py-24 sm:py-28"
       >
-        <div className="mx-auto flex max-w-3xl flex-col gap-5 rounded-xl border border-border bg-card p-7 sm:flex-row sm:items-start sm:gap-6 sm:p-8">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-primary">
+        <div className="neon-brackets relative mx-auto flex max-w-3xl flex-col gap-5 border border-border bg-card p-7 sm:flex-row sm:items-start sm:gap-6 sm:p-8">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center border border-border bg-background text-primary">
             <ShieldCheck className="h-6 w-6" strokeWidth={2} />
           </span>
           <div className="flex flex-col gap-2.5">

@@ -7,24 +7,78 @@
       html, body { height: 100%; margin: 0; }
       body {
         display: flex; align-items: center; justify-content: center;
-        background: #0a0a0a; color: #ededed;
-        font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+        position: relative;
+        overflow: hidden;
+        background: #060a14;
+        color: #eafcff;
+        font: 15px/1.5 ui-monospace, "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
       }
-      .box { text-align: center; }
+      /* NEON HUD grid — same 48px cyan grid as web/app/globals.css .neon-grid,
+         inlined since this file loads with no network access. */
+      body::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(34, 217, 238, .04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(34, 217, 238, .04) 1px, transparent 1px);
+        background-size: 48px 48px;
+        pointer-events: none;
+      }
+      /* Scanlines overlay, matching .neon-scanlines. */
+      body::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, .015) 0 1px, transparent 1px 4px);
+        pointer-events: none;
+      }
+      .box { position: relative; text-align: center; }
+      .wordmark {
+        font: 700 20px/1 "Segoe UI", system-ui, sans-serif;
+        letter-spacing: .04em;
+        color: #eafcff;
+      }
+      .wordmark .slashes { color: #22d9ee; }
+      .katakana {
+        margin-top: 4px;
+        font-size: 10px;
+        letter-spacing: .26em;
+        color: #ff2d78;
+      }
       .spinner {
-        width: 34px; height: 34px; margin: 0 auto 1rem;
-        border: 3px solid #262626; border-top-color: #ededed; border-radius: 50%;
+        width: 34px; height: 34px; margin: 28px auto 16px;
+        border: 3px solid rgba(34, 217, 238, .18);
+        border-top-color: #22d9ee;
+        border-radius: 50%;
+        box-shadow: 0 0 14px rgba(34, 217, 238, .35);
         animation: spin 0.8s linear infinite;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
-      .muted { color: #8f8f8f; margin-top: .4rem; }
+      .status {
+        font-size: 12px;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: #eafcff;
+      }
+      .muted {
+        margin-top: .5rem;
+        font-size: 10.5px;
+        letter-spacing: .1em;
+        color: #5b6d80;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner { animation: none; }
+      }
     </style>
   </head>
   <body>
     <div class="box">
+      <div class="wordmark">FRAG<span class="slashes">//</span>FORGE</div>
+      <div class="katakana">フラグ・フォージ</div>
       <div class="spinner"></div>
-      <div>Arrancando FragForge Studio</div>
-      <div class="muted">orquestador + captura local (HLAE/CS2)</div>
+      <div class="status">Arrancando FragForge Studio</div>
+      <div class="muted">ORQUESTADOR + CAPTURA LOCAL (HLAE/CS2)</div>
     </div>
   </body>
 </html>

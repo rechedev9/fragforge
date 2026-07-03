@@ -43,8 +43,8 @@ export default function HeroForge() {
 
   return (
     <div className="absolute inset-0 overflow-hidden" data-testid="hero-forge">
-      {/* Static, always-present fallback: a designed lime forge glow low-center.
-          Under reduced motion this is the whole visual. */}
+      {/* Static, always-present fallback: a designed cyan forge glow low-center
+          (NEON HUD). Under reduced motion this is the whole visual. */}
       <div className="absolute inset-0 hero-forge-fallback" aria-hidden="true" />
 
       {showCanvas && <ForgeCanvas count={config.count} dpr={config.dpr} />}
