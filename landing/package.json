@@ -1,0 +1,31 @@
+{
+  "name": "fragforge-landing",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3100",
+    "build": "next build",
+    "start": "next start -p 3100",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19",
+    "react-dom": "^19",
+    "three": "^0.184.0",
+    "@react-three/fiber": "^9",
+    "@react-three/drei": "^10",
+    "@react-three/postprocessing": "^3",
+    "lucide-react": "^0.469.0"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/node": "^22",
+    "@types/three": "^0.184.0",
+    "@tailwindcss/postcss": "^4",
+    "tailwindcss": "^4",
+    "@playwright/test": "^1.49.0"
+  }
+}
