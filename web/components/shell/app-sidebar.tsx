@@ -65,7 +65,6 @@ export function AppSidebar() {
           className="flex items-center gap-2 px-1 py-1 group-data-[collapsible=icon]:justify-center"
         >
           <Wordmark className="group-data-[collapsible=icon]:hidden" />
-          <Wordmark hideMark className="hidden" />
         </Link>
       </SidebarHeader>
 

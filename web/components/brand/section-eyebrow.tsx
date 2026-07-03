@@ -1,22 +1,26 @@
 import { cn } from '@/lib/utils';
 
 export type SectionEyebrowProps = {
-  /** Uppercase section label, e.g. "RENDERING", "READY". */
+  /** Uppercase section label, e.g. "PARTIDAS", "BIBLIOTECA". */
   label: string;
+  /** Optional section number, rendered as `// 0N — LABEL`. */
+  number?: number;
   /** Optional count shown as a mono pill after the label. */
   count?: number;
   className?: string;
 };
 
 /**
- * SectionEyebrow — an uppercase Space Grotesk label with an optional count,
- * used for section heads. Small, tracked, and quiet so it frames a section
- * without competing with the screen H1.
+ * SectionEyebrow — the NEON HUD section head: `// 0N — LABEL` in Share Tech
+ * Mono, signal cyan, very wide tracking. Small and quiet so it frames a
+ * section without competing with the screen H1. Without `number` it renders
+ * the bare label (the mockup's panel-head style, e.g. "LAYOUT").
  */
-export function SectionEyebrow({ label, count, className }: SectionEyebrowProps) {
+export function SectionEyebrow({ label, number, count, className }: SectionEyebrowProps) {
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <span className="font-[family-name:var(--font-display)] text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+      <span className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.3em] text-primary">
+        {number !== undefined ? `// ${String(number).padStart(2, '0')} — ` : null}
         {label}
       </span>
       {count !== undefined ? (

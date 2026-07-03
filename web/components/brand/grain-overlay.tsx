@@ -1,25 +1,11 @@
 /**
- * GrainOverlay — the global film-grain texture layer.
+ * GrainOverlay — the global NEON HUD scanlines layer.
  *
- * A fixed, non-interactive SVG noise field rendered once at the app root. It
- * gives every screen the subtle tape/replay grain from the design language.
- * Opacity and blend mode live in `.fragforge-grain` (globals.css).
+ * A fixed, non-interactive overlay rendered once at the app root: 1px white
+ * lines every 4px at near-zero opacity, the CRT/replay texture of the skin.
+ * All styling lives in `.neon-scanlines` (globals.css); it is static (no
+ * animation), so it needs no reduced-motion exception.
  */
 export function GrainOverlay() {
-  return (
-    <div aria-hidden className="fragforge-grain">
-      <svg className="size-full" xmlns="http://www.w3.org/2000/svg">
-        <filter id="fragforge-grain-noise">
-          <feTurbulence
-            type="fractalNoise"
-            baseFrequency="0.8"
-            numOctaves="3"
-            stitchTiles="stitch"
-          />
-          <feColorMatrix type="saturate" values="0" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#fragforge-grain-noise)" />
-      </svg>
-    </div>
-  );
+  return <div aria-hidden className="neon-scanlines" />;
 }

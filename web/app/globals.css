@@ -4,86 +4,87 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * FragForge v2 — "the replay studio".
- * Acid-lime signal color on desaturated cool charcoal. The app is forced dark
- * (<html class="dark">), so the `.dark` block is the source of truth. `:root`
- * mirrors it so the tokens resolve even without the dark class.
+ * FragForge — piel "NEON HUD" (FragForge Anime, dirección 1a).
+ * Fondo azul noche, primario cian #22d9ee, magenta #ff2d78 reservado para
+ * REC/stream/likes/destructivo, violeta #8c5aff en charts. La app va forzada
+ * a oscuro (<html class="dark">), así que el bloque `.dark` es la fuente de
+ * verdad y `:root` lo replica para que los tokens resuelvan sin la clase.
  */
 
 :root {
-  --radius: 0.75rem;
+  --radius: 0rem;
 
-  --background: oklch(0.145 0.006 264);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.196 0.0065 264);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.214 0.007 264);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.905 0.182 124);
-  --primary-foreground: oklch(0.205 0.03 124);
-  --secondary: oklch(0.245 0.006 264);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.245 0.006 264);
-  --muted-foreground: oklch(0.66 0.01 264);
-  --accent: oklch(0.27 0.008 264);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.62 0.21 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.275 0.006 264);
-  --input: oklch(0.275 0.006 264);
-  --ring: oklch(0.905 0.182 124);
+  --background: oklch(0.146 0.023 264.8); /* #060a14 */
+  --foreground: oklch(0.983 0.011 226); /* #f2fbff */
+  --card: oklch(0.174 0.031 263.2); /* panel navy rgb(9 16 30) */
+  --card-foreground: oklch(0.983 0.011 226);
+  --popover: oklch(0.198 0.037 264.2); /* #0d1526 */
+  --popover-foreground: oklch(0.983 0.011 226);
+  --primary: oklch(0.811 0.135 207.6); /* cian #22d9ee */
+  --primary-foreground: oklch(0.173 0.027 233.6); /* #04121a */
+  --secondary: oklch(0.267 0.033 259.6); /* navy #1c2636 */
+  --secondary-foreground: oklch(0.983 0.011 226);
+  --muted: oklch(0.229 0.03 259); /* navy #141d2b */
+  --muted-foreground: oklch(0.707 0.038 249.7); /* #8fa3b8 */
+  --accent: oklch(0.27 0.052 262); /* navy cian-tintado #182640 */
+  --accent-foreground: oklch(0.983 0.011 226);
+  --destructive: oklch(0.657 0.241 6.9); /* magenta #ff2d78 */
+  --destructive-foreground: oklch(0.956 0.025 352.5); /* #ffeaf2 */
+  --border: oklch(0.811 0.135 207.6 / 15%); /* hairline cian */
+  --input: oklch(0.811 0.135 207.6 / 20%);
+  --ring: oklch(0.811 0.135 207.6);
 
-  --chart-1: oklch(0.905 0.182 124);
-  --chart-2: oklch(0.66 0.01 264);
-  --chart-3: oklch(0.62 0.21 25);
-  --chart-4: oklch(0.488 0.243 264);
-  --chart-5: oklch(0.769 0.188 70);
+  --chart-1: oklch(0.811 0.135 207.6); /* cian #22d9ee */
+  --chart-2: oklch(0.657 0.241 6.9); /* magenta #ff2d78 */
+  --chart-3: oklch(0.61 0.232 292); /* violeta #8c5aff */
+  --chart-4: oklch(0.527 0.037 249.9); /* dim #5b6d80 */
+  --chart-5: oklch(0.39 0.044 250.2); /* dim #33475c */
 
-  --sidebar: oklch(0.13 0.006 264);
-  --sidebar-foreground: oklch(0.82 0.01 264);
-  --sidebar-primary: oklch(0.905 0.182 124);
-  --sidebar-primary-foreground: oklch(0.205 0.03 124);
-  --sidebar-accent: oklch(0.22 0.006 264);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.24 0.006 264);
-  --sidebar-ring: oklch(0.905 0.182 124);
+  --sidebar: oklch(0.133 0.02 258); /* navy más oscuro #040810 */
+  --sidebar-foreground: oklch(0.707 0.038 249.7);
+  --sidebar-primary: oklch(0.811 0.135 207.6);
+  --sidebar-primary-foreground: oklch(0.173 0.027 233.6);
+  --sidebar-accent: oklch(0.214 0.05 265.4); /* #0e1830 */
+  --sidebar-accent-foreground: oklch(0.983 0.011 226);
+  --sidebar-border: oklch(0.811 0.135 207.6 / 12%);
+  --sidebar-ring: oklch(0.811 0.135 207.6);
 }
 
 .dark {
-  --background: oklch(0.145 0.006 264);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.196 0.0065 264);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.214 0.007 264);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.905 0.182 124);
-  --primary-foreground: oklch(0.205 0.03 124);
-  --secondary: oklch(0.245 0.006 264);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.245 0.006 264);
-  --muted-foreground: oklch(0.66 0.01 264);
-  --accent: oklch(0.27 0.008 264);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.62 0.21 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.275 0.006 264);
-  --input: oklch(0.275 0.006 264);
-  --ring: oklch(0.905 0.182 124);
+  --background: oklch(0.146 0.023 264.8);
+  --foreground: oklch(0.983 0.011 226);
+  --card: oklch(0.174 0.031 263.2);
+  --card-foreground: oklch(0.983 0.011 226);
+  --popover: oklch(0.198 0.037 264.2);
+  --popover-foreground: oklch(0.983 0.011 226);
+  --primary: oklch(0.811 0.135 207.6);
+  --primary-foreground: oklch(0.173 0.027 233.6);
+  --secondary: oklch(0.267 0.033 259.6);
+  --secondary-foreground: oklch(0.983 0.011 226);
+  --muted: oklch(0.229 0.03 259);
+  --muted-foreground: oklch(0.707 0.038 249.7);
+  --accent: oklch(0.27 0.052 262);
+  --accent-foreground: oklch(0.983 0.011 226);
+  --destructive: oklch(0.657 0.241 6.9);
+  --destructive-foreground: oklch(0.956 0.025 352.5);
+  --border: oklch(0.811 0.135 207.6 / 15%);
+  --input: oklch(0.811 0.135 207.6 / 20%);
+  --ring: oklch(0.811 0.135 207.6);
 
-  --chart-1: oklch(0.905 0.182 124);
-  --chart-2: oklch(0.66 0.01 264);
-  --chart-3: oklch(0.62 0.21 25);
-  --chart-4: oklch(0.488 0.243 264);
-  --chart-5: oklch(0.769 0.188 70);
+  --chart-1: oklch(0.811 0.135 207.6);
+  --chart-2: oklch(0.657 0.241 6.9);
+  --chart-3: oklch(0.61 0.232 292);
+  --chart-4: oklch(0.527 0.037 249.9);
+  --chart-5: oklch(0.39 0.044 250.2);
 
-  --sidebar: oklch(0.13 0.006 264);
-  --sidebar-foreground: oklch(0.82 0.01 264);
-  --sidebar-primary: oklch(0.905 0.182 124);
-  --sidebar-primary-foreground: oklch(0.205 0.03 124);
-  --sidebar-accent: oklch(0.22 0.006 264);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.24 0.006 264);
-  --sidebar-ring: oklch(0.905 0.182 124);
+  --sidebar: oklch(0.133 0.02 258);
+  --sidebar-foreground: oklch(0.707 0.038 249.7);
+  --sidebar-primary: oklch(0.811 0.135 207.6);
+  --sidebar-primary-foreground: oklch(0.173 0.027 233.6);
+  --sidebar-accent: oklch(0.214 0.05 265.4);
+  --sidebar-accent-foreground: oklch(0.983 0.011 226);
+  --sidebar-border: oklch(0.811 0.135 207.6 / 12%);
+  --sidebar-ring: oklch(0.811 0.135 207.6);
 }
 
 @theme inline {
@@ -127,21 +128,20 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* Soft ambient shadows tuned for the charcoal UI — override Tailwind v4's
-   * light-mode defaults so every shadow-* utility (Card, outline Button,
-   * popovers) reads as real, quiet depth on dark instead of an invisible
-   * light-mode drop shadow. */
-  --shadow-2xs: 0 1px 2px 0 oklch(0.04 0.01 264 / 0.6);
-  --shadow-xs: 0 1px 2px 0 oklch(0.04 0.01 264 / 0.6);
-  --shadow-sm: 0 1px 2px 0 oklch(0.04 0.01 264 / 0.55), 0 2px 6px -1px oklch(0.04 0.01 264 / 0.45);
-  --shadow: 0 1px 2px 0 oklch(0.04 0.01 264 / 0.55), 0 4px 10px -2px oklch(0.04 0.01 264 / 0.5);
-  --shadow-md: 0 2px 4px -1px oklch(0.04 0.01 264 / 0.5), 0 8px 18px -3px oklch(0.04 0.01 264 / 0.55);
-  --shadow-lg: 0 4px 8px -2px oklch(0.04 0.01 264 / 0.5), 0 16px 32px -6px oklch(0.04 0.01 264 / 0.6);
+  /* Sombras ambientales suaves sobre azul noche — sobrescriben los defaults
+   * light-mode de Tailwind v4 para que shadow-* lea como profundidad real
+   * sobre el fondo oscuro. */
+  --shadow-2xs: 0 1px 2px 0 oklch(0.04 0.02 260 / 0.6);
+  --shadow-xs: 0 1px 2px 0 oklch(0.04 0.02 260 / 0.6);
+  --shadow-sm: 0 1px 2px 0 oklch(0.04 0.02 260 / 0.55), 0 2px 6px -1px oklch(0.04 0.02 260 / 0.45);
+  --shadow: 0 1px 2px 0 oklch(0.04 0.02 260 / 0.55), 0 4px 10px -2px oklch(0.04 0.02 260 / 0.5);
+  --shadow-md: 0 2px 4px -1px oklch(0.04 0.02 260 / 0.5), 0 8px 18px -3px oklch(0.04 0.02 260 / 0.55);
+  --shadow-lg: 0 4px 8px -2px oklch(0.04 0.02 260 / 0.5), 0 16px 32px -6px oklch(0.04 0.02 260 / 0.6);
 
-  /* Fonts — wired in app/layout.tsx via next/font/google CSS vars. */
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, "JetBrains Mono", monospace;
-  --font-display: var(--font-space-grotesk), var(--font-inter), ui-sans-serif, sans-serif;
+  /* Fuentes — cableadas en app/layout.tsx vía next/font/google. */
+  --font-sans: var(--font-chakra-petch), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-share-tech-mono), ui-monospace, monospace;
+  --font-display: var(--font-chakra-petch), ui-sans-serif, sans-serif;
 }
 
 @layer base {
@@ -161,40 +161,93 @@
   }
 }
 
-/* Thin, dark scrollbars to match the near-black UI. */
+/* Thin, dark scrollbars to match the night-navy UI. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.275 0.006 264) transparent;
+  scrollbar-color: oklch(0.27 0.052 262) transparent;
 }
 
 /*
- * Global film-grain texture (GrainOverlay). The SVG noise lives in the
- * component; this hook keeps the layer fixed, non-interactive, and barely
- * visible. Disabled under reduced motion is unnecessary (it does not animate),
- * but pulse/shimmer below respect the preference.
+ * .neon-grid — la retícula cian de 48px del HUD. Aplícala al fondo de la
+ * pantalla o de un panel grande; es estática (no anima), así que no necesita
+ * excepción de reduced-motion.
  */
-.fragforge-grain {
+.neon-grid {
+  background-image:
+    linear-gradient(color-mix(in oklch, var(--primary) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--primary) 6%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/*
+ * .neon-scanlines — capa global de scanlines (GrainOverlay). Fija, no
+ * interactiva y casi invisible: líneas blancas de 1px cada 4px. Estática,
+ * sin animación.
+ */
+.neon-scanlines {
   position: fixed;
   inset: 0;
   z-index: 50;
   pointer-events: none;
-  opacity: 0.03;
-  mix-blend-mode: overlay;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.015) 0 1px,
+    transparent 1px 4px
+  );
 }
 
 /*
- * Whisper-quiet lime ambient glow for active/CTA elements (primary button,
- * active nav, selected tile). A soft box-shadow in --primary at very low alpha
- * — the restrained "gaming signature". Apply on the element, not globally.
+ * .neon-brackets — corner brackets del HUD en las esquinas superior-izquierda
+ * e inferior-derecha. Requiere `position: relative` (o cualquier posicionado)
+ * en el elemento. El color se hereda de `--neon-bracket-color` (cian por
+ * defecto; pon `[--neon-bracket-color:var(--destructive)]` para la variante
+ * magenta de la ruta stream/REC).
  */
-.fragforge-glow {
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--primary) 22%, transparent),
-    0 2px 18px -6px color-mix(in oklch, var(--primary) 38%, transparent);
+.neon-brackets {
+  --neon-bracket-color: var(--primary);
 }
 
-/* Live REC dot + active pipeline step pulse. */
-@keyframes fragforge-pulse {
+.neon-brackets::before,
+.neon-brackets::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+
+.neon-brackets::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid var(--neon-bracket-color);
+  border-left: 2px solid var(--neon-bracket-color);
+}
+
+.neon-brackets::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid var(--neon-bracket-color);
+  border-right: 2px solid var(--neon-bracket-color);
+}
+
+/*
+ * .neon-notch — esquina inferior-derecha cortada 10px (el CTA "FORJAR REEL"
+ * del mockup). Componible con .neon-glow.
+ */
+.neon-notch {
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
+}
+
+/*
+ * .neon-glow — glow cian ambiental para elementos activos/CTA (botón primario,
+ * nav activa, tile seleccionado). Aplícalo en el elemento, no globalmente.
+ */
+.neon-glow {
+  box-shadow: 0 0 26px color-mix(in oklch, var(--primary) 35%, transparent);
+}
+
+/* .neon-pulse — pulso del punto REC (magenta) y del paso activo del pipeline. */
+@keyframes neon-pulse {
   0%,
   100% {
     opacity: 1;
@@ -204,18 +257,18 @@
   }
 }
 
-.fragforge-pulse {
-  animation: fragforge-pulse 1.4s ease-in-out infinite;
+.neon-pulse {
+  animation: neon-pulse 1.4s ease-in-out infinite;
 }
 
-/* Rendering-card shimmer sweep. */
-@keyframes fragforge-shimmer {
+/* .neon-shimmer — barrido de progreso de las cards en render. */
+@keyframes neon-shimmer {
   100% {
     transform: translateX(100%);
   }
 }
 
-.fragforge-shimmer::after {
+.neon-shimmer::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -226,12 +279,12 @@
     color-mix(in oklch, var(--primary) 6%, transparent),
     transparent
   );
-  animation: fragforge-shimmer 1.8s ease-in-out infinite;
+  animation: neon-shimmer 1.8s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fragforge-pulse,
-  .fragforge-shimmer::after {
+  .neon-pulse,
+  .neon-shimmer::after {
     animation: none;
   }
 }

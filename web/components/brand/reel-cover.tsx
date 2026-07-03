@@ -11,32 +11,37 @@ export type ReelCoverProps = {
   className?: string;
 };
 
-/** Deterministic 0–359 hue from a seed string (no Math.random). */
+/**
+ * Deterministic hue from a seed string (no Math.random), constrained to the
+ * NEON HUD band — cyan (190) through violet to magenta (330) — so covers stay
+ * on-skin instead of drifting into lime/orange.
+ */
 function hueFromSeed(seed: string): number {
   let h = 0;
   for (let i = 0; i < seed.length; i += 1) {
     h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   }
-  return h % 360;
+  return 190 + (h % 141);
 }
 
 /**
  * ReelCover — a CSS-only, on-brand placeholder for clip thumbnails. Instead of
- * random stock photos, it renders a dark charcoal cover with a seeded low-chroma
- * tint, faint scanlines, and a crosshair, so cards read as CS2 reel covers. The
- * seed keeps each cover stable and distinct. Replace with real frames later.
+ * random stock photos, it renders a night-navy cover with a seeded low-chroma
+ * tint from the skin's cyan/violet/magenta band, faint scanlines, and a
+ * crosshair, so cards read as CS2 reel covers. The seed keeps each cover
+ * stable and distinct. Replace with real frames later.
  */
 export function ReelCover({ seed, label, plain = false, className }: ReelCoverProps) {
   const hue = hueFromSeed(seed);
-  const tint = `hsl(${hue} 45% 16%)`;
-  const tint2 = `hsl(${(hue + 28) % 360} 40% 9%)`;
+  const tint = `hsl(${hue} 55% 18%)`;
+  const tint2 = `hsl(${(hue + 28) % 360} 45% 10%)`;
 
   return (
     <div
       aria-hidden
-      className={cn('relative size-full overflow-hidden bg-[#0b0c0e]', className)}
+      className={cn('relative size-full overflow-hidden bg-[#060a14]', className)}
       style={{
-        backgroundImage: `radial-gradient(120% 90% at 78% 18%, ${tint} 0%, ${tint2} 42%, #0b0c0e 78%)`,
+        backgroundImage: `radial-gradient(120% 90% at 78% 18%, ${tint} 0%, ${tint2} 42%, #060a14 78%)`,
       }}
     >
       <div

@@ -18,7 +18,7 @@ export function RenderingCard({ video }: { video: Video }) {
   return (
     <Card
       className={cn(
-        'fragforge-shimmer relative flex-row items-center gap-4 overflow-hidden py-4 pr-5 pl-4',
+        'neon-shimmer relative flex-row items-center gap-4 overflow-hidden py-4 pr-5 pl-4',
       )}
     >
       <div className="relative aspect-video w-28 shrink-0 overflow-hidden rounded-lg border border-border bg-muted sm:w-36">

@@ -14,7 +14,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <SidebarInset>
         <header className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur md:hidden">
           <SidebarTrigger />
-          <Wordmark hideMark />
+          <Wordmark katakana={false} />
         </header>
         <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 md:px-8 md:py-10">
           {children}
