@@ -297,6 +297,19 @@ Testing:
 - Prefer public behavior tests over implementation-detail tests.
 - Avoid tests that require real CS2/HLAE/large media unless explicitly requested.
 
+## TypeScript style (web/)
+
+The web frontend is full TypeScript under `strict: true`; the complete rules live in `.claude/rules/typescript-style.md` (adapted from the jvidalv/berrus guidelines).
+The load-bearing ones:
+
+- No `any` in any form (`as any`, `<any>`, `any[]`); use `unknown` plus narrowing when a shape is genuinely unknown.
+- No `!` non-null assertions and no `as <Type>` to silence the checker; casts are allowed only at trust boundaries (`JSON.parse`, `res.json()`, storage, env) to a named type, with untrusted input validated before use.
+- No re-exports and no backwards-compat shims; when moving code, update every import.
+- No magic strings across boundaries; use named `const`s or `as const` maps with derived union types (`SERVICE_UNAVAILABLE_CODE` is the house example).
+- `Promise.all` for independent awaits; sequential `await` of independent operations is a performance bug.
+- Secrets stay server-side (route handlers, `server-only`); never in client components or `NEXT_PUBLIC_*`.
+- `npm run typecheck` must pass before a web change is done.
+
 ## Operational rules
 
 Before editing:
