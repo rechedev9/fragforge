@@ -13,6 +13,10 @@ FROM node:22-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# public/ only holds gitignored media locally (sample-reel.mp4), so a fresh
+# clone has no such directory at all; guarantee it exists so the runner's COPY
+# never fails on a clean checkout.
+RUN mkdir -p public
 ENV NEXT_PUBLIC_API_BASE=/api \
     NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
