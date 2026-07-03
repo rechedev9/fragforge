@@ -73,3 +73,4 @@ web/playwright-report/
 
 # Autonomous-loop blueprint/state (agent-local, never committed)
 .loop/
+.loop_tmp_crops/
