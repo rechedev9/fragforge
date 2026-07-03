@@ -3,8 +3,8 @@
 Repo-local harness for using Claude Code safely on FragForge.
 
 Claude Code automatically loads `CLAUDE.md` from the repo root. That file holds
-project boundaries, Go style, safety rules, and verification expectations.
-Additional repo-local rules live in `.claude/rules/go-style.md`.
+project boundaries, Go and TypeScript style, safety rules, and verification
+expectations. All style and operational rules live directly in `CLAUDE.md`.
 
 ## Interactive use
 

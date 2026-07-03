@@ -123,17 +123,11 @@ func claudeReviewerAgentRequiredText(name string) []string {
 	return required
 }
 
+// Style and operational norms live directly in CLAUDE.md; the .claude/rules
+// mirrors were removed. Validate that the load-bearing guidance is present in
+// CLAUDE.md and that no rules mirror reappears.
 func checkClaudeRuleDocs() ([]skillIssue, error) {
 	root, err := findWorkflowRoot()
-	if err != nil {
-		return nil, err
-	}
-	rulesDir := filepath.Join(root, ".claude", "rules")
-	entries, err := os.ReadDir(rulesDir)
-	if err != nil {
-		return nil, fmt.Errorf("read claude rules: %w", err)
-	}
-	readmeBody, err := readWorkflowDocBody(root, ".claude/README.md")
 	if err != nil {
 		return nil, err
 	}
@@ -142,64 +136,39 @@ func checkClaudeRuleDocs() ([]skillIssue, error) {
 		return nil, err
 	}
 	var issues []skillIssue
-	var checked int
+	for _, required := range claudeStyleRequiredText() {
+		if !strings.Contains(claudeBody, required) {
+			issues = append(issues, skillIssue{Path: "CLAUDE.md", Message: fmt.Sprintf("missing style guidance %q", required)})
+		}
+	}
+	rulesDir := filepath.Join(root, ".claude", "rules")
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return issues, nil
+		}
+		return nil, fmt.Errorf("read claude rules: %w", err)
+	}
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
 			continue
 		}
-		checked++
 		relPath := filepath.ToSlash(filepath.Join(".claude", "rules", entry.Name()))
-		path := filepath.Join(rulesDir, entry.Name())
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", relPath, err)
-		}
-		body := string(b)
-		for _, doc := range []struct {
-			path string
-			body string
-		}{
-			{path: ".claude/README.md", body: readmeBody},
-			{path: "CLAUDE.md", body: claudeBody},
-		} {
-			if !strings.Contains(doc.body, relPath) {
-				issues = append(issues, skillIssue{Path: doc.path, Message: fmt.Sprintf("does not document claude rule %s", relPath)})
-			}
-		}
-		for _, required := range claudeRuleRequiredText(relPath) {
-			if !strings.Contains(body, required) {
-				issues = append(issues, skillIssue{Path: relPath, Message: fmt.Sprintf("missing claude rule guidance %q", required)})
-			}
-		}
-	}
-	if checked == 0 {
-		issues = append(issues, skillIssue{Path: ".claude/rules", Message: "no claude rule docs found"})
+		issues = append(issues, skillIssue{Path: relPath, Message: "style rules live in CLAUDE.md; remove this .claude/rules mirror"})
 	}
 	return issues, nil
 }
 
-func claudeRuleRequiredText(path string) []string {
-	switch path {
-	case ".claude/rules/go-style.md":
-		return []string{
-			"clarity, simplicity, concision, maintainability",
-			"Avoid `util`, `common`, `helper`, `manager`",
-			"Return errors with context",
-			"Respect context cancellation",
-			"Every goroutine needs an owner",
-		}
-	case ".claude/rules/zackvideo-operations.md":
-		return []string{
-			"scripts/go-gate.sh --no-format",
-			"HLAE/CS2 launch or real capture",
-			"Docker compose and database migrations",
-			"cleanup scripts that delete artifacts",
-			"Never add generated `.mp4`",
-		}
-	default:
-		return []string{
-			"FragForge",
-		}
+func claudeStyleRequiredText() []string {
+	return []string{
+		"Write boring, idiomatic Go.",
+		"Do not introduce `util`, `common`, `helper`, `manager`",
+		"Add useful context when returning errors.",
+		"Every goroutine must have a clear owner and stop condition.",
+		"## TypeScript style (web/)",
+		"No `any`, ever",
+		"No re-exports",
+		"Do not add generated video/audio/image artifacts to git.",
 	}
 }
 
