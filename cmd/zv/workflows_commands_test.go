@@ -1991,6 +1991,7 @@ func TestValidateLegacyPassThroughEntrypointsRejectsMissingEntrypoint(t *testing
 		"zv-analysis-viewer",
 		"zv-pipeline",
 		"zv-rhythm",
+		"zv-tui",
 	}
 
 	issues := validateLegacyPassThroughEntrypoints(commands)
