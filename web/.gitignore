@@ -6,6 +6,9 @@ out
 *.tsbuildinfo
 next-env.d.ts
 
+# visual-judge screenshot harness output (e2e/screenshots.config.ts)
+e2e/screenshots/
+
 # design-sync (staged scripts, build output, machine state)
 .ds-sync/
 ds-bundle/
