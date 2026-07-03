@@ -1,10 +1,11 @@
 // Unit tests for the visible-string formatters on the matches screens
-// (Spanish NEON HUD skin). Run: node --test "lib/**/*.test.mjs"
+// (Spanish NEON HUD skin). Run: node --test "lib/**/*.test.ts"
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { timeAgo, playsSelectionLabel, formatKd } from './format.ts';
+import type { Play } from './api/types.ts';
 
-function play(overrides) {
+function play(overrides: Partial<Play>): Play {
   return {
     id: 'seg-001',
     matchId: 'job',

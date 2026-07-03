@@ -1,10 +1,11 @@
 // Unit tests for the pure intent coercion (corrupt-storage tolerance).
-// Run: node --test reel-store.test.mjs
+// Run: node --test reel-store.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { coerceEditConfig, coerceIntents, DEFAULT_EDIT_CONFIG } from './reel-store.ts';
+import type { ReelIntent } from './reel-store.ts';
 
-const valid = {
+const valid: ReelIntent = {
   videoId: 'job__seg-001',
   jobId: 'job',
   segmentIds: ['seg-001'],
@@ -81,6 +82,6 @@ test('coerces edit config independently', () => {
 test('truncates bookend text to the 80-char limit and drops non-string values', () => {
   const longText = 'x'.repeat(120);
   const coerced = coerceEditConfig({ format: 'short-9x16', killEffect: 'clean', transition: 'cut', intro: true, outro: true, introText: longText, outroText: 42 });
-  assert.equal(coerced.introText.length, 80);
+  assert.equal(coerced.introText?.length, 80);
   assert.equal(coerced.outroText, '');
 });

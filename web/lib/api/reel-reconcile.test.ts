@@ -1,12 +1,13 @@
-// Unit tests for the pure reel-reconcile core. Run: node --test reel-reconcile.test.mjs
-// Plain .mjs (invisible to tsc/Next) importing the type-stripped .ts module, so the
+// Unit tests for the pure reel-reconcile core. Run: node --test reel-reconcile.test.ts
+// Type-checked TypeScript run directly by Node's native type stripping, so the
 // reconcile state machine is testable with zero new dependencies (Node 24 node:test).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deriveReelView } from './reel-reconcile.ts';
+import type { ReconcileInput } from './reel-reconcile.ts';
 
 /** deriveReelView with sane defaults so each case states only what it varies. */
-function view(over) {
+function view(over: Partial<ReconcileInput>) {
   return deriveReelView({ jobStatus: 'parsed', renderStatus: 'none', ...over });
 }
 

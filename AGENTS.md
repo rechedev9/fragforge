@@ -94,6 +94,7 @@ Run it locally (needs the orchestrator on `127.0.0.1:8080`; orchestrator memory 
 cd web && npm install && npm run dev   # http://localhost:3000
 npm run typecheck                      # tsc --noEmit
 npm run lint                           # oxlint (config in web/.oxlintrc.json)
+npm run test:unit                      # node --test unit tests (lib/**/*.test.ts)
 npm run test:e2e                       # Playwright e2e
 ```
 
@@ -355,6 +356,8 @@ React:
 
 Testing:
 
+- Unit tests are `lib/**/*.test.ts` on `node:test`, run with `npm run test:unit` (Node strips types natively; relative imports keep the `.ts` extension, allowed by `allowImportingTsExtensions`).
+- A test double for an external client (e.g. a fake `SupabaseClient`) types only the call surface it fakes and is cast once at creation with `as unknown as <ClientType>` plus a comment; that is the sole sanctioned use of a double cast.
 - E2E lives in `web/e2e` on `@playwright/test`; specs are TypeScript under the same no-`any` rules.
 - Bug fixes need a regression test, same as Go.
 

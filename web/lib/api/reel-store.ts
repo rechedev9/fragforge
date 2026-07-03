@@ -1,9 +1,9 @@
 import type { EditConfig, RenderMode } from './types';
 
 // Mirrors types.BOOKEND_TEXT_MAX_LENGTH. Duplicated (not imported) so this module
-// stays a type-only consumer of ./types, which keeps it runnable directly under
-// Node's native TS loader (reel-store.test.mjs) without an explicit .ts import
-// extension, which `tsc` (moduleResolution: bundler) rejects.
+// stays a type-only consumer of ./types: Node's native TS loader (which runs
+// reel-store.test.ts) erases the type-only import and never has to resolve
+// ./types at runtime.
 const BOOKEND_TEXT_MAX_LENGTH = 80;
 
 /**
@@ -72,7 +72,7 @@ export function saveReelIntents(list: ReelIntent[]): void {
 
 /**
  * Validates parsed JSON into well-formed intents, dropping anything malformed and
- * defaulting soft fields. Pure (no window) and unit-tested in reel-store.test.mjs.
+ * defaulting soft fields. Pure (no window) and unit-tested in reel-store.test.ts.
  */
 export function coerceIntents(parsed: unknown): ReelIntent[] {
   if (!Array.isArray(parsed)) return [];
