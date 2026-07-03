@@ -1,8 +1,8 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 
 /**
- * Covers the highlights list on the match-detail screen ("We found N
- * highlights"): it renders as a vertical list (not a horizontal filmstrip),
+ * Covers the highlights list on the match-detail screen ("JUGADAS
+ * DETECTADAS"): it renders as a vertical list (not a horizontal filmstrip),
  * rows are multi-selectable, Create reel requires at least one pick, and the
  * generate/record request carries every selected segment id in PLAN order
  * (the order rows appear in the list), not click order — 2+ ids render as one
@@ -69,7 +69,7 @@ async function gotoHighlights(page: Page, jobStatus: { value: string }): Promise
 
   await page.goto('/upload');
   await page.locator('input[type=file]').setInputFiles(DUMMY_DEM);
-  await page.getByRole('heading', { name: 'Who do you want to clip?' }).waitFor();
+  await page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' }).waitFor();
   await page.locator('button:has(.lucide-crosshair)').first().click();
 
   await page.waitForURL(/\/matches\//);

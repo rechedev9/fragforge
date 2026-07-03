@@ -6,9 +6,7 @@ import { toast } from 'sonner';
 import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { formatCountdown } from '@/lib/format';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -19,11 +17,15 @@ import {
 import { ReelCover } from '@/components/brand';
 import { DeleteVideoButton } from '@/components/videos/delete-video-button';
 
+const FORMAT_LABEL: Record<string, string> = { 'short-9x16': '9:16', 'landscape-16x9': '16:9' };
+
 /**
- * A finished, downloadable video. Shows the rendered reel's cover (falling back
- * to a generated ReelCover), a hover overlay (View / Download / Share), title,
- * map · score in mono, an availability countdown chip, and a Publish toggle.
- * View plays the reel inline in a dialog; the 9:16 short fits the portrait frame.
+ * A finished, downloadable video — the mockup's LISTO card: a cyan corner
+ * bracket, a "● LISTO" status tag, and a notched PUBLICAR CTA next to an
+ * outlined MP4 download. Hovering the thumbnail still surfaces View/Share
+ * (there is no thumbnail-duration data to show a real running time, so the
+ * corner badge shows only the render format). View plays the reel inline in a
+ * dialog; the 9:16 short fits the portrait frame.
  */
 export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Video) => void }) {
   const [publishing, setPublishing] = useState(false);
@@ -64,18 +66,19 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
     }
     try {
       await navigator.clipboard.writeText(url);
-      toast('Link copied to clipboard.');
+      toast('Enlace copiado al portapapeles.');
     } catch {
-      toast('Could not copy the link.');
+      toast('No se pudo copiar el enlace.');
     }
   };
 
   const meta = video.score ? `${video.map} · ${video.score}` : video.map;
+  const formatBadge = video.editConfig ? FORMAT_LABEL[video.editConfig.format] : undefined;
 
   return (
     <>
-      <Card className="gap-0 overflow-hidden py-0">
-        <div className="group relative aspect-video w-full bg-muted">
+      <div data-slot="card" className="neon-brackets relative border border-primary/40 bg-card/80">
+        <div className="group relative aspect-video w-full overflow-hidden bg-muted">
           {video.thumbnailUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- proxied reel cover, dynamic same-origin URL
             <img src={video.thumbnailUrl} alt="" className="size-full object-cover" />
@@ -83,68 +86,86 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
             <ReelCover seed={video.id} label={video.map} className="size-full" />
           )}
 
+          {formatBadge ? (
+            <span className="absolute top-2 right-2 bg-background/80 px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.12em] text-primary/80">
+              {formatBadge}
+            </span>
+          ) : null}
+
           {video.published ? (
-            <div className="absolute right-3 top-3">
+            <div className="absolute top-2 left-2">
               <Badge>
-                <Globe /> Published
+                <Globe /> Publicado
               </Badge>
             </div>
           ) : null}
 
           {/* hover overlay actions */}
           <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background/70 opacity-0 backdrop-blur-[1px] transition-opacity duration-200 group-hover:opacity-100">
-            <Button
-              variant="secondary"
-              size="sm"
+            <button
+              type="button"
               onClick={() => video.downloadUrl && setPlayerOpen(true)}
               disabled={!video.downloadUrl}
+              className="inline-flex items-center gap-1.5 border border-primary/40 bg-background/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-40"
             >
-              <Eye /> View
-            </Button>
-            <Button variant="default" size="sm" onClick={handleDownload} disabled={!video.downloadUrl}>
-              <Download /> Download
-            </Button>
-            <Button variant="ghost" size="sm" onClick={handleShare} disabled={!video.downloadUrl}>
-              <Share2 /> Share
-            </Button>
+              <Eye className="size-3.5" /> Ver
+            </button>
+            <button
+              type="button"
+              onClick={handleShare}
+              disabled={!video.downloadUrl}
+              className="inline-flex items-center gap-1.5 border border-primary/40 bg-background/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Share2 className="size-3.5" /> Compartir
+            </button>
           </div>
         </div>
 
         <div className="flex flex-col gap-3 p-4">
           <div className="min-w-0">
-            <p className="truncate font-semibold text-foreground">{video.title}</p>
-            <p className="mt-0.5 font-[family-name:var(--font-mono)] text-sm tabular-nums text-muted-foreground">
-              {meta}
+            <p className="truncate font-[family-name:var(--font-display)] text-[14.5px] font-bold text-foreground">
+              {video.title}
+            </p>
+            <p className="mt-1 flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[9.5px] uppercase tracking-[0.16em] text-primary">
+              <span className="size-1.5 rounded-full bg-primary shadow-[0_0_7px_var(--primary)]" />
+              LISTO
             </p>
           </div>
 
-          <div className="flex items-center justify-between gap-3">
-            {video.availableForSec !== undefined ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-2.5 py-1 text-xs text-muted-foreground">
-                <Clock className="size-3.5" />
-                <span className="font-[family-name:var(--font-mono)] tabular-nums">
-                  expires in {formatCountdown(video.availableForSec)}
-                </span>
+          {video.availableForSec !== undefined ? (
+            <span className="inline-flex w-fit items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10.5px] text-muted-foreground">
+              <Clock className="size-3.5" />
+              caduca en {formatCountdown(video.availableForSec)}
+            </span>
+          ) : null}
+
+          <div className="flex items-center gap-2">
+            {video.published ? (
+              <span className="flex flex-1 items-center justify-center gap-1.5 border border-primary/40 py-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary">
+                <Globe className="size-3.5" /> PUBLICADO
               </span>
             ) : (
-              <span />
+              <button
+                type="button"
+                onClick={publish}
+                disabled={publishing}
+                className="neon-notch flex-1 bg-primary py-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {publishing ? 'PUBLICANDO…' : 'PUBLICAR'}
+              </button>
             )}
-
-            <div className="flex items-center gap-1">
-              {video.published ? (
-                <Badge>
-                  <Globe /> Published
-                </Badge>
-              ) : (
-                <Button variant="outline" size="sm" onClick={publish} disabled={publishing}>
-                  <Globe /> {publishing ? 'Publishing…' : 'Publish'}
-                </Button>
-              )}
-              <DeleteVideoButton video={video} onDeleted={() => onChange?.(video)} />
-            </div>
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={!video.downloadUrl}
+              className="flex flex-1 items-center justify-center gap-1.5 border border-primary/40 py-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary/90 transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Download className="size-3.5" /> MP4
+            </button>
+            <DeleteVideoButton video={video} onDeleted={() => onChange?.(video)} />
           </div>
         </div>
-      </Card>
+      </div>
 
       <Dialog open={playerOpen} onOpenChange={setPlayerOpen}>
         <DialogContent className="max-w-md">

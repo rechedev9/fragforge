@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { DeleteVideoButton } from '@/components/videos/delete-video-button';
 
@@ -29,29 +28,31 @@ export function FailedCard({ video, onChange }: { video: Video; onChange: () => 
   }
 
   return (
-    <Card className="flex-row items-center gap-4 border-destructive/40 py-4 pr-5 pl-4">
-      <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-destructive/40 bg-destructive/10">
+    <div className="flex flex-row items-center gap-4 border border-destructive/40 bg-card/80 py-4 pr-5 pl-4">
+      <div className="grid size-10 shrink-0 place-items-center border border-destructive/40 bg-destructive/10">
         <AlertTriangle className="size-5 text-destructive" />
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="truncate font-semibold text-foreground">{video.title}</p>
+        <p className="truncate font-[family-name:var(--font-display)] text-[14.5px] font-bold text-foreground">
+          {video.title}
+        </p>
         <p className="font-[family-name:var(--font-mono)] text-sm tabular-nums text-muted-foreground">
           {video.map}
           {video.score ? ` · ${video.score}` : ''}
         </p>
         <p className="mt-1 line-clamp-2 text-sm text-destructive">
-          {video.failureReason ?? 'The reel failed on your rig.'}
+          {video.failureReason ?? 'El reel falló en tu equipo.'}
         </p>
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
         <Button variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
           <RotateCcw className="size-4" />
-          {retrying ? 'Retrying…' : 'Retry'}
+          {retrying ? 'Reintentando…' : 'Reintentar'}
         </Button>
         <DeleteVideoButton video={video} onDeleted={onChange} />
       </div>
-    </Card>
+    </div>
   );
 }

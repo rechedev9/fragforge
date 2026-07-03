@@ -4,18 +4,33 @@ import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, UploadCloud } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useSession } from '@/lib/session';
 import { isLocalMode } from '@/lib/mode';
 import { isOnboardingDismissed } from '@/lib/onboarding';
 import { Wordmark } from '@/components/brand';
-import { Button } from '@/components/ui/button';
 import { SteamButton } from '@/components/login/steam-button';
 
 // Client-only: three.js touches WebGL, so it never renders on the server.
 const HeroThree = dynamic(() => import('@/components/login/hero-three'), {
   ssr: false,
 });
+
+/** The four HUD corner brackets of a highlighted route card. */
+function CardCorners({ color }: { color: 'primary' | 'destructive' }) {
+  const b = color === 'primary' ? 'border-primary' : 'border-destructive';
+  return (
+    <>
+      <span aria-hidden className={`absolute -top-px -left-px size-4 border-t-2 border-l-2 ${b}`} />
+      <span aria-hidden className={`absolute -top-px -right-px size-4 border-t-2 border-r-2 ${b}`} />
+      <span aria-hidden className={`absolute -bottom-px -left-px size-4 border-b-2 border-l-2 ${b}`} />
+      <span aria-hidden className={`absolute -bottom-px -right-px size-4 border-b-2 border-r-2 ${b}`} />
+    </>
+  );
+}
+
+/** Static pipeline strip: first stage lit cyan, the rest dim, all mono. */
+const PIPELINE = ['ANÁLISIS', 'CAPTURA', 'EDICIÓN', 'REEL'] as const;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -57,88 +72,131 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-background">
-      {/* Cinematic 3D film reel, full-bleed behind the hero copy. */}
-      <HeroThree className="absolute inset-0 z-0" />
+    <main className="relative flex min-h-screen flex-col overflow-hidden bg-background">
+      {/* 3D film reel, recolored to the HUD cyan, full-bleed behind the hero. */}
+      <HeroThree className="absolute inset-0 z-0 opacity-70" />
 
-      {/* Auth-only scanline + vignette, layered above the reel + global grain. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-[1]"
-        style={{
-          backgroundImage:
-            'repeating-linear-gradient(0deg, transparent 0 3px, oklch(0 0 0 / 0.14) 3px 4px)',
-        }}
-      />
+      {/* Ambient radial glows: cyan up top, magenta bottom-right (mockup 1a). */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 z-[1]"
         style={{
           background:
-            'radial-gradient(120% 90% at 50% 0%, transparent 45%, oklch(0 0 0 / 0.5) 100%)',
-        }}
-      />
-      {/* Left scrim keeps the copy crisp over the reel. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-[1]"
-        style={{
-          background:
-            'linear-gradient(90deg, var(--background) 0%, color-mix(in oklch, var(--background) 72%, transparent) 44%, transparent 80%)',
+            'radial-gradient(900px 500px at 50% -10%, color-mix(in oklch, var(--primary) 10%, transparent), transparent 65%), radial-gradient(700px 400px at 85% 105%, color-mix(in oklch, var(--destructive) 9%, transparent), transparent 60%)',
         }}
       />
 
-      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6">
-        <header className="flex h-16 items-center">
-          <Wordmark />
-        </header>
+      {/* Top bar: wordmark left; capture status line + Steam session entry right.
+          The status line is static copy (mockup 1a): the cloud landing has no
+          capture telemetry pre-login — the live probe is the in-app sidebar card. */}
+      <header className="relative z-10 flex items-center justify-between gap-4 border-b border-primary/15 px-6 py-4 sm:px-11">
+        <Wordmark />
+        <div className="flex items-center gap-5">
+          <span className="hidden items-center gap-2.5 font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.08em] text-muted-foreground lg:flex">
+            <span
+              aria-hidden
+              className="size-[7px] rounded-full bg-primary [box-shadow:0_0_8px_var(--primary)]"
+            />
+            CAPTURA LISTA · HLAE + CS2 DETECTADO
+          </span>
+          <SteamButton onClick={handleSignIn} loading={signingIn} />
+        </div>
+      </header>
 
-        <div className="flex flex-1 items-center py-12">
-          {/* Headline + CTA + trust line, kept on the left over the reel. */}
-          <div className="max-w-xl">
-            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-primary" />
-              The replay studio
-            </span>
+      {/* Hero */}
+      <div className="relative z-10 flex flex-1 flex-col items-center px-6 pt-12 text-center sm:pt-14">
+        <p className="font-[family-name:var(--font-mono)] text-[13px] uppercase tracking-[0.32em] text-primary">
+          {'// SISTEMA DE REPLAY — EN LÍNEA'}
+        </p>
+        <h1 className="mt-3.5 font-[family-name:var(--font-display)] text-4xl font-bold leading-none tracking-[0.01em] text-foreground [text-shadow:0_0_28px_color-mix(in_oklch,var(--primary)_35%,transparent)] sm:text-5xl md:text-[62px]">
+          FORJA TU HIGHLIGHT
+        </h1>
+        <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
+          Tus mejores jugadas, encontradas y montadas en tu propio PC. Elige tu
+          fuente.
+        </p>
 
-            <h1 className="mt-6 font-[family-name:var(--font-display)] text-5xl font-bold uppercase leading-[0.92] tracking-tight text-balance sm:text-6xl md:text-7xl">
-              Forge your frags
-              <br />
-              into <span className="text-primary">reels</span>
-            </h1>
-
-            <p className="mt-6 max-w-md text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-              Scan your CS2 demos, pick the play that pops, and let your own rig
-              capture, edit and package the highlight reel.
-            </p>
-
-            <div className="mt-9 flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <SteamButton onClick={handleSignIn} loading={signingIn} />
-                <Button
-                  variant="outline"
-                  size="lg"
-                  asChild
-                  className="h-12 gap-2.5 px-6 text-base"
-                >
-                  <Link href="/upload">
-                    <UploadCloud className="size-5" />
-                    Upload a demo
-                  </Link>
-                </Button>
-              </div>
-              <p className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-wider text-muted-foreground">
-                No AI. Your POV. Your rig. · No login to analyze a demo.
-              </p>
+        {/* Route cards: 01 / DEMO (cyan) and 02 / STREAM (magenta). */}
+        <div className="mt-11 flex w-full max-w-[976px] flex-col justify-center gap-7 pb-12 text-left lg:flex-row">
+          <div className="relative flex-1 border border-primary/35 bg-card/85 p-7 pb-6">
+            <CardCorners color="primary" />
+            <div className="flex items-center justify-between font-[family-name:var(--font-mono)]">
+              <span className="text-xs tracking-[0.24em] text-primary">01 / DEMO</span>
+              <span className="text-[10px] tracking-[0.14em] text-muted-foreground/70">.DEM</span>
             </div>
+            <h2 className="mt-4 font-[family-name:var(--font-display)] text-[28px] font-bold leading-none text-foreground">
+              ANALIZAR DEMO
+            </h2>
+            <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+              Suelta un .dem de CS2 — tuyo o de cualquiera. Detectamos las
+              mejores rondas y las forjamos en un reel.
+            </p>
+            <div className="mt-5">
+              <Link
+                href="/upload"
+                className="neon-notch neon-glow inline-flex h-11 items-center bg-primary px-6 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                SOLTAR UN .DEM
+              </Link>
+            </div>
+            <p className="mt-4 font-[family-name:var(--font-mono)] text-[10.5px] tracking-[0.16em] text-muted-foreground/70">
+              SIN LOGIN · EL .DEM NUNCA SALE DE TU PC
+            </p>
           </div>
 
+          <div className="relative flex-1 border border-destructive/40 bg-destructive/10 p-7 pb-6">
+            <CardCorners color="destructive" />
+            <div className="flex items-center justify-between font-[family-name:var(--font-mono)]">
+              <span className="text-xs tracking-[0.24em] text-destructive">02 / STREAM</span>
+              <span className="text-[10px] tracking-[0.14em] text-muted-foreground/70">9:16 · 16:9</span>
+            </div>
+            <h2 className="mt-4 font-[family-name:var(--font-display)] text-[28px] font-bold leading-none text-foreground">
+              CLIPS DE STREAM
+            </h2>
+            <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+              Pega un clip de Twitch o YouTube — o sube un MP4 — y córtalo en
+              Shorts con tu facecam encima.
+            </p>
+            <div className="mt-5">
+              <Link
+                href="/streams"
+                className="neon-notch inline-flex h-11 items-center border-[1.5px] border-destructive px-6 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-destructive transition-colors hover:bg-destructive/15"
+              >
+                PEGAR ENLACE
+              </Link>
+            </div>
+            <p className="mt-4 font-[family-name:var(--font-mono)] text-[10.5px] tracking-[0.16em] text-muted-foreground/70">
+              TWITCH · YOUTUBE · MP4
+            </p>
+          </div>
         </div>
-
-        <footer className="flex h-16 items-center text-xs text-muted-foreground/70">
-          You bring the PC &amp; GPU. We handle the pipeline.
-        </footer>
       </div>
+
+      {/* Pipeline footer: static strip, first stage lit. */}
+      <footer className="relative z-10 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 border-t border-primary/15 px-6 py-5 font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.2em]">
+        {PIPELINE.map((stage, i) => (
+          <span key={stage} className="flex items-center gap-5">
+            {i > 0 ? (
+              <span aria-hidden className="text-muted-foreground/40">
+                ▸
+              </span>
+            ) : null}
+            <span
+              className={
+                i === 0
+                  ? 'text-primary [text-shadow:0_0_10px_color-mix(in_oklch,var(--primary)_60%,transparent)]'
+                  : 'text-muted-foreground'
+              }
+            >
+              {stage}
+            </span>
+          </span>
+        ))}
+        <span aria-hidden className="ml-5 text-muted-foreground/40">
+          |
+        </span>
+        <span className="text-muted-foreground">RENDER: TU RIG</span>
+      </footer>
     </main>
   );
 }

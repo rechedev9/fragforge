@@ -18,10 +18,10 @@ export type PlayerPickerProps = {
 
 /** Tooltip copy for the abbreviated stat column headers. */
 const STAT_TOOLTIPS: Record<string, string> = {
-  rating: 'HLTV 1.0 rating',
-  adr: 'Average damage per round',
-  kast: '% rounds with kill/assist/survived/traded',
-  hs: '% headshot kills',
+  rating: 'Rating HLTV 1.0',
+  adr: 'Daño medio por ronda',
+  kast: '% de rondas con kill/asistencia/sobrevivir/trade',
+  hs: '% de kills por headshot',
 };
 
 /** "de_dust2" -> "Dust2", "cs_office" -> "Office"; passes through anything unprefixed. */
@@ -50,7 +50,7 @@ function pickRecommended(players: DemoPlayer[]): DemoPlayer | undefined {
 
 type HighlightChip = { key: string; label: string; className: string };
 
-/** Nonzero multi-kill chips in ACE -> 4K -> 3K order; ACE gets the strongest (lime) treatment. */
+/** Nonzero multi-kill chips in ACE -> 4K -> 3K order; ACE gets the strongest (cyan) treatment. */
 function highlightChips(p: DemoPlayer): HighlightChip[] {
   const chips: HighlightChip[] = [];
   if (p.rounds5k) chips.push({ key: 'ace', label: `ACE ×${p.rounds5k}`, className: 'border-primary/40 bg-primary/15 text-primary' });
@@ -74,9 +74,9 @@ function signed(n: number): string {
 }
 
 const TEAM_META = {
-  T: { label: 'Terrorists', text: 'text-amber-400', chip: 'border-amber-400/30 bg-amber-400/10 text-amber-400' },
-  CT: { label: 'Counter-Terrorists', text: 'text-sky-400', chip: 'border-sky-400/30 bg-sky-400/10 text-sky-400' },
-  '': { label: 'Other', text: 'text-muted-foreground', chip: 'border-border bg-muted text-muted-foreground' },
+  T: { label: 'Terroristas', text: 'text-amber-400', chip: 'border-amber-400/30 bg-amber-400/10 text-amber-400' },
+  CT: { label: 'Antiterroristas', text: 'text-primary', chip: 'border-primary/30 bg-primary/10 text-primary' },
+  '': { label: 'Otros', text: 'text-muted-foreground', chip: 'border-border bg-muted text-muted-foreground' },
 } as const;
 
 /** Compact match summary (map, final score, rounds) shown above the roster tables. */
@@ -84,17 +84,17 @@ function MatchHeader({ match }: { match: RosterMatch }) {
   const tWon = match.scoreT > match.scoreCt;
   const ctWon = match.scoreCt > match.scoreT;
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/20 px-3.5 py-2.5">
+    <div className="flex items-center justify-between gap-3 border border-primary/15 bg-muted/20 px-3.5 py-2.5">
       <span className="truncate font-[family-name:var(--font-display)] text-sm font-bold uppercase tracking-wide text-foreground">
         {prettyMapName(match.map)}
       </span>
       <span className="flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-sm tabular-nums">
         <span className={cn(tWon ? 'font-bold text-amber-400' : 'text-muted-foreground')}>{match.scoreT}</span>
         <span className="text-muted-foreground/50">-</span>
-        <span className={cn(ctWon ? 'font-bold text-sky-400' : 'text-muted-foreground')}>{match.scoreCt}</span>
+        <span className={cn(ctWon ? 'font-bold text-primary' : 'text-muted-foreground')}>{match.scoreCt}</span>
       </span>
       <span className="shrink-0 font-[family-name:var(--font-mono)] text-[0.7rem] uppercase tracking-wider text-muted-foreground">
-        {match.rounds} rounds
+        {match.rounds} rondas
       </span>
     </div>
   );
@@ -102,13 +102,13 @@ function MatchHeader({ match }: { match: RosterMatch }) {
 
 /**
  * PlayerPicker — pick whose POV to clip after a roster scan, shown as a CS-style
- * scoreboard split by team (Terrorists / Counter-Terrorists), with a match header
+ * scoreboard split by team (Terroristas / Antiterroristas), with a match header
  * (map, score, rounds) above it when the scan reports one. Each team is its own
  * table with column headers; rows carry HLTV rating, K/D/A, +/-, ADR, KAST, HS%
  * (and MVP when the demo reports it), plus a Highlights line of multi-kill chips
  * under the player name. The roster's clip-worthiest player (by multi-kill rounds,
  * the strongest signal for a good reel) is auto-highlighted and tagged
- * "Recommended", but the user must click a row to confirm the target, which is
+ * "Recomendado", but the user must click a row to confirm the target, which is
  * the whole point of this screen.
  */
 export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
@@ -159,11 +159,11 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                 {meta.label}
               </span>
               <span className="font-[family-name:var(--font-mono)] text-[0.7rem] uppercase tracking-wider text-muted-foreground">
-                avg {avg.toFixed(2)}
+                media {avg.toFixed(2)}
               </span>
             </div>
 
-            <div className="overflow-hidden rounded-xl border border-border">
+            <div className="overflow-hidden border border-primary/15">
               <div
                 className={cn(
                   'grid items-center gap-x-1 border-b border-border/70 bg-muted/30 px-3 py-2 font-[family-name:var(--font-mono)] text-[0.65rem] uppercase tracking-wider text-muted-foreground',
@@ -171,7 +171,7 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                 )}
                 style={gridStyle}
               >
-                <span>Player</span>
+                <span>Jugador</span>
                 {columns.map((c) => (
                   <span key={c.key} className={cn('text-right', cellClass(c))} title={STAT_TOOLTIPS[c.key]}>
                     {c.label}
@@ -220,7 +220,7 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                           it never competes with the player name for horizontal space. */}
                       <span className="flex flex-wrap items-center gap-1 pl-[2.375rem]">
                         {isRecommended ? (
-                          <Badge className="shrink-0 px-1.5 py-0 text-[0.6rem] leading-4">Recommended</Badge>
+                          <Badge className="shrink-0 px-1.5 py-0 text-[0.6rem] leading-4">Recomendado</Badge>
                         ) : null}
                         {chips.length > 0 ? (
                           chips.map((c) => (

@@ -18,8 +18,8 @@ function SteamMark({ className }: { className?: string }) {
 }
 
 /**
- * The lime "Continue with Steam" CTA — the one saturated element on the auth
- * hero. Everything else stays charcoal so this reads as the single action.
+ * The cyan "Continuar con Steam" CTA — the session entry on the cloud
+ * landing, notched + glowing like every primary HUD action.
  */
 export function SteamButton({ onClick, loading = false }: SteamButtonProps) {
   return (
@@ -28,14 +28,14 @@ export function SteamButton({ onClick, loading = false }: SteamButtonProps) {
       size="lg"
       onClick={onClick}
       disabled={loading}
-      className="h-12 gap-2.5 px-6 text-base font-semibold"
+      className="neon-notch neon-glow h-11 gap-2.5 px-5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em]"
     >
       {loading ? (
         <Loader2 className="size-5 animate-spin" />
       ) : (
         <SteamMark className="size-5" />
       )}
-      <span>{loading ? 'Signing in…' : 'Continue with Steam'}</span>
+      <span>{loading ? 'Iniciando sesión…' : 'Continuar con Steam'}</span>
     </Button>
   );
 }

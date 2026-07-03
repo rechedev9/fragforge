@@ -3,11 +3,11 @@ import { cn } from '@/lib/utils';
 
 /**
  * A purely decorative CSS film reel: a tilted strip of "frames" with sprocket
- * holes down each edge and one lime-ringed frame to echo the in-app selection
- * ring. No real video — texture only, sitting behind the grain layer.
+ * holes down each edge and one cyan-ringed frame to echo the in-app selection
+ * ring. No real video — texture only, sitting behind the scanline layer.
  */
 export function HeroReel({ className }: { className?: string }) {
-  // Which frame gets the lime selection ring (the "chosen play").
+  // Which frame gets the cyan selection ring (the "chosen play").
   const active = 2;
 
   return (

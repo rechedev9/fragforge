@@ -76,15 +76,15 @@ test.describe('stream clips — url submit to editor', () => {
 
     await page.goto('/streams');
     await page.locator(URL_INPUT).fill(CLIP_URL);
-    await page.getByRole('button', { name: 'Fetch clip' }).click();
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
 
-    await expect(page.getByText('Fetching Insane clutch…')).toBeVisible();
+    await expect(page.getByText('Descargando Insane clutch…')).toBeVisible();
 
     // Once acquisition finishes the editor renders: layout selector, facecam
-    // picker, clip ranges, and the Create Shorts action.
-    await expect(page.getByText('Layout', { exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole('button', { name: 'Facecam crop region' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Create Shorts' })).toBeVisible();
+    // picker, clip ranges, and the CREAR SHORTS action.
+    await expect(page.getByText('LAYOUT', { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Región de recorte del facecam' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible();
   });
 
   test('reports the service as offline when the create call returns 503 + code', async ({ page }) => {
@@ -99,9 +99,9 @@ test.describe('stream clips — url submit to editor', () => {
 
     await page.goto('/streams');
     await page.locator(URL_INPUT).fill(CLIP_URL);
-    await page.getByRole('button', { name: 'Fetch clip' }).click();
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
 
-    await expect(page.getByText('Stream Clips service is offline. Start it and try again.')).toBeVisible();
+    await expect(page.getByText('El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.')).toBeVisible();
   });
 
   test('surfaces the render failure reason distinctly from an outage', async ({ page }) => {
@@ -127,13 +127,13 @@ test.describe('stream clips — url submit to editor', () => {
 
     await page.goto('/streams');
     await page.locator(URL_INPUT).fill(CLIP_URL);
-    await page.getByRole('button', { name: 'Fetch clip' }).click();
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
 
-    await expect(page.getByRole('button', { name: 'Create Shorts' })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('button', { name: 'Create Shorts' }).click();
+    await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'CREAR SHORTS' }).click();
 
     await expect(page.getByText('ffmpeg encode failed: unsupported codec')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('Stream Clips service is offline. Start it and try again.')).toHaveCount(0);
+    await expect(page.getByText('El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.')).toHaveCount(0);
   });
 });
 
@@ -170,10 +170,10 @@ test.describe('stream clips — MP4 upload', () => {
     );
 
     await page.goto('/streams');
-    await page.getByRole('button', { name: 'Upload an MP4' }).click();
+    await page.getByRole('button', { name: 'SUBIR UN MP4' }).click();
     await page.locator('input[type=file]').setInputFiles(DUMMY_MP4);
 
-    await expect(page.getByText('Layout', { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('LAYOUT', { exact: true })).toBeVisible({ timeout: 15_000 });
     expect(capturedFieldNames).toContain('file');
   });
 
@@ -190,7 +190,7 @@ test.describe('stream clips — MP4 upload', () => {
     });
 
     await page.goto('/streams');
-    await page.getByRole('button', { name: 'Upload an MP4' }).click();
+    await page.getByRole('button', { name: 'SUBIR UN MP4' }).click();
     await page.locator('input[type=file]').setInputFiles(DUMMY_MP4);
 
     await expect(page.getByText('missing video file: http: no such file')).toBeVisible();
@@ -207,7 +207,7 @@ test.describe('stream clips — MP4 upload', () => {
     });
 
     await page.goto('/streams');
-    await page.getByRole('button', { name: 'Upload an MP4' }).click();
+    await page.getByRole('button', { name: 'SUBIR UN MP4' }).click();
     await page.locator('input[type=file]').setInputFiles(DUMMY_MP4);
 
     await expect(page.getByText('stream clips pipeline is not configured: yt-dlp not found')).toBeVisible();
@@ -218,7 +218,7 @@ test.describe('stream clips — MP4 upload', () => {
 // used to leave the old Shorts grid live, so Download handed back the
 // pre-edit file (for a vertical Twitch clip, effectively the raw source).
 // Downloads must always match the current edits: editing after a render marks
-// the results stale and disables Download until Create Shorts runs again.
+// the results stale and disables Download until CREAR SHORTS runs again.
 test.describe('stream clips — edits, music, and downloads', () => {
   const RENDERED_STATE = {
     status: 'rendered',
@@ -270,40 +270,40 @@ test.describe('stream clips — edits, music, and downloads', () => {
 
     await page.goto('/streams');
     await page.locator(URL_INPUT).fill(CLIP_URL);
-    await page.getByRole('button', { name: 'Fetch clip' }).click();
-    await expect(page.getByRole('button', { name: 'Create Shorts' })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('button', { name: 'Create Shorts' }).click();
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
+    await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'CREAR SHORTS' }).click();
 
     // Fresh render: Download is a live link to the rendered variant.
-    const download = page.getByRole('link', { name: 'Download Clutch' });
+    const download = page.getByRole('link', { name: 'Descargar Clutch' });
     await expect(download).toBeVisible({ timeout: 15_000 });
     await expect(download).toHaveAttribute('href', /renders\/streamer-vertical-stack-40-60\/videos\/clip-1$/);
 
     // Edit after the render: the results are stale, Download must lock.
-    await page.getByLabel('End (s)').first().fill('12');
-    await expect(page.getByText(/rendered before your latest edits/)).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Download Clutch' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Download Clutch (outdated)' })).toBeDisabled();
+    await page.getByLabel('Fin (s)').first().fill('12');
+    await expect(page.getByText(/renderizaron antes de tus últimos cambios/)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Descargar Clutch' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Descargar Clutch (desactualizado)' })).toBeDisabled();
 
     // Re-render applies the edits and unlocks Download again.
-    await page.getByRole('button', { name: 'Create Shorts' }).click();
-    await expect(page.getByRole('link', { name: 'Download Clutch' })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText(/rendered before your latest edits/)).toHaveCount(0);
+    await page.getByRole('button', { name: 'CREAR SHORTS' }).click();
+    await expect(page.getByRole('link', { name: 'Descargar Clutch' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/renderizaron antes de tus últimos cambios/)).toHaveCount(0);
   });
 
-  test('music and grade selections are saved into the edit plan on Create Shorts', async ({ page }) => {
+  test('music and grade selections are saved into the edit plan on CREAR SHORTS', async ({ page }) => {
     const flow = await mockRenderFlow(page);
 
     await page.goto('/streams');
     await page.locator(URL_INPUT).fill(CLIP_URL);
-    await page.getByRole('button', { name: 'Fetch clip' }).click();
-    await expect(page.getByRole('button', { name: 'Create Shorts' })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
+    await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible({ timeout: 15_000 });
 
-    await page.getByLabel('Background music').selectOption('concrete-teeth');
-    await page.getByRole('radio', { name: 'High' }).click();
-    await page.getByRole('button', { name: 'Viral grade off' }).click();
-    await page.getByRole('button', { name: 'Create Shorts' }).click();
-    await expect(page.getByRole('link', { name: 'Download Clutch' })).toBeVisible({ timeout: 15_000 });
+    await page.getByLabel('Música de fondo').selectOption('concrete-teeth');
+    await page.getByRole('radio', { name: 'Alto' }).click();
+    await page.getByRole('button', { name: 'Gradación viral: desactivada' }).click();
+    await page.getByRole('button', { name: 'CREAR SHORTS' }).click();
+    await expect(page.getByRole('link', { name: 'Descargar Clutch' })).toBeVisible({ timeout: 15_000 });
 
     const saved = flow.putBodies().at(-1) as { music?: { key?: string; volume?: number }; effects?: { grade?: boolean } };
     expect(saved.music?.key).toBe('concrete-teeth');
@@ -329,9 +329,9 @@ test.describe('stream clips happy path (real orchestrator)', () => {
     test.setTimeout(120_000);
 
     await page.goto('/streams');
-    await page.getByRole('button', { name: 'Upload an MP4' }).click();
+    await page.getByRole('button', { name: 'SUBIR UN MP4' }).click();
     await page.locator('input[type=file]').setInputFiles(SAMPLE_MP4);
 
-    await expect(page.getByText('Layout', { exact: true })).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText('LAYOUT', { exact: true })).toBeVisible({ timeout: 90_000 });
   });
 });

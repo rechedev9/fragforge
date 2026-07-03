@@ -23,7 +23,7 @@ const PRESET_ICONS: Record<string, React.ReactNode> = {
  * PresetCards — the reel style picker. Each preset is one choice that sets both
  * the recording HUD (Clean POV vs Full HUD vs Kill Feed) and the render style;
  * the list comes from the orchestrator's preset registry (/api/presets). The
- * active card carries the lime ring and a filled check; the registry default is
+ * active card carries the cyan ring and a filled check; the registry default is
  * flagged so the user knows the safe pick.
  */
 export function PresetCards({ presets, value, onChange, disabled = false }: PresetCardsProps) {
@@ -65,7 +65,7 @@ function PresetCard({ icon, title, pitch, hud, isDefault, selected, disabled, on
       disabled={disabled}
       aria-pressed={selected}
       className={cn(
-        'group relative flex flex-col items-start gap-3 rounded-xl border p-5 text-left transition-all',
+        'group relative flex flex-col items-start gap-3 border p-5 text-left transition-all',
         'disabled:cursor-not-allowed disabled:opacity-50',
         selected
           ? 'border-primary bg-primary/[0.06] ring-1 ring-primary'
@@ -75,7 +75,7 @@ function PresetCard({ icon, title, pitch, hud, isDefault, selected, disabled, on
       <div className="flex w-full items-start justify-between">
         <span
           className={cn(
-            'inline-flex size-10 items-center justify-center rounded-lg border transition-colors',
+            'inline-flex size-10 items-center justify-center border transition-colors',
             selected ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-muted text-muted-foreground group-hover:text-foreground',
           )}
         >
@@ -83,7 +83,7 @@ function PresetCard({ icon, title, pitch, hud, isDefault, selected, disabled, on
         </span>
         <span
           className={cn(
-            'flex size-5 items-center justify-center rounded-full border transition-colors',
+            'flex size-5 items-center justify-center border transition-colors',
             selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-transparent text-transparent',
           )}
           aria-hidden
@@ -106,7 +106,7 @@ function PresetCard({ icon, title, pitch, hud, isDefault, selected, disabled, on
       <span className="text-sm leading-relaxed text-muted-foreground">{pitch}</span>
 
       {hud ? (
-        <span className="mt-auto inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 font-[family-name:var(--font-mono)] text-[0.65rem] uppercase tracking-wider text-muted-foreground">
+        <span className="mt-auto inline-flex items-center border border-border bg-muted/40 px-2 py-0.5 font-[family-name:var(--font-mono)] text-[0.65rem] uppercase tracking-wider text-muted-foreground">
           HUD · {hud}
         </span>
       ) : null}

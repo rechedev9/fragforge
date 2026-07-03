@@ -4,10 +4,8 @@ import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type StepperStep = {
-  /** Short title shown beside the number. */
-  title: string;
-  /** One-line description under the title. */
-  hint: string;
+  /** Uppercase mono label shown beside the step marker, e.g. "VINCULA STEAM". */
+  label: string;
 };
 
 export type StepperRailProps = {
@@ -18,54 +16,50 @@ export type StepperRailProps = {
 };
 
 /**
- * A vertical numbered stepper rail. Done steps fill lime with a check, the
- * active step gets a lime ring, future steps stay muted. Numbers are mono so
- * they sit in the same scoreboard family as the rest of the app.
+ * A horizontal numbered stepper, NEON HUD style (mockup 3c): done steps fill
+ * cyan with a check, the active step gets a cyan outline with a glow and its
+ * own two-digit index, future steps stay dim. Numbers and labels are mono so
+ * they read as HUD telemetry rather than a generic wizard.
  */
 export function StepperRail({ steps, current, className }: StepperRailProps) {
   return (
-    <ol className={cn('flex flex-col', className)}>
+    <ol
+      className={cn(
+        'flex flex-wrap items-center justify-center gap-x-[18px] gap-y-3 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.18em]',
+        className,
+      )}
+    >
       {steps.map((step, index) => {
         const done = index < current;
         const active = index === current;
         const isLast = index === steps.length - 1;
 
         return (
-          <li key={step.title} className="flex gap-4">
-            <div className="flex flex-col items-center">
+          <li key={step.label} className="flex items-center gap-[18px]">
+            <span
+              className={cn(
+                'flex items-center gap-2',
+                done && 'text-primary',
+                active && 'text-foreground',
+                !done && !active && 'text-muted-foreground',
+              )}
+            >
               <span
                 className={cn(
-                  'grid size-9 shrink-0 place-items-center rounded-full border font-[family-name:var(--font-mono)] text-sm tabular-nums transition-colors',
-                  done && 'border-primary bg-primary text-primary-foreground',
-                  active && 'border-primary text-primary',
-                  !done && !active && 'border-border text-muted-foreground',
+                  'grid size-[22px] shrink-0 place-items-center rounded-full text-[10px] font-bold tabular-nums',
+                  done && 'bg-primary text-primary-foreground',
+                  active &&
+                    'border-[1.5px] border-primary text-primary shadow-[0_0_12px_color-mix(in_oklch,var(--primary)_40%,transparent)]',
+                  !done && !active && 'border border-white/25 text-muted-foreground',
                 )}
               >
-                {done ? <Check className="size-4" aria-hidden /> : index + 1}
+                {done ? <Check className="size-3" aria-hidden /> : String(index + 1).padStart(2, '0')}
               </span>
-              {!isLast ? (
-                <span
-                  className={cn(
-                    'my-1 w-px flex-1',
-                    index < current ? 'bg-primary/60' : 'bg-border',
-                  )}
-                />
-              ) : null}
-            </div>
-
-            <div className={cn('pb-8', isLast && 'pb-0')}>
-              <p
-                className={cn(
-                  'text-sm font-medium leading-none',
-                  active ? 'text-foreground' : 'text-muted-foreground',
-                )}
-              >
-                {step.title}
-              </p>
-              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground/70">
-                {step.hint}
-              </p>
-            </div>
+              {step.label}
+            </span>
+            {!isLast ? (
+              <span aria-hidden className={cn('h-px w-11', done ? 'bg-primary' : 'bg-white/15')} />
+            ) : null}
           </li>
         );
       })}

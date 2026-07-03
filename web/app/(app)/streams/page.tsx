@@ -26,9 +26,9 @@ import {
 } from '@/lib/api/streams';
 import { api } from '@/lib/api';
 import type { Song } from '@/lib/api/types';
+import { cn } from '@/lib/utils';
 import { SectionEyebrow } from '@/components/brand';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -143,12 +143,12 @@ export default function StreamsPage() {
         try {
           const j = await streamsApi.getJob(jobId);
           if (!j) {
-            reset('That job is no longer available.');
+            reset('Ese trabajo ya no está disponible.');
             return;
           }
           if (j.status === 'failed') {
             setJob(j);
-            setFailureReason(j.failure_reason || 'could not acquire the source video');
+            setFailureReason(j.failure_reason || 'no se pudo obtener el vídeo de origen');
             setStage('failed');
             return;
           }
@@ -158,13 +158,13 @@ export default function StreamsPage() {
           }
         } catch (err) {
           if (isServiceUnavailable(err)) {
-            reset('Stream Clips service is offline. Start it and try again.');
+            reset('El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.');
             return;
           }
           // transient network hiccup; keep polling
         }
       }
-      reset('Timed out waiting for the source video to be ready.');
+      reset('Se agotó el tiempo esperando a que el vídeo de origen estuviera listo.');
     },
     [loadEditor, reset],
   );
@@ -185,10 +185,10 @@ export default function StreamsPage() {
     } catch (err) {
       reset(
         isServiceUnavailable(err)
-          ? 'Stream Clips service is offline. Start it and try again.'
+          ? 'El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.'
           : err instanceof Error
             ? err.message
-            : 'Could not start that job. Check the URL and try again.',
+            : 'No se pudo iniciar ese trabajo. Revisa la URL y vuelve a intentarlo.',
       );
     }
   }, [sourceUrl, title, pollAcquiring, loadEditor, reset]);
@@ -209,10 +209,10 @@ export default function StreamsPage() {
       } catch (err) {
         reset(
           isServiceUnavailable(err)
-            ? 'Stream Clips service is offline. Start it and try again.'
+            ? 'El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.'
             : err instanceof Error
               ? err.message
-              : 'Could not process that file. Try another MP4.',
+              : 'No se pudo procesar ese archivo. Prueba con otro MP4.',
         );
       }
     },
@@ -233,12 +233,12 @@ export default function StreamsPage() {
           }
           if (state.status === 'failed') {
             setStage('failed');
-            setFailureReason(state.error || 'render failed');
+            setFailureReason(state.error || 'el render falló');
             return;
           }
         } catch (err) {
           if (isServiceUnavailable(err)) {
-            reset('Stream Clips service is offline. Start it and try again.');
+            reset('El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.');
             return;
           }
         }
@@ -246,7 +246,7 @@ export default function StreamsPage() {
         if (pollGen.current !== gen) return;
       }
       setStage('failed');
-      setFailureReason('timed out waiting for the render to finish');
+      setFailureReason('se agotó el tiempo esperando a que terminara el render');
     },
     [reset],
   );
@@ -254,7 +254,7 @@ export default function StreamsPage() {
   const createShorts = useCallback(async () => {
     if (!job || !plan) return;
     if (!clipsAreValid(plan.clips)) {
-      setError('Every clip needs an end time after its start time.');
+      setError('Cada clip necesita un fin posterior a su inicio.');
       return;
     }
     setError(null);
@@ -271,10 +271,10 @@ export default function StreamsPage() {
       setStage('editing');
       setError(
         isServiceUnavailable(err)
-          ? 'Stream Clips service is offline. Start it and try again.'
+          ? 'El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.'
           : err instanceof Error
             ? err.message
-            : 'Could not start the render.',
+            : 'No se pudo iniciar el render.',
       );
     } finally {
       setSaving(false);
@@ -288,14 +288,14 @@ export default function StreamsPage() {
   }, []);
 
   return (
-    <div className="flex flex-col gap-10">
-      <header className="space-y-2">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold uppercase tracking-tight text-foreground sm:text-4xl">
-          Stream Clips
+    <div className="flex flex-col gap-7">
+      <header className="flex flex-col gap-2.5">
+        <SectionEyebrow number={3} label="CLIPS DE STREAM" accent="magenta" />
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold leading-none tracking-tight text-foreground sm:text-[34px]">
+          DE STREAM A SHORT
         </h1>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Paste a Twitch clip or VOD link — or upload your own MP4 — and forge it
-          into vertical Shorts with your facecam stacked over the gameplay.
+        <p className="max-w-xl text-sm text-muted-foreground">
+          Pega un clip de Twitch o YouTube — o sube un MP4 — y córtalo en vertical con tu facecam.
         </p>
       </header>
 
@@ -311,26 +311,32 @@ export default function StreamsPage() {
           onSubmitFile={(f) => void submitFile(f)}
         />
       ) : stage === 'acquiring' ? (
-        <Card className="flex flex-col items-center justify-center gap-4 p-6 py-14 text-center sm:p-8">
-          <Loader2 className="size-8 animate-spin text-primary" />
+        <div className="flex flex-col items-center justify-center gap-4 border border-destructive/30 bg-card/80 p-6 py-14 text-center sm:p-8">
+          <Loader2 className="size-8 animate-spin text-destructive" />
           <div className="flex flex-col gap-1">
             <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
-              Fetching {job?.title || 'the clip'}…
+              Descargando {job?.title || 'el clip'}…
             </p>
-            <p className="text-sm text-muted-foreground">Downloading and probing the source video.</p>
+            <p className="text-sm text-muted-foreground">Descargando y analizando el vídeo de origen.</p>
           </div>
-        </Card>
+        </div>
       ) : stage === 'failed' ? (
-        <Card className="flex flex-col items-center justify-center gap-4 p-6 py-14 text-center sm:p-8">
+        <div className="flex flex-col items-center justify-center gap-4 border border-destructive/30 bg-card/80 p-6 py-14 text-center sm:p-8">
           <AlertTriangle className="size-8 text-destructive" />
           <div className="flex flex-col gap-1">
             <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
-              That job failed
+              Ese trabajo falló
             </p>
-            <p className="max-w-md text-sm text-muted-foreground">{failureReason ?? 'Something went wrong.'}</p>
+            <p className="max-w-md text-sm text-muted-foreground">{failureReason ?? 'Algo salió mal.'}</p>
           </div>
-          <Button onClick={() => reset('')}>Start over</Button>
-        </Card>
+          <button
+            type="button"
+            onClick={() => reset('')}
+            className="neon-notch bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            EMPEZAR DE NUEVO
+          </button>
+        </div>
       ) : job && plan ? (
         <StreamEditor
           job={job}
@@ -371,21 +377,24 @@ function SourceCard({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <Card className="p-6 sm:p-8">
-      <div className="flex flex-col gap-6">
+    <div className="neon-brackets [--neon-bracket-color:var(--destructive)] relative max-w-2xl border border-destructive/30 bg-[color-mix(in_oklch,var(--destructive)_6%,var(--card))] p-5 sm:p-6">
+      <SectionEyebrow label="FUENTE" accent="magenta" />
+
+      <div className="mt-4 flex flex-col gap-5">
         <div className="flex flex-col gap-2">
-          <Label htmlFor="stream-title">Title (optional)</Label>
+          <Label htmlFor="stream-title">Título (opcional)</Label>
           <Input
             id="stream-title"
-            placeholder="Insane 1v5 clutch"
+            placeholder="Clutch 1v5 en pistola"
             value={title}
             disabled={submitting}
             onChange={(e) => onTitleChange(e.target.value)}
+            className="rounded-none"
           />
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor="stream-url">Twitch clip or VOD URL</Label>
+          <Label htmlFor="stream-url">URL de clip o VOD de Twitch</Label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <div className="relative flex-1">
               <Twitch className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -395,32 +404,37 @@ function SourceCard({
                 value={sourceUrl}
                 disabled={submitting}
                 onChange={(e) => onSourceUrlChange(e.target.value)}
-                className="pl-9"
+                className="rounded-none pl-9"
               />
             </div>
-            <Button onClick={onSubmitUrl} disabled={submitting || !sourceUrl.trim()} className="gap-1.5">
+            <button
+              type="button"
+              onClick={onSubmitUrl}
+              disabled={submitting || !sourceUrl.trim()}
+              className="neon-notch inline-flex items-center justify-center gap-1.5 bg-destructive px-5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
+            >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              Fetch clip
-            </Button>
+              TRAER CLIP
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <div className="h-px flex-1 bg-border" />
-          or
-          <div className="h-px flex-1 bg-border" />
+        <div className="flex items-center gap-3.5 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.2em] text-muted-foreground">
+          <div className="h-px flex-1 bg-white/10" />
+          O
+          <div className="h-px flex-1 bg-white/10" />
         </div>
 
         <div className="flex flex-col gap-2">
-          <Button
-            variant="outline"
+          <button
+            type="button"
             disabled={submitting}
             onClick={() => fileInputRef.current?.click()}
-            className="gap-1.5"
+            className="flex items-center justify-center gap-2 border border-dashed border-white/20 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-semibold text-muted-foreground transition-colors hover:border-destructive/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
           >
             <UploadCloud className="size-4" />
-            Upload an MP4
-          </Button>
+            SUBIR UN MP4
+          </button>
           <input
             ref={fileInputRef}
             type="file"
@@ -436,7 +450,7 @@ function SourceCard({
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -483,29 +497,58 @@ function StreamEditor({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
-      <div className="flex flex-col gap-6">
-        <Card className="p-6 sm:p-8">
-          <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-[18px]">
+        <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
+          <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <SectionEyebrow label="Layout" />
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                value={plan.variant}
-                onValueChange={(v) => v && setVariant(v as StreamVariant)}
-                disabled={busy}
-              >
-                {STREAM_VARIANTS.map((v) => (
-                  <ToggleGroupItem key={v.value} value={v.value} className="text-xs">
-                    {v.label}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
+              <SectionEyebrow label="LAYOUT" />
+              <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.14em] text-muted-foreground">
+                SALIDA: 1080×1920
+              </span>
+            </div>
+
+            <div className="grid gap-3.5 sm:grid-cols-3">
+              {STREAM_VARIANTS.map((v) => {
+                const selected = v.value === plan.variant;
+                return (
+                  <button
+                    key={v.value}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setVariant(v.value)}
+                    aria-pressed={selected}
+                    className={cn(
+                      'flex items-center gap-3 border p-3 text-left transition-colors disabled:pointer-events-none disabled:opacity-50',
+                      selected ? 'border-[1.5px] border-destructive bg-destructive/[0.07]' : 'border-white/14 hover:border-white/25',
+                    )}
+                  >
+                    <LayoutGlyph variant={v.value} selected={selected} />
+                    <span className="flex flex-col gap-0.5">
+                      <span
+                        className={cn(
+                          'font-[family-name:var(--font-display)] text-[12.5px] font-bold uppercase',
+                          selected ? 'text-[#ffeaf2]' : 'text-foreground',
+                        )}
+                      >
+                        {v.label}
+                      </span>
+                      <span
+                        className={cn(
+                          'font-[family-name:var(--font-mono)] text-[9.5px] uppercase tracking-[0.1em]',
+                          selected ? 'text-[#b88fa3]' : 'text-muted-foreground',
+                        )}
+                      >
+                        {v.subtitle}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             {variantMeta.needsFaceCrop ? (
               <div className="flex flex-col gap-2">
-                <Label>Facecam crop — drag to move, drag the corner handle to resize</Label>
+                <Label>Recorte de facecam — arrastra para mover, arrastra la esquina para redimensionar</Label>
                 <FacecamPicker
                   videoSrc={videoSrc}
                   rect={plan.face_crop ?? DEFAULT_FACE_CROP}
@@ -515,19 +558,19 @@ function StreamEditor({
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                No facecam crop needed — this layout renders the full gameplay frame.
+                No hace falta recorte de facecam — este layout renderiza el gameplay a pantalla completa.
               </p>
             )}
           </div>
-        </Card>
+        </div>
 
-        <Card className="p-6 sm:p-8">
+        <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
           <ClipEditor clips={plan.clips} onChange={setClips} disabled={busy} />
-        </Card>
+        </div>
 
-        <Card className="p-6 sm:p-8">
+        <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
           <div className="flex flex-col gap-4">
-            <SectionEyebrow label="Captions" />
+            <SectionEyebrow label="SUBTÍTULOS" />
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="button"
@@ -535,26 +578,26 @@ function StreamEditor({
                 size="sm"
                 disabled={busy}
                 onClick={() => setCaptionsEnabled(!plan.captions?.enabled)}
-                className="gap-1.5"
+                className="gap-1.5 rounded-none"
               >
                 <Captions className="size-4" />
-                {plan.captions?.enabled ? 'Burned captions on' : 'Burned captions off'}
+                {plan.captions?.enabled ? 'Subtítulos incrustados: activados' : 'Subtítulos incrustados: desactivados'}
               </Button>
               {plan.captions?.enabled ? (
                 <select
                   value={plan.captions?.language ?? 'auto'}
                   disabled={busy}
                   onChange={(e) => setLanguage(e.target.value)}
-                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50"
+                  className="h-9 rounded-none border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50"
                 >
-                  <option value="auto">Auto-detect</option>
-                  <option value="es">Spanish</option>
-                  <option value="en">English</option>
+                  <option value="auto">Detección automática</option>
+                  <option value="es">Español</option>
+                  <option value="en">Inglés</option>
                 </select>
               ) : null}
             </div>
           </div>
-        </Card>
+        </div>
 
         <MusicAndEffectsCard
           plan={plan}
@@ -572,12 +615,17 @@ function StreamEditor({
         ) : null}
 
         <div className="flex items-center gap-3">
-          <Button onClick={onCreate} disabled={busy} className="gap-1.5">
+          <button
+            type="button"
+            onClick={onCreate}
+            disabled={busy}
+            className="neon-notch neon-glow inline-flex items-center gap-1.5 bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            {stage === 'rendering' ? 'Rendering…' : 'Create Shorts'}
-          </Button>
+            {stage === 'rendering' ? 'RENDERIZANDO…' : 'CREAR SHORTS'}
+          </button>
           <Button variant="ghost" onClick={onStartOver} disabled={stage === 'rendering'}>
-            Start over
+            Empezar de nuevo
           </Button>
         </div>
 
@@ -586,14 +634,43 @@ function StreamEditor({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-4">
-        <SectionEyebrow label="Preview" />
+      <div className="flex flex-col gap-3">
+        <span className="font-[family-name:var(--font-mono)] text-[10.5px] tracking-[0.28em] text-muted-foreground">
+          PREVIEW · 9:16
+        </span>
         <StreamPreview videoSrc={videoSrc} variant={plan.variant} faceCrop={plan.face_crop} gameplayCrop={plan.gameplay_crop} />
-        <p className="text-xs text-muted-foreground">
-          Approximate 9:16 layout. The real render preserves the full in-game HUD.
+        <p className="text-[11.5px] leading-relaxed text-muted-foreground/80">
+          Layout aproximado. El render real conserva el HUD del juego completo.
         </p>
       </div>
     </div>
+  );
+}
+
+/** A tiny two-region bar visualizing a layout variant (facecam/gameplay
+ * proportion, a stacked triptych, or a solid full-frame block), matching the
+ * mockup's mini icon next to each layout option. Purely decorative. */
+function LayoutGlyph({ variant, selected }: { variant: StreamVariant; selected: boolean }) {
+  const tone = selected ? 'bg-destructive' : 'bg-white/25';
+  const dim = 'bg-white/12';
+
+  return (
+    <span className="flex h-[42px] w-6 shrink-0 flex-col overflow-hidden border border-white/25">
+      {variant === 'streamer-vertical-stack-40-60' ? (
+        <>
+          <span className={cn('h-[40%]', tone)} />
+          <span className={cn('flex-1', dim)} />
+        </>
+      ) : variant === 'streamer-vertical-stack' ? (
+        <>
+          <span className={cn('h-[26%]', tone)} />
+          <span className={cn('flex-1', dim)} />
+          <span className={cn('h-[26%]', tone)} />
+        </>
+      ) : (
+        <span className={cn('flex-1', dim)} />
+      )}
+    </span>
   );
 }
 
@@ -614,22 +691,27 @@ function ClipEditor({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <SectionEyebrow label="Clip ranges" count={clips.length} />
-        <Button type="button" variant="outline" size="sm" onClick={addClip} disabled={disabled} className="gap-1.5">
+        <SectionEyebrow label="RANGOS DE CLIP" count={clips.length} />
+        <button
+          type="button"
+          onClick={addClip}
+          disabled={disabled}
+          className="inline-flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.14em] text-destructive transition-opacity hover:opacity-80 disabled:pointer-events-none disabled:opacity-40"
+        >
           <Plus className="size-3.5" />
-          Add clip
-        </Button>
+          AÑADIR
+        </button>
       </div>
 
       <div className="flex flex-col gap-3">
         {clips.map((clip, i) => {
           const invalid = !(clip.end_seconds > clip.start_seconds);
           return (
-            <div key={clip.id} className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 p-3">
+            <div key={clip.id} className="flex flex-col gap-2 border border-white/10 bg-card/40 p-3">
               <div className="flex flex-wrap items-end gap-2">
                 <div className="flex flex-col gap-1">
                   <Label htmlFor={`${clip.id}-start`} className="text-xs text-muted-foreground">
-                    Start (s)
+                    Inicio (s)
                   </Label>
                   <Input
                     id={`${clip.id}-start`}
@@ -639,12 +721,12 @@ function ClipEditor({
                     value={clip.start_seconds}
                     disabled={disabled}
                     onChange={(e) => updateClip(clip.id, { start_seconds: Number(e.target.value) })}
-                    className="w-24"
+                    className="w-24 rounded-none"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor={`${clip.id}-end`} className="text-xs text-muted-foreground">
-                    End (s)
+                    Fin (s)
                   </Label>
                   <Input
                     id={`${clip.id}-end`}
@@ -655,12 +737,12 @@ function ClipEditor({
                     disabled={disabled}
                     aria-invalid={invalid}
                     onChange={(e) => updateClip(clip.id, { end_seconds: Number(e.target.value) })}
-                    className="w-24"
+                    className="w-24 rounded-none"
                   />
                 </div>
                 <div className="flex min-w-40 flex-1 flex-col gap-1">
                   <Label htmlFor={`${clip.id}-title`} className="text-xs text-muted-foreground">
-                    Title (optional)
+                    Título (opcional)
                   </Label>
                   <Input
                     id={`${clip.id}-title`}
@@ -668,6 +750,7 @@ function ClipEditor({
                     disabled={disabled}
                     onChange={(e) => updateClip(clip.id, { title: e.target.value })}
                     placeholder={`Clip ${i + 1}`}
+                    className="rounded-none"
                   />
                 </div>
                 <Button
@@ -676,12 +759,12 @@ function ClipEditor({
                   size="icon-sm"
                   disabled={disabled || clips.length <= 1}
                   onClick={() => removeClip(clip.id)}
-                  aria-label="Remove clip"
+                  aria-label="Eliminar clip"
                 >
                   <Trash2 className="size-4" />
                 </Button>
               </div>
-              {invalid ? <p className="text-xs text-destructive">End must be after start.</p> : null}
+              {invalid ? <p className="text-xs text-destructive">El fin debe ser posterior al inicio.</p> : null}
             </div>
           );
         })}
@@ -705,15 +788,16 @@ function RenderResults({
   if (!renderState) return null;
 
   return (
-    <Card className="p-6 sm:p-8">
+    <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
       <div className="flex flex-col gap-4">
-        <SectionEyebrow label="Rendered Shorts" count={renderState.videos.length} />
+        <SectionEyebrow label="SHORTS RENDERIZADOS" count={renderState.videos.length} />
 
         {stale ? (
-          <p className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+          <p className="flex items-center gap-2 border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
             <AlertTriangle className="size-3.5 shrink-0" />
-            These Shorts were rendered before your latest edits. Click Create Shorts to apply them —
-            downloads are disabled until then so you never keep an outdated file.
+            Estos Shorts se renderizaron antes de tus últimos cambios. Pulsa Crear Shorts para
+            aplicarlos — la descarga está bloqueada hasta entonces para que nunca te quedes con un
+            archivo desactualizado.
           </p>
         ) : null}
 
@@ -731,7 +815,7 @@ function RenderResults({
         {renderState.videos.length === 0 ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Film className="size-4" />
-            No Shorts were produced.
+            No se generó ningún Short.
           </div>
         ) : (
           <div className="grid gap-5 sm:grid-cols-2">
@@ -740,16 +824,16 @@ function RenderResults({
               return (
                 <div key={v.clip_id} className="flex flex-col gap-2">
                   {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video src={url} controls className="aspect-[9/16] w-full rounded-lg bg-black object-contain" />
+                  <video src={url} controls className="aspect-[9/16] w-full bg-black object-contain" />
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm text-foreground">{v.title || v.clip_id}</span>
                     {stale ? (
-                      <Button variant="outline" size="icon-sm" disabled aria-label={`Download ${v.title || v.clip_id} (outdated)`}>
+                      <Button variant="outline" size="icon-sm" disabled aria-label={`Descargar ${v.title || v.clip_id} (desactualizado)`}>
                         <Download className="size-4" />
                       </Button>
                     ) : (
                       <Button asChild variant="outline" size="icon-sm">
-                        <a href={url} download aria-label={`Download ${v.title || v.clip_id}`}>
+                        <a href={url} download aria-label={`Descargar ${v.title || v.clip_id}`}>
                           <Download className="size-4" />
                         </a>
                       </Button>
@@ -761,15 +845,15 @@ function RenderResults({
           </div>
         )}
       </div>
-    </Card>
+    </div>
   );
 }
 
 /** Preset music gains: quiet bed, balanced, or music-forward. */
 const MUSIC_VOLUMES = [
-  { value: 0.15, label: 'Low' },
-  { value: 0.25, label: 'Medium' },
-  { value: 0.4, label: 'High' },
+  { value: 0.15, label: 'Bajo' },
+  { value: 0.25, label: 'Medio' },
+  { value: 0.4, label: 'Alto' },
 ];
 
 function MusicAndEffectsCard({
@@ -807,23 +891,23 @@ function MusicAndEffectsCard({
   const grade = plan.effects?.grade ?? false;
 
   return (
-    <Card className="p-6 sm:p-8">
+    <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
       <div className="flex flex-col gap-4">
-        <SectionEyebrow label="Music & effects" />
+        <SectionEyebrow label="MÚSICA Y EFECTOS" />
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex flex-col gap-1">
             <Label htmlFor="stream-music" className="text-xs text-muted-foreground">
-              Background music
+              Música de fondo
             </Label>
             <select
               id="stream-music"
               value={musicKey}
               disabled={busy || songs === null}
               onChange={(e) => onMusicKey(e.target.value)}
-              className="h-9 min-w-52 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50"
+              className="h-9 min-w-52 rounded-none border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50"
             >
-              <option value="">{songs === null ? 'Loading tracks…' : 'None'}</option>
+              <option value="">{songs === null ? 'Cargando pistas…' : 'Ninguna'}</option>
               {(songs ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.title}
@@ -835,7 +919,7 @@ function MusicAndEffectsCard({
 
           {musicKey ? (
             <div className="flex flex-col gap-1">
-              <Label className="text-xs text-muted-foreground">Music volume</Label>
+              <Label className="text-xs text-muted-foreground">Volumen de música</Label>
               <ToggleGroup
                 type="single"
                 variant="outline"
@@ -844,7 +928,7 @@ function MusicAndEffectsCard({
                 disabled={busy}
               >
                 {MUSIC_VOLUMES.map((v) => (
-                  <ToggleGroupItem key={v.value} value={String(v.value)} className="text-xs">
+                  <ToggleGroupItem key={v.value} value={String(v.value)} className="rounded-none text-xs">
                     {v.label}
                   </ToggleGroupItem>
                 ))}
@@ -860,16 +944,16 @@ function MusicAndEffectsCard({
             size="sm"
             disabled={busy}
             onClick={() => onGrade(!grade)}
-            className="gap-1.5"
+            className="gap-1.5 rounded-none"
           >
             <Sparkles className="size-4" />
-            {grade ? 'Viral grade on' : 'Viral grade off'}
+            {grade ? 'Gradación viral: activada' : 'Gradación viral: desactivada'}
           </Button>
           <p className="text-xs text-muted-foreground">
-            Light contrast and saturation lift. Music mixes under the streamer&apos;s audio.
+            Ligero realce de contraste y saturación. La música se mezcla bajo el audio del streamer.
           </p>
         </div>
       </div>
-    </Card>
+    </div>
   );
 }
