@@ -209,14 +209,15 @@
 /*
  * .neon-brackets — corner brackets del HUD en las esquinas superior-izquierda
  * e inferior-derecha. Requiere `position: relative` (o cualquier posicionado)
- * en el elemento. El color se hereda de `--neon-bracket-color` (cian por
- * defecto; pon `[--neon-bracket-color:var(--destructive)]` para la variante
- * magenta de la ruta stream/REC).
+ * en el elemento. El color viene de `--neon-bracket-color` (cian por
+ * defecto vía fallback; pon `[--neon-bracket-color:var(--destructive)]` para
+ * la variante magenta de la ruta stream/REC). El fallback vive en el punto de
+ * uso (::before/::after) en vez de en `.neon-brackets` mismo: globals.css no
+ * está dentro de un `@layer`, así que cualquier declaración de
+ * `--neon-bracket-color` aquí ganaría siempre a la utilidad de propiedad
+ * arbitraria de Tailwind (que sí vive en `@layer utilities`), sin importar el
+ * orden de aparición en el CSS compilado.
  */
-.neon-brackets {
-  --neon-bracket-color: var(--primary);
-}
-
 .neon-brackets::before,
 .neon-brackets::after {
   content: "";
@@ -229,15 +230,15 @@
 .neon-brackets::before {
   top: -1px;
   left: -1px;
-  border-top: 2px solid var(--neon-bracket-color);
-  border-left: 2px solid var(--neon-bracket-color);
+  border-top: 2px solid var(--neon-bracket-color, var(--primary));
+  border-left: 2px solid var(--neon-bracket-color, var(--primary));
 }
 
 .neon-brackets::after {
   bottom: -1px;
   right: -1px;
-  border-bottom: 2px solid var(--neon-bracket-color);
-  border-right: 2px solid var(--neon-bracket-color);
+  border-bottom: 2px solid var(--neon-bracket-color, var(--primary));
+  border-right: 2px solid var(--neon-bracket-color, var(--primary));
 }
 
 /*

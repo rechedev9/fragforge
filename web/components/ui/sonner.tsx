@@ -24,14 +24,30 @@ const Toaster = ({ ...props }: ToasterProps) => {
         error: <OctagonXIcon className="size-4" />,
         loading: <Loader2Icon className="size-4 animate-spin" />,
       }}
+      // sonner's own injected stylesheet hardcodes a system sans font stack
+      // on the toaster root (not a CSS var), so only an inline style on that
+      // same element — which always wins over any stylesheet rule regardless
+      // of selector specificity — can put the app font back in.
       style={
         {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          fontFamily: "var(--font-sans)",
         } as React.CSSProperties
       }
+      toastOptions={{
+        // Per-type accents layer on top of the shared night-navy skin by
+        // overriding the --normal-* custom properties the injected stylesheet
+        // already reads border/text color from, instead of adding Tailwind
+        // color utilities directly (those would lose to sonner's own
+        // higher-specificity, unlayered `border`/`color` declarations).
+        classNames: {
+          success: "[--normal-border:var(--primary)] [--normal-text:var(--primary)]",
+          error: "[--normal-border:var(--destructive)] [--normal-text:var(--destructive)]",
+        },
+      }}
       {...props}
     />
   )
