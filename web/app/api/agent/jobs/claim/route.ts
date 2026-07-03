@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveAgent } from '@/lib/cloud/agentAuth';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { toJobDto, type JobRow } from '@/lib/cloud/jobDto';
+import { parseJobRow, toJobDto } from '@/lib/cloud/jobDto';
 
 export const runtime = 'nodejs';
 
@@ -20,5 +20,7 @@ export async function POST(request: Request): Promise<Response> {
     .eq('id', claimed.id)
     .single();
   if (rowError || !row) return NextResponse.json({ error: 'claim failed' }, { status: 500 });
-  return NextResponse.json({ job: toJobDto(row as unknown as JobRow), jobType: row.type });
+  const job = parseJobRow(row);
+  if (!job) return NextResponse.json({ error: 'claim failed' }, { status: 500 });
+  return NextResponse.json({ job: toJobDto(job), jobType: row.type });
 }

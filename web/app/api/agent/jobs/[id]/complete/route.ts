@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveAgent } from '@/lib/cloud/agentAuth';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { JOB_STATE, JOB_TYPE, TERMINAL_STATES_FILTER } from '@/lib/cloud/jobDto';
 
 export const runtime = 'nodejs';
 
@@ -14,10 +15,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .select('id, type')
     .eq('demo_id', id)
     .eq('agent_id', agent.agentId)
-    .not('state', 'in', '(done,failed)')
+    .not('state', 'in', TERMINAL_STATES_FILTER)
     .maybeSingle();
   if (!job) return NextResponse.json({ error: 'not found' }, { status: 404 });
-  const finalState = job.type === 'scan' ? 'scanned' : job.type === 'parse' ? 'parsed' : 'done';
+  const finalState =
+    job.type === JOB_TYPE.scan ? JOB_STATE.scanned : job.type === JOB_TYPE.parse ? JOB_STATE.parsed : JOB_STATE.done;
   await db.from('jobs').update({ state: finalState, updated_at: new Date().toISOString() }).eq('id', job.id);
   return new NextResponse(null, { status: 204 });
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveAgent } from '@/lib/cloud/agentAuth';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { toJobDto, type JobRow } from '@/lib/cloud/jobDto';
+import { parseJobRow, toJobDto, TERMINAL_STATES_FILTER } from '@/lib/cloud/jobDto';
 
 export const runtime = 'nodejs';
 
@@ -14,8 +14,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     .select('demo_id, target_steamid, rules, type, demos(storage_key, sha256)')
     .eq('demo_id', id)
     .eq('agent_id', agent.agentId)
-    .not('state', 'in', '(done,failed)')
+    .not('state', 'in', TERMINAL_STATES_FILTER)
     .maybeSingle();
-  if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 });
-  return NextResponse.json(toJobDto(row as unknown as JobRow));
+  const job = row ? parseJobRow(row) : null;
+  if (!job) return NextResponse.json({ error: 'not found' }, { status: 404 });
+  return NextResponse.json(toJobDto(job));
 }

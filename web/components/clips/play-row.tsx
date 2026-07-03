@@ -2,7 +2,7 @@
 
 import { Check, Crosshair } from 'lucide-react';
 import type { Play } from '@/lib/api/types';
-import { ReelCover } from '@/components/brand';
+import { ReelCover } from '@/components/brand/reel-cover';
 import { cn } from '@/lib/utils';
 
 export type PlayRowProps = {

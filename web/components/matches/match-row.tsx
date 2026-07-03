@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { ScoreBar, StatMono } from '@/components/brand';
+import { ScoreBar } from '@/components/brand/score-bar';
+import { StatMono } from '@/components/brand/stat-mono';
 import { formatKd, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Match } from '@/lib/api/types';

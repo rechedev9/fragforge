@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { JOB_STATE, JOB_TYPE } from '@/lib/cloud/jobDto';
 
 /** Upload the demo and queue a scan job. Returns the demo id (the browser handle). */
 export async function createScanJob(
@@ -21,7 +22,7 @@ export async function createScanJob(
     .insert({ id: demoId, user_id: userId, storage_key: key, filename: file.name, size: file.size });
   if (demo.error) throw new Error(`insert demo: ${demo.error.message}`);
 
-  const job = await client.from('jobs').insert({ demo_id: demoId, user_id: userId, type: 'scan', state: 'queued' });
+  const job = await client.from('jobs').insert({ demo_id: demoId, user_id: userId, type: JOB_TYPE.scan, state: JOB_STATE.queued });
   if (job.error) throw new Error(`insert job: ${job.error.message}`);
   return { demoId };
 }
