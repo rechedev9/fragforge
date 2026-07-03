@@ -36,6 +36,10 @@ services:
     environment:
       ORCHESTRATOR_URL: http://orchestrator:8080
       ORCHESTRATOR_TOKEN: ${ZV_MUTATION_TOKEN:-fragforge-local}
+      # Server route handlers read the mode at runtime (the client bundle gets
+      # it baked at build time in web/Dockerfile); both must say "local" for
+      # the no-login analyze flow to proxy to the orchestrator container.
+      NEXT_PUBLIC_FRAGFORGE_MODE: local
       # When set, web/middleware.ts requires HTTP Basic Auth with this password
       # on every route. Empty (the default) leaves the UI open, matching the
       # previous behavior for a loopback-only local stack.
