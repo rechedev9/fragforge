@@ -93,7 +93,7 @@ function PresetCard({ icon, title, pitch, hud, isDefault, selected, disabled, on
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
+        <span className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
           {title}
         </span>
         {isDefault ? (

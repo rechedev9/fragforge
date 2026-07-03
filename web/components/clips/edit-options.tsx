@@ -16,16 +16,16 @@ export type EditOptionsProps = {
 };
 
 const effectItems: Array<{ value: EditConfig['killEffect']; label: string }> = [
-  { value: 'punch-in', label: 'Punch' },
+  { value: 'punch-in', label: 'Impacto' },
   { value: 'clean', label: 'Limpio' },
   { value: 'velocity', label: 'Velocidad' },
-  { value: 'freeze-flash', label: 'Freeze' },
+  { value: 'freeze-flash', label: 'Congelado' },
 ];
 
 const transitionItems: Array<{ value: EditConfig['transition']; label: string }> = [
-  { value: 'flash', label: 'Flash' },
+  { value: 'flash', label: 'Destello' },
   { value: 'cut', label: 'Corte' },
-  { value: 'whip', label: 'Whip' },
+  { value: 'whip', label: 'Barrido' },
   { value: 'dip', label: 'Fundido' },
 ];
 
@@ -76,7 +76,7 @@ export function EditOptions({ value, onChange, disabled = false }: EditOptionsPr
         </ToggleGroup>
       </OptionBlock>
 
-      <OptionBlock label="INTRO Y OUTRO" className="md:col-span-2">
+      <OptionBlock label="APERTURA Y CIERRE" className="md:col-span-2">
         <ToggleGroup
           type="multiple"
           value={[value.intro ? 'intro' : '', value.outro ? 'outro' : ''].filter(Boolean)}
@@ -87,30 +87,30 @@ export function EditOptions({ value, onChange, disabled = false }: EditOptionsPr
           variant="outline"
           className="flex-wrap"
         >
-          <ToggleGroupItem value="intro" aria-label="Intro">
+          <ToggleGroupItem value="intro" aria-label="Apertura">
             <PanelTop className="size-4" />
-            Intro
+            Apertura
           </ToggleGroupItem>
-          <ToggleGroupItem value="outro" aria-label="Outro">
+          <ToggleGroupItem value="outro" aria-label="Cierre">
             <PanelTop className="size-4 rotate-180" />
-            Outro
+            Cierre
           </ToggleGroupItem>
         </ToggleGroup>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <BookendTextField
-            label="Título de intro"
+            label="Título de apertura"
             value={value.introText ?? ''}
             visible={value.intro}
-            placeholder="Título de intro (vacío = titular generado)"
+            placeholder="Título de apertura (vacío = titular generado)"
             disabled={disabled}
             onChange={(introText) => onChange({ ...value, introText })}
           />
           <BookendTextField
-            label="Texto de outro"
+            label="Texto de cierre"
             value={value.outroText ?? ''}
             visible={value.outro}
-            placeholder="Texto de outro (tu handle; vacío = FragForge)"
+            placeholder="Texto de cierre (tu handle; vacío = FragForge)"
             disabled={disabled}
             onChange={(outroText) => onChange({ ...value, outroText })}
           />
