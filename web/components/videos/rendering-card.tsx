@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import type { Video } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { RecDot } from '@/components/brand/rec-dot';
@@ -20,11 +21,46 @@ export function RenderingCard({ video }: { video: Video }) {
   const isComposing = video.status === 'composing';
   const formatBadge = video.editConfig ? FORMAT_LABEL[video.editConfig.format] : undefined;
 
+  let accentClass: string;
+  if (isCapturing) {
+    accentClass = 'border-destructive/40';
+  } else if (isComposing) {
+    accentClass = 'border-primary/14';
+  } else {
+    accentClass = 'border-white/10 bg-card/60';
+  }
+
+  let stageLabel: ReactNode;
+  if (isCapturing) {
+    stageLabel = <RecDot label="CAPTURANDO · EN TU RIG" />;
+  } else if (isComposing) {
+    stageLabel = (
+      <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.24em] text-muted-foreground">
+        EDICIÓN…
+      </span>
+    );
+  } else {
+    stageLabel = (
+      <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.24em] text-muted-foreground/70">
+        EN COLA
+      </span>
+    );
+  }
+
+  let progressBar: ReactNode;
+  if (isCapturing) {
+    progressBar = <span className="neon-pulse block h-[3px] w-2/3 bg-destructive shadow-[0_0_8px_rgba(255,45,120,0.6)]" />;
+  } else if (isComposing) {
+    progressBar = <span className="neon-pulse block h-[3px] w-1/2 bg-gradient-to-r from-primary to-chart-3" />;
+  } else {
+    progressBar = null;
+  }
+
   return (
     <div
       className={cn(
         'relative border bg-card/80',
-        isCapturing ? 'border-destructive/40' : isComposing ? 'border-primary/14' : 'border-white/10 bg-card/60',
+        accentClass,
       )}
     >
       <div
@@ -40,17 +76,7 @@ export function RenderingCard({ video }: { video: Video }) {
           </span>
         ) : null}
 
-        {isCapturing ? (
-          <RecDot label="CAPTURANDO · EN TU RIG" />
-        ) : isComposing ? (
-          <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.24em] text-muted-foreground">
-            EDICIÓN…
-          </span>
-        ) : (
-          <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.24em] text-muted-foreground/70">
-            EN COLA
-          </span>
-        )}
+        {stageLabel}
       </div>
 
       <div className="flex flex-col gap-1 p-4">
@@ -73,13 +99,7 @@ export function RenderingCard({ video }: { video: Video }) {
           </p>
         )}
 
-        <div className="mt-3 h-[3px] bg-white/8">
-          {isCapturing ? (
-            <span className="neon-pulse block h-[3px] w-2/3 bg-destructive shadow-[0_0_8px_rgba(255,45,120,0.6)]" />
-          ) : isComposing ? (
-            <span className="neon-pulse block h-[3px] w-1/2 bg-gradient-to-r from-primary to-chart-3" />
-          ) : null}
-        </div>
+        <div className="mt-3 h-[3px] bg-white/8">{progressBar}</div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Crosshair } from 'lucide-react';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
@@ -183,6 +183,24 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                 const active = p.steamId === highlighted;
                 const isRecommended = p.steamId === recommended?.steamId;
                 const chips = highlightChips(p);
+                let chipRow: ReactNode;
+                if (chips.length > 0) {
+                  chipRow = chips.map((c) => (
+                    <span
+                      key={c.key}
+                      className={cn(
+                        'inline-flex items-center rounded-full border px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold tabular-nums',
+                        c.className,
+                      )}
+                    >
+                      {c.label}
+                    </span>
+                  ));
+                } else if (!isRecommended) {
+                  chipRow = <span className="text-[0.65rem] text-muted-foreground/60">-</span>;
+                } else {
+                  chipRow = null;
+                }
                 return (
                   <button
                     key={p.steamId}
@@ -222,21 +240,7 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                         {isRecommended ? (
                           <Badge className="shrink-0 px-1.5 py-0 text-[0.6rem] leading-4">Recomendado</Badge>
                         ) : null}
-                        {chips.length > 0 ? (
-                          chips.map((c) => (
-                            <span
-                              key={c.key}
-                              className={cn(
-                                'inline-flex items-center rounded-full border px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold tabular-nums',
-                                c.className,
-                              )}
-                            >
-                              {c.label}
-                            </span>
-                          ))
-                        ) : !isRecommended ? (
-                          <span className="text-[0.65rem] text-muted-foreground/60">-</span>
-                        ) : null}
+                        {chipRow}
                       </span>
                     </span>
                     {columns.map((c) => (

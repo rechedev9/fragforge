@@ -216,6 +216,17 @@ export function synthRoster(fileName: string): DemoPlayer[] {
     const adr = 55 + ((base + i * 11) % 58);
     const kast = 55 + ((base + i * 13) % 35);
     const rating = Math.max(0.2, Math.round((0.55 + (kills - deaths) / rounds + (kills / rounds) * 0.35) * 100) / 100);
+    // Most of the roster has no multi-kill rounds; the standout fragger
+    // (index 0) gets an ace plus a couple of 3Ks so the Highlights column
+    // and the Recommended badge are visible in dev without a real demo.
+    let rounds3k: number;
+    if (i === 0) {
+      rounds3k = 2;
+    } else if (i === 1) {
+      rounds3k = 1;
+    } else {
+      rounds3k = 0;
+    }
     return {
       steamId: String(76561190000000000n + BigInt(base % 1000000) + BigInt(i)),
       name,
@@ -230,12 +241,9 @@ export function synthRoster(fileName: string): DemoPlayer[] {
       hsPct: kills > 0 ? Math.round((1000 * headshots) / kills) / 10 : 0,
       kast,
       rating,
-      // Most of the roster has no multi-kill rounds; the standout fragger
-      // (index 0) gets an ace plus a couple of 3Ks so the Highlights column
-      // and the Recommended badge are visible in dev without a real demo.
       rounds5k: i === 0 ? 1 : 0,
       rounds4k: 0,
-      rounds3k: i === 0 ? 2 : i === 1 ? 1 : 0,
+      rounds3k,
       rounds2k: i < 3 ? 1 : 0,
     };
   });

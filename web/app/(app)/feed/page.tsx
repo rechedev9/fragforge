@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Compass } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { FeedItem } from '@/lib/api/types';
@@ -40,6 +40,15 @@ export default function FeedPage() {
 
   const visible = useMemo(() => sortFeed(items ?? [], sort), [items, sort]);
 
+  let content: ReactNode;
+  if (items === null) {
+    content = <FeedGridSkeleton />;
+  } else if (items.length === 0) {
+    content = <EmptyState />;
+  } else {
+    content = <FeedGrid items={visible} />;
+  }
+
   return (
     <div className="flex flex-col gap-7">
       <header className="flex flex-col gap-2.5">
@@ -78,13 +87,7 @@ export default function FeedPage() {
         </p>
       </header>
 
-      {items === null ? (
-        <FeedGridSkeleton />
-      ) : items.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <FeedGrid items={visible} />
-      )}
+      {content}
     </div>
   );
 }

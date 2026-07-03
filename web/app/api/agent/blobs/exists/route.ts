@@ -18,5 +18,5 @@ export async function GET(request: Request): Promise<Response> {
   const name = slash >= 0 ? path.slice(slash + 1) : path;
   const { data, error } = await supabaseAdmin().storage.from(bucket).list(dir, { search: name });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ exists: !!data?.some((f) => f.name === name) });
+  return NextResponse.json({ exists: data.some((f) => f.name === name) });
 }

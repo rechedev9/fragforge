@@ -52,7 +52,14 @@ export default function ConnectPage() {
 
   // The stepper has one more marker than the real flow: "CAPTURA LISTA" lights
   // up once pairing is confirmed, even though it isn't its own page/step.
-  const stepperIndex = step === 0 ? 0 : paired ? 2 : 1;
+  let stepperIndex: number;
+  if (step === 0) {
+    stepperIndex = 0;
+  } else if (paired) {
+    stepperIndex = 2;
+  } else {
+    stepperIndex = 1;
+  }
 
   return (
     <main className="relative min-h-screen overflow-hidden">

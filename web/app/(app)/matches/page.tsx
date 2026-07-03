@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Clapperboard, UploadCloud } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -79,6 +79,15 @@ export default function MatchesPage() {
     return rows;
   }, [matches, filter, query]);
 
+  let content: ReactNode;
+  if (matches !== null && matches.length === 0) {
+    content = <NoMatchesYet />;
+  } else if (matches === null) {
+    content = <MatchListSkeleton />;
+  } else {
+    content = <MatchList matches={visible} />;
+  }
+
   return (
     <div className="flex flex-col gap-7">
       <header className="flex flex-col gap-2.5">
@@ -101,13 +110,7 @@ export default function MatchesPage() {
         </p>
       </header>
 
-      {matches !== null && matches.length === 0 ? (
-        <NoMatchesYet />
-      ) : matches === null ? (
-        <MatchListSkeleton />
-      ) : (
-        <MatchList matches={visible} />
-      )}
+      {content}
     </div>
   );
 }

@@ -23,7 +23,7 @@ export async function GET(): Promise<Response> {
   // Forward only the fields the UI uses; drop each tool's absolute disk `path` so
   // local filesystem layout never leaves the box, even if this bind is exposed.
   const tools = (list?: UpstreamTool[]) =>
-    (list ?? []).map((t) => ({ name: String(t.name ?? ''), source: String(t.source ?? 'none'), configured: Boolean(t.configured), accessible: Boolean(t.accessible) }));
+    (list ?? []).map((t) => ({ name: t.name ?? '', source: t.source ?? 'none', configured: Boolean(t.configured), accessible: Boolean(t.accessible) }));
   return NextResponse.json(
     {
       record: { enabled: Boolean(data.record?.enabled), tools: tools(data.record?.tools) },

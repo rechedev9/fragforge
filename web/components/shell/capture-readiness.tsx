@@ -88,11 +88,14 @@ export function CaptureReadiness() {
           {TOOL_GUIDE.map((tool) => {
             const state = toolState.get(tool.name);
             const found = Boolean(state?.accessible);
-            const badge = found
-              ? { label: state?.source === 'env' ? 'Configurada' : 'Detectada', cls: 'bg-primary/10 text-primary' }
-              : state?.configured
-                ? { label: 'Falta', cls: 'bg-amber-400/10 text-amber-400' }
-                : { label: 'No encontrada', cls: 'bg-destructive/10 text-destructive' };
+            let badge: { label: string; cls: string };
+            if (found) {
+              badge = { label: state?.source === 'env' ? 'Configurada' : 'Detectada', cls: 'bg-primary/10 text-primary' };
+            } else if (state?.configured) {
+              badge = { label: 'Falta', cls: 'bg-amber-400/10 text-amber-400' };
+            } else {
+              badge = { label: 'No encontrada', cls: 'bg-destructive/10 text-destructive' };
+            }
             return (
               <div key={tool.name} className="border border-border bg-card p-3">
                 <div className="flex items-center justify-between gap-2">
