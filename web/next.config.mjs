@@ -15,4 +15,13 @@ export default {
   // server.js. The desktop packaging and the Docker image both rely on the flat
   // layout, so make it deterministic regardless of where the repo is checked out.
   outputFileTracingRoot: here,
+  experimental: {
+    // Having a middleware at all (web/middleware.ts, the optional password
+    // gate) makes Next cap request bodies at 10MB by default, which silently
+    // truncated multi-hundred-MB .dem uploads to /api/demos/scan and broke the
+    // analyze flow. Raise it past the biggest legitimate upload (the
+    // stream-clips MP4 proxy cap is 2GB); each route still enforces its own
+    // explicit limit.
+    middlewareClientMaxBodySize: '8gb',
+  },
 };
