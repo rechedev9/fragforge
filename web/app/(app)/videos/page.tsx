@@ -114,6 +114,15 @@ export default function VideosPage() {
   );
 }
 
+/**
+ * All non-failed reels share one flat grid regardless of pipeline stage — the
+ * mockup's BIBLIOTECA shows queued/capturing/editing/ready cards side by side
+ * at equal width; each card already carries its own stage treatment (REC dot,
+ * progress bar, "LISTO" tag), so a stage-grouping header on top of that is
+ * redundant. Failed reels stay in their own "needs attention" alert row above
+ * the grid since they need a distinct, actionable presentation, not just a
+ * stage label.
+ */
 function LibrarySections({
   videos,
   allVideos,
@@ -124,8 +133,7 @@ function LibrarySections({
   onChange: () => void;
 }) {
   const failed = videos.filter((v) => v.status === 'failed');
-  const rendering = videos.filter((v) => v.status !== 'ready' && v.status !== 'failed');
-  const ready = videos.filter((v) => v.status === 'ready');
+  const active = videos.filter((v) => v.status !== 'failed');
 
   return (
     <>
@@ -140,31 +148,21 @@ function LibrarySections({
         </section>
       ) : null}
 
-      {rendering.length > 0 ? (
-        <section className="space-y-4">
-          <SectionEyebrow label="RENDERIZANDO" count={rendering.length} />
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {rendering.map((v) => (
-              <RenderingCard key={v.id} video={v} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="space-y-4">
-        <SectionEyebrow label="LISTOS" count={ready.length} />
-        {ready.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {ready.map((v) => (
+      {active.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {active.map((v) =>
+            v.status === 'ready' ? (
               <ReadyCard key={v.id} video={v} onChange={onChange} />
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Todavía no hay reels terminados. Los renders aterrizan aquí al salir del pipeline.
-          </p>
-        )}
-      </section>
+            ) : (
+              <RenderingCard key={v.id} video={v} />
+            ),
+          )}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Todavía no hay reels terminados. Los renders aterrizan aquí al salir del pipeline.
+        </p>
+      )}
 
       <div className="mt-auto flex items-center justify-center pt-6">
         <PipelineSteps status={busiestStatus(allVideos)} className="gap-x-3 text-[11.5px]" />
@@ -175,23 +173,14 @@ function LibrarySections({
 
 function LibrarySkeleton() {
   return (
-    <div className="space-y-10">
-      <section className="space-y-4">
-        <SectionEyebrow label="RENDERIZANDO" />
-        <Skeleton className="h-28 w-full rounded-none" />
-      </section>
-      <section className="space-y-4">
-        <SectionEyebrow label="LISTOS" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="space-y-3">
-              <Skeleton className="aspect-video w-full rounded-none" />
-              <Skeleton className="h-4 w-2/3 rounded-none" />
-              <Skeleton className="h-3 w-1/3 rounded-none" />
-            </div>
-          ))}
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="space-y-3">
+          <Skeleton className="aspect-video w-full rounded-none" />
+          <Skeleton className="h-4 w-2/3 rounded-none" />
+          <Skeleton className="h-3 w-1/3 rounded-none" />
         </div>
-      </section>
+      ))}
     </div>
   );
 }
