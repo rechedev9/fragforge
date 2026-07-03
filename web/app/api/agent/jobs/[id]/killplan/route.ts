@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveAgent } from '@/lib/cloud/agentAuth';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { TERMINAL_STATES_FILTER } from '@/lib/cloud/jobDto';
 
 export const runtime = 'nodejs';
 
@@ -14,6 +15,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .update({ kill_plan: body.kill_plan ?? null, updated_at: new Date().toISOString() })
     .eq('demo_id', id)
     .eq('agent_id', agent.agentId)
-    .not('state', 'in', '(done,failed)');
+    .not('state', 'in', TERMINAL_STATES_FILTER);
   return new NextResponse(null, { status: 204 });
 }

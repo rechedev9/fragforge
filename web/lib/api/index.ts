@@ -10,6 +10,3 @@ import { isLocalMode } from '@/lib/mode';
 // the in-memory mock runs (the design/preview default).
 export const api: ApiClient =
   process.env.NEXT_PUBLIC_API_BASE || isLocalMode() ? new RealApiClient() : new MockApiClient();
-
-export type { ApiClient } from './client';
-export * from './types';

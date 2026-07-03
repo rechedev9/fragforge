@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useSession } from '@/lib/session';
 import { dismissOnboarding } from '@/lib/onboarding';
-import { Wordmark } from '@/components/brand';
+import { Wordmark } from '@/components/brand/wordmark';
 import { StepperRail, type StepperStep } from '@/components/connect/stepper-rail';
 import { LinkHistoryStep } from '@/components/connect/link-history-step';
 import { PairPcStep } from '@/components/connect/pair-pc-step';

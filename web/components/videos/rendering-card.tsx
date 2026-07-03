@@ -2,7 +2,7 @@
 
 import type { Video } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
-import { RecDot } from '@/components/brand';
+import { RecDot } from '@/components/brand/rec-dot';
 
 const FORMAT_LABEL: Record<string, string> = { 'short-9x16': '9:16', 'landscape-16x9': '16:9' };
 

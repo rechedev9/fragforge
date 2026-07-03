@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ReelCover } from '@/components/brand';
+import { ReelCover } from '@/components/brand/reel-cover';
 import { DeleteVideoButton } from '@/components/videos/delete-video-button';
 
 const FORMAT_LABEL: Record<string, string> = { 'short-9x16': '9:16', 'landscape-16x9': '16:9' };

@@ -8,7 +8,7 @@ import { Loader2 } from 'lucide-react';
 import { useSession } from '@/lib/session';
 import { isLocalMode } from '@/lib/mode';
 import { isOnboardingDismissed } from '@/lib/onboarding';
-import { Wordmark } from '@/components/brand';
+import { Wordmark } from '@/components/brand/wordmark';
 import { SteamButton } from '@/components/login/steam-button';
 
 // Client-only: three.js touches WebGL, so it never renders on the server.

@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 import { isLocalMode } from '@/lib/mode';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
-import { Wordmark } from '@/components/brand';
+import { Wordmark } from '@/components/brand/wordmark';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';

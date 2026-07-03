@@ -6,7 +6,7 @@ import { Check, Copy, Cpu, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { SectionEyebrow } from '@/components/brand';
+import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { cn } from '@/lib/utils';
 
 // The FragForge Studio Windows installer, the same canonical release asset

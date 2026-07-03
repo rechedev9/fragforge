@@ -27,7 +27,7 @@ import {
 import { api } from '@/lib/api';
 import type { Song } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
-import { SectionEyebrow } from '@/components/brand';
+import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
