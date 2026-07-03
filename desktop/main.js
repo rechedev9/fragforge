@@ -11,6 +11,7 @@
 
 const { app, BrowserWindow } = require('electron');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -46,6 +47,92 @@ const orchestratorExe = resourcePath(
 const nextServer = resourcePath('web', 'server.js');
 const dataDir = path.join(app.getPath('userData'), 'data');
 const musicDir = path.join(dataDir, 'music');
+
+// All child output is mirrored to this file so a failed boot is diagnosable
+// from a user report: the packaged app has no console, so stdout alone is
+// invisible. Truncated on every launch; the error screen shows its tail.
+const logFile = path.join(app.getPath('userData'), 'studio.log');
+let logStream = null;
+function logLine(text) {
+  process.stdout.write(text);
+  try {
+    if (!logStream) logStream = fs.createWriteStream(logFile, { flags: 'w' });
+    logStream.write(text);
+  } catch {
+    // Logging must never break the app; stdout still has the line in dev.
+  }
+}
+
+// HLAE is a hard requirement for capture but is third-party (advancedfx, MIT)
+// and was previously left for the user to install by hand — the #1 "NO
+// ENCONTRADA" support report. Provision it like the music catalog: download
+// the official release zip (pinned version + sha256) into userData on first
+// boot, extract it, and point the orchestrator at it via ZV_HLAE_PATH (env
+// always wins over auto-detection). The zip ships its LICENSES/ folder, so
+// attribution travels with the install.
+const HLAE_VERSION = '2.190.1';
+const HLAE_ZIP_URL =
+  'https://github.com/advancedfx/advancedfx/releases/download/v2.190.1/hlae_2_190_1.zip';
+const HLAE_ZIP_SHA256 = 'b8c0a6d99201ba017e877c3ba95fd1c3a60b33dc1159218828c7c0a785e59ca3';
+const hlaeDir = path.join(app.getPath('userData'), 'hlae', HLAE_VERSION);
+const hlaeExe = path.join(hlaeDir, 'HLAE.exe');
+
+/** Downloads url to destPath and returns its sha256 hex digest. */
+async function downloadFile(url, destPath) {
+  const res = await fetchStream(url);
+  const hash = crypto.createHash('sha256');
+  await new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(destPath);
+    res.on('data', (chunk) => hash.update(chunk));
+    res.pipe(out);
+    res.on('error', reject);
+    out.on('error', reject);
+    out.on('finish', resolve);
+  });
+  return hash.digest('hex');
+}
+
+/**
+ * Ensures HLAE is installed under userData and returns the HLAE.exe path, or
+ * '' when provisioning failed (offline, bad hash); the orchestrator then falls
+ * back to auto-detecting a manual C:\HLAE-* install. Idempotent: subsequent
+ * boots see the existing exe and return instantly.
+ */
+async function provisionHlae() {
+  if (process.platform !== 'win32') return '';
+  if (fs.existsSync(hlaeExe)) return hlaeExe;
+
+  fs.mkdirSync(hlaeDir, { recursive: true });
+  const zipPath = path.join(hlaeDir, 'hlae.zip.part');
+  try {
+    logLine(`[hlae] downloading HLAE ${HLAE_VERSION}...\n`);
+    const digest = await downloadFile(HLAE_ZIP_URL, zipPath);
+    if (digest !== HLAE_ZIP_SHA256) {
+      throw new Error(`sha256 mismatch: got ${digest}, want ${HLAE_ZIP_SHA256}`);
+    }
+    // Expand-Archive ships with every Windows 10/11 PowerShell; no unzip dep.
+    await new Promise((resolve, reject) => {
+      const ps = spawn(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command',
+          `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${hlaeDir}' -Force`],
+        { windowsHide: true },
+      );
+      let stderr = '';
+      ps.stderr.on('data', (b) => { stderr += b; });
+      ps.on('error', reject);
+      ps.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`Expand-Archive exited ${code}: ${stderr.trim()}`))));
+    });
+    if (!fs.existsSync(hlaeExe)) throw new Error(`HLAE.exe missing after extraction in ${hlaeDir}`);
+    logLine(`[hlae] installed ${hlaeExe}\n`);
+    return hlaeExe;
+  } catch (err) {
+    logLine(`[hlae] provisioning failed (capture falls back to a manual install): ${err}\n`);
+    return '';
+  } finally {
+    fs.rmSync(zipPath, { force: true });
+  }
+}
 
 /** GET that follows redirects (archive.org download links bounce to mirrors). */
 function fetchStream(url, redirectsLeft = 5) {
@@ -86,7 +173,7 @@ async function provisionMusic() {
   try {
     tracks = JSON.parse(fs.readFileSync(bundledCatalog, 'utf8')).tracks ?? [];
   } catch (err) {
-    process.stdout.write(`[music] bad catalog.json: ${err}\n`);
+    logLine(`[music] bad catalog.json: ${err}\n`);
     return;
   }
   for (const t of tracks) {
@@ -99,9 +186,9 @@ async function provisionMusic() {
       const bundledAudio = resourcePath('music', `${t.id}.${t.ext}`);
       if (fs.existsSync(bundledAudio)) {
         fs.copyFileSync(bundledAudio, dest);
-        process.stdout.write(`[music] copied bundled ${t.id}.${t.ext}\n`);
+        logLine(`[music] copied bundled ${t.id}.${t.ext}\n`);
       } else {
-        process.stdout.write(`[music] skip ${t.id}: no downloadUrl and no bundled audio\n`);
+        logLine(`[music] skip ${t.id}: no downloadUrl and no bundled audio\n`);
       }
       continue;
     }
@@ -118,10 +205,10 @@ async function provisionMusic() {
         out.on('finish', resolve);
       });
       fs.renameSync(tmp, dest);
-      process.stdout.write(`[music] downloaded ${t.id}.${t.ext}\n`);
+      logLine(`[music] downloaded ${t.id}.${t.ext}\n`);
     } catch (err) {
       fs.rmSync(tmp, { force: true });
-      process.stdout.write(`[music] skip ${t.id}: ${err}\n`);
+      logLine(`[music] skip ${t.id}: ${err}\n`);
     }
   }
 }
@@ -171,7 +258,7 @@ async function stablePort(key) {
   try {
     fs.writeFileSync(portsFile, JSON.stringify({ ...saved, [key]: port }));
   } catch (err) {
-    process.stdout.write(`[ports] could not persist ${key} port: ${err}\n`);
+    logLine(`[ports] could not persist ${key} port: ${err}\n`);
   }
   return port;
 }
@@ -199,15 +286,45 @@ function waitForHttp(url, timeoutMs) {
 
 const children = [];
 
-/** Spawns a child, tracks it for shutdown, and prefixes its logs. */
+/**
+ * Spawns a child, tracks it for shutdown, and prefixes its logs (mirrored to
+ * studio.log). The returned exited promise rejects the moment the child dies
+ * or fails to spawn, so boot() can fail fast with the real cause (an AV
+ * quarantine or a crashing backend exits in milliseconds) instead of sitting
+ * out the full healthz timeout and reporting a useless "timed out".
+ */
 function launch(label, exe, args, env) {
   const child = spawn(exe, args, { env: { ...process.env, ...env }, windowsHide: true });
   children.push(child);
-  const tag = (buf) => process.stdout.write(`[${label}] ${buf}`);
+  const tag = (buf) => logLine(`[${label}] ${buf}`);
   child.stdout.on('data', tag);
   child.stderr.on('data', tag);
-  child.on('exit', (code) => process.stdout.write(`[${label}] exited (${code})\n`));
-  return child;
+  const exited = new Promise((_, reject) => {
+    child.on('error', (err) => {
+      logLine(`[${label}] failed to start: ${err}\n`);
+      reject(new Error(`${label} no pudo iniciarse: ${err.message}`));
+    });
+    child.on('exit', (code) => {
+      logLine(`[${label}] exited (${code})\n`);
+      reject(new Error(`${label} terminó inesperadamente (código ${code})`));
+    });
+  });
+  exited.catch(() => {}); // observed selectively during boot; never unhandled
+  return { child, exited };
+}
+
+/** Last lines of studio.log, HTML-escaped for the error screen. */
+function logTail(maxLines = 40) {
+  try {
+    const lines = fs.readFileSync(logFile, 'utf8').split('\n');
+    return lines
+      .slice(-maxLines)
+      .join('\n')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;');
+  } catch {
+    return '(sin registro)';
+  }
 }
 
 let mainWindow = null;
@@ -234,23 +351,33 @@ async function boot() {
 
   // Fire-and-forget: tracks land while the app boots (and even mid-session);
   // /api/songs rescans the dir per request.
-  provisionMusic().catch((err) => process.stdout.write(`[music] provision failed: ${err}\n`));
+  provisionMusic().catch((err) => logLine(`[music] provision failed: ${err}\n`));
+
+  // HLAE must be resolved before the orchestrator spawns (tool paths are read
+  // once at startup). First boot downloads ~9 MB; later boots return the
+  // cached install instantly. Capped so a stalled download can never wedge the
+  // app: worst case we boot without HLAE and the capture card says so.
+  const hlaePath = await Promise.race([
+    provisionHlae(),
+    new Promise((resolve) => setTimeout(() => resolve(''), 45000)),
+  ]);
 
   // The orchestrator: SQLite job repo on disk (so reels survive an app restart)
   // + inline queue, capture and render tools auto-detected (HLAE/CS2/recorder/
   // editor/ffmpeg). "sqlite" with no path stores <dataDir>/jobs.db. Loopback
   // bind needs no mutation token.
-  launch('orchestrator', orchestratorExe, [], {
+  const orch = launch('orchestrator', orchestratorExe, [], {
     ZV_DATABASE_URL: 'sqlite',
     ZV_DATA_DIR: dataDir,
     ZV_HTTP_ADDR: `127.0.0.1:${orchPort}`,
     ZV_MUSIC_DIR: musicDir,
+    ...(hlaePath ? { ZV_HLAE_PATH: hlaePath } : {}),
   });
 
   // The Next.js standalone server, run by Electron's own Node (no separate Node
   // runtime shipped). NEXT_PUBLIC_FRAGFORGE_MODE is baked into the client bundle
   // at build time; it is set here too for the server route handlers.
-  launch('web', process.execPath, [nextServer], {
+  const web = launch('web', process.execPath, [nextServer], {
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
     PORT: String(webPort),
@@ -260,14 +387,20 @@ async function boot() {
   });
 
   try {
-    await waitForHttp(`${orchestratorUrl}/healthz`, 30000);
-    await waitForHttp(`http://127.0.0.1:${webPort}/`, 30000);
+    // Racing against child exit turns "timed out waiting for healthz" into the
+    // real cause when a backend dies at startup instead of coming up slowly.
+    await Promise.race([waitForHttp(`${orchestratorUrl}/healthz`, 60000), orch.exited]);
+    await Promise.race([waitForHttp(`http://127.0.0.1:${webPort}/`, 60000), web.exited]);
   } catch (err) {
+    logLine(`[boot] failed: ${err}\n`);
     if (mainWindow) {
       mainWindow.loadURL(
         'data:text/html,' +
           encodeURIComponent(`<body style="font:16px system-ui;background:#0a0a0a;color:#eee;padding:2rem">
-            <h2>FragForge Studio no pudo arrancar</h2><pre>${String(err)}</pre></body>`),
+            <h2>FragForge Studio no pudo arrancar</h2>
+            <p>${String(err).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>
+            <p style="color:#999">Si un antivirus ha bloqueado o puesto en cuarentena archivos de FragForge, restáuralos y vuelve a abrir la app. Registro completo: ${logFile.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>
+            <pre style="background:#111;padding:1rem;overflow:auto;max-height:40vh;font-size:12px">${logTail()}</pre></body>`),
       );
     }
     return;
