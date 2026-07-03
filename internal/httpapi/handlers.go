@@ -571,7 +571,7 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	// there); the KillPlan==nil guard still rejects a job that failed before it
 	// was ever parsed.
 	if (j.Status != job.StatusParsed && j.Status != job.StatusRecorded && j.Status != job.StatusFailed) || j.KillPlan == nil {
-		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to record (status=%s)", j.Status))
+		writeNotReady(w, fmt.Sprintf("job is not ready to record (status=%s)", j.Status))
 		return
 	}
 	if !h.requireRecordEnabled(w) {
@@ -648,7 +648,7 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 	// Same entry points as recording: a parsed job, or a recorded/failed job
 	// being re-run in place. The kill plan must exist before we can record.
 	if (j.Status != job.StatusParsed && j.Status != job.StatusRecorded && j.Status != job.StatusFailed) || j.KillPlan == nil {
-		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to generate (status=%s)", j.Status))
+		writeNotReady(w, fmt.Sprintf("job is not ready to generate (status=%s)", j.Status))
 		return
 	}
 	if !h.requireRecordEnabled(w) {
@@ -769,7 +769,7 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 	}
 	variant := chi.URLParam(r, "variant")
 	if j.Status != job.StatusRecorded && j.Status != job.StatusComposed && j.Status != job.StatusDone {
-		writeError(w, http.StatusConflict, fmt.Sprintf("job is not ready to render (status=%s)", j.Status))
+		writeNotReady(w, fmt.Sprintf("job is not ready to render (status=%s)", j.Status))
 		return
 	}
 	loadout, err := renderplan.LoadoutForVariant(variant)
@@ -1287,6 +1287,17 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// ErrorCodeNotReady marks a 409 caused by the job being mid-transition (e.g. a
+// generate request while another reel's capture holds the job in "recording").
+// Clients treat it as transient - re-evaluate next poll - unlike durable 409s
+// such as "recording is not configured", which they surface to the user.
+const ErrorCodeNotReady = "not_ready"
+
+// writeNotReady writes a status-conflict 409 with the stable not_ready code.
+func writeNotReady(w http.ResponseWriter, msg string) {
+	writeJSON(w, http.StatusConflict, map[string]string{"error": msg, "code": ErrorCodeNotReady})
 }
 
 // internalError logs the underlying error at the boundary and returns a generic

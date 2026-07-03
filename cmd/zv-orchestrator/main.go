@@ -190,6 +190,9 @@ func main() {
 		}
 		inline.Start(ctx)
 		log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
+		// Inline tasks died with the previous process; put interrupted jobs back
+		// on track before serving requests (sqlite mode persists them mid-stage).
+		recoverInterruptedJobs(ctx, repo, store, queue)
 	} else {
 		redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr}
 		client := asynq.NewClient(redisOpt)

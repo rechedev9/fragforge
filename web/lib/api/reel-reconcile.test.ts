@@ -50,6 +50,31 @@ test('render ready wins even if job flags failed (a finished reel is ready)', ()
   );
 });
 
+// The render state is shared per job+variant: after reel A of a demo finishes,
+// a newer reel B sees renderStatus 'ready' although B's own video does not
+// exist. B must be driven through its own capture (record = the generate flow),
+// never shown as a ready card whose download 404s.
+test('render ready but this reel video missing → drive record', () => {
+  assert.deepEqual(
+    view({ jobStatus: 'recorded', renderStatus: 'ready', reelVideoMissing: true }),
+    { status: 'queued', action: 'record' },
+  );
+});
+
+test('render ready, reel video missing, another capture running → wait', () => {
+  assert.deepEqual(
+    view({ jobStatus: 'recording', renderStatus: 'ready', reelVideoMissing: true }),
+    { status: 'recording', action: 'none' },
+  );
+});
+
+test('render ready, reel video missing, job failed → failed with reason', () => {
+  assert.deepEqual(
+    view({ jobStatus: 'failed', jobFailureReason: 'capture died', renderStatus: 'ready', reelVideoMissing: true }),
+    { status: 'failed', action: 'none', failureReason: 'capture died' },
+  );
+});
+
 test('job failed → failed with reason', () => {
   assert.deepEqual(
     view({ jobStatus: 'failed', jobFailureReason: 'recorder exited with code 1' }),

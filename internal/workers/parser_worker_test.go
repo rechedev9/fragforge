@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -25,6 +26,7 @@ import (
 // in-memory fakes -------------------------------------------------------
 
 type fakeRepo struct {
+	mu             sync.Mutex
 	jobs           map[uuid.UUID]*job.Job
 	lastStatusSeen job.Status
 }
@@ -45,6 +47,8 @@ func newFakeJobRepo(jobs ...job.Job) *fakeRepo {
 // only returns the single job seeded into the repo, for tests that seed
 // exactly one.
 func (f *fakeRepo) only() job.Job {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for _, j := range f.jobs {
 		return *j
 	}
@@ -52,8 +56,14 @@ func (f *fakeRepo) only() job.Job {
 }
 
 // lastStatus returns the most recent status passed to UpdateStatus.
-func (f *fakeRepo) lastStatus() job.Status { return f.lastStatusSeen }
+func (f *fakeRepo) lastStatus() job.Status {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastStatusSeen
+}
 func (f *fakeRepo) Get(_ context.Context, id uuid.UUID) (job.Job, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	j, ok := f.jobs[id]
 	if !ok {
 		return job.Job{}, job.ErrNotFound
@@ -65,6 +75,8 @@ func (f *fakeRepo) Get(_ context.Context, id uuid.UUID) (job.Job, error) {
 // plan, so a test fails if the parser or compose worker ever relies on KillPlan
 // from the metadata path.
 func (f *fakeRepo) GetMeta(_ context.Context, id uuid.UUID) (job.Job, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	j, ok := f.jobs[id]
 	if !ok {
 		return job.Job{}, job.ErrNotFound
@@ -74,6 +86,8 @@ func (f *fakeRepo) GetMeta(_ context.Context, id uuid.UUID) (job.Job, error) {
 	return meta, nil
 }
 func (f *fakeRepo) UpdateStatus(_ context.Context, id uuid.UUID, s job.Status, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastStatusSeen = s
 	j := f.jobs[id]
 	if j == nil {
@@ -84,19 +98,28 @@ func (f *fakeRepo) UpdateStatus(_ context.Context, id uuid.UUID, s job.Status, r
 	return nil
 }
 func (f *fakeRepo) SetKillPlan(_ context.Context, id uuid.UUID, p killplan.Plan) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.jobs[id].KillPlan = &p
 	return nil
 }
 
-type fakeStorage struct{ files map[string][]byte }
+type fakeStorage struct {
+	mu    sync.Mutex
+	files map[string][]byte
+}
 
 func newFakeStorage() *fakeStorage { return &fakeStorage{files: map[string][]byte{}} }
 func (f *fakeStorage) Put(key string, r io.Reader) error {
 	b, _ := io.ReadAll(r)
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.files[key] = b
 	return nil
 }
 func (f *fakeStorage) Open(key string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	b, ok := f.files[key]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -104,6 +127,8 @@ func (f *fakeStorage) Open(key string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
 func (f *fakeStorage) Exists(key string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	_, ok := f.files[key]
 	return ok, nil
 }

@@ -1,6 +1,6 @@
 import type { ApiClient } from './client';
 import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch } from './types';
-import { SERVICE_UNAVAILABLE_CODE } from './types';
+import { NOT_READY_CODE, SERVICE_UNAVAILABLE_CODE } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
@@ -166,6 +166,8 @@ export class RealApiClient implements ApiClient {
   private readonly intents = new Map<string, ReelIntent>();
   /** Reels with a record/render POST in flight, so a tick never double-drives. */
   private readonly driving = new Set<string>();
+  /** Reels whose own video artifact was confirmed to exist (see reelVideoExists). */
+  private readonly videoVerified = new Set<string>();
 
   constructor() {
     // Rehydrate the reels the user asked for so the Library survives a hard reload
@@ -428,6 +430,7 @@ export class RealApiClient implements ApiClient {
     }
     this.intents.delete(id);
     this.reels.delete(id);
+    this.videoVerified.delete(id);
     saveReelIntents(Array.from(this.intents.values()));
   }
 
@@ -456,11 +459,16 @@ export class RealApiClient implements ApiClient {
       return;
     }
     const render = await this.fetchRenderStatus(intent.jobId, variantOf(intent));
+    // The render state is per job+variant, shared by every reel of the demo,
+    // so 'ready' only counts for this reel once ITS video artifact exists;
+    // otherwise the reel still needs its own capture+render pass.
+    const reelVideoMissing = render.status === 'ready' && !(await this.reelVideoExists(intent));
     const view = deriveReelView({
       jobStatus: job.status,
       jobFailureReason: job.failureReason,
       renderStatus: render.status,
       renderFailureReason: render.failureReason,
+      reelVideoMissing,
     });
     this.applyView(intent, view);
     if (view.action !== 'none') void this.drive(intent, view.action);
@@ -487,14 +495,23 @@ export class RealApiClient implements ApiClient {
     try {
       const res =
         action === 'record'
-          ? // The preset (Clean POV / Full HUD / Kill Feed) sets the recording HUD;
+          ? // generate = capture + server-chained render in one call. The preset
+            // (Clean POV / Full HUD / Kill Feed) sets the recording HUD;
             // segment_ids scopes the capture to exactly the selected clips (in plan
-            // order) instead of recording the whole demo. 2+ ids render as one
-            // concatenated reel.
-            await fetch(`/api/demos/${intent.jobId}/record`, {
+            // order) instead of recording the whole demo; 2+ ids render as one
+            // concatenated reel. The orchestrator persists the render intent and
+            // the record worker enqueues the render itself after the capture, so
+            // the reel keeps advancing even when this tab is throttled or closed
+            // mid-capture (a plain /record + browser-driven /render stalled there).
+            await fetch(`/api/demos/${intent.jobId}/generate`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ preset: variant, segment_ids: intent.segmentIds }),
+              body: JSON.stringify({
+                preset: variant,
+                segment_ids: intent.segmentIds,
+                music: intent.mode === 'music' ? intent.songId : undefined,
+                edit: buildEditRequest(intent.editConfig),
+              }),
             })
           : await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, {
               method: 'POST',
@@ -509,6 +526,11 @@ export class RealApiClient implements ApiClient {
         // A 503 means the orchestrator is momentarily unreachable; let the next
         // reconcile tick retry instead of permanently failing the reel.
         if (body.code === SERVICE_UNAVAILABLE_CODE) return;
+        // A not_ready 409 is a benign race: the job moved (e.g. into 'recording'
+        // for another reel of the same demo) between the status read and this
+        // POST. The next reconcile tick re-derives from server truth; failing
+        // the reel here turned that race into a permanent FALLÓ card.
+        if (body.code === NOT_READY_CODE) return;
         // Anything else is durable (e.g. the 409 "recording is not configured on
         // this machine; set ZV_RECORDER_PATH, ZV_HLAE_PATH and ZV_CS2_PATH and
         // restart the orchestrator"): surface it so the Library shows why the reel
@@ -539,6 +561,28 @@ export class RealApiClient implements ApiClient {
   private async fetchStatus(jobId: string): Promise<string | null> {
     const full = await this.fetchStatusFull(jobId);
     return full ? full.status : null;
+  }
+
+  /**
+   * Whether this reel's own video artifact exists. Verified once with a 1-byte
+   * range read (the proxy forwards Range, so nothing meaningful downloads) and
+   * cached: an artifact never disappears mid-session except via deleteVideo.
+   */
+  private async reelVideoExists(intent: ReelIntent): Promise<boolean> {
+    if (this.videoVerified.has(intent.videoId)) return true;
+    try {
+      const res = await fetch(
+        `/api/demos/${intent.jobId}/renders/${variantOf(intent)}/videos/${reelName(intent.segmentIds)}`,
+        { headers: { Range: 'bytes=0-0' } },
+      );
+      if (!res.ok) return false;
+      this.videoVerified.add(intent.videoId);
+      return true;
+    } catch {
+      // Orchestrator unreachable: report missing without driving anything; the
+      // next tick re-evaluates. deriveReelView only drives from stable states.
+      return false;
+    }
   }
 
   /** Reads the reel render-variant state; 'none' when the render has not started. */

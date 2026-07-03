@@ -225,19 +225,14 @@ type RecordWorker struct {
 	cfg      RecordWorkerConfig
 	runner   commandRunner
 	enqueuer Enqueuer
-	// jobLocks serializes recording per job so two reels for the same job (each a
-	// distinct, non-deduped task with different segment ids) never launch the
-	// recorder concurrently or race on the job-level recording result. Process-
-	// local: it covers the inline queue and a single orchestrator process.
-	jobLocks sync.Map // uuid.UUID -> *sync.Mutex
-}
-
-// lockJob acquires the per-job recording lock and returns its release func.
-func (w *RecordWorker) lockJob(id uuid.UUID) func() {
-	m, _ := w.jobLocks.LoadOrStore(id, &sync.Mutex{})
-	mu := m.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
+	// captureMu serializes every recorder launch. HLAE/CS2 is a machine-global
+	// resource - CS2 refuses to start while another cs2.exe runs - so captures
+	// must queue sequentially across jobs, not just per job (two reels of
+	// different demos used to overlap and the second died with "cs2.exe is
+	// already running"). Holding it across the whole record() also keeps the
+	// per-job recording-result read-merge-write race-free. Process-local: it
+	// covers the inline queue and a single orchestrator process.
+	captureMu sync.Mutex
 }
 
 func NewRecordWorker(repo StatusRepository, store storage.Storage, cfg RecordWorkerConfig) *RecordWorker {
@@ -365,10 +360,10 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 	if j.KillPlan == nil {
 		return fmt.Errorf("job %s has no kill plan", j.ID)
 	}
-	// Serialize recording per job: two reels for the same job (each a distinct,
-	// non-deduped task with different segment ids) must not launch the recorder
-	// concurrently or race on the job-level recording result.
-	defer w.lockJob(j.ID)()
+	// Queue captures sequentially: only one recorder/CS2 may run on this
+	// machine at a time, whichever job it belongs to (see captureMu).
+	w.captureMu.Lock()
+	defer w.captureMu.Unlock()
 
 	// A reel records only its selected segment(s); an empty selection means the
 	// whole kill plan (the CLI all-kills default). Resolve to concrete ids so
@@ -1729,9 +1724,13 @@ const compilationSegmentID = "demo-compilation"
 // clip-bearing artifacts, not all plan segments, because the editor only emits a
 // short for segments with a recorded clip - a plan segment with no clip (a
 // partial capture) must not make coverage permanently unsatisfiable. A
-// compilation render (one "demo-compilation" short) is always treated as
-// covered. An unreadable recording result falls back to covered, leaving the
-// key-based readiness check authoritative.
+// compilation-ONLY render (a single "demo-compilation" short, the CLI all-kills
+// flow) is treated as covered; but a per-segment render that also emitted a
+// compilation short is still measured per segment - treating any compilation
+// short as full coverage made every later reel's render skip forever, so a
+// second reel of the same demo never got its video. An unreadable recording
+// result falls back to covered, leaving the key-based readiness check
+// authoritative.
 func renderCoversRecordedSegments(store storage.Storage, id uuid.UUID, render editor.Result) (bool, error) {
 	exists, err := store.Exists(recording.ResultArtifactKey(id))
 	if err != nil || !exists {
@@ -1742,11 +1741,16 @@ func renderCoversRecordedSegments(store storage.Storage, id uuid.UUID, render ed
 		return true, nil
 	}
 	rendered := make(map[string]bool, len(render.Shorts))
+	hasCompilation := false
 	for _, s := range render.Shorts {
 		if s.SegmentID == compilationSegmentID {
-			return true, nil
+			hasCompilation = true
+			continue
 		}
 		rendered[s.SegmentID] = true
+	}
+	if hasCompilation && len(rendered) == 0 {
+		return true, nil
 	}
 	for _, a := range rec.Artifacts {
 		if isSegmentClip(a) && !rendered[a.SegmentID] {

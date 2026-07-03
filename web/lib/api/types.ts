@@ -93,6 +93,15 @@ export type RosterMatch = {
 export const SERVICE_UNAVAILABLE_CODE = 'service_unavailable';
 
 /**
+ * Stable error code the orchestrator attaches to a status-conflict 409 (e.g.
+ * generate/record/render requested while another reel's capture holds the job
+ * in "recording"). Transient by definition: the client waits for the next
+ * reconcile tick instead of failing the reel, unlike durable 409s such as
+ * "recording is not configured".
+ */
+export const NOT_READY_CODE = 'not_ready';
+
+/**
  * One external capture tool (recorder/HLAE/CS2) and its readiness on this PC.
  * `source` is how the path was resolved: 'detected' (auto-found on the machine),
  * 'env' (set explicitly), or 'none' (not found - the user must install/set it).

@@ -71,7 +71,15 @@ export async function forwardError(res: Response): Promise<Response> {
   try {
     const body = JSON.parse(text) as unknown;
     if (body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string') {
-      return NextResponse.json({ error: (body as { error: string }).error }, { status: res.status });
+      const { error } = body as { error: string; code?: unknown };
+      const code = (body as { code?: unknown }).code;
+      // The stable machine-readable `code` (e.g. "not_ready") rides along so the
+      // client can tell transient conflicts from durable failures; anything
+      // non-string is dropped rather than forwarded verbatim.
+      if (typeof code === 'string' && code) {
+        return NextResponse.json({ error, code }, { status: res.status });
+      }
+      return NextResponse.json({ error }, { status: res.status });
     }
   } catch {
     // not JSON; fall through to a wrapped text error

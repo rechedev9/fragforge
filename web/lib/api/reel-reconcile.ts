@@ -22,6 +22,15 @@ export type ReconcileInput = {
   jobFailureReason?: string;
   renderStatus: RenderStatus;
   renderFailureReason?: string;
+  /**
+   * True when the render variant reports ready but THIS reel's own video
+   * artifact does not exist. The render state is shared by every reel of the
+   * job (it is per job+variant), so after reel A finishes, a newer reel B of
+   * the same demo sees renderStatus 'ready' even though B's clips were never
+   * captured or rendered - without this flag B showed a LISTO card whose
+   * download 404'd, and its capture never ran.
+   */
+  reelVideoMissing?: boolean;
 };
 
 export type ReelView = {
@@ -40,8 +49,18 @@ function failed(reason?: string): ReelView {
 export function deriveReelView(input: ReconcileInput): ReelView {
   const { jobStatus, jobFailureReason, renderStatus, renderFailureReason } = input;
 
-  // A finished render is always ready — even if the job later flags an error.
-  if (renderStatus === 'ready') return { status: 'ready', action: 'none' };
+  // A finished render is ready — but only for a reel whose own video exists.
+  // A reel still missing its video needs its own capture+render pass: 'record'
+  // (the generate flow) captures exactly the missing clips and chains the
+  // render, so it covers both halves idempotently. While another reel of the
+  // job is mid-capture, wait instead of driving: the record endpoint rejects a
+  // job in 'recording' and that rejection would wrongly fail this reel.
+  if (renderStatus === 'ready') {
+    if (!input.reelVideoMissing) return { status: 'ready', action: 'none' };
+    if (jobStatus === 'recording') return { status: 'recording', action: 'none' };
+    if (jobStatus === 'failed') return failed(jobFailureReason);
+    return { status: 'queued', action: 'record' };
+  }
   if (jobStatus === 'failed') return failed(jobFailureReason);
   if (renderStatus === 'failed') return failed(renderFailureReason);
   if (renderStatus === 'queued' || renderStatus === 'rendering') {

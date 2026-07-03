@@ -1063,6 +1063,52 @@ func TestGetMomentsReturns409WhenJobNotParsed(t *testing.T) {
 	}
 }
 
+// A status-conflict 409 (another reel's capture holds the job in "recording")
+// must carry the stable not_ready code so the web client treats it as a
+// transient race - wait for the next poll - instead of permanently failing the
+// reel it was driving.
+func TestStatusConflictCarriesNotReadyCode(t *testing.T) {
+	plan := killplan.NewPlan()
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "record", path: "/record"},
+		{name: "generate", path: "/generate"},
+		{name: "render", path: "/renders/viral-60-clean"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			queue := &fakeQueue{}
+			j := job.Job{ID: uuid.New(), Status: job.StatusRecording, Rules: rules.Default(), KillPlan: &plan}
+			repo.jobs[j.ID] = j
+			h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true, RenderEnabled: true}))
+
+			r := chi.NewRouter()
+			r.Post("/api/jobs/{id}/record", h.StartRecording)
+			r.Post("/api/jobs/{id}/generate", h.StartGenerate)
+			r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
+			req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+tc.path, nil)
+			rw := httptest.NewRecorder()
+			r.ServeHTTP(rw, req)
+
+			if rw.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409; body=%s", rw.Code, rw.Body.String())
+			}
+			var body struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(rw.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body.Code != ErrorCodeNotReady {
+				t.Fatalf("code = %q, want %q; body=%s", body.Code, ErrorCodeNotReady, rw.Body.String())
+			}
+		})
+	}
+}
+
 func TestStartRecordingEnqueuesRecordTaskWhenParsed(t *testing.T) {
 	repo := newFakeRepo()
 	queue := &fakeQueue{}

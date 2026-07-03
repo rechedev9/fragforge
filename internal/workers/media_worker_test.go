@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -219,6 +220,84 @@ func TestRecordWorkerSkipsWhenOutputsAlreadyExist(t *testing.T) {
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("runner calls = %d, want 0", len(runner.calls))
+	}
+}
+
+// Regression for the "cs2.exe is already running" failure: HLAE/CS2 is a
+// machine-global resource, so captures for DIFFERENT jobs must queue
+// sequentially, not just captures of the same job. Before the global capture
+// lock, two reels of two demos launched two recorders concurrently and the
+// second one died.
+func TestRecordWorkerSerializesCapturesAcrossJobs(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	plan := minimalKillPlan()
+	ids := []uuid.UUID{uuid.New(), uuid.New()}
+	for _, id := range ids {
+		repo.jobs[id] = &job.Job{
+			ID:       id,
+			Status:   job.StatusParsed,
+			DemoPath: "demos/test.dem",
+			Rules:    rules.Default(),
+			KillPlan: &plan,
+		}
+	}
+	_ = store.Put("demos/test.dem", bytes.NewReader([]byte("demo")))
+
+	var mu sync.Mutex
+	running, overlaps := 0, 0
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		mu.Lock()
+		running++
+		if running > 1 {
+			overlaps++
+		}
+		mu.Unlock()
+		// Hold the "capture" long enough for the other goroutine to reach the
+		// runner if serialization were broken.
+		time.Sleep(50 * time.Millisecond)
+		mu.Lock()
+		running--
+		mu.Unlock()
+
+		outDir := argValue(args, "--out")
+		scriptPath := filepath.Join(outDir, "recording.js")
+		segmentPath := filepath.Join(outDir, "segments", "seg-001.mp4")
+		_ = os.MkdirAll(filepath.Dir(segmentPath), 0o755)
+		_ = os.WriteFile(scriptPath, []byte("script"), 0o644)
+		_ = os.WriteFile(segmentPath, []byte("clip"), 0o644)
+		_ = writeJSONFile(filepath.Join(outDir, "recording-result.json"), recordingResultWithSegment(scriptPath, segmentPath))
+		return []byte("recorded"), nil
+	}}
+	w := NewRecordWorker(repo, store, RecordWorkerConfig{
+		WorkDir:      t.TempDir(),
+		RecorderPath: "zv-recorder",
+		HLAEPath:     "HLAE.exe",
+		CS2Path:      "cs2.exe",
+	})
+	w.runner = runner
+
+	var wg sync.WaitGroup
+	errs := make([]error, len(ids))
+	for i, id := range ids {
+		wg.Go(func() {
+			errs[i] = w.HandleRecordDemo(context.Background(), recordTask(t, id))
+		})
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("HandleRecordDemo job %d error = %v", i, err)
+		}
+	}
+	if overlaps != 0 {
+		t.Fatalf("recorder overlaps = %d, want 0 (captures must run sequentially across jobs)", overlaps)
+	}
+	for _, id := range ids {
+		if repo.jobs[id].Status != job.StatusRecorded {
+			t.Fatalf("job %s Status = %s, want recorded", id, repo.jobs[id].Status)
+		}
 	}
 }
 
@@ -928,6 +1007,71 @@ func minimalKillPlan() killplan.Plan {
 		TickEnd:   128,
 	}}
 	return plan
+}
+
+// Regression: a per-segment render that ALSO emitted a compilation short must
+// not count as covering segments it never rendered. Treating any compilation
+// short as full coverage made the chained render of a second reel skip forever,
+// so that reel's video never existed.
+func TestRenderCoversRecordedSegments(t *testing.T) {
+	newStoreWithRecording := func(t *testing.T, id uuid.UUID, segIDs ...string) *fakeStorage {
+		t.Helper()
+		store := newFakeStorage()
+		result := recordingResultWithSegment("recording.js", "segments/"+segIDs[0]+".mp4")
+		result.Artifacts = nil
+		for _, seg := range segIDs {
+			result.Artifacts = append(result.Artifacts, recording.RecordingArtifact{
+				SegmentID: seg,
+				Role:      "segment",
+				Type:      "video",
+				Path:      "segments/" + seg + ".mp4",
+			})
+		}
+		putJSON(t, store, recording.ResultArtifactKey(id), result)
+		return store
+	}
+	shorts := func(segIDs ...string) editor.Result {
+		var r editor.Result
+		for _, seg := range segIDs {
+			r.Shorts = append(r.Shorts, editor.ShortResult{SegmentID: seg})
+		}
+		return r
+	}
+
+	cases := []struct {
+		name     string
+		recorded []string
+		rendered []string
+		want     bool
+	}{
+		{name: "all recorded segments rendered", recorded: []string{"seg-001"}, rendered: []string{"seg-001"}, want: true},
+		{name: "new recorded segment missing its short", recorded: []string{"seg-001", "seg-002"}, rendered: []string{"seg-001"}, want: false},
+		{
+			name:     "compilation short does not mask a missing segment short",
+			recorded: []string{"seg-001", "seg-002"},
+			rendered: []string{"seg-001", compilationSegmentID},
+			want:     false,
+		},
+		{
+			name:     "compilation-only render is covered",
+			recorded: []string{"seg-001", "seg-002"},
+			rendered: []string{compilationSegmentID},
+			want:     true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := uuid.New()
+			store := newStoreWithRecording(t, id, tc.recorded...)
+			got, err := renderCoversRecordedSegments(store, id, shorts(tc.rendered...))
+			if err != nil {
+				t.Fatalf("renderCoversRecordedSegments error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("renderCoversRecordedSegments = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func recordingResultWithSegment(scriptPath, segmentPath string) recording.RecordingResult {

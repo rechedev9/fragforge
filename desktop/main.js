@@ -50,13 +50,26 @@ const musicDir = path.join(dataDir, 'music');
 
 // All child output is mirrored to this file so a failed boot is diagnosable
 // from a user report: the packaged app has no console, so stdout alone is
-// invisible. Truncated on every launch; the error screen shows its tail.
+// invisible. Appended across launches (a truncate-on-boot log erased exactly
+// the session that crashed); rotated to studio.log.old past 5 MB so it stays
+// bounded. The error screen shows its tail.
 const logFile = path.join(app.getPath('userData'), 'studio.log');
+const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
 let logStream = null;
 function logLine(text) {
   process.stdout.write(text);
   try {
-    if (!logStream) logStream = fs.createWriteStream(logFile, { flags: 'w' });
+    if (!logStream) {
+      try {
+        if (fs.statSync(logFile).size > LOG_ROTATE_BYTES) {
+          fs.renameSync(logFile, `${logFile}.old`);
+        }
+      } catch {
+        // Missing file (first boot) or a locked rename: append to what exists.
+      }
+      logStream = fs.createWriteStream(logFile, { flags: 'a' });
+      logStream.write(`\n--- session start ${new Date().toISOString()} ---\n`);
+    }
     logStream.write(text);
   } catch {
     // Logging must never break the app; stdout still has the line in dev.
