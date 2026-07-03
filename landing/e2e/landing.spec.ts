@@ -1,9 +1,9 @@
 import { test, expect, type Page, request } from "@playwright/test";
 
-// Canonical download asset for the live GitHub Release v0.2.7. The primary CTA
+// Canonical download asset for the live GitHub Release v0.2.8. The primary CTA
 // must point at exactly this URL, and the URL must actually resolve.
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v0.2.7/FragForge.Studio.Setup.0.2.7.exe";
+  "https://github.com/rechedev9/fragforge/releases/download/v0.2.8/FragForge.Studio.Setup.0.2.8.exe";
 
 function trackConsole(page: Page) {
   const errors: string[] = [];

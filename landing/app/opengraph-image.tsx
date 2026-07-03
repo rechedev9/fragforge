@@ -120,7 +120,7 @@ export default function OpengraphImage() {
           }}
         >
           <span style={{ color: CYAN }}>↓</span>
-          v0.2.7 · 124 MB · Windows 10/11
+          v0.2.8 · 124 MB · Windows 10/11
         </div>
       </div>
     ),
