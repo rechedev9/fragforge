@@ -1,9 +1,5 @@
 import type { Play, VideoStatus } from './api/types';
 
-// Re-export the canonical `cn` (clsx + tailwind-merge) so legacy
-// `@/lib/format` imports keep resolving after the v2 shadcn migration.
-export { cn } from './utils';
-
 export function formatKd(n: number): string {
   return n.toFixed(2);
 }
@@ -16,18 +12,18 @@ export function ratingClass(rating: number): string {
   return 'text-rose-400';
 }
 
-/** Relative time like "2h" / "3d" / "just now" from an ISO string or epoch ms. */
+/** Relative time like "hace 2 h" / "hace 3 d" / "ahora mismo" from an ISO string or epoch ms. */
 export function timeAgo(value: string | number): string {
   const then = typeof value === 'number' ? value : Date.parse(value);
   const diffSec = Math.max(0, (Date.now() - then) / 1000);
 
-  if (diffSec < 60) return 'just now';
+  if (diffSec < 60) return 'ahora mismo';
   const minutes = Math.floor(diffSec / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) return `hace ${minutes} min`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return `hace ${hours} h`;
   const days = Math.floor(hours / 24);
-  return `${days}d`;
+  return `hace ${days} d`;
 }
 
 /** Remaining-availability countdown: "14h" or "13h 59m" or "12m". */
@@ -44,15 +40,15 @@ export function formatCountdown(sec: number): string {
 /**
  * Selection summary for a set of picked highlights, in the order given (the
  * caller passes plan order, not click order). One pick reuses its own label
- * ("1K · Round 1"); 2+ picks summarize as a count plus the distinct rounds in
- * ascending order ("3 highlights · Rounds 1, 6, 9"). Used by both the sticky
+ * ("1K · Ronda 1"); 2+ picks summarize as a count plus the distinct rounds in
+ * ascending order ("3 jugadas · Rondas 1, 6, 9"). Used by both the sticky
  * create-reel bar and the stored reel title so they read identically.
  */
 export function playsSelectionLabel(plays: Play[]): string | null {
   if (plays.length === 0) return null;
   if (plays.length === 1) return plays[0].label;
   const rounds = Array.from(new Set(plays.map((p) => p.round))).sort((a, b) => a - b);
-  return `${plays.length} highlights · Rounds ${rounds.join(', ')}`;
+  return `${plays.length} jugadas · Rondas ${rounds.join(', ')}`;
 }
 
 /**

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Clapperboard, UploadCloud } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Match } from '@/lib/api/types';
+import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { MatchFilters, type MatchFilter } from '@/components/matches/match-filters';
 import { MatchList } from '@/components/matches/match-list';
 import { MatchListSkeleton } from '@/components/matches/match-list-skeleton';
@@ -17,27 +18,27 @@ import { isWin } from '@/components/matches/match-score';
  */
 function NoMatchesYet() {
   return (
-    <div className="flex flex-col items-center gap-6 rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
+    <div className="flex flex-col items-center gap-6 border border-dashed border-border bg-card/40 px-6 py-16 text-center">
       <div className="flex flex-col gap-1.5">
-        <p className="text-sm font-medium text-foreground">No matches yet</p>
+        <p className="text-sm font-medium text-foreground">Aún no hay partidas</p>
         <p className="text-xs text-muted-foreground">
-          Analyze a CS2 demo or cut clips from a stream to get started.
+          Analiza una demo de CS2 o corta clips de un stream para empezar.
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-3">
         <Link
           href="/upload"
-          className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          className="neon-notch inline-flex h-10 items-center gap-2 bg-primary px-5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
         >
           <UploadCloud className="size-4" />
-          Analyze a demo
+          ANALIZAR UNA DEMO
         </Link>
         <Link
           href="/streams"
-          className="inline-flex h-10 items-center gap-2 rounded-md border border-border bg-transparent px-5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+          className="inline-flex h-10 items-center gap-2 border border-destructive/40 bg-transparent px-5 font-[family-name:var(--font-display)] text-sm font-semibold tracking-[0.06em] text-foreground transition-colors hover:bg-destructive/10"
         >
           <Clapperboard className="size-4" />
-          Stream Clips
+          CLIPS DE STREAM
         </Link>
       </div>
     </div>
@@ -71,7 +72,7 @@ export default function MatchesPage() {
     }
 
     if (filter === 'frags') {
-      // "Best frags" = most kills first; K/D only breaks ties.
+      // "Mejores frags" = most kills first; K/D only breaks ties.
       rows = [...rows].sort((a, b) => b.stats.kills - a.stats.kills || b.stats.kd - a.stats.kd);
     }
 
@@ -79,28 +80,33 @@ export default function MatchesPage() {
   }, [matches, filter, query]);
 
   return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-col gap-1.5">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-          Matches
-        </h1>
+    <div className="flex flex-col gap-7">
+      <header className="flex flex-col gap-2.5">
+        <SectionEyebrow number={1} label="PARTIDAS" />
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+          <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold leading-none tracking-tight text-foreground sm:text-[34px]">
+            TUS PARTIDAS
+          </h1>
+          {matches !== null && matches.length === 0 ? null : (
+            <MatchFilters
+              filter={filter}
+              onFilterChange={setFilter}
+              query={query}
+              onQueryChange={setQuery}
+            />
+          )}
+        </div>
         <p className="max-w-xl text-sm text-muted-foreground">
-          Your recent CS2 matches. Pick one and forge the highlights into a reel.
+          Tus últimas partidas de CS2. Elige una y forja sus highlights en un reel.
         </p>
       </header>
 
       {matches !== null && matches.length === 0 ? (
         <NoMatchesYet />
+      ) : matches === null ? (
+        <MatchListSkeleton />
       ) : (
-        <>
-          <MatchFilters
-            filter={filter}
-            onFilterChange={setFilter}
-            query={query}
-            onQueryChange={setQuery}
-          />
-          {matches === null ? <MatchListSkeleton /> : <MatchList matches={visible} />}
-        </>
+        <MatchList matches={visible} />
       )}
     </div>
   );

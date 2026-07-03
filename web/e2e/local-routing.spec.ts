@@ -21,29 +21,29 @@ test.describe('local studio routing', () => {
   test('the cloud landing at / redirects to the dashboard', async ({ page }) => {
     await page.goto('/');
     await page.waitForURL('**/matches');
-    await expect(page.getByRole('heading', { name: 'Matches' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'TUS PARTIDAS' })).toBeVisible();
   });
 
   test('Back from the upload flow returns to the dashboard, not the landing', async ({ page }) => {
     await page.goto('/upload');
     await page.getByRole('link', { name: 'Back' }).click();
     await page.waitForURL('**/matches');
-    await expect(page.getByRole('heading', { name: 'Matches' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'TUS PARTIDAS' })).toBeVisible();
     // The Steam-login landing must never flash in between.
     expect(page.url()).not.toMatch(/\/$/);
   });
 
   test('the empty dashboard routes into both content flows', async ({ page }) => {
     await page.goto('/matches');
-    await expect(page.getByText('No matches yet')).toBeVisible();
+    await expect(page.getByText('Aún no hay partidas')).toBeVisible();
 
-    await page.getByRole('link', { name: 'Analyze a demo' }).click();
+    await page.getByRole('link', { name: 'ANALIZAR UNA DEMO' }).click();
     await page.waitForURL('**/upload');
 
     await page.goto('/matches');
     // Scope to the page body; the sidebar nav links to /streams too (as
-    // "Clips de stream"), so keep this pinned to the in-page link.
-    await page.getByRole('main').getByRole('link', { name: 'Stream Clips' }).click();
+    // "CLIPS DE STREAM"), so keep this pinned to the in-page link.
+    await page.getByRole('main').getByRole('link', { name: 'CLIPS DE STREAM' }).click();
     await page.waitForURL('**/streams');
   });
 });

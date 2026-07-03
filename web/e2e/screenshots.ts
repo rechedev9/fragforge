@@ -70,15 +70,17 @@ test('connect (/connect)', async ({ page }) => {
 
 test('matches (/matches)', async ({ page }) => {
   await page.goto('/matches');
-  await expect(page.getByRole('heading', { name: 'Matches' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'TUS PARTIDAS' })).toBeVisible();
   await expect(page.locator(`a[href="/matches/${MATCH_ID}"]`).first()).toBeVisible();
   await shoot(page, 'matches.png');
 });
 
 test('match detail (/matches/[id])', async ({ page }) => {
   await page.goto(`/matches/${MATCH_ID}`);
-  await expect(page.getByRole('heading', { name: /we found/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /JUGADAS DETECTADAS/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Inferno' })).toBeVisible();
+  // Wait out the preset-cards skeleton so the judge sees the real cards.
+  await expect(page.getByText('POR DEFECTO')).toBeVisible();
   await shoot(page, 'match-detail.png');
 });
 
@@ -147,14 +149,15 @@ test.describe('mobile 390x844', () => {
 
   test('mobile matches', async ({ page }) => {
     await page.goto('/matches');
-    await expect(page.getByRole('heading', { name: 'Matches' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'TUS PARTIDAS' })).toBeVisible();
     await expect(page.locator(`a[href="/matches/${MATCH_ID}"]`).first()).toBeVisible();
     await shoot(page, 'mobile-matches.png');
   });
 
   test('mobile match detail', async ({ page }) => {
     await page.goto(`/matches/${MATCH_ID}`);
-    await expect(page.getByRole('heading', { name: /we found/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /JUGADAS DETECTADAS/ })).toBeVisible();
+    await expect(page.getByText('POR DEFECTO')).toBeVisible();
     await shoot(page, 'mobile-match-detail.png');
   });
 });

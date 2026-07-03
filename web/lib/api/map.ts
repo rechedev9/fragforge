@@ -108,7 +108,7 @@ export function segmentToPlay(jobId: string, segment: KillPlanSegment): Play {
     round: segment.round,
     kills,
     weapon: topWeapon(segment),
-    label: `${kills}K · Round ${segment.round}`,
+    label: `${kills}K · Ronda ${segment.round}`,
     thumbnailUrl: thumb(segment.id),
   };
 }

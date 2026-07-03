@@ -30,7 +30,7 @@ test('reel records only the selected clip, not the whole demo', async ({ page, r
   await page.waitForURL(/\/matches\//, { timeout: 180_000 });
   const jobId = page.url().split('/matches/')[1].split(/[/?#]/)[0];
   console.log('[pipeline] jobId=' + jobId);
-  await page.getByText(/We found/).waitFor({ timeout: 180_000 });
+  await page.getByText(/JUGADAS DETECTADAS/).waitFor({ timeout: 180_000 });
 
   // Every kill-plan segment id for this job (the clips the user could pick).
   const plan = (await page.request.get(`/api/demos/${jobId}/plan`).then((r) => r.json())) as {
@@ -43,7 +43,7 @@ test('reel records only the selected clip, not the whole demo', async ({ page, r
 
   // Pick exactly ONE clip and create its reel.
   await page.locator('button:has(.lucide-crosshair)').first().click();
-  await page.getByRole('button', { name: /create reel/i }).click();
+  await page.getByRole('button', { name: 'FORJAR REEL' }).click();
   await page.waitForURL(/\/videos/, { timeout: 60_000 });
   console.log('[pipeline] reel created, capture should start');
 
