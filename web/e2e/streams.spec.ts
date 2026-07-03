@@ -87,6 +87,25 @@ test.describe('stream clips — url submit to editor', () => {
     await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible();
   });
 
+  test('rejects an obviously non-video URL client-side without calling the API', async ({ page }) => {
+    // Regression for the reported bug: a ShareX .png upload URL pasted into the
+    // clip field used to reach yt-dlp and fail with a raw SSL traceback. It must
+    // be rejected instantly, in Spanish, before any POST /api/streams.
+    let postCalled = false;
+    await page.route('**/api/streams', (route) => {
+      if (route.request().method() === 'POST') postCalled = true;
+      return route.continue();
+    });
+
+    await page.goto('/streams');
+    await page.locator(URL_INPUT).fill('http://167.233.55.246/root/uploads/FragForge_Studio_ao6vfNGPXa.png');
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
+
+    await expect(page.getByText(/apunta a un archivo \.png, no a un vídeo/)).toBeVisible();
+    await expect(page.getByText(/Descargando/)).toHaveCount(0);
+    expect(postCalled).toBe(false);
+  });
+
   test('reports the service as offline when the create call returns 503 + code', async ({ page }) => {
     await page.route('**/api/streams', (route) => {
       if (route.request().method() !== 'POST') return route.continue();

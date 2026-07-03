@@ -156,8 +156,13 @@ func TestAcquireWorkerFailureRecordsReasonAndObs(t *testing.T) {
 	if got.FailureReason == "" {
 		t.Fatal("failure reason not set")
 	}
-	if !strings.Contains(got.FailureReason, "not found") {
-		t.Fatalf("failure reason = %q, want it to mention the source was not found", got.FailureReason)
+	// The stored reason must be the clean, user-facing "not found" message, not
+	// the raw yt-dlp stderr the user reported seeing dumped into the failed card.
+	if !strings.Contains(got.FailureReason, "No encontramos un vídeo") {
+		t.Fatalf("failure reason = %q, want the friendly not-found message", got.FailureReason)
+	}
+	if strings.Contains(got.FailureReason, "HTTP Error 404") {
+		t.Fatalf("failure reason = %q, leaked the raw yt-dlp stderr", got.FailureReason)
 	}
 }
 

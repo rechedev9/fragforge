@@ -73,7 +73,7 @@ func (w *AcquireWorker) HandleStreamAcquire(ctx context.Context, t *asynq.Task) 
 		return fmt.Errorf("load stream job %s: %w", payload.JobID, err)
 	}
 	if err := w.acquire(ctx, j); err != nil {
-		markStreamFailed(w.repo, j.ID, err.Error())
+		markStreamFailed(w.repo, j.ID, friendlyAcquireReason(err))
 		recordStreamAcquireFailure(j.ID, err)
 		logWorkerError(j.ID, tasks.TypeStreamAcquire, err)
 		return err
@@ -205,6 +205,26 @@ func acquireFailureClass(err error) string {
 		return "unavailable"
 	default:
 		return "error"
+	}
+}
+
+// friendlyAcquireReason maps an acquire failure to a short, user-facing reason
+// stored as the job's failure_reason. The web UI renders that field verbatim
+// in a Spanish-only interface (its own empty-value fallback is already
+// Spanish), so these are display strings, not Go errors, and must never leak
+// the raw yt-dlp stderr/SSL traceback the user reported seeing in the failed
+// card. The full technical error is still preserved server-side in the obs
+// journal and worker log (see recordStreamAcquireFailure and logWorkerError).
+func friendlyAcquireReason(err error) string {
+	switch {
+	case errors.Is(err, vodfetch.ErrNotFound):
+		return "No encontramos un vídeo en esa URL (puede que el clip se haya borrado)."
+	case errors.Is(err, vodfetch.ErrAuthRequired):
+		return "Ese vídeo necesita inicio de sesión o suscripción; no podemos descargarlo."
+	case errors.Is(err, vodfetch.ErrUnavailable):
+		return "Ese vídeo no está disponible ahora mismo (privado, caducado o restringido por región)."
+	default:
+		return "No pudimos preparar un vídeo a partir de esa URL. Asegúrate de que es un clip o VOD público de Twitch o YouTube."
 	}
 }
 

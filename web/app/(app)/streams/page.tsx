@@ -49,6 +49,28 @@ function isServiceUnavailable(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === SERVICE_UNAVAILABLE_CODE;
 }
 
+/**
+ * Extensions of URLs that are a direct link to a non-video asset (an image
+ * pasted from a clipboard uploader like ShareX, a document, an archive, an
+ * audio-only file). yt-dlp cannot turn these into an MP4, so we reject them
+ * instantly with a localized message instead of round-tripping to a doomed
+ * acquire job. The server guards the same set (vodfetch.ClassifySource) for
+ * direct API callers; this is the fast, in-language UX path.
+ */
+const NON_VIDEO_EXT_RE =
+  /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|heic|avif|pdf|txt|md|csv|json|xml|html?|zip|rar|7z|gz|tar|mp3|wav|flac|ogg|m4a|docx?|xlsx?)$/i;
+
+/** The extension (without the dot, lowercased) if `raw` clearly points to a
+ * non-video file, else null. Unparseable input is left for the server. */
+function nonVideoExtension(raw: string): string | null {
+  try {
+    const match = new URL(raw).pathname.match(NON_VIDEO_EXT_RE);
+    return match ? match[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 let clipSeq = 0;
 function nextClipId(): string {
   clipSeq += 1;
@@ -170,11 +192,19 @@ export default function StreamsPage() {
   );
 
   const submitUrl = useCallback(async () => {
-    if (!sourceUrl.trim()) return;
+    const trimmed = sourceUrl.trim();
+    if (!trimmed) return;
+    const badExt = nonVideoExtension(trimmed);
+    if (badExt) {
+      setError(
+        `Esa URL apunta a un archivo .${badExt}, no a un vídeo. Pega el enlace de un clip o VOD de Twitch o YouTube, o usa “Subir un MP4”.`,
+      );
+      return;
+    }
     setError(null);
     setStage('submitting');
     try {
-      const j = await streamsApi.createFromUrl({ sourceUrl: sourceUrl.trim(), title: title.trim() || undefined });
+      const j = await streamsApi.createFromUrl({ sourceUrl: trimmed, title: title.trim() || undefined });
       if (j.status === 'acquiring') {
         setJob(j);
         setStage('acquiring');

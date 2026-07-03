@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -60,6 +61,25 @@ func (k SourceKind) String() string {
 var twitchVODPath = regexp.MustCompile(`^/videos/\d+/?$`)
 var twitchClipPath = regexp.MustCompile(`^/[^/]+/clip/[^/]+/?$`)
 
+// nonVideoExts are file extensions whose URLs are direct links to a non-video
+// asset: an image pasted from a clipboard uploader (the reported case was a
+// ShareX .png), a document, an archive, or an audio-only file. yt-dlp's
+// generic extractor cannot turn any of these into an MP4, so ClassifySource
+// rejects them up front instead of enqueuing a download that is guaranteed to
+// fail deep inside the acquire worker. Video container extensions (.mp4, .mov,
+// .webm, ...) are intentionally absent: a direct link to one of those is a
+// legitimate source yt-dlp can fetch.
+var nonVideoExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	".bmp": true, ".svg": true, ".ico": true, ".tif": true, ".tiff": true,
+	".heic": true, ".avif": true,
+	".pdf": true, ".txt": true, ".md": true, ".csv": true, ".json": true,
+	".xml": true, ".html": true, ".htm": true,
+	".zip": true, ".rar": true, ".7z": true, ".gz": true, ".tar": true,
+	".mp3": true, ".wav": true, ".flac": true, ".ogg": true, ".m4a": true,
+	".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
+}
+
 // ClassifySource validates url as http(s) and reports what kind of source it
 // is. Non-http(s) schemes are rejected.
 func ClassifySource(rawURL string) (SourceKind, error) {
@@ -72,6 +92,9 @@ func ClassifySource(rawURL string) (SourceKind, error) {
 	}
 	if u.Host == "" {
 		return SourceOther, errors.New("url has no host")
+	}
+	if ext := strings.ToLower(path.Ext(u.Path)); ext != "" && nonVideoExts[ext] {
+		return SourceOther, fmt.Errorf("url points to a %s file, not a video; paste a twitch or youtube clip or vod link", ext)
 	}
 
 	host := strings.ToLower(u.Hostname())

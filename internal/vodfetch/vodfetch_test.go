@@ -233,6 +233,24 @@ func TestDownload_RejectsNonHTTPScheme(t *testing.T) {
 	}
 }
 
+func TestDownload_RejectsNonVideoURL(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "clip.mp4")
+	runner := &fakeRunner{}
+	f := Fetcher{Runner: runner}
+
+	_, err := f.Download(context.Background(), "http://167.233.55.246/root/uploads/FragForge_Studio_ao6vfNGPXa.png", dest)
+	if err == nil {
+		t.Fatal("Download() error = nil, want non-nil")
+	}
+	if runner.gotName != "" {
+		t.Errorf("runner was invoked for a non-video url, gotName = %q", runner.gotName)
+	}
+	if _, statErr := os.Stat(dest); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("dest file was created despite rejection")
+	}
+}
+
 func TestDownload_ArgsShape(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "clip.mp4")
@@ -294,6 +312,34 @@ func TestClassifySource(t *testing.T) {
 			name: "twitch channel homepage is other",
 			url:  "https://www.twitch.tv/somechannel",
 			want: SourceOther,
+		},
+		{
+			name: "direct mp4 link is allowed",
+			url:  "https://cdn.example.com/clips/highlight.mp4",
+			want: SourceOther,
+		},
+		{
+			// The reported bug: a ShareX screenshot upload URL pasted into the
+			// clip field. It is an image, not a video, so it must be rejected
+			// before a doomed yt-dlp job is enqueued.
+			name:    "png image url rejected",
+			url:     "http://167.233.55.246/root/uploads/FragForge_Studio_ao6vfNGPXa.png",
+			wantErr: true,
+		},
+		{
+			name:    "jpg image url rejected",
+			url:     "https://cdn.example.com/thumb.JPG",
+			wantErr: true,
+		},
+		{
+			name:    "image url with query string rejected",
+			url:     "https://cdn.example.com/uploads/frame.webp?v=2",
+			wantErr: true,
+		},
+		{
+			name:    "audio-only url rejected",
+			url:     "https://cdn.example.com/audio/track.mp3",
+			wantErr: true,
 		},
 		{
 			name:    "ftp scheme rejected",
