@@ -2,13 +2,12 @@
 
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Music } from 'lucide-react';
+import { Music } from 'lucide-react';
 import type { EditConfig, Match, Play, Preset } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { DEFAULT_EDIT_CONFIG } from '@/lib/api/reel-store';
-import { formatKd, playsSelectionLabel, ratingClass } from '@/lib/format';
+import { formatKd, playsSelectionLabel, ratingClass, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScoreBar } from '@/components/brand/score-bar';
@@ -58,7 +57,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         setMatch(m);
         setPlays(p);
       } catch {
-        // A failed fetch falls through to the "Match not found" branch below.
+        // A failed fetch falls through to the "Partida no encontrada" branch below.
         if (!active) return;
         setMatch(null);
         setPlays([]);
@@ -148,9 +147,9 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   if (!match) {
     return (
       <div className="py-24 text-center">
-        <p className="text-muted-foreground">Match not found.</p>
+        <p className="text-muted-foreground">Partida no encontrada.</p>
         <Button variant="secondary" className="mt-4" onClick={() => router.push('/matches')}>
-          Back to matches
+          VOLVER A PARTIDAS
         </Button>
       </div>
     );
@@ -161,11 +160,15 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   const score = parseScore(match.score);
   const win = isWin(match.score);
   // Uploaded demos have no round score (the parser computes none): hide the
-  // win/loss + score chips and show the highlight count instead.
+  // score block and let the mono meta line carry the play count instead.
   const hasScore = match.score.trim() !== '';
   const fromUpload = match.source === 'upload';
   const backHref = fromUpload ? '/upload' : '/matches';
-  const backLabel = fromUpload ? 'Upload' : 'Matches';
+  const backLabel = fromUpload ? 'SUBIR DEMO' : 'PARTIDAS';
+  const meta = [
+    timeAgo(match.playedAt),
+    `${n} ${n === 1 ? 'jugada' : 'jugadas'}`,
+  ].join(' · ');
 
   // Scoreboard extras exist only on enriched (uploaded) matches; mock/seed
   // matches show the classic K/D/A line. `hasRich` gates the ADR/KAST/HS row.
@@ -175,35 +178,28 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="flex min-h-[calc(100vh-5rem)] flex-col gap-8 pb-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="-ml-2 w-fit text-muted-foreground"
+      <button
+        type="button"
         onClick={() => router.push(backHref)}
+        className="w-fit cursor-pointer font-[family-name:var(--font-mono)] text-[11px] tracking-[0.22em] text-muted-foreground/70 transition-colors hover:text-primary"
       >
-        <ArrowLeft className="size-4" />
-        {backLabel}
-      </Button>
+        ◂ {backLabel}
+      </button>
 
-      {/* Match summary */}
-      <section className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-        <div className="flex items-center gap-4">
-          <ScoreBar win={win} className="h-11" />
-          <div className="flex flex-col gap-2">
-            <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+      {/* Match summary — accent bar + map title + mono meta, score, stat strip. */}
+      <section className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+        <div className="flex items-center gap-5">
+          <ScoreBar win={win} className="h-[52px] w-[3px]" />
+          <div className="flex flex-col gap-1">
+            <h1 className="font-[family-name:var(--font-display)] text-[28px] font-bold uppercase leading-none tracking-tight text-foreground sm:text-[32px]">
               {match.map}
             </h1>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className="font-[family-name:var(--font-mono)] text-[0.7rem]">
-                {hasScore ? (win ? 'WIN' : 'LOSS') : `${n} ${n === 1 ? 'HIGHLIGHT' : 'HIGHLIGHTS'}`}
-              </Badge>
-              {hasScore && score ? (
-                <span className="font-[family-name:var(--font-mono)] text-sm tabular-nums text-muted-foreground">
-                  {score[0]}-{score[1]}
-                </span>
-              ) : null}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/70">
+                {meta}
+              </span>
               {hasRating ? (
-                <span className="inline-flex items-baseline gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-0.5">
+                <span className="inline-flex items-baseline gap-1.5 border border-border bg-muted/40 px-2 py-0.5">
                   <span
                     className={cn(
                       'font-[family-name:var(--font-mono)] text-sm font-semibold tabular-nums',
@@ -212,16 +208,23 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
                   >
                     {rating.toFixed(2)}
                   </span>
-                  <span className="text-[0.6rem] font-medium uppercase tracking-wider text-muted-foreground">
+                  <span className="font-[family-name:var(--font-mono)] text-[0.6rem] uppercase tracking-wider text-muted-foreground">
                     rating
                   </span>
                 </span>
               ) : null}
             </div>
           </div>
+          {hasScore && score ? (
+            <div className="ml-2 font-[family-name:var(--font-mono)] text-[26px] tabular-nums">
+              <span className={win ? 'text-primary' : 'text-muted-foreground'}>{score[0]}</span>
+              <span className="text-muted-foreground/70"> : </span>
+              <span className="text-muted-foreground">{score[1]}</span>
+            </div>
+          ) : null}
         </div>
 
-        <div className="grid grid-cols-4 gap-x-5 gap-y-3 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6">
+        <div className="grid grid-cols-4 gap-x-5 gap-y-3 sm:flex sm:flex-wrap sm:items-center sm:gap-x-7">
           <StatMono label="K" value={match.stats.kills} />
           <StatMono label="D" value={match.stats.deaths} />
           <StatMono label="A" value={match.stats.assists} />
@@ -233,22 +236,23 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         </div>
       </section>
 
-      {/* Highlights list */}
+      {/* Detected plays */}
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight text-foreground">
-            We found{' '}
-            <span className="font-[family-name:var(--font-mono)] tabular-nums text-primary">{n}</span>{' '}
-            {n === 1 ? 'highlight' : 'highlights'}
+          <h2 className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.24em] text-primary">
+            JUGADAS DETECTADAS{' '}
+            <span className="tracking-[0.14em] text-muted-foreground/70">
+              · <span className="tabular-nums">{n}</span>
+            </span>
           </h2>
           <p className="text-sm text-muted-foreground">
-            Pick the plays you want to forge into a reel — 2+ picks concatenate into one.
+            Elige las jugadas que quieras forjar en un reel; 2 o más se concatenan en uno.
           </p>
         </div>
 
         {n === 0 ? (
-          <p className="rounded-xl border border-dashed border-border bg-card/50 px-5 py-10 text-center text-sm text-muted-foreground">
-            No highlight-worthy plays found in this match.
+          <p className="border border-dashed border-border bg-card/50 px-5 py-10 text-center text-sm text-muted-foreground">
+            No hay jugadas dignas de highlight en esta partida.
           </p>
         ) : (
           <PlayList
@@ -264,16 +268,16 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
       {/* Preset picker */}
       {n > 0 ? (
         <section className="flex flex-col gap-4">
-          <SectionEyebrow label="Reel preset" />
+          <SectionEyebrow label="PRESET DEL REEL" />
           {presets === null ? (
             <div className="grid gap-4 sm:grid-cols-3">
               {[0, 1, 2].map((i) => (
-                <Skeleton key={i} className="h-40 rounded-xl" />
+                <Skeleton key={i} className="h-40" />
               ))}
             </div>
           ) : presets.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border bg-card/50 px-5 py-6 text-center text-sm text-muted-foreground">
-              Couldn&apos;t load reel presets. Refresh the page to try again.
+            <p className="border border-dashed border-border bg-card/50 px-5 py-6 text-center text-sm text-muted-foreground">
+              No se pudieron cargar los presets. Recarga la página para reintentar.
             </p>
           ) : (
             <PresetCards
@@ -289,27 +293,27 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
       {/* Edit options */}
       {n > 0 ? (
         <section className="flex flex-col gap-4">
-          <SectionEyebrow label="Edit options" />
+          <SectionEyebrow label="OPCIONES DE EDICIÓN" />
           <EditOptions value={editConfig} onChange={setEditConfig} disabled={selectedIds.size === 0 || busy} />
         </section>
       ) : null}
 
-      {/* Soundtrack (optional) */}
+      {/* Music (optional) */}
       {n > 0 ? (
         <section className="flex flex-col gap-4">
-          <SectionEyebrow label="Soundtrack (optional)" />
+          <SectionEyebrow label="MÚSICA (OPCIONAL)" />
           {songTitle ? (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4">
+            <div className="flex items-center justify-between gap-3 border border-destructive/30 bg-card px-5 py-4">
               <div className="flex min-w-0 items-center gap-3">
-                <Music className="size-5 shrink-0 text-primary" />
+                <Music className="size-5 shrink-0 text-destructive" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">{songTitle}</p>
-                  <p className="text-xs text-muted-foreground">Soundtrack added</p>
+                  <p className="text-xs text-muted-foreground">Música añadida</p>
                 </div>
               </div>
               <div className="flex shrink-0 gap-2">
                 <Button variant="secondary" size="sm" disabled={busy} onClick={() => setSongOpen(true)}>
-                  Change
+                  Cambiar
                 </Button>
                 <Button
                   variant="ghost"
@@ -320,7 +324,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
                     setSongTitle(null);
                   }}
                 >
-                  Remove
+                  Quitar
                 </Button>
               </div>
             </div>
@@ -329,10 +333,10 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
               type="button"
               disabled={busy}
               onClick={() => setSongOpen(true)}
-              className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-card/50 px-5 py-4 text-left text-sm text-muted-foreground transition-colors hover:border-muted-foreground/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-3 border border-dashed border-border bg-card/50 px-5 py-4 text-left text-sm text-muted-foreground transition-colors hover:border-muted-foreground/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Music className="size-5" />
-              Add a soundtrack — sync the action to a track.
+              Añade música: sincroniza la acción con un tema.
             </button>
           )}
         </section>
@@ -344,8 +348,10 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
       {n > 0 ? (
         <CreateReelBar
           selectionLabel={selectionLabel}
-          presetLabel={presetLabel ? `${presetLabel} · ${editConfig.format === 'short-9x16' ? 'Short' : '16:9'}` : null}
+          presetLabel={presetLabel}
           songTitle={songTitle}
+          format={editConfig.format}
+          onFormatChange={(format) => setEditConfig({ ...editConfig, format })}
           creating={creating}
           onCreate={onCreate}
         />
@@ -365,19 +371,19 @@ function LoadingState() {
   return (
     <div className="flex flex-col gap-8">
       <Skeleton className="h-8 w-24" />
-      <Skeleton className="h-20 w-full rounded-xl" />
+      <Skeleton className="h-20 w-full" />
       <div className="flex flex-col gap-4">
         <Skeleton className="h-6 w-48" />
-        <div className="flex flex-col gap-px overflow-hidden rounded-xl border border-border">
+        <div className="flex flex-col gap-px overflow-hidden border border-border">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-[76px] w-full rounded-none" />
           ))}
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
-        <Skeleton className="h-40 rounded-xl" />
-        <Skeleton className="h-40 rounded-xl" />
-        <Skeleton className="h-40 rounded-xl" />
+        <Skeleton className="h-40" />
+        <Skeleton className="h-40" />
+        <Skeleton className="h-40" />
       </div>
     </div>
   );

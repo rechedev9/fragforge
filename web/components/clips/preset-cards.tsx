@@ -97,8 +97,8 @@ function PresetCard({ icon, title, pitch, hud, isDefault, selected, disabled, on
           {title}
         </span>
         {isDefault ? (
-          <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold uppercase tracking-wider text-primary">
-            Default
+          <span className="border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold uppercase tracking-wider text-primary">
+            POR DEFECTO
           </span>
         ) : null}
       </div>

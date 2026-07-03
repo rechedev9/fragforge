@@ -14,10 +14,14 @@ export type MatchFiltersProps = {
   onQueryChange: (query: string) => void;
 };
 
+/** Square mono NEON HUD filter chip; the active one is solid cyan on dark text. */
+const CHIP_CLASS =
+  'h-auto border border-primary/25 bg-transparent px-3.5 py-1.5 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.14em] text-muted-foreground rounded-none first:rounded-none last:rounded-none hover:bg-primary/10 hover:text-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground';
+
 /**
- * Filter controls for the matches scoreboard: a segmented ToggleGroup (All /
- * Wins / Best frags) and a map search box. Lime stays a signal — the active
- * toggle is the only tinted element here.
+ * Filter controls for the matches scoreboard: square mono chips (Todas /
+ * Victorias / Mejores frags) plus a map search box, per the NEON HUD mockup.
+ * Cyan stays a signal — the active chip is the only filled element here.
  */
 export function MatchFilters({
   filter,
@@ -26,41 +30,28 @@ export function MatchFilters({
   onQueryChange,
 }: MatchFiltersProps) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
       <ToggleGroup
         type="single"
         value={filter}
         onValueChange={(value) => {
           if (value) onFilterChange(value as MatchFilter);
         }}
-        variant="outline"
-        className="w-fit"
-        aria-label="Filter matches"
+        className="w-fit gap-2"
+        aria-label="Filtrar partidas"
       >
-        <ToggleGroupItem
-          value="all"
-          aria-label="All matches"
-          className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-        >
-          All
+        <ToggleGroupItem value="all" aria-label="Todas las partidas" className={CHIP_CLASS}>
+          TODAS
         </ToggleGroupItem>
-        <ToggleGroupItem
-          value="wins"
-          aria-label="Wins only"
-          className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-        >
-          Wins
+        <ToggleGroupItem value="wins" aria-label="Solo victorias" className={CHIP_CLASS}>
+          VICTORIAS
         </ToggleGroupItem>
-        <ToggleGroupItem
-          value="frags"
-          aria-label="Best frags first"
-          className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-        >
-          Best frags
+        <ToggleGroupItem value="frags" aria-label="Mejores frags primero" className={CHIP_CLASS}>
+          MEJORES FRAGS
         </ToggleGroupItem>
       </ToggleGroup>
 
-      <div className="relative w-full sm:max-w-xs">
+      <div className="relative w-full sm:max-w-[220px]">
         <Search
           size={15}
           aria-hidden
@@ -70,9 +61,9 @@ export function MatchFilters({
           type="search"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search map…"
-          aria-label="Search by map"
-          className="pl-9"
+          placeholder="Buscar mapa…"
+          aria-label="Buscar por mapa"
+          className="border-primary/25 pl-9 font-[family-name:var(--font-mono)] text-sm"
         />
       </div>
     </div>

@@ -73,9 +73,9 @@ async function gotoCreateReel(page: Page, jobStatus: { value: string }): Promise
   await page.locator('button:has(.lucide-crosshair)').first().click();
 
   await page.waitForURL(/\/matches\//);
-  await page.getByText(/We found/).waitFor();
+  await page.getByText('JUGADAS DETECTADAS · 1').waitFor();
 
-  // Pick the one play so "Create reel" is enabled.
+  // Pick the one play so "FORJAR REEL" is enabled.
   await page.locator('button:has(.lucide-crosshair)').first().click();
 }
 
@@ -87,10 +87,10 @@ function outroChip(page: Page) {
   return page.getByRole('button', { name: 'Outro' });
 }
 function introInput(page: Page) {
-  return page.getByLabel('Intro title');
+  return page.getByLabel('Título de intro');
 }
 function outroInput(page: Page) {
-  return page.getByLabel('Outro text');
+  return page.getByLabel('Texto de outro');
 }
 
 test.describe('create-reel bookend text', () => {
@@ -103,7 +103,7 @@ test.describe('create-reel bookend text', () => {
     await expect(introInput(page)).toBeVisible();
     await expect(introInput(page)).toHaveAttribute(
       'placeholder',
-      'Intro title — leave empty to use the generated headline',
+      'Título de intro (vacío = titular generado)',
     );
 
     await introChip(page).click();
@@ -133,7 +133,7 @@ test.describe('create-reel bookend text', () => {
     await outroChip(page).click();
     await outroInput(page).fill('@fragforge');
 
-    await page.getByRole('button', { name: /create reel/i }).click();
+    await page.getByRole('button', { name: 'FORJAR REEL' }).click();
     await page.waitForURL(/\/videos/);
 
     await expect.poll(() => renderBody !== null, { timeout: 30_000 }).toBe(true);
@@ -164,7 +164,7 @@ test.describe('create-reel bookend text', () => {
     // Intro toggled on but left empty; Outro left off entirely.
     await introChip(page).click();
 
-    await page.getByRole('button', { name: /create reel/i }).click();
+    await page.getByRole('button', { name: 'FORJAR REEL' }).click();
     await page.waitForURL(/\/videos/);
 
     await expect.poll(() => renderBody !== null, { timeout: 30_000 }).toBe(true);
@@ -199,7 +199,7 @@ test.describe('create-reel bookend text', () => {
       return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) });
     });
 
-    await page.getByRole('button', { name: /create reel/i }).click();
+    await page.getByRole('button', { name: 'FORJAR REEL' }).click();
     await page.waitForURL(/\/videos/);
 
     await expect.poll(() => renderBody !== null, { timeout: 30_000 }).toBe(true);

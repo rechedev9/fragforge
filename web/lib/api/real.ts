@@ -60,9 +60,9 @@ function variantOf(intent: Pick<ReelIntent, 'variant'>): string {
 
 /** Display-only labels for the known presets (server is the source of truth). */
 const VARIANT_LABELS: Record<string, string> = {
-  'viral-60-clean': 'Kill Feed',
-  'clean-pov-60': 'Clean POV',
-  'full-hud-60': 'Full HUD',
+  'viral-60-clean': 'Killfeed',
+  'clean-pov-60': 'POV limpio',
+  'full-hud-60': 'HUD completo',
 };
 
 function variantLabel(variant: string): string {

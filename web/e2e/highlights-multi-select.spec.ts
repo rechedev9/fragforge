@@ -73,11 +73,11 @@ async function gotoHighlights(page: Page, jobStatus: { value: string }): Promise
   await page.locator('button:has(.lucide-crosshair)').first().click();
 
   await page.waitForURL(/\/matches\//);
-  await page.getByText(/We found/).waitFor();
+  await page.getByText('JUGADAS DETECTADAS · 3').waitFor();
 }
 
 function row(page: Page, round: number) {
-  return page.getByRole('button', { name: `Round ${round}` });
+  return page.getByRole('button', { name: `RONDA ${round}` });
 }
 
 /** The sticky create-reel bar's "Selected ..." summary text (distinct from the list header's "N selected" count). */
@@ -137,7 +137,7 @@ test.describe('highlights list — vertical, multi-select', () => {
     const jobStatus = { value: 'parsed' };
     await gotoHighlights(page, jobStatus);
 
-    const createButton = page.getByRole('button', { name: /create reel/i });
+    const createButton = page.getByRole('button', { name: 'FORJAR REEL' });
     await expect(createButton).toBeDisabled();
 
     await row(page, 1).click();
@@ -154,9 +154,9 @@ test.describe('highlights list — vertical, multi-select', () => {
     const captured = captureRecordSegmentIds(page, jobStatus);
 
     await row(page, 6).click();
-    await expect(selectionSummary(page)).toContainText('3K · Round 6');
+    await expect(selectionSummary(page)).toContainText('3K · Ronda 6');
 
-    await page.getByRole('button', { name: /create reel/i }).click();
+    await page.getByRole('button', { name: 'FORJAR REEL' }).click();
     await page.waitForURL(/\/videos/);
 
     await expect.poll(() => captured.segmentIds !== null, { timeout: 30_000 }).toBe(true);
@@ -173,9 +173,9 @@ test.describe('highlights list — vertical, multi-select', () => {
     await row(page, 1).click();
     await row(page, 6).click();
 
-    await expect(selectionSummary(page)).toContainText('3 highlights · Rounds 1, 6, 9');
+    await expect(selectionSummary(page)).toContainText('3 jugadas · Rondas 1, 6, 9');
 
-    await page.getByRole('button', { name: /create reel/i }).click();
+    await page.getByRole('button', { name: 'FORJAR REEL' }).click();
     await page.waitForURL(/\/videos/);
 
     await expect.poll(() => captured.segmentIds !== null, { timeout: 30_000 }).toBe(true);
@@ -187,12 +187,12 @@ test.describe('highlights list — vertical, multi-select', () => {
     const jobStatus = { value: 'parsed' };
     await gotoHighlights(page, jobStatus);
 
-    await page.getByRole('button', { name: 'Select all' }).click();
-    await expect(page.getByText('3 selected')).toBeVisible();
-    await expect(page.getByRole('button', { name: /create reel/i })).toBeEnabled();
+    await page.getByRole('button', { name: 'SELECCIONAR TODO' }).click();
+    await expect(page.getByText('3 SELECCIONADAS')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'FORJAR REEL' })).toBeEnabled();
 
-    await page.getByRole('button', { name: 'Clear' }).click();
-    await expect(page.getByText('Tap to select')).toBeVisible();
-    await expect(page.getByRole('button', { name: /create reel/i })).toBeDisabled();
+    await page.getByRole('button', { name: 'LIMPIAR' }).click();
+    await expect(page.getByText('TOCA PARA SELECCIONAR')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'FORJAR REEL' })).toBeDisabled();
   });
 });

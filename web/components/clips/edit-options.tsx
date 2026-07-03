@@ -1,6 +1,6 @@
 'use client';
 
-import { Monitor, PanelTop, Smartphone, Sparkles, Zap } from 'lucide-react';
+import { PanelTop, Sparkles, Zap } from 'lucide-react';
 import { BOOKEND_TEXT_MAX_LENGTH, type EditConfig } from '@/lib/api/types';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Input } from '@/components/ui/input';
@@ -15,47 +15,28 @@ export type EditOptionsProps = {
   disabled?: boolean;
 };
 
-const formatItems: Array<{ value: EditConfig['format']; label: string; icon: React.ReactNode }> = [
-  { value: 'short-9x16', label: 'Short', icon: <Smartphone className="size-4" /> },
-  { value: 'landscape-16x9', label: '16:9', icon: <Monitor className="size-4" /> },
-];
-
 const effectItems: Array<{ value: EditConfig['killEffect']; label: string }> = [
   { value: 'punch-in', label: 'Punch' },
-  { value: 'clean', label: 'Clean' },
-  { value: 'velocity', label: 'Velocity' },
+  { value: 'clean', label: 'Limpio' },
+  { value: 'velocity', label: 'Velocidad' },
   { value: 'freeze-flash', label: 'Freeze' },
 ];
 
 const transitionItems: Array<{ value: EditConfig['transition']; label: string }> = [
   { value: 'flash', label: 'Flash' },
-  { value: 'cut', label: 'Cut' },
+  { value: 'cut', label: 'Corte' },
   { value: 'whip', label: 'Whip' },
-  { value: 'dip', label: 'Dip' },
+  { value: 'dip', label: 'Fundido' },
 ];
 
+/**
+ * Kill-effect, transition, and bookend controls. The 9:16/16:9 aspect toggle
+ * lives in the CreateReelBar (the mockup's bottom REEL bar), not here.
+ */
 export function EditOptions({ value, onChange, disabled = false }: EditOptionsProps) {
   return (
-    <div className={cn('grid gap-4 md:grid-cols-[1fr_1fr_auto]', disabled && 'opacity-60')}>
-      <OptionBlock label="Format">
-        <ToggleGroup
-          type="single"
-          value={value.format}
-          onValueChange={(format) => format && onChange({ ...value, format: format as EditConfig['format'] })}
-          disabled={disabled}
-          variant="outline"
-          className="flex-wrap"
-        >
-          {formatItems.map((item) => (
-            <ToggleGroupItem key={item.value} value={item.value} aria-label={item.label}>
-              {item.icon}
-              {item.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </OptionBlock>
-
-      <OptionBlock label="Kill effect">
+    <div className={cn('grid gap-4 md:grid-cols-[1fr_1fr]', disabled && 'opacity-60')}>
+      <OptionBlock label="EFECTO DE KILL">
         <ToggleGroup
           type="single"
           value={value.killEffect}
@@ -75,7 +56,7 @@ export function EditOptions({ value, onChange, disabled = false }: EditOptionsPr
         </ToggleGroup>
       </OptionBlock>
 
-      <OptionBlock label="Transitions">
+      <OptionBlock label="TRANSICIONES">
         <ToggleGroup
           type="single"
           value={value.transition}
@@ -95,7 +76,7 @@ export function EditOptions({ value, onChange, disabled = false }: EditOptionsPr
         </ToggleGroup>
       </OptionBlock>
 
-      <OptionBlock label="Bookends" className="md:col-span-3">
+      <OptionBlock label="INTRO Y OUTRO" className="md:col-span-2">
         <ToggleGroup
           type="multiple"
           value={[value.intro ? 'intro' : '', value.outro ? 'outro' : ''].filter(Boolean)}
@@ -118,18 +99,18 @@ export function EditOptions({ value, onChange, disabled = false }: EditOptionsPr
 
         <div className="grid gap-3 sm:grid-cols-2">
           <BookendTextField
-            label="Intro title"
+            label="Título de intro"
             value={value.introText ?? ''}
             visible={value.intro}
-            placeholder="Intro title — leave empty to use the generated headline"
+            placeholder="Título de intro (vacío = titular generado)"
             disabled={disabled}
             onChange={(introText) => onChange({ ...value, introText })}
           />
           <BookendTextField
-            label="Outro text"
+            label="Texto de outro"
             value={value.outroText ?? ''}
             visible={value.outro}
-            placeholder="Outro text — e.g. your handle; empty = FragForge"
+            placeholder="Texto de outro (tu handle; vacío = FragForge)"
             disabled={disabled}
             onChange={(outroText) => onChange({ ...value, outroText })}
           />

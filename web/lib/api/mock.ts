@@ -278,9 +278,9 @@ export class MockApiClient implements ApiClient {
   async listPresets(): Promise<Preset[]> {
     await delay();
     return [
-      { name: 'viral-60-clean', label: 'Kill Feed', description: 'HUD-less POV that keeps the in-game kill feed, with punch-ins and kill counters', hudMode: 'deathnotices', default: true },
-      { name: 'clean-pov-60', label: 'Clean POV', description: 'Fully HUD-less cinematic first-person POV, no in-game HUD or kill feed', hudMode: 'clean' },
-      { name: 'full-hud-60', label: 'Full HUD', description: 'Keeps the full in-game CS2 HUD, health, ammo, and radar visible', hudMode: 'gameplay' },
+      { name: 'viral-60-clean', label: 'Killfeed', description: 'POV sin HUD que conserva el killfeed del juego, con punch-ins y contador de kills', hudMode: 'deathnotices', default: true },
+      { name: 'clean-pov-60', label: 'POV limpio', description: 'POV cinemático en primera persona, sin HUD ni killfeed del juego', hudMode: 'clean' },
+      { name: 'full-hud-60', label: 'HUD completo', description: 'Conserva el HUD completo de CS2: vida, munición y radar visibles', hudMode: 'gameplay' },
     ];
   }
 

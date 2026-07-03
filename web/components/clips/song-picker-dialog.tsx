@@ -78,8 +78,8 @@ export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="font-[family-name:var(--font-display)] tracking-tight">Pick a track</DialogTitle>
-          <DialogDescription>We&apos;ll cut the action to the beat. Tap play to preview.</DialogDescription>
+          <DialogTitle className="font-[family-name:var(--font-display)] tracking-tight">ELIGE UN TEMA</DialogTitle>
+          <DialogDescription>Cortamos la acción al ritmo del beat. Pulsa play para escucharlo.</DialogDescription>
         </DialogHeader>
 
         {/* One shared element drives every row's preview. */}
@@ -90,7 +90,7 @@ export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId 
             <SongRowSkeletons />
           ) : songs.length === 0 ? (
             <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-              No tracks available. Drop audio into the music directory and reload.
+              No hay temas disponibles. Añade audio al directorio de música y recarga.
             </p>
           ) : (
             <ul className="flex flex-col gap-1.5">
@@ -134,7 +134,7 @@ function SongRow({ song, playing, selected, onTogglePlay, onUse }: SongRowProps)
         variant="ghost"
         size="icon-sm"
         onClick={onTogglePlay}
-        aria-label={playing ? `Pause ${song.title}` : `Preview ${song.title}`}
+        aria-label={playing ? `Pausar ${song.title}` : `Escuchar ${song.title}`}
         className="shrink-0 text-muted-foreground hover:text-foreground"
       >
         {playing ? <Pause /> : <Play />}
@@ -152,7 +152,7 @@ function SongRow({ song, playing, selected, onTogglePlay, onUse }: SongRowProps)
 
       <Button type="button" size="sm" variant={selected ? 'secondary' : 'default'} onClick={onUse} className="shrink-0">
         {selected ? <Check /> : null}
-        {selected ? 'Selected' : 'Use this track'}
+        {selected ? 'Elegido' : 'Usar este tema'}
       </Button>
     </li>
   );
