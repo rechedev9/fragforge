@@ -1,23 +1,20 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
+import { Chakra_Petch, Share_Tech_Mono } from 'next/font/google';
 import { SessionProvider } from '@/lib/session';
 import { GrainOverlay } from '@/components/brand/grain-overlay';
 import { Toaster } from '@/components/ui/sonner';
 
-const spaceGrotesk = Space_Grotesk({
+const chakraPetch = Chakra_Petch({
   subsets: ['latin'],
-  variable: '--font-space-grotesk',
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-chakra-petch',
 });
 
-const inter = Inter({
+const shareTechMono = Share_Tech_Mono({
   subsets: ['latin'],
-  variable: '--font-inter',
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  variable: '--font-jetbrains-mono',
+  weight: '400',
+  variable: '--font-share-tech-mono',
 });
 
 export const metadata: Metadata = {
@@ -25,7 +22,7 @@ export const metadata: Metadata = {
   description: 'Forge your CS2 frags into highlight reels — captured on your own rig.',
 };
 
-const fontVars = `${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable}`;
+const fontVars = `${chakraPetch.variable} ${shareTechMono.variable}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

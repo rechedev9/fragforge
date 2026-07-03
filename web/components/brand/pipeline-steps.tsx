@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { cn } from '@/lib/utils';
 import type { VideoStatus } from '@/lib/api/types';
 
@@ -6,12 +7,12 @@ export type PipelineStepsProps = {
   className?: string;
 };
 
-/** The four product-facing pipeline stages, in order. */
-const STEPS = ['Queued', 'Capturing', 'Editing', 'Ready'] as const;
+/** The four product-facing pipeline stages, in order (visible labels). */
+const STEPS = ['COLA', 'CAPTURA', 'EDICIÓN', 'LISTO'] as const;
 
 /**
  * Index of the stage a status sits at:
- * queued→Queued, recording→Capturing, composing→Editing, ready→Ready.
+ * queued→COLA, recording→CAPTURA, composing→EDICIÓN, ready→LISTO.
  * `failed` keeps the bar but marks the active stage as errored.
  */
 function activeIndex(status: VideoStatus): number {
@@ -30,10 +31,11 @@ function activeIndex(status: VideoStatus): number {
 }
 
 /**
- * PipelineSteps — the hero of the product story. A horizontal stepper rendering
- * Queued → Capturing → Editing → Ready. Done steps are lime-filled, the active
- * step pulses lime, future steps are muted. `failed` paints the active step
- * destructive. Honors prefers-reduced-motion (pulse disabled in CSS).
+ * PipelineSteps — the hero of the product story, NEON HUD style: a mono
+ * COLA ▸ CAPTURA ▸ EDICIÓN ▸ LISTO line. The active step glows (magenta while
+ * capturing — the REC color — cyan otherwise, per the skin's color rules);
+ * done steps are dim, future steps dimmer. `failed` paints the active step
+ * magenta. Honors prefers-reduced-motion (pulse disabled in CSS).
  */
 export function PipelineSteps({ status, className }: PipelineStepsProps) {
   const active = activeIndex(status);
@@ -41,34 +43,38 @@ export function PipelineSteps({ status, className }: PipelineStepsProps) {
   const done = status === 'ready';
 
   return (
-    <ol className={cn('flex items-center gap-1.5', className)}>
+    <ol
+      className={cn(
+        'flex flex-wrap items-center gap-x-2.5 gap-y-1 font-[family-name:var(--font-mono)] text-[0.7rem] uppercase tracking-[0.14em]',
+        className,
+      )}
+    >
       {STEPS.map((label, i) => {
         const isDone = i < active || (done && i === active);
         const isActive = i === active && !done;
-        const isFailed = failed && isActive;
+        const isMagenta = failed || i === 1; // failed step or CAPTURA (the REC stage)
 
         return (
-          <li key={label} className="flex flex-1 flex-col gap-1.5">
-            <span
-              aria-hidden
+          <Fragment key={label}>
+            {i > 0 ? (
+              <li aria-hidden className="text-muted-foreground/40">
+                ▸
+              </li>
+            ) : null}
+            <li
               className={cn(
-                'h-1 rounded-full transition-colors',
-                isFailed && 'bg-destructive',
-                !isFailed && isActive && 'bg-primary fragforge-pulse',
-                !isFailed && isDone && 'bg-primary',
-                !isActive && !isDone && 'bg-muted',
-              )}
-            />
-            <span
-              className={cn(
-                'text-[0.65rem] font-medium uppercase tracking-wide',
-                isFailed && 'text-destructive',
-                !isFailed && (isActive || isDone) ? 'text-foreground' : 'text-muted-foreground',
+                isActive &&
+                  (isMagenta
+                    ? 'text-destructive [text-shadow:0_0_10px_color-mix(in_oklch,var(--destructive)_60%,transparent)]'
+                    : 'text-primary [text-shadow:0_0_10px_color-mix(in_oklch,var(--primary)_60%,transparent)]'),
+                isActive && !failed && 'neon-pulse',
+                !isActive && isDone && (done && i === active ? 'text-primary' : 'text-muted-foreground'),
+                !isActive && !isDone && 'text-muted-foreground/60',
               )}
             >
               {label}
-            </span>
-          </li>
+            </li>
+          </Fragment>
         );
       })}
     </ol>

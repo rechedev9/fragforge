@@ -7,15 +7,16 @@ export type StatMonoProps = {
   value: string | number;
   /** Stack label above value (default) or place it inline before the value. */
   layout?: 'stacked' | 'inline';
-  /** Tint the value with the lime signal color (e.g. a standout stat). */
+  /** Tint the value with the cyan signal color (e.g. a standout stat). */
   accent?: boolean;
   className?: string;
 };
 
 /**
- * StatMono — a labeled mono number. Every stat in FragForge (K / D / A / MVP /
- * K/D / scores / ticks / durations) is rendered through this so digits stay
- * tabular and the scoreboard/demo-tick feel is consistent.
+ * StatMono — a labeled mono number, NEON HUD style. Every stat in FragForge
+ * (K / D / A / MVP / K/D / scores / ticks / durations) is rendered through
+ * this: Share Tech Mono tabular value over a dim mono label with wide
+ * tracking, so the scoreboard/demo-tick feel is consistent.
  */
 export function StatMono({
   label,
@@ -27,12 +28,12 @@ export function StatMono({
   if (layout === 'inline') {
     return (
       <span className={cn('inline-flex items-baseline gap-1.5', className)}>
-        <span className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="font-[family-name:var(--font-mono)] text-[9.5px] uppercase tracking-[0.2em] text-muted-foreground/70">
           {label}
         </span>
         <span
           className={cn(
-            'font-[family-name:var(--font-mono)] text-sm font-semibold tabular-nums',
+            'font-[family-name:var(--font-mono)] text-sm tabular-nums',
             accent ? 'text-primary' : 'text-foreground',
           )}
         >
@@ -44,12 +45,12 @@ export function StatMono({
 
   return (
     <div className={cn('flex flex-col gap-0.5', className)}>
-      <span className="text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
+      <span className="font-[family-name:var(--font-mono)] text-[9.5px] uppercase tracking-[0.2em] text-muted-foreground/70">
         {label}
       </span>
       <span
         className={cn(
-          'font-[family-name:var(--font-mono)] text-lg font-semibold leading-none tabular-nums',
+          'font-[family-name:var(--font-mono)] text-lg leading-none tabular-nums',
           accent ? 'text-primary' : 'text-foreground',
         )}
       >
