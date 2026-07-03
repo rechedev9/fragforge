@@ -9,6 +9,7 @@ import { isLocalMode } from '@/lib/mode';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { Wordmark } from '@/components/brand';
+import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { DemoDropzone } from '@/components/upload/demo-dropzone';
@@ -20,6 +21,28 @@ type Stage = 'idle' | 'scanning' | 'picking' | 'parsing' | 'waiting-for-pc';
 function isServiceUnavailable(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === SERVICE_UNAVAILABLE_CODE;
 }
+
+/** The three pipeline steps under the dropzone (mockup 2b): static copy. */
+const PIPELINE_STEPS = [
+  {
+    n: '01',
+    accent: 'text-primary',
+    title: 'ANÁLISIS AUTOMÁTICO',
+    copy: 'Parseamos la demo y puntuamos cada ronda: clutches, aces, multi-kills.',
+  },
+  {
+    n: '02',
+    accent: 'text-primary',
+    title: 'ELIGES LAS JUGADAS',
+    copy: 'Filmstrip con las mejores jugadas detectadas. Marca las que quieres en el reel.',
+  },
+  {
+    n: '03',
+    accent: 'text-destructive',
+    title: 'RENDER EN TU RIG',
+    copy: 'Captura y edición en tu propio PC. 9:16 para Shorts o 16:9 para largo.',
+  },
+] as const;
 
 /**
  * Upload flow (/upload) — the no-login entry. Drop any .dem (yours or someone
@@ -71,8 +94,8 @@ export default function UploadPage() {
         }
         reset(
           isServiceUnavailable(err)
-            ? 'Analysis service is offline. Start it and try again.'
-            : 'Could not scan that demo. Try another .dem file.',
+            ? 'El servicio de análisis está offline. Arráncalo y vuelve a intentarlo.'
+            : 'No se pudo escanear esa demo. Prueba con otro archivo .dem.',
         );
       }
     },
@@ -98,8 +121,8 @@ export default function UploadPage() {
       } catch (err) {
         reset(
           isServiceUnavailable(err)
-            ? 'Analysis service is offline. Start it and try again.'
-            : 'Could not parse highlights for that player. Pick another.',
+            ? 'El servicio de análisis está offline. Arráncalo y vuelve a intentarlo.'
+            : 'No se pudieron extraer los highlights de ese jugador. Elige otro.',
         );
       }
     },
@@ -116,87 +139,106 @@ export default function UploadPage() {
 
       <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col px-6">
         <header className="flex h-16 items-center justify-between">
-          <Link href={homeHref} aria-label="FragForge home">
+          <Link href={homeHref} aria-label="Inicio de FragForge">
             <Wordmark />
           </Link>
           <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
             <Link href={homeHref}>
               <ArrowLeft className="size-4" />
-              Back
+              Volver
             </Link>
           </Button>
         </header>
 
         <div className="flex flex-1 flex-col justify-center py-12">
           <div className="mb-8 max-w-xl">
-            <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold uppercase tracking-tight sm:text-4xl">
-              {stage === 'picking' ? 'Who do you want to clip?' : 'Analyze any demo'}
+            <SectionEyebrow number={2} label="SUBIR DEMO" className="mb-2.5" />
+            <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold leading-none tracking-tight sm:text-[34px]">
+              {stage === 'picking' ? '¿A QUIÉN QUIERES CLIPEAR?' : 'ANALIZA CUALQUIER DEMO'}
             </h1>
-            <p className="mt-3 text-muted-foreground">
+            <p className="mt-3 text-sm text-muted-foreground">
               {stage === 'picking' ? (
-                <>Pick a player from the demo and we&apos;ll forge their best plays into a reel.</>
+                <>Elige a un jugador de la demo y forjaremos sus mejores jugadas en un reel.</>
               ) : (
                 <>
-                  Drop a .dem file — yours or someone else&apos;s — and forge its
-                  best plays into a reel. No Steam login required.
+                  Suelta un .dem — tuyo o de cualquiera — y forja sus mejores
+                  jugadas en un reel. Sin login.
                 </>
               )}
             </p>
           </div>
 
-          <Card className="overflow-hidden p-6 sm:p-8">
-            {stage === 'scanning' || stage === 'parsing' ? (
-              <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
-                <Loader2 className="size-8 animate-spin text-primary" />
-                <div className="flex flex-col gap-1">
-                  <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
-                    {stage === 'scanning' ? 'Scanning roster…' : 'Forging highlights…'}
-                  </p>
-                  {fileName ? (
-                    <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
-                      <FileVideo className="size-4" />
-                      {fileName}
+          {stage === 'idle' ? (
+            <div className="flex flex-col gap-3">
+              <DemoDropzone onFile={onFile} />
+              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+              <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                {PIPELINE_STEPS.map((step) => (
+                  <div key={step.n} className="border border-primary/15 bg-card/75 p-5">
+                    <div className={`font-[family-name:var(--font-mono)] text-xl ${step.accent}`}>
+                      {step.n}
+                    </div>
+                    <div className="mt-2 font-[family-name:var(--font-display)] text-[15px] font-bold text-foreground">
+                      {step.title}
+                    </div>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      {step.copy}
                     </p>
-                  ) : null}
-                </div>
+                  </div>
+                ))}
               </div>
-            ) : stage === 'picking' ? (
-              <PlayerPicker players={players} onPick={onPick} match={match ?? undefined} />
-            ) : stage === 'waiting-for-pc' ? (
-              <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
-                <div className="flex flex-col gap-1">
-                  <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
-                    Your PC is offline
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Open FragForge Agent on your computer to analyze this demo, then retry.
-                  </p>
-                  {fileName ? (
-                    <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
-                      <FileVideo className="size-4" />
-                      {fileName}
+            </div>
+          ) : (
+            <Card className="overflow-hidden p-6 sm:p-8">
+              {stage === 'scanning' || stage === 'parsing' ? (
+                <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
+                  <Loader2 className="size-8 animate-spin text-primary" />
+                  <div className="flex flex-col gap-1">
+                    <p className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
+                      {stage === 'scanning' ? 'Escaneando el roster…' : 'Forjando highlights…'}
                     </p>
-                  ) : null}
+                    {fileName ? (
+                      <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
+                        <FileVideo className="size-4" />
+                        {fileName}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-                <Button
-                  onClick={() => {
-                    if (pendingFile) void runScan(pendingFile);
-                  }}
-                >
-                  Retry
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <DemoDropzone onFile={onFile} />
-                {error ? <p className="text-sm text-destructive">{error}</p> : null}
-              </div>
-            )}
-          </Card>
+              ) : stage === 'picking' ? (
+                <PlayerPicker players={players} onPick={onPick} match={match ?? undefined} />
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
+                  <div className="flex flex-col gap-1">
+                    <p className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
+                      Tu PC está offline
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Abre FragForge Agent en tu PC para analizar esta demo y reintenta.
+                    </p>
+                    {fileName ? (
+                      <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
+                        <FileVideo className="size-4" />
+                        {fileName}
+                      </p>
+                    ) : null}
+                  </div>
+                  <Button
+                    className="neon-notch font-[family-name:var(--font-display)] font-bold tracking-[0.06em]"
+                    onClick={() => {
+                      if (pendingFile) void runScan(pendingFile);
+                    }}
+                  >
+                    REINTENTAR
+                  </Button>
+                </div>
+              )}
+            </Card>
+          )}
         </div>
 
-        <footer className="flex h-16 items-center text-xs text-muted-foreground/70">
-          You bring the PC &amp; GPU. We handle the rest.
+        <footer className="flex h-16 items-center font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.2em] text-muted-foreground/70">
+          TÚ PONES EL PC Y LA GPU · NOSOTROS EL RESTO
         </footer>
       </div>
     </main>

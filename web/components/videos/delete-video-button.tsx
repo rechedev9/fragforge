@@ -30,10 +30,10 @@ export function DeleteVideoButton({ video, onDeleted }: { video: Video; onDelete
     try {
       await api.deleteVideo(video.id);
       setOpen(false);
-      toast('Reel deleted.');
+      toast('Reel borrado.');
       onDeleted();
     } catch {
-      toast('Could not delete the reel.');
+      toast('No se pudo borrar el reel.');
     } finally {
       setDeleting(false);
     }
@@ -44,7 +44,7 @@ export function DeleteVideoButton({ video, onDeleted }: { video: Video; onDelete
       <Button
         variant="ghost"
         size="sm"
-        aria-label={`Delete ${video.title}`}
+        aria-label={`Borrar ${video.title}`}
         className="text-muted-foreground hover:text-destructive"
         onClick={() => setOpen(true)}
       >
@@ -54,19 +54,19 @@ export function DeleteVideoButton({ video, onDeleted }: { video: Video; onDelete
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete this reel?</DialogTitle>
+            <DialogTitle>¿Borrar este reel?</DialogTitle>
             <DialogDescription className="break-words">
-              <span className="font-medium text-foreground">{video.title}</span> and its rendered
-              file will be removed. This cannot be undone.
+              <span className="font-medium text-foreground">{video.title}</span> y su archivo
+              renderizado se eliminarán. Esta acción no se puede deshacer.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setOpen(false)} disabled={deleting}>
-              Cancel
+              Cancelar
             </Button>
             <Button variant="destructive" size="sm" onClick={onConfirm} disabled={deleting}>
               <Trash2 className="size-4" />
-              {deleting ? 'Deleting…' : 'Delete'}
+              {deleting ? 'Borrando…' : 'Borrar'}
             </Button>
           </DialogFooter>
         </DialogContent>

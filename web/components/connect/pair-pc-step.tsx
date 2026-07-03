@@ -2,12 +2,19 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Check, Copy, Cpu, Loader2 } from 'lucide-react';
+import { Check, Copy, Cpu, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { useSession } from '@/lib/session';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SectionEyebrow } from '@/components/brand';
+import { cn } from '@/lib/utils';
+
+// The FragForge Studio Windows installer, the same canonical release asset
+// the landing page's download CTA points at. Kept as a literal here since
+// web/ and landing/ are separate Next apps with no shared config; bump both
+// in lockstep on a new release.
+const AGENT_DOWNLOAD_URL =
+  'https://github.com/rechedev9/fragforge/releases/download/v0.2.7/FragForge.Studio.Setup.0.2.7.exe';
 
 export type PairPcStepProps = {
   /**
@@ -15,6 +22,8 @@ export type PairPcStepProps = {
    * /matches navigation when omitted (e.g. standalone previews).
    */
   onEnter?: () => void;
+  /** Reports the redeemed-pairing status so the parent stepper can advance. */
+  onPairedChange?: (paired: boolean) => void;
 };
 
 /**
@@ -23,9 +32,8 @@ export type PairPcStepProps = {
  * enters. Pairing is optional, though: the player can enter the studio now and
  * pair before their first reel.
  */
-export function PairPcStep({ onEnter }: PairPcStepProps = {}) {
+export function PairPcStep({ onEnter, onPairedChange }: PairPcStepProps = {}) {
   const router = useRouter();
-  const { refresh } = useSession();
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [paired, setPaired] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -34,8 +42,9 @@ export function PairPcStep({ onEnter }: PairPcStepProps = {}) {
   const checkStatus = useCallback(async () => {
     const status = await api.getPcStatus();
     setPaired(status.paired);
+    onPairedChange?.(status.paired);
     return status.paired;
-  }, []);
+  }, [onPairedChange]);
 
   useEffect(() => {
     void checkStatus();
@@ -46,8 +55,7 @@ export function PairPcStep({ onEnter }: PairPcStepProps = {}) {
     try {
       const result = await api.pairPc();
       setPairingCode(result.pairingCode);
-      const isPaired = await checkStatus();
-      if (isPaired) await refresh();
+      await checkStatus();
     } finally {
       setGenerating(false);
     }
@@ -64,41 +72,134 @@ export function PairPcStep({ onEnter }: PairPcStepProps = {}) {
     }
   }
 
+  function enter() {
+    if (onEnter) onEnter();
+    else router.push('/matches');
+  }
+
+  if (pairingCode) {
+    return (
+      <div className="text-center">
+        <h1 className="font-[family-name:var(--font-mono)] text-[11px] font-normal uppercase tracking-[0.3em] text-primary">
+          Código de emparejamiento
+        </h1>
+
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
+          {pairingCode.split('').map((ch, index) =>
+            ch === '-' ? (
+              <span
+                key={index}
+                aria-hidden
+                className="flex items-center px-0.5 font-[family-name:var(--font-mono)] text-2xl text-muted-foreground/40"
+              >
+                –
+              </span>
+            ) : (
+              <span
+                key={index}
+                className="grid h-[56px] w-[42px] place-items-center border border-primary/40 bg-background/80 font-[family-name:var(--font-mono)] text-2xl text-foreground sm:h-16 sm:w-[50px] sm:text-[28px]"
+              >
+                {ch}
+              </span>
+            ),
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="mt-3 inline-flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {copied ? <Check className="size-3" aria-hidden /> : <Copy className="size-3" aria-hidden />}
+          {copied ? 'Copiado' : 'Copiar código'}
+        </button>
+
+        <p className="mx-auto mt-5 max-w-sm text-sm leading-relaxed text-muted-foreground">
+          Abre el <span className="text-foreground">agente FragForge</span> en tu PC gaming y
+          escribe este código.
+          <br />
+          Es lo que graba y renderiza tus reels en tu propio rig.
+        </p>
+
+        <div
+          className={cn(
+            'mt-5 inline-flex items-center gap-2 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.16em]',
+            paired ? 'text-primary' : 'text-destructive',
+          )}
+        >
+          <span
+            className={cn(
+              'size-[7px] rounded-full',
+              paired
+                ? 'bg-primary shadow-[0_0_8px_var(--primary)]'
+                : 'bg-destructive shadow-[0_0_8px_var(--destructive)] neon-pulse',
+            )}
+          />
+          {paired ? 'Agente conectado' : 'Esperando al agente…'}
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3.5">
+          <a
+            href={AGENT_DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="neon-notch inline-flex items-center bg-primary px-6 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Descargar agente (Windows)
+          </a>
+          <button type="button" onClick={enter} className="border border-primary/35 px-6 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-semibold tracking-[0.05em] text-primary transition-colors hover:bg-primary/10">
+            Ya lo tengo — entrar al estudio
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={generating}
+          className="mt-4 inline-flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+        >
+          {generating ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+          Generar otro código
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div>
+    <div className="text-left">
       <div className="flex items-center justify-between gap-3">
-        <SectionEyebrow label="Step 02" />
+        <SectionEyebrow number={2} label="EMPAREJA TU PC" />
         {paired ? (
           <Badge className="gap-1.5">
             <Check className="size-3" aria-hidden />
-            Paired
+            Emparejado
           </Badge>
         ) : (
           <Badge variant="outline" className="gap-1.5 text-muted-foreground">
-            Not paired
+            No emparejado
           </Badge>
         )}
       </div>
 
-      <h2 className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight">
-        Pair your PC
-      </h2>
+      <h1 className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold uppercase tracking-tight text-foreground">
+        Empareja tu PC
+      </h1>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        FragForge records on your own rig. Run the agent on your gaming PC and it
-        captures plays with your Steam and your GPU — your POV, your hardware.
+        FragForge graba en tu propio equipo. Ejecuta el agente en tu PC gaming y
+        captura tus jugadas con tu Steam y tu GPU — tu POV, tu hardware.
       </p>
 
       <ol className="mt-5 space-y-2.5 text-sm text-muted-foreground">
-        <Step n={1}>Install the FragForge agent on your gaming PC.</Step>
-        <Step n={2}>Generate a pairing code below.</Step>
-        <Step n={3}>Enter the code in the agent to link it to your account.</Step>
+        <Step n={1}>Instala el agente FragForge en tu PC gaming.</Step>
+        <Step n={2}>Genera un código de emparejamiento abajo.</Step>
+        <Step n={3}>Escribe el código en el agente para vincularlo a tu cuenta.</Step>
       </ol>
 
-      <div className="mt-5 rounded-xl border border-border bg-card/50 p-4">
-        <p className="text-sm font-medium text-foreground">Capture needs HLAE + CS2 on this PC</p>
+      <div className="mt-5 border border-border bg-card/50 p-4">
+        <p className="text-sm font-medium text-foreground">La captura necesita HLAE + CS2 en este PC</p>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-          Recording drives CS2 through HLAE. Point the orchestrator at them with these
-          environment variables, then restart it:
+          La grabación controla CS2 a través de HLAE. Apunta el orquestador a ellos con
+          estas variables de entorno y reinícialo:
         </p>
         <ul className="mt-2 space-y-1 font-[family-name:var(--font-mono)] text-xs text-muted-foreground">
           <li>ZV_RECORDER_PATH</li>
@@ -106,64 +207,37 @@ export function PairPcStep({ onEnter }: PairPcStepProps = {}) {
           <li>ZV_CS2_PATH</li>
         </ul>
         <p className="mt-2 text-xs text-muted-foreground/80">
-          The Capture card in the sidebar shows if they are set and reachable.
+          La tarjeta CAPTURA del panel lateral muestra si están configuradas y accesibles.
         </p>
       </div>
 
-      {pairingCode ? (
-        <div className="mt-5 flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
-          <div>
-            <p className="text-[0.7rem] font-medium uppercase tracking-[0.18em] text-primary/80">
-              Pairing code
-            </p>
-            <p className="mt-0.5 font-[family-name:var(--font-mono)] text-2xl font-bold tracking-widest tabular-nums text-foreground">
-              {pairingCode}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCopy}
-            aria-label="Copy pairing code"
-          >
-            {copied ? (
-              <Check className="size-4" aria-hidden />
-            ) : (
-              <Copy className="size-4" aria-hidden />
-            )}
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
-        </div>
-      ) : null}
-
       <div className="mt-6 flex flex-col gap-3">
         <Button
-          variant={pairingCode ? 'outline' : 'default'}
           size="lg"
-          className="w-full"
+          className="neon-notch neon-glow w-full font-[family-name:var(--font-display)] font-bold tracking-[0.06em]"
           onClick={handleGenerate}
           disabled={generating}
         >
           {generating ? (
             <>
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              Generating…
+              Generando…
             </>
           ) : (
             <>
               <Cpu className="size-4" aria-hidden />
-              {pairingCode ? 'Generate a new code' : 'Generate pairing code'}
+              Generar código de emparejamiento
             </>
           )}
         </Button>
 
         <Button
+          variant="outline"
           size="lg"
-          className="w-full"
-          onClick={() => (onEnter ? onEnter() : router.push('/matches'))}
+          className="w-full font-[family-name:var(--font-display)] font-semibold tracking-[0.06em]"
+          onClick={enter}
         >
-          {pairingCode ? 'Enter the studio' : 'Skip pairing — enter the studio'}
-          <ArrowRight className="size-4" aria-hidden />
+          Saltar emparejamiento — entrar al estudio
         </Button>
       </div>
     </div>

@@ -18,8 +18,8 @@ const DUMMY_DEM = {
 const FILE_INPUT = 'input[type=file]';
 
 // Regression specs for the offline-detection fix: the /upload flow must tell an
-// orchestrator outage ("Analysis service is offline") apart from a genuinely
-// unscannable demo ("Could not scan that demo"). Both branches are mocked at the
+// orchestrator outage ("El servicio de análisis está offline") apart from a genuinely
+// unscannable demo ("No se pudo escanear esa demo"). Both branches are mocked at the
 // network layer, so they are fast, deterministic, and need no orchestrator.
 test.describe('upload error messaging', () => {
   test('reports the analysis service as offline when the scan proxy returns 503 + code', async ({ page }) => {
@@ -34,9 +34,11 @@ test.describe('upload error messaging', () => {
     await page.goto('/upload');
     await page.locator(FILE_INPUT).setInputFiles(DUMMY_DEM);
 
-    await expect(page.getByText('Analysis service is offline. Start it and try again.')).toBeVisible();
+    await expect(
+      page.getByText('El servicio de análisis está offline. Arráncalo y vuelve a intentarlo.'),
+    ).toBeVisible();
     // The misleading bad-demo copy must NOT appear for an outage.
-    await expect(page.getByText('Could not scan that demo. Try another .dem file.')).toHaveCount(0);
+    await expect(page.getByText('No se pudo escanear esa demo. Prueba con otro archivo .dem.')).toHaveCount(0);
   });
 
   test('reports a bad demo when the scan fails for a reason other than an outage', async ({ page }) => {
@@ -60,8 +62,10 @@ test.describe('upload error messaging', () => {
     await page.goto('/upload');
     await page.locator(FILE_INPUT).setInputFiles(DUMMY_DEM);
 
-    await expect(page.getByText('Could not scan that demo. Try another .dem file.')).toBeVisible();
-    await expect(page.getByText('Analysis service is offline. Start it and try again.')).toHaveCount(0);
+    await expect(page.getByText('No se pudo escanear esa demo. Prueba con otro archivo .dem.')).toBeVisible();
+    await expect(
+      page.getByText('El servicio de análisis está offline. Arráncalo y vuelve a intentarlo.'),
+    ).toHaveCount(0);
   });
 });
 
@@ -121,11 +125,11 @@ test.describe('upload roster scoreboard', () => {
     await page.goto('/upload');
     await page.locator(FILE_INPUT).setInputFiles(DUMMY_DEM);
 
-    await expect(page.getByRole('heading', { name: 'Who do you want to clip?' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' })).toBeVisible();
 
     // Match header: prettified map name and both sides' score.
     await expect(page.getByText('Dust2')).toBeVisible();
-    await expect(page.getByText('22 rounds')).toBeVisible();
+    await expect(page.getByText('22 rondas')).toBeVisible();
 
     // Highlights chips for the ace/3K player, ACE before 3K.
     const aceRow = page.locator('button', { hasText: 'aceplayer' });
@@ -133,11 +137,11 @@ test.describe('upload roster scoreboard', () => {
     await expect(aceRow.getByText('3K ×2')).toBeVisible();
 
     // The ace/3K player is the recommended pick, tagged and preselected.
-    await expect(aceRow.getByText('Recommended')).toBeVisible();
+    await expect(aceRow.getByText('Recomendado')).toBeVisible();
 
     // The quiet player has no multi-kill rounds: a muted placeholder, no chips.
     const quietRow = page.locator('button', { hasText: 'quietplayer' });
-    await expect(quietRow.getByText('Recommended')).toHaveCount(0);
+    await expect(quietRow.getByText('Recomendado')).toHaveCount(0);
   });
 });
 
@@ -163,7 +167,7 @@ test.describe('upload happy path (real demo + orchestrator)', () => {
     await page.locator(FILE_INPUT).setInputFiles(DEMO_PATH);
 
     // Scanning... -> the picker. The heading only switches once a roster exists.
-    await expect(page.getByRole('heading', { name: 'Who do you want to clip?' })).toBeVisible({ timeout: 150_000 });
+    await expect(page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' })).toBeVisible({ timeout: 150_000 });
     // At least one player row (each carries a crosshair icon) must render.
     await expect(page.locator('button:has(.lucide-crosshair)').first()).toBeVisible();
   });

@@ -58,7 +58,7 @@ test.describe('cloud upload — async scan', () => {
     await page.goto('/upload');
     await page.locator(FILE_INPUT).setInputFiles(DUMMY_DEM);
 
-    await expect(page.getByRole('heading', { name: 'Who do you want to clip?' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('zack')).toBeVisible();
     await expect(page.getByText('video')).toBeVisible();
   });
@@ -86,9 +86,9 @@ test.describe('cloud upload — async scan', () => {
 
     // waitForScan throws PC_OFFLINE after >4 consecutive offline polls at
     // 1500ms each (~7.5s), well inside the 30s test timeout above.
-    await expect(page.getByText('Your PC is offline')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Tu PC está offline')).toBeVisible({ timeout: 20_000 });
     await expect(
-      page.getByText('Open FragForge Agent on your computer to analyze this demo, then retry.'),
+      page.getByText('Abre FragForge Agent en tu PC para analizar esta demo y reintenta.'),
     ).toBeVisible();
   });
 
@@ -106,6 +106,6 @@ test.describe('cloud upload — async scan', () => {
     await page.goto('/upload');
     await page.locator(FILE_INPUT).setInputFiles(DUMMY_DEM);
 
-    await expect(page.getByText('Could not scan that demo. Try another .dem file.')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('No se pudo escanear esa demo. Prueba con otro archivo .dem.')).toBeVisible({ timeout: 15_000 });
   });
 });

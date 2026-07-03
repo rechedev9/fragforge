@@ -24,9 +24,9 @@ test.describe('local studio routing', () => {
     await expect(page.getByRole('heading', { name: 'TUS PARTIDAS' })).toBeVisible();
   });
 
-  test('Back from the upload flow returns to the dashboard, not the landing', async ({ page }) => {
+  test('Volver from the upload flow returns to the dashboard, not the landing', async ({ page }) => {
     await page.goto('/upload');
-    await page.getByRole('link', { name: 'Back' }).click();
+    await page.getByRole('link', { name: 'Volver' }).click();
     await page.waitForURL('**/matches');
     await expect(page.getByRole('heading', { name: 'TUS PARTIDAS' })).toBeVisible();
     // The Steam-login landing must never flash in between.

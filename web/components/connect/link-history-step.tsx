@@ -46,7 +46,7 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
         knownCode: knownCode.trim(),
       });
       if (!result.ok) {
-        setError("We couldn't validate those codes. Check them and try again.");
+        setError('No pudimos validar esos códigos. Revísalos e inténtalo de nuevo.');
         setSubmitting(false);
         return;
       }
@@ -62,7 +62,7 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
       const message =
         err instanceof Error && err.message.trim().length > 0
           ? err.message
-          : 'We could not load your matches. Please try again.';
+          : 'No pudimos cargar tus partidas. Inténtalo de nuevo.';
       const code = (err as { code?: string } | null)?.code;
       setLinkUnavailable(code === 'steam_not_configured' || code === 'steam_unreachable');
       setError(message);
@@ -71,19 +71,19 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
   }
 
   return (
-    <div>
-      <SectionEyebrow label="Step 01" />
-      <h2 className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight">
-        Link your match history
-      </h2>
+    <div className="text-left">
+      <SectionEyebrow number={1} label="VINCULA STEAM" />
+      <h1 className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold uppercase tracking-tight text-foreground">
+        Vincula tu historial
+      </h1>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        Paste your Steam authentication code and the sharecode of your most
-        recent match. We use them to scan your demos for highlights.
+        Pega tu código de autenticación de Steam y el sharecode de tu partida más
+        reciente. Los usamos para escanear tus demos en busca de highlights.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-5">
         <div className="space-y-2">
-          <Label htmlFor="auth-code">Authentication code</Label>
+          <Label htmlFor="auth-code">Código de autenticación</Label>
           <Input
             id="auth-code"
             autoComplete="off"
@@ -96,7 +96,7 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="known-code">Most recent sharecode</Label>
+          <Label htmlFor="known-code">Sharecode más reciente</Label>
           <Input
             id="known-code"
             autoComplete="off"
@@ -110,48 +110,48 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
 
         <div className="text-xs leading-relaxed text-muted-foreground">
           <p>
-            Generate your auth code and copy your latest sharecode from Steam.{' '}
+            Genera tu código de autenticación y copia tu sharecode más reciente desde Steam.{' '}
             <button
               type="button"
               onClick={() => setShowHelp((open) => !open)}
               aria-expanded={showHelp}
               className="font-medium text-primary hover:underline"
             >
-              How to get these
+              Cómo conseguirlos
             </button>
           </p>
 
           {showHelp ? (
-            <div className="mt-2 space-y-2 rounded-md border border-border bg-card/60 p-3">
+            <div className="mt-2 space-y-2 border border-border bg-card/60 p-3">
               <p>
-                <span className="font-medium text-foreground">Authentication code</span> — generate it on
-                Steam&apos;s{' '}
+                <span className="font-medium text-foreground">Código de autenticación</span> — genéralo en
+                la{' '}
                 <a
                   href="https://help.steampowered.com/en/wizard/HelpWithGameIssue/?appid=730&issueid=128"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-primary hover:underline"
                 >
-                  Game Authentication page
+                  página de autenticación de Steam
                   <ExternalLink className="size-3" aria-hidden />
                 </a>{' '}
-                (sign in to Steam first; the code looks like <span className="font-[family-name:var(--font-mono)]">XXXX-XXXXX-XXXX</span>).
+                (inicia sesión en Steam primero; el código tiene el formato <span className="font-[family-name:var(--font-mono)]">XXXX-XXXXX-XXXX</span>).
               </p>
               <p>
-                <span className="font-medium text-foreground">Sharecode</span> — in CS2 open{' '}
-                <span className="font-[family-name:var(--font-mono)]">Watch → Your Matches</span>, then copy the{' '}
-                <span className="font-[family-name:var(--font-mono)]">CSGO-…</span> code of your most recent match.
-                Signed in to Steam, you can also open your{' '}
+                <span className="font-medium text-foreground">Sharecode</span> — en CS2 abre{' '}
+                <span className="font-[family-name:var(--font-mono)]">Ver → Tus partidas</span>, y copia el{' '}
+                <span className="font-[family-name:var(--font-mono)]">CSGO-…</span> de tu partida más reciente.
+                Con la sesión iniciada en Steam, también puedes abrir tu{' '}
                 <a
                   href="https://steamcommunity.com/my/gcpd/730?tab=matchhistorypremier"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-primary hover:underline"
                 >
-                  Premier match history
+                  historial de partidas Premier
                   <ExternalLink className="size-3" aria-hidden />
                 </a>{' '}
-                (or the Competitive / Wingman tabs) to copy a match&apos;s share link.
+                (o las pestañas Competitivo / Wingman) para copiar el enlace de una partida.
               </p>
             </div>
           ) : null}
@@ -160,13 +160,13 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
         {error ? (
           <div
             role="alert"
-            className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground"
+            className="space-y-1 border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground"
           >
             <p>{error}</p>
             {linkUnavailable ? (
               <p className="text-xs text-destructive-foreground/80">
-                Match-history linking isn&apos;t available right now — use{' '}
-                <span className="font-medium">Skip for now</span> below and link it later.
+                La vinculación del historial no está disponible ahora mismo — usa{' '}
+                <span className="font-medium">Saltar por ahora</span> abajo y vincúlalo más tarde.
               </p>
             ) : null}
           </div>
@@ -178,18 +178,23 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
             <span className="font-[family-name:var(--font-mono)] tabular-nums">
               {matchesFound}
             </span>
-            matches found
+            partidas encontradas
           </Badge>
         ) : null}
 
-        <Button type="submit" size="lg" className="w-full" disabled={!canSubmit}>
+        <Button
+          type="submit"
+          size="lg"
+          className="neon-notch w-full font-[family-name:var(--font-display)] font-bold tracking-[0.06em]"
+          disabled={!canSubmit}
+        >
           {submitting ? (
             <>
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              Loading my matches…
+              Cargando tus partidas…
             </>
           ) : (
-            'Load my matches'
+            'Cargar mis partidas'
           )}
         </Button>
       </form>

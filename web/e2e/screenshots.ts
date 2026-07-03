@@ -23,7 +23,7 @@ let stageDir: string;
 // A fixture match id from web/lib/api/fixtures.ts (fixtureMatches[0]).
 const MATCH_ID = 'm-inferno';
 // Seed video title from web/lib/api/fixtures.ts seedVideos(); its ready card
-// carries the delete button aria-label `Delete ${title}`.
+// carries the delete button aria-label `Borrar ${title}`.
 const READY_VIDEO_TITLE = '5K - Clean POV';
 
 test.beforeAll(() => {
@@ -49,8 +49,8 @@ async function shoot(page: Page, name: string): Promise<void> {
 
 test('home (/)', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /forge your frags/i })).toBeVisible();
-  await expect(page.getByRole('link', { name: /upload a demo/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'FORJA TU HIGHLIGHT' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'SOLTAR UN .DEM' })).toBeVisible();
   // Let the three.js hero reel reach a steady frame before capturing.
   await page.waitForTimeout(2000);
   await shoot(page, 'home.png');
@@ -58,13 +58,13 @@ test('home (/)', async ({ page }) => {
 
 test('upload (/upload)', async ({ page }) => {
   await page.goto('/upload');
-  await expect(page.getByRole('heading', { name: /analyze any demo/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'ANALIZA CUALQUIER DEMO' })).toBeVisible();
   await shoot(page, 'upload.png');
 });
 
 test('connect (/connect)', async ({ page }) => {
   await page.goto('/connect');
-  await expect(page.getByRole('heading', { name: /set up your studio/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Vincula tu historial' })).toBeVisible();
   await shoot(page, 'connect.png');
 });
 
@@ -86,20 +86,20 @@ test('match detail (/matches/[id])', async ({ page }) => {
 
 test('streams (/streams)', async ({ page }) => {
   await page.goto('/streams');
-  await expect(page.getByRole('heading', { name: 'Stream Clips' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'DE STREAM A SHORT' })).toBeVisible();
   await shoot(page, 'streams.png');
 });
 
 test('videos (/videos)', async ({ page }) => {
   await page.goto('/videos');
-  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'TUS REELS' })).toBeVisible();
   await expect(page.getByText(READY_VIDEO_TITLE).first()).toBeVisible();
   await shoot(page, 'videos.png');
 });
 
 test('feed (/feed)', async ({ page }) => {
   await page.goto('/feed');
-  await expect(page.getByRole('heading', { name: 'Feed' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'LA COMUNIDAD FORJA' })).toBeVisible();
   await expect(page.getByText('RaiSeNN').first()).toBeVisible();
   await shoot(page, 'feed.png');
 });
@@ -109,13 +109,13 @@ test('dialog + toast (delete-reel flow on /videos)', async ({ page }) => {
   await expect(page.getByText(READY_VIDEO_TITLE).first()).toBeVisible();
 
   // Open the delete-reel confirmation dialog on the seeded ready video.
-  await page.getByRole('button', { name: `Delete ${READY_VIDEO_TITLE}` }).click();
-  await expect(page.getByRole('heading', { name: 'Delete this reel?' })).toBeVisible();
+  await page.getByRole('button', { name: `Borrar ${READY_VIDEO_TITLE}` }).click();
+  await expect(page.getByRole('heading', { name: '¿Borrar este reel?' })).toBeVisible();
   await shoot(page, 'dialog.png');
 
-  // Confirm: the dialog closes and a real sonner toast fires ("Reel deleted.").
-  await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(page.getByText('Reel deleted.')).toBeVisible();
+  // Confirm: the dialog closes and a real sonner toast fires ("Reel borrado.").
+  await page.getByRole('button', { name: 'Borrar', exact: true }).click();
+  await expect(page.getByText('Reel borrado.')).toBeVisible();
   await shoot(page, 'toast.png');
 });
 
@@ -139,9 +139,33 @@ test('skeleton (loading state on /matches)', async ({ page }) => {
 
 test('not found (/definitely-missing-route)', async ({ page }) => {
   await page.goto('/definitely-missing-route');
-  await expect(page.getByRole('heading', { name: /this page got fragged/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Esta página ha sido fraggeada' })).toBeVisible();
   await expect(page.getByText('404')).toBeVisible();
   await shoot(page, 'not-found.png');
+});
+
+test('deterministic checks: lang + fonts (/matches)', async ({ page }) => {
+  // Complement to the (non-deterministic) visual judge, required by
+  // .loop/PLAN.md F6: the document must declare Spanish, the display font
+  // must actually be Chakra Petch (not a silent system-font fallback), and
+  // the mono font must actually be Share Tech Mono.
+  await page.goto('/matches');
+  await expect(page.getByRole('heading', { name: 'TUS PARTIDAS' })).toBeVisible();
+  await expect(page.getByText('K/D', { exact: true }).first()).toBeVisible();
+
+  const lang = await page.evaluate(() => document.documentElement.lang);
+  expect(lang).toBe('es');
+
+  const headingFont = await page
+    .getByRole('heading', { name: 'TUS PARTIDAS' })
+    .evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(headingFont).toContain('Chakra Petch');
+
+  const statFont = await page
+    .getByText('K/D', { exact: true })
+    .first()
+    .evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(statFont).toContain('Share Tech Mono');
 });
 
 test.describe('mobile 390x844', () => {

@@ -121,7 +121,7 @@ export function FacecamPicker({
       <div
         role="button"
         tabIndex={disabled ? -1 : 0}
-        aria-label="Facecam crop region"
+        aria-label="Región de recorte del facecam"
         onPointerDown={beginDrag('move')}
         className={cn(
           'absolute rounded-sm border-2 border-primary bg-primary/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]',
@@ -136,7 +136,7 @@ export function FacecamPicker({
       >
         <div
           role="button"
-          aria-label="Resize facecam crop"
+          aria-label="Redimensionar recorte del facecam"
           onPointerDown={beginDrag('resize')}
           className="absolute -right-1.5 -bottom-1.5 size-4 cursor-nwse-resize rounded-sm border-2 border-background bg-primary"
         />

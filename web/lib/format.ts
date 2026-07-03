@@ -52,19 +52,22 @@ export function playsSelectionLabel(plays: Play[]): string | null {
 }
 
 /**
- * Product-facing label for a render status. The pipeline's internal stages are
- * collapsed into the three words users see: Capturing, Processing, Ready.
+ * Product-facing label for a render status, in Spanish. The pipeline's
+ * internal stages collapse into the words users see: Capturando, Editando,
+ * Listo, Fallido — `queued` also reads "Editando" (queued and composing are
+ * both "still processing" from the viewer's point of view; the Biblioteca
+ * grid distinguishes them visually via PipelineSteps instead).
  */
 export function productStatusLabel(status: VideoStatus): string {
   switch (status) {
     case 'recording':
-      return 'Capturing';
+      return 'Capturando';
     case 'queued':
     case 'composing':
-      return 'Processing';
+      return 'Editando';
     case 'ready':
-      return 'Ready';
+      return 'Listo';
     case 'failed':
-      return 'Failed';
+      return 'Fallido';
   }
 }

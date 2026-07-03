@@ -69,7 +69,7 @@ async function gotoCreateReel(page: Page, jobStatus: { value: string }): Promise
 
   await page.goto('/upload');
   await page.locator('input[type=file]').setInputFiles(DUMMY_DEM);
-  await page.getByRole('heading', { name: 'Who do you want to clip?' }).waitFor();
+  await page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' }).waitFor();
   await page.locator('button:has(.lucide-crosshair)').first().click();
 
   await page.waitForURL(/\/matches\//);

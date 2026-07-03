@@ -24,10 +24,10 @@ export type NormalizedRect = { x: number; y: number; width: number; height: numb
 
 export type StreamVariant = 'streamer-vertical-stack-40-60' | 'streamer-vertical-stack' | 'streamer-fullframe-nocam';
 
-export const STREAM_VARIANTS: { value: StreamVariant; label: string; needsFaceCrop: boolean }[] = [
-  { value: 'streamer-vertical-stack-40-60', label: 'Facecam 40 / Gameplay 60', needsFaceCrop: true },
-  { value: 'streamer-vertical-stack', label: 'Facecam / Gameplay stack', needsFaceCrop: true },
-  { value: 'streamer-fullframe-nocam', label: 'Full-frame (no facecam)', needsFaceCrop: false },
+export const STREAM_VARIANTS: { value: StreamVariant; label: string; subtitle: string; needsFaceCrop: boolean }[] = [
+  { value: 'streamer-vertical-stack-40-60', label: 'Facecam 40', subtitle: 'Gameplay 60', needsFaceCrop: true },
+  { value: 'streamer-vertical-stack', label: 'Stack', subtitle: 'Cam / juego / chat', needsFaceCrop: true },
+  { value: 'streamer-fullframe-nocam', label: 'Full-frame', subtitle: 'Sin facecam', needsFaceCrop: false },
 ];
 
 export type StreamClipRange = { id: string; start_seconds: number; end_seconds: number; title?: string };

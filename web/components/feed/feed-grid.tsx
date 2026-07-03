@@ -6,13 +6,12 @@ export type FeedGridProps = {
   items: FeedItem[];
 };
 
-/**
- * Responsive portrait masonry of community reels. CSS columns let the 9:16
- * cards tile densely without a fixed row grid; cards opt out of column breaks.
- */
+/** A uniform 16:9-thumbnail grid of community reels, per the NEON HUD mockup
+ * (a fixed grid, not a masonry — every card gets the same thumbnail height
+ * regardless of the underlying render's aspect ratio). */
 export function FeedGrid({ items }: FeedGridProps) {
   return (
-    <div className="columns-2 gap-4 sm:columns-3 lg:columns-4 [&>*]:mb-4">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
       {items.map((item) => (
         <FeedCard key={item.id} item={item} />
       ))}
@@ -20,19 +19,16 @@ export function FeedGrid({ items }: FeedGridProps) {
   );
 }
 
-/** Loading placeholder mirroring the masonry layout with staggered heights. */
+/** Loading placeholder mirroring the grid layout. */
 export function FeedGridSkeleton() {
-  const ratios = ['aspect-[9/16]', 'aspect-[9/14]', 'aspect-[9/15]', 'aspect-[3/5]'];
   return (
-    <div className="columns-2 gap-4 sm:columns-3 lg:columns-4 [&>*]:mb-4">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div
-          key={i}
-          className="break-inside-avoid overflow-hidden rounded-xl border border-border bg-card"
-        >
-          <Skeleton className={`w-full rounded-none ${ratios[i % ratios.length]}`} />
-          <div className="flex items-center justify-end px-3 py-2">
-            <Skeleton className="h-4 w-10" />
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="border border-primary/14 bg-card/80">
+          <Skeleton className="aspect-video w-full rounded-none" />
+          <div className="flex flex-col gap-2 p-3.5">
+            <Skeleton className="h-4 w-3/4 rounded-none" />
+            <Skeleton className="h-3 w-1/3 rounded-none" />
           </div>
         </div>
       ))}

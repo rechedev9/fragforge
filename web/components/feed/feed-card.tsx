@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Heart, MapPin, Play } from 'lucide-react';
+import { Heart, Play } from 'lucide-react';
 import type { FeedItem } from '@/lib/api/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 export type FeedCardProps = {
@@ -19,10 +18,12 @@ export type FeedCardProps = {
 };
 
 /**
- * One community reel in the feed: a 9:16 portrait thumbnail with a soft gradient
- * foot, author avatar + name, a map chip, a like toggle, and a click-to-play
- * overlay that opens the reel in an inline player. Lime is reserved for the
- * liked state; everything else stays neutral charcoal.
+ * One community reel in the feed, NEON HUD style: a thumbnail with a
+ * click-to-play affordance, a Chakra Petch title, a dim mono handle, and a
+ * magenta heart — magenta is reserved for likes per the skin's color rule, so
+ * it never turns cyan even once liked. The mockup also shows a mono
+ * duration/aspect-ratio badge on the thumbnail; `FeedItem` carries neither
+ * field, so it is left out here rather than displaying a fabricated number.
  */
 export function FeedCard({ item }: FeedCardProps) {
   const [liked, setLiked] = useState(false);
@@ -31,8 +32,8 @@ export function FeedCard({ item }: FeedCardProps) {
   const initials = item.author.slice(0, 2).toUpperCase();
 
   return (
-    <figure className="group break-inside-avoid overflow-hidden rounded-xl border border-border bg-card">
-      <div className="relative aspect-[9/16] overflow-hidden bg-muted">
+    <figure className="group border border-primary/14 bg-card/80">
+      <div className="relative aspect-video overflow-hidden bg-muted">
         {/* eslint-disable-next-line @next/next/no-img-element -- remote seed thumbnail */}
         <img
           src={item.thumbnailUrl}
@@ -40,65 +41,44 @@ export function FeedCard({ item }: FeedCardProps) {
           className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
         />
 
-        {/* soft gradient foot for legibility */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/15 to-transparent" />
-
-        {/* map chip */}
-        <div className="pointer-events-none absolute left-2.5 top-2.5">
-          <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-background/70 px-2 py-0.5 text-[0.7rem] font-medium text-foreground/90 backdrop-blur-sm">
-            <MapPin className="size-3 text-muted-foreground" aria-hidden />
-            {item.map}
-          </span>
-        </div>
-
-        {/* click-to-play overlay (covers the thumbnail; ▶ appears on hover/focus) */}
+        {/* click-to-play overlay */}
         <button
           type="button"
           onClick={() => setPlayerOpen(true)}
-          aria-label={`Play ${item.title}`}
+          aria-label={`Reproducir ${item.title}`}
           className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 focus-visible:opacity-100 group-hover:opacity-100"
         >
-          <span className="flex size-14 items-center justify-center rounded-full bg-background/70 text-foreground ring-1 ring-white/15 backdrop-blur-sm">
-            <Play className="ml-0.5 size-6 fill-current" aria-hidden />
+          <span className="flex size-11 items-center justify-center rounded-full border border-white/40 bg-background/50 text-foreground">
+            <Play className="ml-0.5 size-4 fill-current" aria-hidden />
           </span>
         </button>
-
-        {/* footer: title + author */}
-        <figcaption className="pointer-events-none absolute inset-x-0 bottom-0 space-y-2 p-3">
-          <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground drop-shadow-sm">
-            {item.title}
-          </h3>
-          <div className="flex items-center gap-2">
-            <Avatar className="size-6">
-              <AvatarImage src={item.authorAvatarUrl} alt={item.author} />
-              <AvatarFallback className="text-[0.6rem]">{initials}</AvatarFallback>
-            </Avatar>
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/90">
-              {item.author}
-            </span>
-            <span className="font-[family-name:var(--font-mono)] text-[0.7rem] tabular-nums text-muted-foreground">
-              {timeAgo(item.createdAt)}
-            </span>
-          </div>
-        </figcaption>
       </div>
 
-      <div className="flex items-center justify-end px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setLiked((v) => !v)}
-          aria-pressed={liked}
-          aria-label={liked ? 'Unlike' : 'Like'}
-          className={cn(
-            'inline-flex items-center gap-1.5 text-sm font-medium transition-colors',
-            liked ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Heart className={cn('size-4', liked && 'fill-current')} aria-hidden />
-          <span className="font-[family-name:var(--font-mono)] tabular-nums">
+      <div className="flex flex-col gap-1.5 p-3.5">
+        <h3 className="line-clamp-2 font-[family-name:var(--font-display)] text-sm font-bold leading-snug text-foreground">
+          {item.title}
+        </h3>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Avatar className="size-5 rounded-none">
+              <AvatarImage src={item.authorAvatarUrl} alt={item.author} />
+              <AvatarFallback className="rounded-none text-[0.55rem]">{initials}</AvatarFallback>
+            </Avatar>
+            <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70">
+              @{item.author}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLiked((v) => !v)}
+            aria-pressed={liked}
+            aria-label={liked ? 'Quitar me gusta' : 'Me gusta'}
+            className="inline-flex shrink-0 items-center gap-1 font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-destructive"
+          >
+            <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
             {likeCount.toLocaleString()}
-          </span>
-        </button>
+          </button>
+        </div>
       </div>
 
       <Dialog open={playerOpen} onOpenChange={setPlayerOpen}>
