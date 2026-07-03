@@ -108,7 +108,7 @@ export default function UploadPage() {
 
   return (
     <main className="relative min-h-screen overflow-hidden">
-      {/* Faint lime glow, matching the onboarding screen. */}
+      {/* Faint cyan glow, matching the onboarding screen. */}
       <div
         aria-hidden
         className="pointer-events-none absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-primary/10 blur-[160px]"

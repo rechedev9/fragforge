@@ -109,7 +109,7 @@ export function AppSidebar() {
   );
 }
 
-/** Footer slots meter: used / total with a thin lime progress and "Get more". */
+/** Footer slots meter: used / total with a thin cyan progress and "Get more". */
 function SlotsMeter() {
   const { session } = useSession();
   const slots = session?.slots;

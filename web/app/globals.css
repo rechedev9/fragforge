@@ -14,6 +14,16 @@
 :root {
   --radius: 0rem;
 
+  /* Fuentes compuestas en runtime. `@theme inline` (abajo) solo inlina valores
+   * en las utilidades font-* y NO emite estas variables, así que los usos
+   * directos (`font-family: var(--font-sans)` en body y los
+   * `font-[family-name:var(--font-display)]` de los componentes) necesitan
+   * estas definiciones reales. Las variables --font-chakra-petch y
+   * --font-share-tech-mono las define next/font en <html> (app/layout.tsx). */
+  --font-sans: var(--font-chakra-petch), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-share-tech-mono), ui-monospace, monospace;
+  --font-display: var(--font-chakra-petch), ui-sans-serif, sans-serif;
+
   --background: oklch(0.146 0.023 264.8); /* #060a14 */
   --foreground: oklch(0.983 0.011 226); /* #f2fbff */
   --card: oklch(0.174 0.031 263.2); /* panel navy rgb(9 16 30) */
@@ -174,8 +184,8 @@
  */
 .neon-grid {
   background-image:
-    linear-gradient(color-mix(in oklch, var(--primary) 6%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in oklch, var(--primary) 6%, transparent) 1px, transparent 1px);
+    linear-gradient(color-mix(in oklch, var(--primary) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--primary) 4%, transparent) 1px, transparent 1px);
   background-size: 48px 48px;
 }
 

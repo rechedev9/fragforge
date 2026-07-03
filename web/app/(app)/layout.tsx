@@ -11,7 +11,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>
+      {/* SidebarInset paints an opaque bg-background over <body>, so it needs
+          its own neon-grid layer for the HUD grid to show in the content area. */}
+      <SidebarInset className="neon-grid">
         <header className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur md:hidden">
           <SidebarTrigger />
           <Wordmark katakana={false} />
