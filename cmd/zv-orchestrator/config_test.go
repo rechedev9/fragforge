@@ -97,14 +97,23 @@ func TestLoadConfigRejectsInvalidQueueMode(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRejectsPartialRecordWorkerConfig(t *testing.T) {
+func TestLoadConfigAllowsPartialRecordWorkerConfig(t *testing.T) {
+	// Regression: a partially-set record trio must not kill the boot. The
+	// desktop app passes only ZV_HLAE_PATH (its provisioned HLAE) and relies on
+	// auto-detection for the recorder and CS2; validation used to run before
+	// detection and log.Fatal on the incomplete trio, so the whole app failed
+	// to start. Incompleteness after detection just leaves the record worker
+	// disabled, which capabilities and the startup log already explain.
 	clearConfigEnv(t)
 	t.Setenv("ZV_DATABASE_URL", "postgres://example")
 	t.Setenv("ZV_RECORDER_PATH", "zv-recorder.exe")
 
-	_, err := loadConfig()
-	if err == nil {
-		t.Fatal("loadConfig error = nil, want missing HLAE/CS2 error")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig error = %v, want partial record config accepted", err)
+	}
+	if cfg.recordWorkerEnabled() {
+		t.Fatal("record worker enabled with a partial trio, want disabled")
 	}
 }
 

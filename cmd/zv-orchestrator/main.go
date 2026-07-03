@@ -36,6 +36,9 @@ func main() {
 	}
 	log.Printf("capture: record worker enabled=%v", cfg.recordWorkerEnabled())
 	log.Printf("capture: render worker enabled=%v", cfg.renderWorkerEnabled())
+	if missing := cfg.missingRecordConfig(); len(missing) > 0 {
+		log.Printf("capture: record worker disabled, missing after auto-detection: %v", missing)
+	}
 	if missing := cfg.missingRecordTools(); len(missing) > 0 {
 		log.Printf("capture: configured record tool path(s) not found on disk: %v", missing)
 	}

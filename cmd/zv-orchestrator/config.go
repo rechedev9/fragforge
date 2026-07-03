@@ -135,16 +135,14 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return c, err
 	}
-	if err := c.validateMediaConfig(); err != nil {
-		return c, err
-	}
 	return c, nil
 }
 
 func (c config) recordWorkerEnabled() bool {
-	// All three are needed to record; with auto-detection a path may be filled
-	// for some tools and not others, so require the full set (validateMediaConfig
-	// still enforces the all-or-nothing contract for explicitly-set env).
+	// All three are needed to record. A partial set (explicit env for one tool,
+	// auto-detection expected to fill the rest) is not an error: after
+	// detection, an incomplete trio just leaves the worker disabled, and the
+	// startup log plus /api/capabilities say which tool is missing.
 	return c.RecorderPath != "" && c.HLAEPath != "" && c.CS2Path != ""
 }
 
@@ -235,25 +233,30 @@ func (c config) missingRecordTools() []string {
 	return missing
 }
 
-func (c config) validateMediaConfig() error {
-	recordValues := map[string]string{
-		"ZV_RECORDER_PATH": c.RecorderPath,
-		"ZV_HLAE_PATH":     c.HLAEPath,
-		"ZV_CS2_PATH":      c.CS2Path,
+// missingRecordConfig lists the record-trio env names still empty after
+// auto-detection when at least one is set, so main can log why the record
+// worker is disabled instead of fatally rejecting a partial trio (which used
+// to kill the desktop app, whose launcher sets only ZV_HLAE_PATH).
+func (c config) missingRecordConfig() []string {
+	recordValues := []struct{ name, value string }{
+		{"ZV_RECORDER_PATH", c.RecorderPath},
+		{"ZV_HLAE_PATH", c.HLAEPath},
+		{"ZV_CS2_PATH", c.CS2Path},
 	}
 	anySet := false
-	for _, value := range recordValues {
-		anySet = anySet || value != ""
+	for _, t := range recordValues {
+		anySet = anySet || t.value != ""
 	}
 	if !anySet {
 		return nil
 	}
-	for key, value := range recordValues {
-		if value == "" {
-			return fmt.Errorf("%s is required when record worker config is set", key)
+	var missing []string
+	for _, t := range recordValues {
+		if t.value == "" {
+			missing = append(missing, t.name)
 		}
 	}
-	return nil
+	return missing
 }
 
 func durationEnv(key, def string) (string, error) {
