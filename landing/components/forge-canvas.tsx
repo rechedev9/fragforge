@@ -7,8 +7,9 @@ import * as THREE from "three";
 
 /**
  * ForgeCanvas is the heavy WebGL half of the hero, lazily loaded (ssr:false)
- * only when motion is allowed. It renders the acid-lime "particle forge":
- * thousands of sparks rising and swirling off an unseen anvil below the fold.
+ * only when motion is allowed. It renders the NEON HUD "particle forge":
+ * thousands of cyan sparks (a rare magenta ember among them) rising and
+ * swirling off an unseen anvil below the fold.
  *
  *  - DPR cap comes from the parent (2 on desktop, 1.5 on small viewports).
  *  - Time only advances while the tab is visible (see Interaction), so the
@@ -175,7 +176,7 @@ function ForgeParticles({ count }: { count: number }) {
 /**
  * ForgeGlow is a subtle ember glow hugging the bottom edge of the viewport:
  * the plane spans y -10.2..-2.2 at z=-2, where the visible frame ends around
- * y=-5.3, so the peak luminance sits below the fold and only a faint lime
+ * y=-5.3, so the peak luminance sits below the fold and only a faint cyan
  * tail reaches into the bottom band of the hero. Never behind the headline.
  */
 function ForgeGlow() {
@@ -341,11 +342,15 @@ void main() {
   energy = mix(energy, 1.0, step(0.93, aSeed)); // occasional white-hot ember
   vEnergy = energy;
 
-  // Color ramp: acid lime -> white-hot (linear space; sRGB output applied by
-  // the composer). Keeps peak brightness low and off the headline zone.
-  vec3 lime = vec3(0.52, 0.90, 0.06);
-  vec3 white = vec3(1.0, 1.0, 0.92);
-  vColor = mix(lime, white, pow(energy, 1.6));
+  // Color ramp: signal cyan -> white-hot (linear space; sRGB output applied
+  // by the composer). Keeps peak brightness low and off the headline zone.
+  // A rare (~1.5%) ember runs magenta instead, echoing the HUD's reserved
+  // accent color among a field that otherwise reads entirely cyan.
+  vec3 cyan = vec3(0.133, 0.851, 0.933);
+  vec3 magenta = vec3(1.0, 0.176, 0.471);
+  vec3 base = mix(cyan, magenta, step(0.985, aSeed));
+  vec3 white = vec3(1.0, 1.0, 0.96);
+  vColor = mix(base, white, pow(energy, 1.6));
 
   float twinkle = 0.62 + 0.38 * sin(t * 3.1 + aSeed * 31.0);
   float lifeFade = smoothstep(0.0, 0.08, life) * (1.0 - smoothstep(0.72, 1.0, life));
@@ -375,7 +380,8 @@ void main() {
   // no broad gaussian halo (that read as blurry blobs).
   float core = pow(1.0 - d, 2.2);
   float a = vAlpha * core;
-  // Hottest cores exceed the bloom threshold; cool sparks stay pure lime.
+  // Hottest cores exceed the bloom threshold; cool sparks stay pure cyan
+  // (or magenta for the rare tinted ember).
   vec3 col = vColor * (0.85 + vEnergy * 0.9 * core);
   gl_FragColor = vec4(col, a);
 }
@@ -403,7 +409,7 @@ void main() {
   float glow = smoothstep(0.6, 0.0, d);
   glow = pow(glow, 2.4);
   float pulse = 0.92 + 0.08 * sin(uTime * 0.8);
-  vec3 lime = vec3(0.42, 0.80, 0.05);
-  gl_FragColor = vec4(lime * glow * pulse * 0.4, glow * 0.3);
+  vec3 cyan = vec3(0.09, 0.72, 0.82);
+  gl_FragColor = vec4(cyan * glow * pulse * 0.4, glow * 0.3);
 }
 `;

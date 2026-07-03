@@ -1,19 +1,20 @@
 import { ImageResponse } from "next/og";
 
-// Edge-safe social card: charcoal background, lime accent, wordmark + tagline.
-// Uses only inline styles and satori's default fonts (no external asset fetch).
+// Edge-safe social card: night-navy background, NEON HUD cyan accent,
+// wordmark + tagline. Uses only inline styles and satori's default fonts (no
+// external asset fetch).
 export const runtime = "edge";
 
 export const alt = "FragForge Studio — Turn CS2 demos into viral Shorts";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const CHARCOAL = "#0f1013";
-const LIME = "#c2f042";
-const LIME_DARK = "#1e2a08";
-const WHITE = "#fafafa";
-const MUTED = "#9a9ba3";
-const BORDER = "#2a2c31";
+const NIGHT_NAVY = "#060a14";
+const CYAN = "#22d9ee";
+const CYAN_DARK = "#04121a";
+const WHITE = "#f2fbff";
+const MUTED = "#8fa3b8";
+const BORDER = "rgba(34, 217, 238, 0.2)";
 
 export default function OpengraphImage() {
   return new ImageResponse(
@@ -26,8 +27,8 @@ export default function OpengraphImage() {
           flexDirection: "column",
           alignItems: "flex-start",
           justifyContent: "center",
-          backgroundColor: CHARCOAL,
-          backgroundImage: `radial-gradient(1000px 520px at 50% 118%, rgba(194,240,66,0.20), transparent 60%)`,
+          backgroundColor: NIGHT_NAVY,
+          backgroundImage: `radial-gradient(1000px 520px at 50% 118%, rgba(34,217,238,0.20), transparent 60%)`,
           padding: "88px 96px",
         }}
       >
@@ -40,8 +41,8 @@ export default function OpengraphImage() {
               justifyContent: "center",
               width: 84,
               height: 84,
-              borderRadius: 20,
-              backgroundColor: LIME,
+              border: `2px solid ${CYAN}`,
+              backgroundColor: CYAN_DARK,
             }}
           >
             <svg
@@ -49,7 +50,7 @@ export default function OpengraphImage() {
               height="48"
               viewBox="0 0 24 24"
               fill="none"
-              stroke={LIME_DARK}
+              stroke={CYAN}
               strokeWidth="2.4"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -58,8 +59,9 @@ export default function OpengraphImage() {
             </svg>
           </div>
           <div style={{ display: "flex", fontSize: 52, fontWeight: 700 }}>
-            <span style={{ color: LIME }}>Frag</span>
-            <span style={{ color: WHITE }}>Forge</span>
+            <span style={{ color: WHITE }}>FRAG</span>
+            <span style={{ color: CYAN }}>{"//"}</span>
+            <span style={{ color: WHITE }}>FORGE</span>
             <span style={{ color: MUTED, marginLeft: 18 }}>Studio</span>
           </div>
         </div>
@@ -88,7 +90,7 @@ export default function OpengraphImage() {
           }}
         >
           <span style={{ color: WHITE }}>viral&nbsp;</span>
-          <span style={{ color: LIME }}>Shorts</span>
+          <span style={{ color: CYAN }}>Shorts</span>
         </div>
 
         {/* Tagline */}
@@ -112,13 +114,12 @@ export default function OpengraphImage() {
             alignItems: "center",
             gap: 14,
             padding: "12px 22px",
-            borderRadius: 12,
             border: `1px solid ${BORDER}`,
             color: WHITE,
             fontSize: 26,
           }}
         >
-          <span style={{ color: LIME }}>↓</span>
+          <span style={{ color: CYAN }}>↓</span>
           v0.2.7 · 124 MB · Windows 10/11
         </div>
       </div>

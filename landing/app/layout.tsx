@@ -1,22 +1,20 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
+import { Chakra_Petch, Share_Tech_Mono } from "next/font/google";
 import "./globals.css";
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+// NEON HUD type system: Chakra Petch for display/sans, Share Tech Mono for
+// every number/label/eyebrow. Same next/font/google wiring as web/app/layout.tsx.
+const chakraPetch = Chakra_Petch({
+  variable: "--font-chakra-petch",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
-const inter = Inter({
-  variable: "--font-inter",
+const shareTechMono = Share_Tech_Mono({
+  variable: "--font-share-tech-mono",
   subsets: ["latin"],
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
+  weight: "400",
   display: "swap",
 });
 
@@ -59,7 +57,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable} bg-background text-foreground antialiased`}
+        className={`${chakraPetch.variable} ${shareTechMono.variable} neon-grid bg-background text-foreground antialiased`}
       >
         {children}
       </body>
