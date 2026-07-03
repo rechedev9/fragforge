@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 // web/ and landing/ are separate Next apps with no shared config; bump both
 // in lockstep on a new release.
 const AGENT_DOWNLOAD_URL =
-  'https://github.com/rechedev9/fragforge/releases/download/v0.2.11/FragForge.Studio.Setup.0.2.11.exe';
+  'https://github.com/rechedev9/fragforge/releases/download/v0.2.12/FragForge.Studio.Setup.0.2.12.exe';
 
 export type PairPcStepProps = {
   /**
