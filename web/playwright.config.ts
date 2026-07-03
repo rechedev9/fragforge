@@ -9,6 +9,10 @@ import { defineConfig, devices } from '@playwright/test';
  * needs the local orchestrator on :8080 and a real .dem at ZV_E2E_DEMO (default
  * ../testdata/sample.dem); it skips itself when either is absent, so the suite
  * still passes in CI without a 400 MB demo or a running orchestrator.
+ *
+ * ZV_E2E_BASE_URL points the suite at an externally managed server instead
+ * (e.g. a `next start` prod build in local mode on :3200); in that case no
+ * webServer is spawned, so the run never boots a stray dev server on :3000.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -21,10 +25,12 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  webServer: process.env.ZV_E2E_BASE_URL
+    ? undefined
+    : {
+        command: 'npm run dev',
+        url: 'http://localhost:3000',
+        reuseExistingServer: true,
+        timeout: 120_000,
+      },
 });

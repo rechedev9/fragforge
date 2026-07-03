@@ -41,7 +41,8 @@ test.describe('local studio routing', () => {
     await page.waitForURL('**/upload');
 
     await page.goto('/matches');
-    // Scope to the page body: the sidebar has a "Stream Clips" nav link too.
+    // Scope to the page body; the sidebar nav links to /streams too (as
+    // "Clips de stream"), so keep this pinned to the in-page link.
     await page.getByRole('main').getByRole('link', { name: 'Stream Clips' }).click();
     await page.waitForURL('**/streams');
   });

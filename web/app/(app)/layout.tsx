@@ -9,7 +9,8 @@ import { Wordmark } from '@/components/brand/wordmark';
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <SidebarProvider>
+    // The NEON HUD mockup sidebar is 232px wide; the shadcn default is 16rem.
+    <SidebarProvider style={{ '--sidebar-width': '232px' } as React.CSSProperties}>
       <AppSidebar />
       {/* SidebarInset paints an opaque bg-background over <body>, so it needs
           its own neon-grid layer for the HUD grid to show in the content area. */}
