@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+:root {
+  --background: oklch(0.145 0.006 264);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.196 0.0065 264);
+  --card-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.905 0.182 124);
+  --primary-foreground: oklch(0.205 0.03 124);
+  --muted-foreground: oklch(0.66 0.01 264);
+  --border: oklch(0.275 0.006 264);
+  --destructive: oklch(0.62 0.21 25);
+
+  --radius: 0.75rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-space-grotesk);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Static, designed hero fallback used under prefers-reduced-motion (and as the
+   base layer beneath the animated canvas): a lime forge glow concentrated
+   low-center over the charcoal void, so the hero still looks intentional. */
+.hero-forge-fallback {
+  background:
+    radial-gradient(
+      120% 90% at 50% 112%,
+      color-mix(in oklab, var(--primary) 32%, transparent),
+      color-mix(in oklab, var(--primary) 8%, transparent) 34%,
+      transparent 62%
+    ),
+    radial-gradient(
+      60% 45% at 50% 100%,
+      color-mix(in oklab, var(--primary) 22%, transparent),
+      transparent 70%
+    ),
+    var(--background);
+}
