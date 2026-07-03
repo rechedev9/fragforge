@@ -16,9 +16,9 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const STATUS_META: Record<CaptureStatus, { label: string; dot: string; text: string; hint: string }> = {
-  ready: { label: 'Ready', dot: 'bg-emerald-400', text: 'text-emerald-400', hint: 'HLAE + CS2 detected on this PC.' },
+  ready: { label: 'Ready', dot: 'bg-primary', text: 'text-primary', hint: 'HLAE + CS2 detected on this PC.' },
   warning: { label: 'Check paths', dot: 'bg-amber-400', text: 'text-amber-400', hint: 'A capture tool was set but is missing on disk.' },
-  unconfigured: { label: 'Set up', dot: 'bg-rose-400', text: 'text-rose-400', hint: "HLAE + CS2 weren't found on this PC." },
+  unconfigured: { label: 'Set up', dot: 'bg-destructive', text: 'text-destructive', hint: "HLAE + CS2 weren't found on this PC." },
   offline: { label: 'Offline', dot: 'bg-muted-foreground', text: 'text-muted-foreground', hint: 'Start your local orchestrator (zv serve).' },
 };
 
@@ -88,10 +88,10 @@ export function CaptureReadiness() {
             const state = toolState.get(tool.name);
             const found = Boolean(state?.accessible);
             const badge = found
-              ? { label: state?.source === 'env' ? 'Set' : 'Detected', cls: 'bg-emerald-400/10 text-emerald-400' }
+              ? { label: state?.source === 'env' ? 'Set' : 'Detected', cls: 'bg-primary/10 text-primary' }
               : state?.configured
                 ? { label: 'Missing', cls: 'bg-amber-400/10 text-amber-400' }
-                : { label: 'Not found', cls: 'bg-rose-400/10 text-rose-400' };
+                : { label: 'Not found', cls: 'bg-destructive/10 text-destructive' };
             return (
               <div key={tool.name} className="rounded-lg border border-border bg-card p-3">
                 <div className="flex items-center justify-between gap-2">

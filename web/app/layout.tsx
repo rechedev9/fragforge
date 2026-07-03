@@ -26,8 +26,12 @@ const fontVars = `${chakraPetch.variable} ${shareTechMono.variable}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${fontVars} bg-background text-foreground antialiased`}>
+    // The next/font variable classes live on <html> so the composed
+    // --font-sans/--font-mono/--font-display tokens in globals.css resolve at
+    // :root (declared on <body> they would compute to guaranteed-invalid at
+    // :root and the whole app would silently fall back to system fonts).
+    <html lang="en" className={`dark ${fontVars}`}>
+      <body className="neon-grid bg-background text-foreground antialiased">
         <SessionProvider>{children}</SessionProvider>
         <GrainOverlay />
         <Toaster />
