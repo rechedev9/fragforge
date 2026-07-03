@@ -70,3 +70,6 @@ web/playwright-report/
 
 # Firecrawl local cache / outputs
 /.firecrawl/
+
+# Autonomous-loop blueprint/state (agent-local, never committed)
+.loop/
