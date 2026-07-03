@@ -36,6 +36,10 @@ services:
     environment:
       ORCHESTRATOR_URL: http://orchestrator:8080
       ORCHESTRATOR_TOKEN: ${ZV_MUTATION_TOKEN:-fragforge-local}
+      # When set, web/middleware.ts requires HTTP Basic Auth with this password
+      # on every route. Empty (the default) leaves the UI open, matching the
+      # previous behavior for a loopback-only local stack.
+      FRAGFORGE_WEB_PASSWORD: ${FRAGFORGE_WEB_PASSWORD:-}
     ports:
       - "3000:3000"
     depends_on:
