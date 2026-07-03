@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, FileVideo, Loader2 } from 'lucide-react';
@@ -129,6 +129,55 @@ export default function UploadPage() {
     [stage, jobId, router, reset],
   );
 
+  let cardContent: ReactNode;
+  if (stage === 'scanning' || stage === 'parsing') {
+    cardContent = (
+      <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
+        <Loader2 className="size-8 animate-spin text-primary" />
+        <div className="flex flex-col gap-1">
+          <p className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
+            {stage === 'scanning' ? 'Escaneando el roster…' : 'Forjando highlights…'}
+          </p>
+          {fileName ? (
+            <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
+              <FileVideo className="size-4" />
+              {fileName}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    );
+  } else if (stage === 'picking') {
+    cardContent = <PlayerPicker players={players} onPick={onPick} match={match ?? undefined} />;
+  } else {
+    cardContent = (
+      <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
+        <div className="flex flex-col gap-1">
+          <p className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
+            Tu PC está offline
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Abre FragForge Agent en tu PC para analizar esta demo y reintenta.
+          </p>
+          {fileName ? (
+            <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
+              <FileVideo className="size-4" />
+              {fileName}
+            </p>
+          ) : null}
+        </div>
+        <Button
+          className="neon-notch font-[family-name:var(--font-display)] font-bold tracking-[0.06em]"
+          onClick={() => {
+            if (pendingFile) void runScan(pendingFile);
+          }}
+        >
+          REINTENTAR
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <main className="relative min-h-screen overflow-hidden">
       {/* Faint cyan glow, matching the onboarding screen. */}
@@ -189,51 +238,7 @@ export default function UploadPage() {
               </div>
             </div>
           ) : (
-            <Card className="overflow-hidden p-6 sm:p-8">
-              {stage === 'scanning' || stage === 'parsing' ? (
-                <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
-                  <Loader2 className="size-8 animate-spin text-primary" />
-                  <div className="flex flex-col gap-1">
-                    <p className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
-                      {stage === 'scanning' ? 'Escaneando el roster…' : 'Forjando highlights…'}
-                    </p>
-                    {fileName ? (
-                      <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
-                        <FileVideo className="size-4" />
-                        {fileName}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              ) : stage === 'picking' ? (
-                <PlayerPicker players={players} onPick={onPick} match={match ?? undefined} />
-              ) : (
-                <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
-                  <div className="flex flex-col gap-1">
-                    <p className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
-                      Tu PC está offline
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      Abre FragForge Agent en tu PC para analizar esta demo y reintenta.
-                    </p>
-                    {fileName ? (
-                      <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
-                        <FileVideo className="size-4" />
-                        {fileName}
-                      </p>
-                    ) : null}
-                  </div>
-                  <Button
-                    className="neon-notch font-[family-name:var(--font-display)] font-bold tracking-[0.06em]"
-                    onClick={() => {
-                      if (pendingFile) void runScan(pendingFile);
-                    }}
-                  >
-                    REINTENTAR
-                  </Button>
-                </div>
-              )}
-            </Card>
+            <Card className="overflow-hidden p-6 sm:p-8">{cardContent}</Card>
           )}
         </div>
 

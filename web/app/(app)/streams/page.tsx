@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Captions,
@@ -47,6 +47,17 @@ function sleep(ms: number): Promise<void> {
 /** True when an API error means the local analysis service is unreachable. */
 function isServiceUnavailable(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === SERVICE_UNAVAILABLE_CODE;
+}
+
+/** Localized message for a failed API call, preferring the offline hint. */
+function errorMessage(err: unknown, fallback: string): string {
+  if (isServiceUnavailable(err)) {
+    return 'El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.';
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return fallback;
 }
 
 /**
@@ -213,13 +224,7 @@ export default function StreamsPage() {
         void loadEditor(j);
       }
     } catch (err) {
-      reset(
-        isServiceUnavailable(err)
-          ? 'El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.'
-          : err instanceof Error
-            ? err.message
-            : 'No se pudo iniciar ese trabajo. Revisa la URL y vuelve a intentarlo.',
-      );
+      reset(errorMessage(err, 'No se pudo iniciar ese trabajo. Revisa la URL y vuelve a intentarlo.'));
     }
   }, [sourceUrl, title, pollAcquiring, loadEditor, reset]);
 
@@ -237,13 +242,7 @@ export default function StreamsPage() {
           void loadEditor(j);
         }
       } catch (err) {
-        reset(
-          isServiceUnavailable(err)
-            ? 'El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.'
-            : err instanceof Error
-              ? err.message
-              : 'No se pudo procesar ese archivo. Prueba con otro MP4.',
-        );
+        reset(errorMessage(err, 'No se pudo procesar ese archivo. Prueba con otro MP4.'));
       }
     },
     [title, pollAcquiring, loadEditor, reset],
@@ -299,13 +298,7 @@ export default function StreamsPage() {
       void pollRender(job.id, saved.variant);
     } catch (err) {
       setStage('editing');
-      setError(
-        isServiceUnavailable(err)
-          ? 'El servicio de Clips de stream está offline. Arráncalo y vuelve a intentarlo.'
-          : err instanceof Error
-            ? err.message
-            : 'No se pudo iniciar el render.',
-      );
+      setError(errorMessage(err, 'No se pudo iniciar el render.'));
     } finally {
       setSaving(false);
     }
@@ -316,6 +309,70 @@ export default function StreamsPage() {
       pollGen.current += 1; // stop any in-flight poll loop on unmount
     };
   }, []);
+
+  let stageContent: ReactNode;
+  if (stage === 'idle' || stage === 'submitting') {
+    stageContent = (
+      <SourceCard
+        sourceUrl={sourceUrl}
+        title={title}
+        submitting={stage === 'submitting'}
+        error={error}
+        onSourceUrlChange={setSourceUrl}
+        onTitleChange={setTitle}
+        onSubmitUrl={() => void submitUrl()}
+        onSubmitFile={(f) => void submitFile(f)}
+      />
+    );
+  } else if (stage === 'acquiring') {
+    stageContent = (
+      <div className="flex flex-col items-center justify-center gap-4 border border-destructive/30 bg-card/80 p-6 py-14 text-center sm:p-8">
+        <Loader2 className="size-8 animate-spin text-destructive" />
+        <div className="flex flex-col gap-1">
+          <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
+            Descargando {job?.title || 'el clip'}…
+          </p>
+          <p className="text-sm text-muted-foreground">Descargando y analizando el vídeo de origen.</p>
+        </div>
+      </div>
+    );
+  } else if (stage === 'failed') {
+    stageContent = (
+      <div className="flex flex-col items-center justify-center gap-4 border border-destructive/30 bg-card/80 p-6 py-14 text-center sm:p-8">
+        <AlertTriangle className="size-8 text-destructive" />
+        <div className="flex flex-col gap-1">
+          <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
+            Ese trabajo falló
+          </p>
+          <p className="max-w-md text-sm text-muted-foreground">{failureReason ?? 'Algo salió mal.'}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => reset('')}
+          className="neon-notch bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          EMPEZAR DE NUEVO
+        </button>
+      </div>
+    );
+  } else if (job && plan) {
+    stageContent = (
+      <StreamEditor
+        job={job}
+        plan={plan}
+        onPlanChange={setPlan}
+        stage={stage as 'editing' | 'rendering' | 'rendered'}
+        renderState={renderState}
+        renderedPlan={renderedPlan}
+        error={error}
+        saving={saving}
+        onCreate={() => void createShorts()}
+        onStartOver={() => reset('')}
+      />
+    );
+  } else {
+    stageContent = null;
+  }
 
   return (
     <div className="flex flex-col gap-7">
@@ -329,58 +386,7 @@ export default function StreamsPage() {
         </p>
       </header>
 
-      {stage === 'idle' || stage === 'submitting' ? (
-        <SourceCard
-          sourceUrl={sourceUrl}
-          title={title}
-          submitting={stage === 'submitting'}
-          error={error}
-          onSourceUrlChange={setSourceUrl}
-          onTitleChange={setTitle}
-          onSubmitUrl={() => void submitUrl()}
-          onSubmitFile={(f) => void submitFile(f)}
-        />
-      ) : stage === 'acquiring' ? (
-        <div className="flex flex-col items-center justify-center gap-4 border border-destructive/30 bg-card/80 p-6 py-14 text-center sm:p-8">
-          <Loader2 className="size-8 animate-spin text-destructive" />
-          <div className="flex flex-col gap-1">
-            <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
-              Descargando {job?.title || 'el clip'}…
-            </p>
-            <p className="text-sm text-muted-foreground">Descargando y analizando el vídeo de origen.</p>
-          </div>
-        </div>
-      ) : stage === 'failed' ? (
-        <div className="flex flex-col items-center justify-center gap-4 border border-destructive/30 bg-card/80 p-6 py-14 text-center sm:p-8">
-          <AlertTriangle className="size-8 text-destructive" />
-          <div className="flex flex-col gap-1">
-            <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
-              Ese trabajo falló
-            </p>
-            <p className="max-w-md text-sm text-muted-foreground">{failureReason ?? 'Algo salió mal.'}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => reset('')}
-            className="neon-notch bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            EMPEZAR DE NUEVO
-          </button>
-        </div>
-      ) : job && plan ? (
-        <StreamEditor
-          job={job}
-          plan={plan}
-          onPlanChange={setPlan}
-          stage={stage as 'editing' | 'rendering' | 'rendered'}
-          renderState={renderState}
-          renderedPlan={renderedPlan}
-          error={error}
-          saving={saving}
-          onCreate={() => void createShorts()}
-          onStartOver={() => reset('')}
-        />
-      ) : null}
+      {stageContent}
     </div>
   );
 }
@@ -684,22 +690,29 @@ function LayoutGlyph({ variant, selected }: { variant: StreamVariant; selected: 
   const tone = selected ? 'bg-destructive' : 'bg-white/25';
   const dim = 'bg-white/12';
 
+  let regions: ReactNode;
+  if (variant === 'streamer-vertical-stack-40-60') {
+    regions = (
+      <>
+        <span className={cn('h-[40%]', tone)} />
+        <span className={cn('flex-1', dim)} />
+      </>
+    );
+  } else if (variant === 'streamer-vertical-stack') {
+    regions = (
+      <>
+        <span className={cn('h-[26%]', tone)} />
+        <span className={cn('flex-1', dim)} />
+        <span className={cn('h-[26%]', tone)} />
+      </>
+    );
+  } else {
+    regions = <span className={cn('flex-1', dim)} />;
+  }
+
   return (
     <span className="flex h-[42px] w-6 shrink-0 flex-col overflow-hidden border border-white/25">
-      {variant === 'streamer-vertical-stack-40-60' ? (
-        <>
-          <span className={cn('h-[40%]', tone)} />
-          <span className={cn('flex-1', dim)} />
-        </>
-      ) : variant === 'streamer-vertical-stack' ? (
-        <>
-          <span className={cn('h-[26%]', tone)} />
-          <span className={cn('flex-1', dim)} />
-          <span className={cn('h-[26%]', tone)} />
-        </>
-      ) : (
-        <span className={cn('flex-1', dim)} />
-      )}
+      {regions}
     </span>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Film } from 'lucide-react';
 import type { Video, VideoStatus } from '@/lib/api/types';
 import { api } from '@/lib/api';
@@ -89,6 +89,15 @@ export default function VideosPage() {
 
   const visible = useMemo(() => (videos ?? []).filter((v) => matchesFormat(v, filter)), [videos, filter]);
 
+  let content: ReactNode;
+  if (videos === null) {
+    content = <LibrarySkeleton />;
+  } else if (videos.length === 0) {
+    content = <EmptyState />;
+  } else {
+    content = <LibrarySections videos={visible} allVideos={videos} onChange={() => void refresh()} />;
+  }
+
   return (
     <div className="flex flex-col gap-10">
       <header className="flex flex-col gap-2.5">
@@ -104,13 +113,7 @@ export default function VideosPage() {
         </p>
       </header>
 
-      {videos === null ? (
-        <LibrarySkeleton />
-      ) : videos.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <LibrarySections videos={visible} allVideos={videos} onChange={() => void refresh()} />
-      )}
+      {content}
     </div>
   );
 }

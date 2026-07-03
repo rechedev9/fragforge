@@ -37,10 +37,15 @@ export async function POST(request: Request): Promise<Response> {
   } catch (err) {
     // Log only the classified, key-free signal server-side — never the raw error
     // (its `cause` can embed the request URL + API key on some Node versions).
-    console.error(
-      'match-history: enumerateSharecodes failed:',
-      err instanceof SteamApiError ? err.code : err instanceof Error ? err.name : 'unknown',
-    );
+    let signal: string;
+    if (err instanceof SteamApiError) {
+      signal = err.code;
+    } else if (err instanceof Error) {
+      signal = err.name;
+    } else {
+      signal = 'unknown';
+    }
+    console.error('match-history: enumerateSharecodes failed:', signal);
     if (err instanceof SteamApiError && err.code === 'steam_not_configured') {
       return NextResponse.json(
         {

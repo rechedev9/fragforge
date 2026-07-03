@@ -651,7 +651,14 @@ export class RealApiClient implements ApiClient {
       const tools = data.record?.tools ?? [];
       const enabled = Boolean(data.record?.enabled);
       const anyMissing = tools.some((t) => t.configured && !t.accessible);
-      const status: CaptureStatus = !enabled ? 'unconfigured' : anyMissing ? 'warning' : 'ready';
+      let status: CaptureStatus;
+      if (!enabled) {
+        status = 'unconfigured';
+      } else if (anyMissing) {
+        status = 'warning';
+      } else {
+        status = 'ready';
+      }
       return { recordEnabled: enabled, status, tools };
     } catch {
       return { recordEnabled: false, status: 'offline', tools: [] };

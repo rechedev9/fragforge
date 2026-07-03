@@ -76,6 +76,14 @@ export function AppSidebar() {
             {NAV_ITEMS.map((item) => {
               const active = isActiveHref(pathname, item.href);
               const magenta = item.accent === 'magenta';
+              let numberTone: string;
+              if (!active) {
+                numberTone = 'text-sidebar-foreground/60';
+              } else if (magenta) {
+                numberTone = 'text-destructive';
+              } else {
+                numberTone = 'text-primary';
+              }
               return (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
@@ -96,14 +104,7 @@ export function AppSidebar() {
                     <Link href={item.href}>
                       <span
                         aria-hidden
-                        className={cn(
-                          'font-[family-name:var(--font-mono)] text-[10px]',
-                          active
-                            ? magenta
-                              ? 'text-destructive'
-                              : 'text-primary'
-                            : 'text-sidebar-foreground/60',
-                        )}
+                        className={cn('font-[family-name:var(--font-mono)] text-[10px]', numberTone)}
                       >
                         {item.number}
                       </span>

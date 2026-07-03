@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Music } from 'lucide-react';
 import type { EditConfig, Match, Play, Preset } from '@/lib/api/types';
@@ -176,6 +176,32 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   const hasRich = adr !== undefined;
   const hasRating = rating > 0;
 
+  let presetContent: ReactNode;
+  if (presets === null) {
+    presetContent = (
+      <div className="grid gap-4 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-40" />
+        ))}
+      </div>
+    );
+  } else if (presets.length === 0) {
+    presetContent = (
+      <p className="border border-dashed border-border bg-card/50 px-5 py-6 text-center text-sm text-muted-foreground">
+        No se pudieron cargar los presets. Recarga la página para reintentar.
+      </p>
+    );
+  } else {
+    presetContent = (
+      <PresetCards
+        presets={presets}
+        value={variant}
+        onChange={setVariant}
+        disabled={selectedIds.size === 0 || busy}
+      />
+    );
+  }
+
   return (
     <div className="flex min-h-[calc(100vh-5rem)] flex-col gap-8 pb-2">
       <button
@@ -269,24 +295,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
       {n > 0 ? (
         <section className="flex flex-col gap-4">
           <SectionEyebrow label="PRESET DEL REEL" />
-          {presets === null ? (
-            <div className="grid gap-4 sm:grid-cols-3">
-              {[0, 1, 2].map((i) => (
-                <Skeleton key={i} className="h-40" />
-              ))}
-            </div>
-          ) : presets.length === 0 ? (
-            <p className="border border-dashed border-border bg-card/50 px-5 py-6 text-center text-sm text-muted-foreground">
-              No se pudieron cargar los presets. Recarga la página para reintentar.
-            </p>
-          ) : (
-            <PresetCards
-              presets={presets}
-              value={variant}
-              onChange={setVariant}
-              disabled={selectedIds.size === 0 || busy}
-            />
-          )}
+          {presetContent}
         </section>
       ) : null}
 

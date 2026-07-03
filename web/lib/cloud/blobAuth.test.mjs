@@ -11,7 +11,7 @@ function fakeDbWithOwner(userId) {
       return {
         select() {
           return {
-            eq(column, value) {
+            eq(column, _value) {
               assert.equal(column, 'id');
               return {
                 async maybeSingle() {

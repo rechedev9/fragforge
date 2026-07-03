@@ -93,6 +93,7 @@ Run it locally (needs the orchestrator on `127.0.0.1:8080`; orchestrator memory 
 ```bash
 cd web && npm install && npm run dev   # http://localhost:3000
 npm run typecheck                      # tsc --noEmit
+npm run lint                           # oxlint (config in web/.oxlintrc.json)
 npm run test:e2e                       # Playwright e2e
 ```
 
@@ -305,7 +306,8 @@ Same priorities as the Go rules: clarity, simplicity, concision, maintainability
 Full TypeScript, strict:
 
 - The project is full TypeScript: no `.js`/`.jsx` source files, `strict: true` and `allowJs: false` stay on in `web/tsconfig.json`.
-- `npm run typecheck` (`tsc --noEmit`) must pass before any change is considered done.
+- `npm run typecheck` (`tsc --noEmit`) and `npm run lint` (oxlint) must pass before any change is considered done.
+- Lint config lives in `web/.oxlintrc.json` (adapted from berrus): type-aware oxlint with `no-explicit-any`, `no-nested-ternary`, the React/hooks rules, and `_`-prefixed unused args.
 
 Type safety:
 

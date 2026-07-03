@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, Pause, Play } from 'lucide-react';
 import type { Song } from '@/lib/api/types';
 import { api } from '@/lib/api';
@@ -74,6 +74,32 @@ export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId 
     void audio.play().then(() => setPlayingId(song.id)).catch(() => setPlayingId(null));
   }
 
+  let list: ReactNode;
+  if (songs === null) {
+    list = <SongRowSkeletons />;
+  } else if (songs.length === 0) {
+    list = (
+      <p className="px-2 py-8 text-center text-sm text-muted-foreground">
+        No hay temas disponibles. Añade audio al directorio de música y recarga.
+      </p>
+    );
+  } else {
+    list = (
+      <ul className="flex flex-col gap-1.5">
+        {songs.map((song) => (
+          <SongRow
+            key={song.id}
+            song={song}
+            playing={playingId === song.id}
+            selected={selectedSongId === song.id}
+            onTogglePlay={() => togglePlay(song)}
+            onUse={() => onChoose(song.id, song.title)}
+          />
+        ))}
+      </ul>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -85,28 +111,7 @@ export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId 
         {/* One shared element drives every row's preview. */}
         <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
 
-        <div className="-mx-2 max-h-[22rem] overflow-y-auto px-2">
-          {songs === null ? (
-            <SongRowSkeletons />
-          ) : songs.length === 0 ? (
-            <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-              No hay temas disponibles. Añade audio al directorio de música y recarga.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1.5">
-              {songs.map((song) => (
-                <SongRow
-                  key={song.id}
-                  song={song}
-                  playing={playingId === song.id}
-                  selected={selectedSongId === song.id}
-                  onTogglePlay={() => togglePlay(song)}
-                  onUse={() => onChoose(song.id, song.title)}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
+        <div className="-mx-2 max-h-[22rem] overflow-y-auto px-2">{list}</div>
       </DialogContent>
     </Dialog>
   );
