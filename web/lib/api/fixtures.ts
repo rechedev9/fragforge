@@ -1,4 +1,5 @@
 import type { Match, Play, Song, Video, FeedItem, SteamUser, Slots, DemoPlayer, RosterMatch } from './types';
+import { DEFAULT_EDIT_CONFIG } from './reel-store';
 
 /**
  * Static mock data backing the MockApiClient. None of these reference real
@@ -281,6 +282,7 @@ export function seedVideos(): Video[] {
       map: 'Inferno',
       score: '13-2',
       mode: 'clean',
+      editConfig: DEFAULT_EDIT_CONFIG,
       status: 'ready',
       createdAt: now - 6 * 3600 * 1000,
       availableForSec: 14 * 3600,
@@ -294,6 +296,7 @@ export function seedVideos(): Video[] {
       map: 'Inferno',
       score: '13-2',
       mode: 'music',
+      editConfig: { ...DEFAULT_EDIT_CONFIG, format: 'landscape-16x9' },
       songId: 'song-zerokull-1',
       status: 'recording',
       createdAt: now - 4 * 1000,
