@@ -8,7 +8,7 @@ import type { VideoStatus } from './types';
  * relies entirely on this mapping, so a page reload that re-reads server state
  * resumes exactly where it left off and never double-drives a stage.
  *
- * Unit-tested in reel-reconcile.test.mjs (node:test).
+ * Unit-tested in reel-reconcile.test.ts (node:test).
  */
 
 /** Render-variant lifecycle as the orchestrator reports it; 'none' = not started. */

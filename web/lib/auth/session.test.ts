@@ -1,9 +1,10 @@
-// Unit tests for the signed-cookie session. Run: node --test session.test.mjs
+// Unit tests for the signed-cookie session. Run: node --test session.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { signSession, verifySession } from './session.ts';
+import type { SessionPayload } from './session.ts';
 
-const payload = {
+const payload: SessionPayload = {
   steamid64: '76561198000000000',
   persona: 'kekO',
   avatar: 'https://example.com/a.jpg',

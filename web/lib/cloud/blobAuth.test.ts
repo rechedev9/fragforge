@@ -1,17 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { agentOwnsKey } from './blobAuth.ts';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-// Mirrors the demos.test.mjs fake-db style: `.from('demos').select().eq().maybeSingle()`
+// Mirrors the demos.test.ts fake-db style: `.from('demos').select().eq().maybeSingle()`
 // resolves directly (no `.then` needed since the route awaits `maybeSingle()`).
-function fakeDbWithOwner(userId) {
-  return {
-    from(table) {
+function fakeDbWithOwner(userId: string): SupabaseClient {
+  const db = {
+    from(table: string) {
       assert.equal(table, 'demos');
       return {
         select() {
           return {
-            eq(column, _value) {
+            eq(column: string, _value: string) {
               assert.equal(column, 'id');
               return {
                 async maybeSingle() {
@@ -24,6 +25,8 @@ function fakeDbWithOwner(userId) {
       };
     },
   };
+  // Partial test double covering only the call surface agentOwnsKey uses.
+  return db as unknown as SupabaseClient;
 }
 
 test('demos/ keys are authorized by a pure prefix check, no db needed', async () => {

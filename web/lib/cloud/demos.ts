@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { JOB_STATE, JOB_TYPE } from '@/lib/cloud/jobDto';
+// Relative .ts import (not the `@/` alias) so Node's native TS loader can resolve
+// it when demos.test.ts runs this module directly under node --test.
+import { JOB_STATE, JOB_TYPE } from './jobDto.ts';
 
 /** Upload the demo and queue a scan job. Returns the demo id (the browser handle). */
 export async function createScanJob(
