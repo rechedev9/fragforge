@@ -291,7 +291,7 @@ export class MockApiClient implements ApiClient {
     // Preserve the caller's (plan) order rather than the plays array's order.
     const pickedPlays = input.playIds.map((pid) => plays.find((p) => p.id === pid)).filter((p): p is Play => Boolean(p));
 
-    const modeLabel = input.mode === 'music' ? 'Music Edit' : 'Clean POV';
+    const modeLabel = input.mode === 'music' ? 'Edición Musical' : 'Clean POV';
     const playLabel = playsSelectionLabel(pickedPlays) ?? 'Highlight';
     const id = `v-${Date.now()}`;
 

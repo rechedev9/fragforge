@@ -79,18 +79,18 @@ async function gotoCreateReel(page: Page, jobStatus: { value: string }): Promise
   await page.locator('button:has(.lucide-crosshair)').first().click();
 }
 
-/** Intro chip toggle in the Bookends row. */
+/** Intro (Apertura) chip toggle in the Bookends row. */
 function introChip(page: Page) {
-  return page.getByRole('button', { name: 'Intro' });
+  return page.getByRole('button', { name: 'Apertura' });
 }
 function outroChip(page: Page) {
-  return page.getByRole('button', { name: 'Outro' });
+  return page.getByRole('button', { name: 'Cierre' });
 }
 function introInput(page: Page) {
-  return page.getByLabel('Título de intro');
+  return page.getByLabel('Título de apertura');
 }
 function outroInput(page: Page) {
-  return page.getByLabel('Texto de outro');
+  return page.getByLabel('Texto de cierre');
 }
 
 test.describe('create-reel bookend text', () => {
@@ -103,7 +103,7 @@ test.describe('create-reel bookend text', () => {
     await expect(introInput(page)).toBeVisible();
     await expect(introInput(page)).toHaveAttribute(
       'placeholder',
-      'Título de intro (vacío = titular generado)',
+      'Título de apertura (vacío = titular generado)',
     );
 
     await introChip(page).click();

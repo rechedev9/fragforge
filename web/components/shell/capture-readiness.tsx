@@ -19,7 +19,7 @@ const STATUS_META: Record<CaptureStatus, { label: string; text: string; hint: st
   ready: { label: 'Lista', text: 'text-primary', hint: 'HLAE + CS2 detectado en este PC' },
   warning: { label: 'Revisa rutas', text: 'text-amber-400', hint: 'Una herramienta de captura está configurada pero falta en disco.' },
   unconfigured: { label: 'Configurar', text: 'text-destructive', hint: 'No se encontró HLAE + CS2 en este PC.' },
-  offline: { label: 'Offline', text: 'text-muted-foreground', hint: 'Arranca tu orquestador local (zv serve).' },
+  offline: { label: 'Sin conexión', text: 'text-muted-foreground', hint: 'Arranca tu orquestador local (zv serve).' },
 };
 
 /** The three record tools, with a friendly name and a typical Windows path. */

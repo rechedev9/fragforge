@@ -83,7 +83,12 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-5">
         <div className="space-y-2">
-          <Label htmlFor="auth-code">Código de autenticación</Label>
+          <Label
+            htmlFor="auth-code"
+            className="font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground"
+          >
+            Código de autenticación
+          </Label>
           <Input
             id="auth-code"
             autoComplete="off"
@@ -96,7 +101,12 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="known-code">Sharecode más reciente</Label>
+          <Label
+            htmlFor="known-code"
+            className="font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground"
+          >
+            Sharecode más reciente
+          </Label>
           <Input
             id="known-code"
             autoComplete="off"
@@ -185,7 +195,7 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
         <Button
           type="submit"
           size="lg"
-          className="neon-notch w-full font-[family-name:var(--font-display)] font-bold tracking-[0.06em]"
+          className="neon-notch w-full font-[family-name:var(--font-display)] font-bold tracking-[0.06em] uppercase"
           disabled={!canSubmit}
         >
           {submitting ? (

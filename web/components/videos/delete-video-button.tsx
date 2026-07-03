@@ -54,17 +54,29 @@ export function DeleteVideoButton({ video, onDeleted }: { video: Video; onDelete
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>¿Borrar este reel?</DialogTitle>
+            <DialogTitle className="uppercase">¿Borrar este reel?</DialogTitle>
             <DialogDescription className="break-words">
               <span className="font-medium text-foreground">{video.title}</span> y su archivo
               renderizado se eliminarán. Esta acción no se puede deshacer.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setOpen(false)} disabled={deleting}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setOpen(false)}
+              disabled={deleting}
+              className="rounded-none border border-primary/40 font-[family-name:var(--font-display)] font-bold tracking-[0.05em] uppercase hover:bg-primary/10"
+            >
               Cancelar
             </Button>
-            <Button variant="destructive" size="sm" onClick={onConfirm} disabled={deleting}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onConfirm}
+              disabled={deleting}
+              className="neon-notch rounded-none font-[family-name:var(--font-display)] font-bold tracking-[0.05em] uppercase"
+            >
               <Trash2 className="size-4" />
               {deleting ? 'Borrando…' : 'Borrar'}
             </Button>

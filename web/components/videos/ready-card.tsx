@@ -141,7 +141,7 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
 
           <div className="flex items-center gap-2">
             {video.published ? (
-              <span className="flex flex-1 items-center justify-center gap-1.5 border border-primary/40 py-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary">
+              <span className="neon-notch neon-glow flex flex-1 items-center justify-center gap-1.5 bg-primary py-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground">
                 <Globe className="size-3.5" /> PUBLICADO
               </span>
             ) : (

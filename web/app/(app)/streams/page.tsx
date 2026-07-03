@@ -410,8 +410,8 @@ function SourceCard({
             <button
               type="button"
               onClick={onSubmitUrl}
-              disabled={submitting || !sourceUrl.trim()}
-              className="neon-notch inline-flex items-center justify-center gap-1.5 bg-destructive px-5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
+              disabled={submitting}
+              className="neon-notch inline-flex items-center justify-center gap-1.5 bg-destructive px-5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-[#1a0410] transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
             >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               TRAER CLIP
