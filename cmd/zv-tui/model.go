@@ -33,11 +33,12 @@ const (
 type mode int
 
 const (
-	modeBrowse   mode = iota // navigating a job list
-	modePrompt               // text-input overlay (upload path / URL)
-	modeRoster               // pick a player from the roster
-	modeSegments             // multi-select segments to record
-	modePreset               // pick a render preset
+	modeBrowse     mode = iota // navigating a job list
+	modePrompt                 // text-input overlay (upload path / URL)
+	modeRoster                 // pick a player from the roster
+	modeSegments               // multi-select segments to record
+	modePreset                 // pick a render preset
+	modeStreamEdit             // edit a stream job's clip plan
 )
 
 type promptKind int
@@ -46,6 +47,7 @@ const (
 	promptUploadDemo promptKind = iota
 	promptUploadStream
 	promptStreamURL
+	promptClipRange // "start end [title]" for one clip of a stream edit plan
 )
 
 type presetPurpose int
@@ -77,6 +79,17 @@ type segmentPicker struct {
 	segments []tuiclient.Segment
 	cursor   int
 	selected map[int]bool
+}
+
+// clipEditor is the in-progress edit of a stream job's clip list. It keeps the
+// base plan (variant, crops) so saving preserves everything the TUI does not
+// expose, only replacing the Clips. editIndex is -1 while adding a new clip.
+type clipEditor struct {
+	jobID     string
+	basePlan  tuiclient.StreamEditPlan
+	clips     []tuiclient.ClipRange
+	cursor    int
+	editIndex int
 }
 
 type model struct {
@@ -125,6 +138,7 @@ type model struct {
 	segs          segmentPicker
 	presetCursor  int
 	presetPurpose presetPurpose
+	clipEd        clipEditor
 }
 
 func newModel(cl *tuiclient.Client, initialDrops []string) model {

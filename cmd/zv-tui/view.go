@@ -109,6 +109,9 @@ func (m model) hintBar() string {
 		return join(sep, keyHint("↑↓", "move"), keyHint("space", "toggle"), keyHint("a", "all"), keyHint("enter", "preset"), keyHint("esc", "back"))
 	case modePreset:
 		return join(sep, keyHint("↑↓", "preset"), keyHint("enter", "confirm"), keyHint("esc", "back"))
+	case modeStreamEdit:
+		return join(sep, keyHint("↑↓", "clip"), keyHint("a", "add"), keyHint("e", "edit"),
+			keyHint("d", "delete"), keyHint("s", "save"), keyHint("esc", "back"))
 	}
 	if m.screen == screenDemos {
 		return join(sep,
@@ -118,7 +121,7 @@ func (m model) hintBar() string {
 	}
 	return join(sep,
 		keyHint("↑↓", "nav"), keyHint("tab", "demos"), keyHint("u", "upload"),
-		keyHint("U", "url"), keyHint("R", "render"), keyHint("q", "quit"))
+		keyHint("U", "url"), keyHint("e", "edit clips"), keyHint("R", "render"), keyHint("q", "quit"))
 }
 
 // ---- browse body -----------------------------------------------------------
@@ -304,7 +307,7 @@ func (m model) streamDetail_(w, h int) (string, string) {
 		}
 	}
 	b = append(b, "")
-	b = append(b, hintStyle.Render("press R to render (needs a ready clip + ffmpeg)"))
+	b = append(b, hintStyle.Render("press e to edit clips, R to render (needs ffmpeg)"))
 	return "Detail", strings.Join(b, "\n")
 }
 
@@ -325,6 +328,9 @@ func (m model) viewOverlay(bodyH int) string {
 	case modePreset:
 		title = "Pick a render preset"
 		content = m.presetView()
+	case modeStreamEdit:
+		title = "Edit clip plan"
+		content = m.clipEditorView()
 	default:
 		title = ""
 		content = ""
@@ -341,8 +347,31 @@ func (m model) promptTitle() string {
 		return "Upload a streamer clip (.mp4)"
 	case promptStreamURL:
 		return "Acquire a stream clip by URL"
+	case promptClipRange:
+		return "Clip range (start end [title], seconds)"
 	}
 	return "Input"
+}
+
+// clipEditorView renders the stream clip list being edited.
+func (m model) clipEditorView() string {
+	if len(m.clipEd.clips) == 0 {
+		return itemDim.Render("(no clips - press a to add one)")
+	}
+	var lines []string
+	for i, c := range m.clipEd.clips {
+		title := c.Title
+		if title == "" {
+			title = "(untitled)"
+		}
+		row := fmt.Sprintf("%-4s %6.1f - %-6.1f  %s", c.ID, c.StartSeconds, c.EndSeconds, title)
+		if i == m.clipEd.cursor {
+			lines = append(lines, itemSelected.Render("▌ "+row))
+		} else {
+			lines = append(lines, "  "+itemNormal.Render(row))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) segmentsView() string {

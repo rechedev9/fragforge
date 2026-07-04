@@ -218,6 +218,52 @@ func TestStreamClipFlowEndToEnd(t *testing.T) {
 	}
 }
 
+// TestStreamClipEditPlan covers "sacar clips": open the clip editor, add a clip
+// range, save it (PutStreamEditPlan), and confirm the job's plan now has it.
+func TestStreamClipEditPlan(t *testing.T) {
+	fake := newOrchFake()
+	mp4 := writeTemp(t, "clip.mp4", "FAKEMP4")
+	u := startTUI(t, fake)
+
+	u.wait("FragForge")
+	u.send(tabKey)
+	u.wait("no stream clips yet")
+
+	u.key("u")
+	u.wait("Upload a streamer clip")
+	u.send(ctrlU)
+	u.typ(mp4)
+	u.send(enter)
+	u.wait("ready")
+	u.wait("Edit plan")
+
+	// e -> clip editor, seeded with the default plan's single clip.
+	u.key("e")
+	u.wait("Edit clip plan")
+	u.wait("c1")
+
+	// a -> add a clip via the "start end title" prompt.
+	u.key("a")
+	u.wait("Clip range")
+	u.typ("10 25 Ace on mirage")
+	u.send(enter)
+	u.wait("Ace on mirage")
+	u.wait("c2")
+
+	// s -> save the plan.
+	u.key("s")
+	u.wait("saved 2 clip")
+
+	fm := u.quit()
+	if fm.streamDetail.plan == nil || len(fm.streamDetail.plan.Clips) != 2 {
+		t.Fatalf("want a saved 2-clip plan in detail, got %+v", fm.streamDetail.plan)
+	}
+	// The variant (a field the editor preserves) must survive the round trip.
+	if fm.streamDetail.plan.Variant != tuiclient.StreamDefaultVariant {
+		t.Fatalf("editor dropped the plan variant, got %q", fm.streamDetail.plan.Variant)
+	}
+}
+
 // TestStreamClipFromURL covers acquiring a clip from a URL (the yt-dlp path).
 func TestStreamClipFromURL(t *testing.T) {
 	fake := newOrchFake()
