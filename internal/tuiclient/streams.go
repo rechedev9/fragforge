@@ -2,7 +2,6 @@ package tuiclient
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 )
@@ -38,10 +37,7 @@ func (c *Client) GetStreamJob(ctx context.Context, id string) (StreamJob, error)
 // CreateStreamJobUpload uploads a streamer MP4 file. The job starts in
 // "uploaded" and becomes "ready" once probed.
 func (c *Client) CreateStreamJobUpload(ctx context.Context, videoPath, title string) (StreamCreateResponse, error) {
-	config := "{}"
-	if title != "" {
-		config = fmt.Sprintf(`{"title":%q}`, title)
-	}
+	config := configJSON(map[string]string{"title": title})
 	var out StreamCreateResponse
 	err := c.uploadMultipart(ctx, "/api/stream-jobs", "video", videoPath, config, &out)
 	return out, err

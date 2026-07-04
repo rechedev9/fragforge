@@ -48,7 +48,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.presets = msg.presets
 		for _, p := range msg.presets {
 			if p.Default {
-				defaultRenderVariant = p.Name
+				m.defaultVariant = p.Name
 			}
 		}
 		return m, nil
@@ -108,8 +108,6 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSegmentsKey(msg)
 	case modePreset:
 		return m.handlePresetKey(msg)
-	case modeConfirm:
-		return m.handleConfirmKey(msg)
 	default:
 		return m.handleBrowseKey(msg)
 	}
@@ -161,7 +159,7 @@ func (m model) handleDemoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.jobCursor = max(0, len(m.jobs)-1)
 		return m, m.detailCmd()
 	case "u":
-		return m.openPrompt(promptUploadDemo, "path to a .dem file", defaultUploadDir()), nil
+		return m.openPrompt(promptUploadDemo, "path to a .dem file", defaultUploadDir())
 	case "enter", "p":
 		return m.actOnDemo()
 	case "r":
@@ -293,9 +291,9 @@ func (m model) handleStreamKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.streamCursor = max(0, len(m.streams)-1)
 		return m, m.streamDetailCmd()
 	case "u":
-		return m.openPrompt(promptUploadStream, "path to a streamer .mp4 file", defaultUploadDir()), nil
+		return m.openPrompt(promptUploadStream, "path to a streamer .mp4 file", defaultUploadDir())
 	case "U":
-		return m.openPrompt(promptStreamURL, "source URL (needs yt-dlp on the host)", ""), nil
+		return m.openPrompt(promptStreamURL, "source URL (needs yt-dlp on the host)", "")
 	case "R", "enter":
 		return m.startStreamRender()
 	}
@@ -358,8 +356,10 @@ func (m model) currentStreamID() string {
 	return ""
 }
 
-// detailCmd loads the focused demo job's detail when the cursor points at a
-// different job than the one currently loaded.
+// detailCmd loads the focused demo job's detail. When the cursor moves to a
+// different job it first drops the previous job's detail so a stale plan/roster/
+// render can't drive an action against the newly-focused job, and clears any
+// per-job error/notice that belonged to the old selection.
 func (m *model) detailCmd() tea.Cmd {
 	id := m.currentJobID()
 	if id == "" {
@@ -368,8 +368,10 @@ func (m *model) detailCmd() tea.Cmd {
 		return nil
 	}
 	if id != m.detailID {
-		// Show the list row immediately; detail streams in.
-		m.detail.loaded = false
+		m.detail = jobDetail{}
+		m.detailID = id
+		m.errText = ""
+		m.notice = ""
 	}
 	return m.loadJobDetail(id)
 }
@@ -382,44 +384,35 @@ func (m *model) streamDetailCmd() tea.Cmd {
 		return nil
 	}
 	if id != m.streamID {
-		m.streamDetail.loaded = false
+		m.streamDetail = streamDetail{}
+		m.streamID = id
+		m.errText = ""
+		m.notice = ""
 	}
 	return m.loadStreamDetail(id)
 }
 
-// refreshCurrent reloads the active screen's list and the focused detail.
+// refreshCurrent reloads the active screen's list; the resulting jobsMsg/
+// streamsMsg then reloads the focused detail via detailCmd (so detail is not
+// fetched twice per poll).
 func (m model) refreshCurrent() tea.Cmd {
 	if m.screen == screenDemos {
-		return tea.Batch(m.loadJobs(), m.loadJobDetailIfAny())
+		return m.loadJobs()
 	}
-	return tea.Batch(m.loadStreams(), m.loadStreamDetailIfAny())
-}
-
-func (m model) loadJobDetailIfAny() tea.Cmd {
-	if id := m.currentJobID(); id != "" {
-		return m.loadJobDetail(id)
-	}
-	return nil
-}
-
-func (m model) loadStreamDetailIfAny() tea.Cmd {
-	if id := m.currentStreamID(); id != "" {
-		return m.loadStreamDetail(id)
-	}
-	return nil
+	return m.loadStreams()
 }
 
 // ---- overlays: prompt ------------------------------------------------------
 
-func (m model) openPrompt(kind promptKind, placeholder, prefill string) model {
+func (m model) openPrompt(kind promptKind, placeholder, prefill string) (model, tea.Cmd) {
 	m.mode = modePrompt
 	m.promptKind = kind
 	m.errText = ""
 	m.prompt.Placeholder = placeholder
 	m.prompt.SetValue(prefill)
 	m.prompt.CursorEnd()
-	m.prompt.Focus()
-	return m
+	cmd := m.prompt.Focus()
+	return m, cmd
 }
 
 func (m model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -643,21 +636,6 @@ func (m model) handlePresetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			_, err := cl.StartRenderVariant(c, id, preset)
 			return err
 		})
-	}
-	return m, nil
-}
-
-// ---- overlays: confirm -----------------------------------------------------
-
-func (m model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "y", "enter":
-		cmd := m.confirmCmd
-		m.mode = modeBrowse
-		m.busy = true
-		return m, cmd
-	default:
-		m.mode = modeBrowse
 	}
 	return m, nil
 }

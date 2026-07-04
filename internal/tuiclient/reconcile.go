@@ -27,13 +27,18 @@ const (
 // view (matching the web); a failed render falls through to the job status so
 // the operator can retry.
 func NextStep(jobStatus string, render *RenderVariantState) Step {
-	if render != nil {
-		switch render.Status {
-		case RenderReady:
-			return StepReady
-		case RenderQueued, RenderRendering:
-			return StepRendering
-		}
+	// A finished render is terminal, even if the job later flags an error.
+	if render != nil && render.Status == RenderReady {
+		return StepReady
+	}
+	// A job-level failure takes precedence over a stale in-flight render, so a
+	// job that fails while a render state is still queued/rendering surfaces the
+	// failure instead of hanging on "rendering" (matches deriveReelView order).
+	if jobStatus == StatusFailed {
+		return StepRetry
+	}
+	if render != nil && (render.Status == RenderQueued || render.Status == RenderRendering) {
+		return StepRendering
 	}
 	switch jobStatus {
 	case StatusQueued, StatusScanning:
@@ -50,8 +55,6 @@ func NextStep(jobStatus string, render *RenderVariantState) Step {
 		return StepComposing
 	case StatusRecorded, StatusComposed, StatusDone:
 		return StepRender
-	case StatusFailed:
-		return StepRetry
 	default:
 		return StepWait
 	}

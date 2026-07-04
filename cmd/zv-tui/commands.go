@@ -81,6 +81,9 @@ func (m *model) loadStreams() tea.Cmd {
 // its status. Sub-resource "not ready" (409) is treated as nil, not an error.
 func (m *model) loadJobDetail(id string) tea.Cmd {
 	cl := m.cl
+	// Snapshot the default variant here (Update goroutine); reading it inside the
+	// closure would race the presetsMsg writer.
+	variant := m.defaultVariant
 	return func() tea.Msg {
 		c, cancel := ctx()
 		defer cancel()
@@ -103,8 +106,8 @@ func (m *model) loadJobDetail(id string) tea.Cmd {
 			}
 		}
 		// A render variant may exist for any recorded+ job; report it when present.
-		if defaultRenderVariant != "" {
-			if rv, err := cl.GetRenderVariant(c, id, defaultRenderVariant); err == nil {
+		if variant != "" {
+			if rv, err := cl.GetRenderVariant(c, id, variant); err == nil {
 				out.render = &rv
 			}
 		}

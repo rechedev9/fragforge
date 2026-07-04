@@ -5,13 +5,14 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rechedev9/fragforge/internal/tuiclient"
 )
 
 func (m model) View() string {
-	if !m.ready || m.width < 24 || m.height < 8 {
-		return "starting FragForge TUI… (make the terminal a bit bigger)"
+	if !m.ready || m.width < 40 || m.height < 10 {
+		return "starting FragForge TUI… (make the terminal at least 40x10)"
 	}
 	header := m.viewHeader()
 	footer := m.viewFooter()
@@ -440,12 +441,16 @@ func block(lines []string, w, h int) string {
 	return strings.Join(out, "\n")
 }
 
-// padLine pads or truncates a single line to width w, ANSI-aware.
+// padLine pads or truncates a single line to width w, ANSI-aware. It truncates
+// first so lipgloss's Width only ever pads: Width wraps a too-long line into
+// extra rows (before MaxWidth would trim it), which would break the panels'
+// fixed height. Truncating up front guarantees one row out.
 func padLine(s string, w int) string {
 	if w < 1 {
 		w = 1
 	}
-	return lipgloss.NewStyle().Width(w).MaxWidth(w).Render(s)
+	s = ansi.Truncate(s, w, "")
+	return lipgloss.NewStyle().Width(w).Render(s)
 }
 
 // listRow renders one selectable list row: colored dot + text, or a full-width

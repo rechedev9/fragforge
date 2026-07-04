@@ -40,6 +40,11 @@ func TestNextStepRenderDrivesView(t *testing.T) {
 	if got := NextStep(StatusRecorded, &RenderVariantState{Status: RenderFailed}); got != StepRender {
 		t.Errorf("failed render on recorded job: got %q, want %q", got, StepRender)
 	}
+	// A job failure takes precedence over a stale in-flight render, so the
+	// failure surfaces instead of a permanent "rendering" state.
+	if got := NextStep(StatusFailed, &RenderVariantState{Status: RenderQueued}); got != StepRetry {
+		t.Errorf("failed job with stale queued render: got %q, want %q", got, StepRetry)
+	}
 }
 
 func TestStepActionable(t *testing.T) {

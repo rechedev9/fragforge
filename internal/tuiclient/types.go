@@ -257,8 +257,11 @@ const (
 	StreamRendered  = "rendered"
 	StreamFailed    = "failed"
 
-	// StreamDefaultVariant is the only supported stream render variant.
-	StreamDefaultVariant = "streamer-vertical-stack"
+	// StreamDefaultVariant is the product-default stream render variant
+	// (internal/streamclips.DefaultVariant): a 40% facecam / 60% gameplay
+	// vertical stack. "streamer-vertical-stack" (no suffix) is a legacy 35/65
+	// layout, so the suffix here is deliberate.
+	StreamDefaultVariant = "streamer-vertical-stack-40-60"
 )
 
 type SourceProbe struct {

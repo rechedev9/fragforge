@@ -51,10 +51,7 @@ func (c *Client) GetJob(ctx context.Context, id string) (Job, error) {
 // runs the roster scan flow (job ends in "scanned", awaiting a target pick);
 // when set, it parses straight to a kill plan.
 func (c *Client) CreateJob(ctx context.Context, demoPath, targetSteamID string) (CreateJobResponse, error) {
-	config := "{}"
-	if targetSteamID != "" {
-		config = fmt.Sprintf(`{"target_steamid":%q}`, targetSteamID)
-	}
+	config := configJSON(map[string]string{"target_steamid": targetSteamID})
 	var out CreateJobResponse
 	err := c.uploadMultipart(ctx, "/api/jobs", "demo", demoPath, config, &out)
 	return out, err
@@ -163,6 +160,17 @@ func (c *Client) uploadMultipart(ctx context.Context, path, fileField, filePath,
 
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
+
+	// Build the request before starting the writer goroutine: if the request
+	// fails to build, close the pipe and return without a goroutine that would
+	// otherwise block forever writing to a body nobody reads.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, pr)
+	if err != nil {
+		_ = pw.Close()
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
 	go func() {
 		var werr error
 		defer func() { _ = pw.CloseWithError(werr) }()
@@ -182,10 +190,5 @@ func (c *Client) uploadMultipart(ctx context.Context, path, fileField, filePath,
 		werr = mw.Close()
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, pr)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
 	return c.send(req, http.MethodPost, path, out)
 }

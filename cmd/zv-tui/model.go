@@ -13,10 +13,11 @@ import (
 
 const pollInterval = 2 * time.Second
 
-// defaultRenderVariant is the preset name used as the default render variant
-// (POST /api/jobs/{id}/renders/{variant}). It is overwritten once the preset
-// registry loads; "viral-60-clean" is the documented default.
-var defaultRenderVariant = "viral-60-clean"
+// fallbackRenderVariant is the default render variant name used until the preset
+// registry loads; "viral-60-clean" is the documented default. Once presets load
+// it is replaced by the registry default, stored per-model (m.defaultVariant) so
+// no mutable global is shared with the Cmd goroutines.
+const fallbackRenderVariant = "viral-60-clean"
 
 type screen int
 
@@ -33,7 +34,6 @@ const (
 	modeRoster               // pick a player from the roster
 	modeSegments             // multi-select segments to record
 	modePreset               // pick a render preset
-	modeConfirm              // yes/no confirmation
 )
 
 type promptKind int
@@ -87,10 +87,14 @@ type model struct {
 	caps       tuiclient.Capabilities
 	capsLoaded bool
 	presets    []tuiclient.Preset
-	spinner    spinner.Model
-	busy       bool
-	notice     string
-	errText    string
+	// defaultVariant is the render variant used when the operator does not pick a
+	// preset; it tracks the preset registry default (set from presetsMsg on the
+	// Update goroutine, read only there and when building Cmds - no shared global).
+	defaultVariant string
+	spinner        spinner.Model
+	busy           bool
+	notice         string
+	errText        string
 
 	// demos
 	jobs      []tuiclient.Job
@@ -112,8 +116,6 @@ type model struct {
 	segs          segmentPicker
 	presetCursor  int
 	presetPurpose presetPurpose
-	confirmText   string
-	confirmCmd    tea.Cmd
 }
 
 func newModel(cl *tuiclient.Client) model {
@@ -126,11 +128,12 @@ func newModel(cl *tuiclient.Client) model {
 	ti.Width = 60
 
 	return model{
-		cl:      cl,
-		screen:  screenDemos,
-		mode:    modeBrowse,
-		spinner: sp,
-		prompt:  ti,
+		cl:             cl,
+		screen:         screenDemos,
+		mode:           modeBrowse,
+		defaultVariant: fallbackRenderVariant,
+		spinner:        sp,
+		prompt:         ti,
 	}
 }
 

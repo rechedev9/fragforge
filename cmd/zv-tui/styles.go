@@ -35,9 +35,7 @@ var (
 	itemDim      = lipgloss.NewStyle().Foreground(colMuted)
 
 	labelStyle = lipgloss.NewStyle().Foreground(colMuted)
-	valueStyle = lipgloss.NewStyle().Foreground(colText)
 
-	statusBar = lipgloss.NewStyle().Foreground(colText)
 	hintStyle = lipgloss.NewStyle().Foreground(colMuted)
 	hintKey   = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
 

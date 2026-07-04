@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -96,38 +97,22 @@ func (e *APIError) Error() string {
 // for "action not valid in this state". The TUI treats it as "keep polling".
 func IsNotReady(err error) bool {
 	var apiErr *APIError
-	return asAPIError(err, &apiErr) && apiErr.StatusCode == http.StatusConflict
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict
 }
 
 // IsNotFound reports whether err is a 404.
 func IsNotFound(err error) bool {
 	var apiErr *APIError
-	return asAPIError(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
 // StatusCode returns the HTTP status of an APIError, or 0 if err is not one.
 func StatusCode(err error) int {
 	var apiErr *APIError
-	if asAPIError(err, &apiErr) {
+	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode
 	}
 	return 0
-}
-
-func asAPIError(err error, target **APIError) bool {
-	for err != nil {
-		if e, ok := err.(*APIError); ok {
-			*target = e
-			return true
-		}
-		type unwrapper interface{ Unwrap() error }
-		u, ok := err.(unwrapper)
-		if !ok {
-			return false
-		}
-		err = u.Unwrap()
-	}
-	return false
 }
 
 // getJSON performs a GET and decodes the JSON body into out.
@@ -217,6 +202,25 @@ func (c *Client) stream(ctx context.Context, path string, dst io.Writer) (string
 		return "", fmt.Errorf("GET %s: stream body: %w", path, err)
 	}
 	return resp.Header.Get("Content-Type"), nil
+}
+
+// configJSON marshals a multipart "config" field object, skipping empty values.
+// Using json.Marshal (rather than fmt.Sprintf %q) keeps user-supplied values
+// such as a stream title JSON-safe: %q emits Go escapes, not JSON escapes, so a
+// title with a control character would otherwise produce a body the server
+// rejects with 400.
+func configJSON(fields map[string]string) string {
+	obj := make(map[string]string, len(fields))
+	for k, v := range fields {
+		if v != "" {
+			obj[k] = v
+		}
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 // query builds a "?k=v" suffix from a set of parameters, skipping empty values.
