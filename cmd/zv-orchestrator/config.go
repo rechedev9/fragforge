@@ -41,6 +41,7 @@ type config struct {
 	WhisperModelPath  string
 	GroqAPIKey        string
 	GroqModel         string
+	AllowedWebOrigins []string
 }
 
 const (
@@ -98,6 +99,11 @@ func loadConfig() (config, error) {
 		// (an API key cannot be probed on PATH or disk).
 		GroqAPIKey: firstNonEmpty(os.Getenv("ZV_GROQ_API_KEY"), os.Getenv("GROQ_API_KEY")),
 		GroqModel:  os.Getenv("ZV_GROQ_MODEL"),
+		// ZV_ALLOWED_WEB_ORIGINS is the single "hosted mode is enabled" signal: a
+		// comma-separated list of exact web Origins allowed to make cross-site
+		// calls from our SPA. Empty by default, so every existing mode is
+		// unaffected.
+		AllowedWebOrigins: parseAllowedWebOrigins(os.Getenv("ZV_ALLOWED_WEB_ORIGINS")),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
@@ -136,6 +142,29 @@ func loadConfig() (config, error) {
 		return c, err
 	}
 	return c, nil
+}
+
+// hosted reports whether hosted mode is enabled, which is signaled solely by a
+// non-empty set of allowed web origins.
+func (c config) hosted() bool {
+	return len(c.AllowedWebOrigins) > 0
+}
+
+// parseAllowedWebOrigins splits a comma-separated origin list, trims each entry
+// and drops empties. A blank input yields a nil slice (hosted mode off).
+func parseAllowedWebOrigins(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var origins []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		origins = append(origins, part)
+	}
+	return origins
 }
 
 func (c config) recordWorkerEnabled() bool {

@@ -9,13 +9,60 @@ import (
 	"time"
 )
 
+// hostGuard defends the loopback agent against DNS rebinding. In hosted mode an
+// attacker page whose domain resolves to 127.0.0.1 can send both Origin and Host
+// of its own domain; originMatchesHost would then read the request as same-origin
+// and skip the pairing-token requirement. Pinning the Host to a loopback name
+// defeats that for every path (including the CORS preflight, since this is the
+// outermost middleware), because a rebinding request carries the attacker's Host,
+// not 127.0.0.1/localhost. Outside hosted mode the middleware is a pass-through,
+// so Electron/local/one-box/exposed binds are byte-for-byte unchanged.
+func (h *Handlers) hostGuard(next http.Handler) http.Handler {
+	if !h.hosted() {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackHost(r.Host) {
+			writeError(w, http.StatusMisdirectedRequest, "unexpected Host header")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLoopbackHost reports whether an HTTP Host header targets the loopback
+// interface: "localhost" or a loopback IP (127.0.0.0/8 or ::1), with or without a
+// port. Unlike a listen address a Host header may omit the port, so a
+// SplitHostPort failure falls back to treating the whole value as the host.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host
+	}
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
 // crossSiteGuard rejects browser-driven cross-site mutation requests. It is a
 // defense-in-depth measure against CSRF: non-browser clients (curl, the Next.js
 // proxy, server-to-server) send neither Sec-Fetch-Site nor Origin and are
 // allowed through, since they cannot be CSRF'd.
-func crossSiteGuard(next http.Handler) http.Handler {
+func (h *Handlers) crossSiteGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isMutationMethod(r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// A legitimate cross-site call from our hosted SPA is allowed here. It is
+		// still gated by the pairing token downstream in requireMutationToken, so
+		// this only relaxes the CSRF guard for an explicitly configured origin.
+		if origin := r.Header.Get("Origin"); origin != "" && h.isAllowedWebOrigin(origin) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -47,6 +94,42 @@ func originMatchesHost(origin, host string) bool {
 		return false
 	}
 	return u.Host == host
+}
+
+// cors emits CORS headers for the hosted SPA and answers Private Network Access
+// preflights. It only reacts to Origins in the configured allow-list; any other
+// Origin (or none) passes through with no CORS headers, so the browser blocks a
+// cross-origin read. It is wired as the OUTERMOST middleware so a preflight
+// OPTIONS short-circuits with 204 before the auth gates run.
+func (h *Handlers) cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" || !h.isAllowedWebOrigin(origin) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Echo the exact Origin (never "*") and mark the response as
+		// Origin-varying so a shared cache cannot serve one origin's response to
+		// another. We authenticate with a header token, not cookies, so
+		// Access-Control-Allow-Credentials is deliberately not set.
+		hdr := w.Header()
+		hdr.Set("Access-Control-Allow-Origin", origin)
+		hdr.Add("Vary", "Origin")
+		hdr.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		hdr.Set("Access-Control-Allow-Headers", "X-FragForge-Token, Content-Type, Range")
+		hdr.Set("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length, Content-Type")
+		if r.Method == http.MethodOptions {
+			// Chromium only asks for Private Network Access on the preflight, when
+			// an HTTPS page calls a localhost/private address. Grant it only when
+			// requested, and only for an allowed origin.
+			if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+				hdr.Set("Access-Control-Allow-Private-Network", "true")
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // rateLimiter is a per-client-IP token-bucket limiter. Buckets refill lazily on

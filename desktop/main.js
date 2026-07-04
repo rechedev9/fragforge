@@ -9,7 +9,7 @@
 // Both children bind loopback on dynamically-chosen free ports, so two installs
 // (or a stray process) never collide on a fixed port.
 
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, clipboard, shell } = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
@@ -19,11 +19,53 @@ const https = require('https');
 const net = require('net');
 
 // A single running instance owns the orchestrator; a second launch just focuses
-// the existing window instead of spawning a duplicate backend on new ports.
+// the existing window instead of spawning a duplicate backend on new ports (or,
+// in agent-only mode, would collide on the fixed agent port).
 if (!app.requestSingleInstanceLock()) {
   app.quit();
   process.exit(0);
 }
+
+/** Truthy env flag ("1", "true", "yes", "on"; case-insensitive). */
+function envTruthy(value) {
+  if (!value) return false;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+// Agent-only (headless) mode: instead of bundling and serving the Next web UI
+// in a native window, this run just provisions the local capture/render tools
+// and spawns the orchestrator bound to a fixed loopback port with a persisted
+// pairing token. The web UI is served by our hosted domain; the browser on this
+// PC talks to this agent directly at http://127.0.0.1:<port>. Everything below
+// the flag keeps the existing Studio behavior untouched when the flag is off.
+//
+// Enabled either by FRAGFORGE_AGENT_ONLY=1 (dev / manual) or by a bundled
+// "agent-mode.flag" resource (the dedicated Agent installer stages it via
+// scripts/assemble-agent.mjs), so the packaged Agent runs headless with no env
+// var required.
+function agentModeMarkerPresent() {
+  try {
+    const base = app.isPackaged
+      ? process.resourcesPath
+      : path.join(__dirname, 'build-resources');
+    return fs.existsSync(path.join(base, 'agent-mode.flag'));
+  } catch {
+    return false;
+  }
+}
+const AGENT_ONLY = envTruthy(process.env.FRAGFORGE_AGENT_ONLY) || agentModeMarkerPresent();
+
+// The loopback address the hosted agent binds by default. Fixed (not a random
+// free port) so the hosted SPA can default to it without discovery; the user
+// can override it with FRAGFORGE_AGENT_ADDR (host:port) if 8787 is taken.
+const DEFAULT_AGENT_ADDR = '127.0.0.1:8787';
+
+// The hosted web origin(s) allowed to make cross-site calls to this agent. This
+// is the single "hosted mode is on" signal the orchestrator reads
+// (ZV_ALLOWED_WEB_ORIGINS): a non-empty value makes it generate/persist/print
+// the pairing token and require that token for cross-site reads and mutations.
+// Comma-separated exact origins; overridable via ZV_ALLOWED_WEB_ORIGINS.
+const DEFAULT_WEB_ORIGINS = 'https://fragforge.gr-prod.taila10698.ts.net';
 
 /**
  * Resolves a bundled resource for both the packaged app and `electron .` (dev).
@@ -497,6 +539,122 @@ async function boot() {
   if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${webPort}/matches`);
 }
 
+// 16x16 tray icon (FragForge cyan frame + slash), embedded as a PNG so the
+// headless agent needs no external asset and works in the packaged app.
+const TRAY_ICON_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAWElEQVR4nKXTqxUAIAxDUTSaCdh/IZZgBVBwyq9Ringi5rqEXGr7KcgRY6KawBgssgAe5ABY5AowyBNAERVAEBOwEAjQEBh4IRRwQ2hgR1yARNyARJY3euqxZL+nE0XvfgAAAABJRU5ErkJggg==';
+
+let tray = null;
+
+/**
+ * Builds (or rebuilds) the system-tray menu for agent-only mode. Best-effort:
+ * a tray is the standard background-agent affordance on Windows, but if it
+ * cannot be created (no shell, unsupported platform) the agent keeps running
+ * headless - the pairing token is still on stdout, in studio.log, and in the
+ * token file. Called after boot and again when the token/URL/status change.
+ */
+function renderTray(agentUrl, token, statusText) {
+  try {
+    if (!tray) {
+      const icon = nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_ICON_PNG}`);
+      tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
+    }
+    tray.setToolTip(`FragForge Agent - ${statusText}\n${agentUrl}`);
+    const menu = Menu.buildFromTemplate([
+      { label: `FragForge Agent (${statusText})`, enabled: false },
+      { label: agentUrl, enabled: false },
+      { type: 'separator' },
+      {
+        label: 'Copiar URL del agente',
+        click: () => clipboard.writeText(agentUrl),
+      },
+      {
+        label: 'Copiar token de emparejamiento',
+        enabled: Boolean(token),
+        click: () => { if (token) clipboard.writeText(token); },
+      },
+      {
+        label: 'Abrir registro (studio.log)',
+        click: () => { shell.openPath(logFile).catch(() => {}); },
+      },
+      { type: 'separator' },
+      { label: 'Salir', click: () => app.quit() },
+    ]);
+    tray.setContextMenu(menu);
+  } catch (err) {
+    logLine(`[agent] tray unavailable (running headless): ${err}\n`);
+  }
+}
+
+/** Reads the persisted pairing token the orchestrator wrote, or '' if absent. */
+function readPairingToken() {
+  try {
+    return fs.readFileSync(path.join(dataDir, 'agent-pairing.token'), 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Headless agent boot: no browser window, no bundled web. Provisions the
+ * capture/render tools (win32 only), then spawns the orchestrator bound to the
+ * fixed loopback agent port in hosted mode (ZV_ALLOWED_WEB_ORIGINS set), so it
+ * generates/persists/prints the pairing token and gates cross-site requests on
+ * it. The hosted SPA (served by our domain) talks to this agent directly.
+ */
+async function agentBoot() {
+  const agentAddr = process.env.FRAGFORGE_AGENT_ADDR || DEFAULT_AGENT_ADDR;
+  const allowedOrigins = process.env.ZV_ALLOWED_WEB_ORIGINS || DEFAULT_WEB_ORIGINS;
+  const agentUrl = `http://${agentAddr}`;
+
+  renderTray(agentUrl, '', 'arrancando');
+
+  logLine('[agent] FragForge Agent (headless) starting\n');
+  logLine(`[agent] bind ${agentAddr}, allowed web origins: ${allowedOrigins}\n`);
+
+  // Music tracks land while the backend boots; /api/songs rescans per request.
+  provisionMusic().catch((err) => logLine(`[music] provision failed: ${err}\n`));
+
+  // Resolve HLAE/FFmpeg/yt-dlp before spawning (tool paths are read once at
+  // startup). First boot downloads them; later boots return cached installs.
+  const toolEnv = await provisionTools();
+
+  // Hosted-mode orchestrator: SQLite job repo on disk (reels survive a restart),
+  // inline queue, provisioned tools, and ZV_ALLOWED_WEB_ORIGINS to enable the
+  // pairing token + read-auth. ZV_MUTATION_TOKEN (if the user set it) still
+  // takes precedence inside the orchestrator; we do not set it here so a fresh
+  // random token is generated and persisted on first run.
+  const orch = launch('orchestrator', orchestratorExe, [], {
+    ZV_DATABASE_URL: 'sqlite',
+    ZV_DATA_DIR: dataDir,
+    ZV_HTTP_ADDR: agentAddr,
+    ZV_MUSIC_DIR: musicDir,
+    ZV_ALLOWED_WEB_ORIGINS: allowedOrigins,
+    ...toolEnv,
+  });
+
+  try {
+    await Promise.race([waitForHttp(`${agentUrl}/healthz`, 60000), orch.exited]);
+  } catch (err) {
+    logLine(`[agent] failed to start: ${err}\n`);
+    renderTray(agentUrl, '', 'error');
+    return;
+  }
+
+  const token = readPairingToken();
+  renderTray(agentUrl, token, 'conectado');
+
+  // The user copies this into the hosted web UI ("Agent connection"). The
+  // orchestrator also prints the token itself; this banner repeats it with the
+  // agent URL so a single glance at the log has everything to pair.
+  logLine('\n============================================================\n');
+  logLine('  FragForge Agent listo\n');
+  logLine(`  URL del agente:  ${agentUrl}\n`);
+  logLine(`  Token de emparejamiento:\n    ${token || '(no se pudo leer; revisa el registro del orquestador)'}\n`);
+  logLine('  Pega ambos en la web (seccion "Conexion con el agente").\n');
+  logLine('============================================================\n\n');
+}
+
 function shutdown() {
   for (const child of children) {
     if (!child.killed) child.kill();
@@ -510,8 +668,14 @@ app.on('second-instance', () => {
   }
 });
 
-app.whenReady().then(boot);
+app.whenReady().then(AGENT_ONLY ? agentBoot : boot);
 
-app.on('window-all-closed', () => app.quit());
+// In Studio mode, closing the last window quits the app. In agent-only mode
+// there is no window (the agent is a background/tray process), so this must not
+// quit: the agent keeps running until the user quits it from the tray or the
+// process is signalled.
+app.on('window-all-closed', () => {
+  if (!AGENT_ONLY) app.quit();
+});
 app.on('before-quit', shutdown);
 process.on('exit', shutdown);

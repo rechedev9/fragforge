@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyCallback, fetchPersona } from '@/lib/auth/steam';
 import { signSession, SESSION_COOKIE, SESSION_MAX_AGE } from '@/lib/auth/session';
-import { ensureUser } from '@/lib/cloud/users';
+import { ensureUser } from '@/lib/accounts/users';
 
 export const runtime = 'nodejs';
 

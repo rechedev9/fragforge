@@ -25,6 +25,7 @@ import {
   type StreamVariant,
 } from '@/lib/api/streams';
 import { api } from '@/lib/api';
+import { downloadMedia, useMediaSrc } from '@/lib/agent/media';
 import type { Song } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
@@ -513,7 +514,10 @@ function StreamEditor({
   onCreate: () => void;
   onStartOver: () => void;
 }) {
-  const videoSrc = streamsApi.sourceUrl(job.id);
+  // In hosted mode sourceUrl is an absolute agent URL needing the token; resolve
+  // it to a token-fetched object URL so <video>/canvas cropping works (empty
+  // until the blob is ready). In local/cloud it is the same-origin path as-is.
+  const videoSrc = useMediaSrc(streamsApi.sourceUrl(job.id)) ?? '';
   const variantMeta = STREAM_VARIANTS.find((v) => v.value === plan.variant) ?? STREAM_VARIANTS[0];
   const stale = renderedPlan !== null && planFingerprint(renderedPlan) !== planFingerprint(plan);
   const busy = stage === 'rendering' || saving;
@@ -862,31 +866,45 @@ function RenderResults({
           </div>
         ) : (
           <div className="grid gap-5 sm:grid-cols-2">
-            {renderState.videos.map((v) => {
-              const url = streamsApi.videoUrl(job.id, renderedPlan.variant, v.clip_id);
-              return (
-                <div key={v.clip_id} className="flex flex-col gap-2">
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video src={url} controls className="aspect-[9/16] w-full bg-black object-contain" />
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm text-foreground">{v.title || v.clip_id}</span>
-                    {stale ? (
-                      <Button variant="outline" size="icon-sm" disabled aria-label={`Descargar ${v.title || v.clip_id} (desactualizado)`}>
-                        <Download className="size-4" />
-                      </Button>
-                    ) : (
-                      <Button asChild variant="outline" size="icon-sm">
-                        <a href={url} download aria-label={`Descargar ${v.title || v.clip_id}`}>
-                          <Download className="size-4" />
-                        </a>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {renderState.videos.map((v) => (
+              <RenderedShort
+                key={v.clip_id}
+                url={streamsApi.videoUrl(job.id, renderedPlan.variant, v.clip_id)}
+                label={v.title || v.clip_id}
+                stale={stale}
+              />
+            ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One rendered Short: plays the clip and offers a download. In hosted mode the
+ * URL is an absolute agent URL needing the X-FragForge-Token, so playback goes
+ * through a token-fetched object URL (useMediaSrc) and the download fetches the
+ * MP4 with the token into a Blob (downloadMedia) - the bytes never touch our
+ * server. In local/cloud both are plain same-origin URLs.
+ */
+function RenderedShort({ url, label, stale }: { url: string; label: string; stale: boolean }) {
+  const src = useMediaSrc(url);
+  return (
+    <div className="flex flex-col gap-2">
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      {src ? <video src={src} controls className="aspect-[9/16] w-full bg-black object-contain" /> : <div className="aspect-[9/16] w-full animate-pulse bg-muted" />}
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm text-foreground">{label}</span>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={stale}
+          aria-label={stale ? `Descargar ${label} (desactualizado)` : `Descargar ${label}`}
+          onClick={() => void downloadMedia(url, `${label}.mp4`)}
+        >
+          <Download className="size-4" />
+        </Button>
       </div>
     </div>
   );

@@ -1,0 +1,33 @@
+# electron-builder config for the FragForge Agent installer (headless).
+#
+# Separate from the Studio build in package.json because the Agent bundles NO
+# web UI (that is hosted on our domain) - it stages only the Go binaries, the
+# music catalog, and the agent-mode.flag marker. Build on Windows:
+#
+#   cd desktop
+#   npm install
+#   npm run dist:agent
+#
+# Producing a SIGNED .exe additionally requires a Windows build host with a code
+# signing certificate; it cannot be built or E2E-tested on Linux.
+appId: com.fragforge.agent
+productName: FragForge Agent
+directories:
+  output: dist-agent
+files:
+  - main.js
+  - loading.html
+extraResources:
+  - from: build-resources/bin
+    to: bin
+  - from: build-resources/music
+    to: music
+  - from: build-resources/agent-mode.flag
+    to: agent-mode.flag
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

@@ -17,12 +17,15 @@ COPY . .
 # clone has no such directory at all; guarantee it exists so the runner's COPY
 # never fails on a clean checkout.
 RUN mkdir -p public
-# local mode: the compose stack is the self-contained no-login analyze flow
-# (web -> orchestrator container), not the Supabase cloud control-plane. The
-# var is inlined into the client bundle here and must also be present at
-# runtime for the server route handlers (set in docker-compose.app.yml).
+# Data-plane mode is inlined into the client bundle here (NEXT_PUBLIC_* is baked
+# at build time) and must also match at runtime for the server route handlers.
+# Defaults to 'local': the self-contained no-login analyze flow (web ->
+# orchestrator container). The hosted stack overrides this to 'hosted' via a
+# build arg (docker-compose.hosted.yml), where the browser talks DIRECTLY to a
+# local agent and the Next server only serves the SPA + SQLite accounts DB.
+ARG NEXT_PUBLIC_FRAGFORGE_MODE=local
 ENV NEXT_PUBLIC_API_BASE=/api \
-    NEXT_PUBLIC_FRAGFORGE_MODE=local \
+    NEXT_PUBLIC_FRAGFORGE_MODE=${NEXT_PUBLIC_FRAGFORGE_MODE} \
     NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
