@@ -108,6 +108,10 @@ type model struct {
 	streamDetail streamDetail
 	streamID     string
 
+	// initialDrops are file paths given on the command line (e.g. a .dem
+	// dragged onto the executable), uploaded once at startup.
+	initialDrops []string
+
 	// overlays
 	prompt        textinput.Model
 	promptKind    promptKind
@@ -118,7 +122,7 @@ type model struct {
 	presetPurpose presetPurpose
 }
 
-func newModel(cl *tuiclient.Client) model {
+func newModel(cl *tuiclient.Client, initialDrops []string) model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = spinnerStyle
@@ -129,6 +133,7 @@ func newModel(cl *tuiclient.Client) model {
 
 	return model{
 		cl:             cl,
+		initialDrops:   initialDrops,
 		screen:         screenDemos,
 		mode:           modeBrowse,
 		defaultVariant: fallbackRenderVariant,
@@ -138,14 +143,17 @@ func newModel(cl *tuiclient.Client) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		m.loadCaps(),
 		m.loadPresets(),
 		m.loadJobs(),
 		m.loadStreams(),
 		tick(),
-	)
+	}
+	drops, _ := m.dropCmds(m.initialDrops)
+	cmds = append(cmds, drops...)
+	return tea.Batch(cmds...)
 }
 
 // focusedJob returns the job under the cursor on the demos screen, or nil.

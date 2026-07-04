@@ -18,14 +18,19 @@ import (
 const usage = `zv-tui - lazygit-style terminal UI for the FragForge pipeline
 
 Usage:
-  zv tui [--url <orchestrator>] [--token <token>]
+  zv tui [--url <orchestrator>] [--token <token>] [file ...]
+
+Files given as arguments (or dragged onto the executable) are uploaded on
+startup: .dem as demos, .mp4/.mov/.mkv/.webm as stream clips. Dropping a file
+onto the running TUI uploads it too.
 
 Flags:
   --url <addr>     orchestrator base URL (default $ORCHESTRATOR_URL or ` + tuiclient.DefaultBaseURL + `)
   --token <tok>    X-FragForge-Token for a non-loopback orchestrator
                    (default $ZV_MUTATION_TOKEN)
 
-Keys:
+Keys (the mouse works too: click tabs and rows, wheel to scroll, click the
+selected row to run its next step):
   ↑/↓ or j/k  navigate      tab  switch Demos / Stream Clips
   u           upload        enter  run the next step for the selected job
   r/c/R       record / compose / render     d  download the composed MP4
@@ -51,7 +56,7 @@ func main() {
 	}
 
 	cl := tuiclient.New(tuiclient.Config{BaseURL: *url, Token: *token})
-	p := tea.NewProgram(newModel(cl), tea.WithAltScreen())
+	p := tea.NewProgram(newModel(cl, fs.Args()), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "zv-tui: %v\n", err)
 		os.Exit(1)
