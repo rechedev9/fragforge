@@ -13,6 +13,7 @@ build:
 	go build -o bin/zv-pipeline ./cmd/zv-pipeline
 	go build -o bin/zv-tactical-data ./cmd/zv-tactical-data
 	go build -o bin/zv-agent ./cmd/zv-agent
+	go build -o bin/zv-tui ./cmd/zv-tui
 
 test:
 	go test ./... -count=1

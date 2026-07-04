@@ -27,6 +27,7 @@ Usage:
   zv workflows run <name> -- [workflow flags]
   zv workflows check
   zv serve
+  zv tui [--url <orchestrator>] [--token <token>]
   zv pipeline [zv-pipeline flags]
 
 Legacy pass-throughs:
@@ -39,6 +40,7 @@ Legacy pass-throughs:
   zv analysis-viewer [zv-analysis-viewer args]
   zv tactical-data [zv-tactical-data args]
   zv rhythm [zv-rhythm args]
+  zv tui [zv-tui args]
 
 Use "zv <command> --help" for the underlying command help.
 `

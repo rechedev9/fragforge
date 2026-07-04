@@ -235,6 +235,7 @@ func legacyPassThroughs() []legacyPassThrough {
 		{Command: "analysis-viewer", Binary: "zv-analysis-viewer"},
 		{Command: "tactical-data", Binary: "zv-tactical-data"},
 		{Command: "rhythm", Binary: "zv-rhythm"},
+		{Command: "tui", Binary: "zv-tui"},
 	}
 }
 
@@ -251,5 +252,6 @@ func defaultLegacyCommandEntrypointNames() []string {
 		"zv-orchestrator",
 		"zv-tactical-data",
 		"zv-rhythm",
+		"zv-tui",
 	}
 }
