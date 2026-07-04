@@ -223,14 +223,28 @@ func main() {
 		rateLimitRPS = 20
 		rateLimitBurst = 40
 	}
+	// Hosted mode: ensure a pairing token exists (ZV_MUTATION_TOKEN takes
+	// precedence), print it so the user can paste it into the web UI, and turn on
+	// read-auth so cross-site reads are gated. Loopback same-origin reads still
+	// work because the cross-site rule in requireMutationToken only triggers on a
+	// cross-site Origin. Non-hosted modes are untouched: no token is generated.
+	if cfg.hosted() {
+		token, err := ensurePairingToken(cfg.DataDir, cfg.MutationToken)
+		if err != nil {
+			log.Fatalf("pairing token: %v", err)
+		}
+		cfg.MutationToken = token
+		printPairingToken(token)
+	}
 	handlers := httpapi.NewHandlers(repo, store, queue,
 		httpapi.WithMutationToken(cfg.MutationToken),
-		httpapi.WithRequireReadAuth(exposed),
+		httpapi.WithRequireReadAuth(exposed || cfg.hosted()),
 		httpapi.WithRateLimit(rateLimitRPS, rateLimitBurst),
 		httpapi.WithStreamRepository(streamRepo),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
 		httpapi.WithMusicDir(cfg.MusicDir),
 		httpapi.WithCapabilities(cfg.captureCapabilities(captureSource)),
+		httpapi.WithAllowedWebOrigins(cfg.AllowedWebOrigins),
 	)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

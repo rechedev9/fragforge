@@ -29,9 +29,6 @@ const session: Session = {
 
 const videos: Video[] = seedVideos();
 
-/** Set by pairPc so the next getPcStatus reports the PC as paired. */
-let pcPaired = false;
-
 /**
  * Uploaded demos, parsed on the fly. They are not Steam matches (the demo may
  * belong to anyone) so they live apart from fixtureMatches, but getMatch /
@@ -112,7 +109,6 @@ function loadSession(): void {
     session.slots = stored.slots ?? session.slots;
     session.pcPaired = stored.pcPaired ?? false;
     session.matchHistoryLinked = stored.matchHistoryLinked ?? false;
-    pcPaired = stored.pcPaired ?? false;
   } catch {
     // ignore corrupt storage; fall back to the signed-out default.
   }
@@ -168,7 +164,6 @@ export class MockApiClient implements ApiClient {
     session.user = null;
     session.matchHistoryLinked = false;
     session.pcPaired = false;
-    pcPaired = false;
     saveSession();
   }
 
@@ -177,22 +172,6 @@ export class MockApiClient implements ApiClient {
     session.matchHistoryLinked = true;
     saveSession();
     return { ok: true, matchesFound: fixtureMatches.length };
-  }
-
-  async pairPc(): Promise<{ pairingCode: string }> {
-    await delay();
-    pcPaired = true;
-    session.pcPaired = true;
-    saveSession();
-    const code = `CS2V-${randomCode()}`;
-    return { pairingCode: code };
-  }
-
-  async getPcStatus(): Promise<{ paired: boolean }> {
-    await delay();
-    session.pcPaired = pcPaired;
-    saveSession();
-    return { paired: pcPaired };
   }
 
   // Offline/dev mode has no real orchestrator to probe, so capture reads ready.
@@ -366,13 +345,4 @@ function cloneSession(): Session {
     pcPaired: session.pcPaired,
     matchHistoryLinked: session.matchHistoryLinked,
   };
-}
-
-function randomCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let out = '';
-  for (let i = 0; i < 4; i++) {
-    out += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return out;
 }

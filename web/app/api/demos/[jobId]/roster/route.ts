@@ -1,40 +1,20 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/server';
-import { serviceUnavailable } from '../../_lib';
 import { isLocalMode } from '@/lib/mode';
 import { localRoster } from '../../_local';
 
 export const runtime = 'nodejs';
 
 /**
- * GET /api/demos/{jobId}/roster — reads the agent-uploaded roster scan result
- * straight from the `artifacts` bucket (`jobs/{jobId}/roster.json`). Missing
- * object, download error, or a truncated/corrupt payload all resolve to an
- * empty roster rather than a 500: the upload page treats an empty list the
- * same as "still scanning" and keeps polling status. A Supabase outage/misconfig
- * (the client itself throwing) instead surfaces the {code: service_unavailable}
- * 503 shape, per the /api/demos/* contract.
+ * GET /api/demos/{jobId}/roster — roster scan result proxy.
+ *
+ * Only local mode uses this: it proxies the roster from the local orchestrator.
+ * In hosted mode the browser reads the roster from the local agent directly, so
+ * any non-local request is a misconfiguration and gets a 404. The former
+ * Supabase artifacts-download path was removed with the accounts move to
+ * node:sqlite (job artifacts no longer live on our server).
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ jobId: string }> }): Promise<Response> {
   const { jobId } = await params;
-
-  // Local studio: proxy the roster scan result from the local orchestrator.
   if (isLocalMode()) return localRoster(jobId);
-
-  const path = `jobs/${jobId}/roster.json`;
-
-  try {
-    const { data, error } = await supabaseAdmin().storage.from('artifacts').download(path);
-    if (error || !data) return NextResponse.json({ players: [] });
-
-    try {
-      const json = JSON.parse(await data.text()) as { players?: unknown[] };
-      return NextResponse.json({ players: json.players ?? [] });
-    } catch {
-      return NextResponse.json({ players: [] });
-    }
-  } catch (err) {
-    console.error('roster lookup failed', err);
-    return serviceUnavailable();
-  }
+  return NextResponse.json({ players: [] }, { status: 404 });
 }

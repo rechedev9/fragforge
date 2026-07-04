@@ -30,7 +30,6 @@ export default function ConnectPage() {
   const router = useRouter();
   const { session, loading } = useSession();
   const [step, setStep] = useState(0);
-  const [paired, setPaired] = useState(false);
 
   // Resume where the player actually is — skip steps already completed.
   useEffect(() => {
@@ -50,16 +49,10 @@ export default function ConnectPage() {
     );
   }
 
-  // The stepper has one more marker than the real flow: "CAPTURA LISTA" lights
-  // up once pairing is confirmed, even though it isn't its own page/step.
-  let stepperIndex: number;
-  if (step === 0) {
-    stepperIndex = 0;
-  } else if (paired) {
-    stepperIndex = 2;
-  } else {
-    stepperIndex = 1;
-  }
+  // The two onboarding steps map directly onto the first two stepper markers;
+  // the third ("CAPTURA LISTA") is confirmed later in the studio (the sidebar
+  // CAPTURA card), not from this page.
+  const stepperIndex = step;
 
   return (
     <main className="relative min-h-screen overflow-hidden">
@@ -89,7 +82,7 @@ export default function ConnectPage() {
             {step === 0 ? (
               <LinkHistoryStep onLinked={() => setStep(1)} />
             ) : (
-              <PairPcStep onEnter={enterStudio} onPairedChange={setPaired} />
+              <PairPcStep onEnter={enterStudio} />
             )}
           </div>
 

@@ -5,6 +5,7 @@ import { Clock, Download, Eye, Globe, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
+import { downloadMedia, useMediaSrc } from '@/lib/agent/media';
 import { formatCountdown } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -31,6 +32,14 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
   const [publishing, setPublishing] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
 
+  // In hosted mode downloadUrl/thumbnailUrl are ABSOLUTE agent URLs that need the
+  // X-FragForge-Token; a bare <video src>/<img src> cannot carry it, so resolve
+  // them to token-fetched object URLs. The player MP4 is only fetched once the
+  // dialog opens (undefined url = no fetch), so a Library of many cards does not
+  // eagerly pull every reel. In local/cloud these hooks return the URL unchanged.
+  const thumbSrc = useMediaSrc(video.thumbnailUrl);
+  const playSrc = useMediaSrc(playerOpen ? video.downloadUrl : undefined);
+
   const publish = async () => {
     if (video.published || publishing) return;
     setPublishing(true);
@@ -44,13 +53,12 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
 
   const handleDownload = () => {
     if (!video.downloadUrl) return;
-    const a = document.createElement('a');
-    a.href = video.downloadUrl;
-    a.download = `${video.title}.mp4`;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    // Hosted mode fetches the MP4 from the local agent WITH the token into a Blob
+    // and saves it locally; the bytes never transit our server. Local/cloud fall
+    // back to a plain same-origin anchor download inside downloadMedia.
+    void downloadMedia(video.downloadUrl, `${video.title}.mp4`).catch(() => {
+      toast('No se pudo descargar el vídeo.');
+    });
   };
 
   const handleShare = async () => {
@@ -79,9 +87,9 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
     <>
       <div data-slot="card" className="neon-brackets relative border border-primary/40 bg-card/80">
         <div className="group relative aspect-video w-full overflow-hidden bg-muted">
-          {video.thumbnailUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- proxied reel cover, dynamic same-origin URL
-            <img src={video.thumbnailUrl} alt="" className="size-full object-cover" />
+          {video.thumbnailUrl && thumbSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element -- reel cover, dynamic URL (same-origin proxy or token-fetched object URL in hosted mode)
+            <img src={thumbSrc} alt="" className="size-full object-cover" />
           ) : (
             <ReelCover seed={video.id} label={video.map} className="size-full" />
           )}
@@ -175,9 +183,9 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
               {meta}
             </DialogDescription>
           </DialogHeader>
-          {video.downloadUrl ? (
+          {playSrc ? (
             <video
-              src={video.downloadUrl}
+              src={playSrc}
               controls
               autoPlay
               playsInline

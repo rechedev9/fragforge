@@ -27,8 +27,9 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Wordmark } from '@/components/brand/wordmark';
 import { CaptureReadiness } from '@/components/shell/capture-readiness';
+import { AgentConnectionPill } from '@/components/agent/agent-connection';
 import { useSession } from '@/lib/session';
-import { isLocalMode } from '@/lib/mode';
+import { isLocalMode, isHostedMode } from '@/lib/mode';
 import { cn } from '@/lib/utils';
 
 type NavItem = {
@@ -119,10 +120,13 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="gap-2 px-4 pb-6">
+        {/* Hosted mode bridges to a LOCAL agent; keep its connected/disconnected
+            state always visible in the shell. */}
+        {isHostedMode() && <AgentConnectionPill className="group-data-[collapsible=icon]:hidden" />}
         <CaptureReadiness />
-        {/* Slots quota and Steam sign-in are cloud-only; local studio runs on
-            this PC, so the footer shows just capture readiness. */}
-        {!isLocalMode() && <SlotsMeter />}
+        {/* The slots quota is a cloud-only concept; local studio and hosted both
+            run capture on this PC. Steam sign-in stays for cloud and hosted. */}
+        {!isLocalMode() && !isHostedMode() && <SlotsMeter />}
         {!isLocalMode() && <UserMenu />}
       </SidebarFooter>
     </Sidebar>

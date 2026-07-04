@@ -15,6 +15,19 @@ Capture still needs CS2 + HLAE installed on the machine (Windows + GPU); the app
 only removes the setup friction, not that requirement. Job data (demos,
 artifacts) is written under the per-user app data dir, not Program Files.
 
+## Agent-only (headless) mode
+
+The same `main.js` can run headless as the FragForge Agent for hosted mode: no
+window, no bundled web (the web is served by our domain), just the orchestrator
+bound to `127.0.0.1:8787` with a persisted pairing token and a system-tray icon
+to copy the token/URL. It reuses the exact same HLAE/FFmpeg/yt-dlp provisioning.
+
+Enable it with `FRAGFORGE_AGENT_ONLY=1`, or bundle the `agent-mode.flag` marker
+that `scripts/assemble-agent.mjs` stages (the dedicated Agent installer does).
+Build the Agent installer with `npm run dist:agent`
+(config: `electron-builder-agent.yml`). Full details, security model and
+Windows-only signed-build caveat: `docs/hosted-agent.md`.
+
 ## Build the installer (on Windows)
 
 Prerequisites: Go 1.26+, Node.js + npm, and the web deps installed.

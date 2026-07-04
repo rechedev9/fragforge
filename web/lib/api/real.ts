@@ -5,8 +5,25 @@ import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
-import { isLocalMode } from '@/lib/mode';
+import { usesLocalAgent } from '@/lib/mode';
 import { playsSelectionLabel } from '@/lib/format';
+
+/**
+ * Transport options for RealApiClient. In hosted mode (Topology A) the browser
+ * talks DIRECTLY to the local agent: `native` remaps the same-origin proxy paths
+ * (`/api/demos/*`) to the agent's NATIVE routes (`/api/jobs/*`), `baseUrl`
+ * prefixes them with the agent origin, and `headers` supplies the per-request
+ * X-FragForge-Token. Omitted for local/cloud, where every call stays a
+ * same-origin relative fetch through the Next.js `/api/*` proxy.
+ */
+export type RealApiTransport = {
+  /** Absolute agent origin (no trailing slash) prefixed onto native paths. */
+  baseUrl?: string;
+  /** Per-request headers (the token provider); resolved lazily on every call. */
+  headers?: () => Record<string, string>;
+  /** When true, remap proxy paths to agent-native paths and prefix baseUrl. */
+  native?: boolean;
+};
 
 /** Segment ids joined into the one path segment the record/render/video routes key on. */
 function reelName(segmentIds: string[]): string {
@@ -167,7 +184,17 @@ export class RealApiClient implements ApiClient {
   /** Reels with a record/render POST in flight, so a tick never double-drives. */
   private readonly driving = new Set<string>();
 
-  constructor() {
+  /** Agent origin prefixed onto native paths in hosted mode; '' same-origin. */
+  private readonly baseUrl: string;
+  /** Per-request header provider (the token) - resolved lazily on every call. */
+  private readonly headers: () => Record<string, string>;
+  /** When true, job traffic hits the agent's native routes, not the proxy. */
+  private readonly native: boolean;
+
+  constructor(transport: RealApiTransport = {}) {
+    this.baseUrl = (transport.baseUrl ?? '').replace(/\/+$/, '');
+    this.headers = transport.headers ?? (() => ({}));
+    this.native = transport.native ?? false;
     // Rehydrate the reels the user asked for so the Library survives a hard reload
     // or a direct visit; their live status is filled on the first reconcile tick.
     for (const intent of loadReelIntents()) {
@@ -176,29 +203,70 @@ export class RealApiClient implements ApiClient {
     }
   }
 
-  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
-    const form = new FormData();
-    form.append('file', file);
-    const { jobId } = await readJson<{ jobId: string }>(
-      await fetch('/api/demos/scan', { method: 'POST', body: form }),
-    );
+  /**
+   * Maps a same-origin proxy path to the URL to actually fetch. In native
+   * (hosted) mode the `/api/demos/*` proxy paths become the agent's NATIVE
+   * `/api/jobs/*` routes (scan is the agent's `/api/jobs` create), prefixed with
+   * the agent origin; `/api/capabilities|/api/songs|/api/presets` pass through
+   * unchanged but prefixed. In non-native mode the path is returned verbatim so
+   * the relative same-origin fetch is unchanged.
+   */
+  private mapPath(path: string): string {
+    if (!this.native) return path;
+    if (path === '/api/demos/scan') return `${this.baseUrl}/api/jobs`;
+    if (path.startsWith('/api/demos/')) {
+      return `${this.baseUrl}/api/jobs/${path.slice('/api/demos/'.length)}`;
+    }
+    // /api/capabilities | /api/songs | /api/presets - agent-native as-is.
+    return `${this.baseUrl}${path}`;
+  }
 
-    // Local studio scans synchronously on this machine (orchestrator status
-    // reaches 'scanned'); cloud scans hand off to a paired agent and also watch
-    // whether the user's PC is online (PC_OFFLINE).
-    if (isLocalMode()) {
+  /**
+   * The single fetch seam for job/capability traffic. Remaps the path (native
+   * mode) and merges the token header. Auth/session/steam calls do NOT go through
+   * here: they stay same-origin to OUR server and must never be remapped to the
+   * agent.
+   */
+  private req(path: string, init?: RequestInit): Promise<Response> {
+    const url = this.mapPath(path);
+    if (!this.native) return fetch(url, init);
+    const headers = { ...((init?.headers as Record<string, string> | undefined) ?? {}), ...this.headers() };
+    return fetch(url, { ...init, headers });
+  }
+
+  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
+    // The agent's native `/api/jobs` create (hosted) takes the upload under field
+    // `demo` and returns `{ id }` (mirroring the local proxy's _local.ts rewrite);
+    // the same-origin proxy (local/cloud) takes `file` and returns `{ jobId }`.
+    let jobId: string;
+    if (this.native) {
+      const form = new FormData();
+      form.append('demo', file, file.name);
+      const { id } = await readJson<{ id: string }>(await this.req('/api/demos/scan', { method: 'POST', body: form }));
+      jobId = id;
+    } else {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await readJson<{ jobId: string }>(await this.req('/api/demos/scan', { method: 'POST', body: form }));
+      jobId = res.jobId;
+    }
+
+    // A local agent (local studio or hosted) scans synchronously on this machine
+    // (status reaches 'scanned'); cloud scans hand off to a paired agent and also
+    // watch whether the user's PC is online (PC_OFFLINE).
+    if (usesLocalAgent()) {
       await this.waitForStatus(jobId, 'scanned');
     } else {
       await this.waitForScan(jobId);
     }
 
-    const roster = await readJson<RosterResponse>(await fetch(`/api/demos/${jobId}/roster`));
+    const roster = await readJson<RosterResponse>(await this.req(`/api/demos/${jobId}/roster`));
     return { jobId, players: roster.players.map(toDemoPlayer), match: toRosterMatch(roster.match) };
   }
 
   async parseDemo(input: { jobId: string; steamId: string }): Promise<Match> {
     await readJson<unknown>(
-      await fetch(`/api/demos/${input.jobId}/parse`, {
+      await this.req(`/api/demos/${input.jobId}/parse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ steamId: input.steamId }),
@@ -208,8 +276,8 @@ export class RealApiClient implements ApiClient {
     await this.waitForStatus(input.jobId, 'parsed');
 
     const [plan, roster] = await Promise.all([
-      readJson<KillPlan>(await fetch(`/api/demos/${input.jobId}/plan`)),
-      readJson<RosterResponse>(await fetch(`/api/demos/${input.jobId}/roster`)),
+      readJson<KillPlan>(await this.req(`/api/demos/${input.jobId}/plan`)),
+      readJson<RosterResponse>(await this.req(`/api/demos/${input.jobId}/roster`)),
     ]);
 
     const picked = roster.players.find((p) => p.steamid64 === input.steamId);
@@ -225,7 +293,7 @@ export class RealApiClient implements ApiClient {
     // The plan exists once parsing finishes and stays through record/render.
     if (!PLAN_READY.has(status)) return null;
 
-    const plan = await readJson<KillPlan>(await fetch(`/api/demos/${id}/plan`));
+    const plan = await readJson<KillPlan>(await this.req(`/api/demos/${id}/plan`));
     return planToMatch(id, plan, await this.summaryPlayer(id, plan));
   }
 
@@ -237,7 +305,7 @@ export class RealApiClient implements ApiClient {
    */
   private async summaryPlayer(jobId: string, plan: KillPlan): Promise<DemoPlayer> {
     try {
-      const { players } = await readJson<RosterResponse>(await fetch(`/api/demos/${jobId}/roster`));
+      const { players } = await readJson<RosterResponse>(await this.req(`/api/demos/${jobId}/roster`));
       const row = players.find((p) => p.steamid64 === plan.target?.steamid64) ?? players[0];
       if (row) return toDemoPlayer(row);
     } catch {
@@ -267,7 +335,7 @@ export class RealApiClient implements ApiClient {
     // No plan until parsing finishes; it persists through record/render.
     if (status === null || !PLAN_READY.has(status)) return [];
 
-    const plan = await readJson<KillPlan>(await fetch(`/api/demos/${matchId}/plan`));
+    const plan = await readJson<KillPlan>(await this.req(`/api/demos/${matchId}/plan`));
     return planToPlays(matchId, plan);
   }
 
@@ -296,7 +364,7 @@ export class RealApiClient implements ApiClient {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await sleep(1500);
       const data = await readJson<{ status: string; failure_reason?: string; online?: boolean }>(
-        await fetch(`/api/demos/${jobId}/status`),
+        await this.req(`/api/demos/${jobId}/status`),
       );
       if (data.status === 'scanned') return;
       if (data.status === 'failed') throw new Error(data.failure_reason || 'scan failed');
@@ -358,7 +426,7 @@ export class RealApiClient implements ApiClient {
       .map((v) => ({ ...v }));
     // Local studio shows only the user's own real reels (persisted on this PC).
     // Cloud/preview additionally shows demo seed videos for the design surface.
-    if (isLocalMode()) return reels;
+    if (usesLocalAgent()) return reels;
     const seeds = await this.fallback.listVideos();
     return [...reels, ...seeds];
   }
@@ -419,7 +487,7 @@ export class RealApiClient implements ApiClient {
     try {
       const variant = variantOf(intent);
       const name = reelName(intent.segmentIds);
-      await fetch(`/api/demos/${intent.jobId}/renders/${variant}/videos/${name}`, {
+      await this.req(`/api/demos/${intent.jobId}/renders/${variant}/videos/${name}`, {
         method: 'DELETE',
       });
     } catch {
@@ -473,8 +541,13 @@ export class RealApiClient implements ApiClient {
     if (view.status === 'ready') {
       const variant = variantOf(intent);
       const name = reelName(intent.segmentIds);
-      next.downloadUrl = `/api/demos/${intent.jobId}/renders/${variant}/videos/${name}`;
-      next.thumbnailUrl = `/api/demos/${intent.jobId}/renders/${variant}/covers/${name}`;
+      // In hosted mode these must be ABSOLUTE agent URLs (mapPath prefixes the
+      // agent origin and rewrites to the native /api/jobs route); the browser
+      // then fetches them WITH the token into a Blob (see lib/agent/media) since
+      // a bare <video src>/<a download> cannot carry the X-FragForge-Token header.
+      // In local/cloud mapPath returns the same relative same-origin path.
+      next.downloadUrl = this.mapPath(`/api/demos/${intent.jobId}/renders/${variant}/videos/${name}`);
+      next.thumbnailUrl = this.mapPath(`/api/demos/${intent.jobId}/renders/${variant}/covers/${name}`);
     }
     this.reels.set(intent.videoId, next);
   }
@@ -491,12 +564,12 @@ export class RealApiClient implements ApiClient {
             // segment_ids scopes the capture to exactly the selected clips (in plan
             // order) instead of recording the whole demo. 2+ ids render as one
             // concatenated reel.
-            await fetch(`/api/demos/${intent.jobId}/record`, {
+            await this.req(`/api/demos/${intent.jobId}/record`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ preset: variant, segment_ids: intent.segmentIds }),
             })
-          : await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, {
+          : await this.req(`/api/demos/${intent.jobId}/renders/${variant}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -529,7 +602,7 @@ export class RealApiClient implements ApiClient {
 
   /** Reads job status + failure reason; null when the job is unknown (404). */
   private async fetchStatusFull(jobId: string): Promise<{ status: string; failureReason?: string } | null> {
-    const res = await fetch(`/api/demos/${jobId}/status`);
+    const res = await this.req(`/api/demos/${jobId}/status`);
     if (res.status === 404) return null;
     const data = await readJson<{ status: string; failure_reason?: string }>(res);
     return { status: data.status, failureReason: data.failure_reason };
@@ -543,7 +616,7 @@ export class RealApiClient implements ApiClient {
 
   /** Reads the reel render-variant state; 'none' when the render has not started. */
   private async fetchRenderStatus(jobId: string, variant: string): Promise<{ status: RenderStatus; failureReason?: string }> {
-    const res = await fetch(`/api/demos/${jobId}/renders/${variant}`);
+    const res = await this.req(`/api/demos/${jobId}/renders/${variant}`);
     if (!res.ok) return { status: 'none' }; // 404 = render not started yet
     const data = (await res.json()) as { status?: string; failure_reason?: string };
     const known = new Set<RenderStatus>(['queued', 'rendering', 'ready', 'failed']);
@@ -612,26 +685,6 @@ export class RealApiClient implements ApiClient {
     return { ok: Boolean(data.ok), matchesFound: Number(data.matchesFound) || 0 };
   }
 
-  /** Mints a one-time pairing code for the desktop agent (POST /api/pc/pair). */
-  async pairPc(): Promise<{ pairingCode: string }> {
-    // Cloud-only: pairing hands work to a remote agent via Supabase. Local studio
-    // runs capture on this same machine, so there is nothing to pair.
-    if (isLocalMode()) return { pairingCode: '' };
-    return readJson<{ pairingCode: string }>(await fetch('/api/pc/pair', { method: 'POST' }));
-  }
-
-  /**
-   * Reports whether the signed-in user has a redeemed agent (GET /api/pc/status).
-   * Stays false right after pairPc until the desktop agent redeems the code and
-   * heartbeats, since the pending pairing row is excluded server-side.
-   */
-  async getPcStatus(): Promise<{ paired: boolean }> {
-    // Local studio is the machine itself; report paired without hitting the
-    // cloud-only /api/pc/status route (which needs Supabase).
-    if (isLocalMode()) return { paired: true };
-    return readJson<{ paired: boolean }>(await fetch('/api/pc/status', { cache: 'no-store' }));
-  }
-
   /**
    * Reads capture readiness from the local orchestrator (/api/capabilities): is
    * the record worker enabled and are HLAE/CS2/recorder reachable. A 503 maps to
@@ -640,7 +693,7 @@ export class RealApiClient implements ApiClient {
    */
   async getCaptureReadiness(): Promise<CaptureReadiness> {
     try {
-      const res = await fetch('/api/capabilities', { cache: 'no-store' });
+      const res = await this.req('/api/capabilities', { cache: 'no-store' });
       if (!res.ok) {
         // Any non-ok here is a transport/backend problem (the orchestrator reports
         // "unconfigured" via a 200 with record.enabled=false), so treat it as
@@ -667,7 +720,7 @@ export class RealApiClient implements ApiClient {
   listMatches(): Promise<Match[]> {
     // Local studio has no cloud match library; the mock seeds are a design-only
     // surface. A local match is opened by job id from the upload flow, not listed.
-    if (isLocalMode()) return Promise.resolve([]);
+    if (usesLocalAgent()) return Promise.resolve([]);
     return this.fallback.listMatches();
   }
   /** @deprecated Superseded by scanDemo + parseDemo. */
@@ -677,7 +730,7 @@ export class RealApiClient implements ApiClient {
   /** Real music catalog from the orchestrator; falls back to the mock offline. */
   async listSongs(): Promise<Song[]> {
     try {
-      const res = await fetch('/api/songs', { cache: 'no-store' });
+      const res = await this.req('/api/songs', { cache: 'no-store' });
       const data = await readJson<{
         songs: Array<{ id: string; title: string; artist?: string; genre?: string; durationSec?: number; license?: string; audioUrl: string }>;
       }>(res);
@@ -698,7 +751,7 @@ export class RealApiClient implements ApiClient {
   /** Real preset registry from the orchestrator; falls back to the mock offline. */
   async listPresets(): Promise<Preset[]> {
     try {
-      const res = await fetch('/api/presets', { cache: 'no-store' });
+      const res = await this.req('/api/presets', { cache: 'no-store' });
       const data = await readJson<{
         default?: string;
         presets: Array<{ name: string; label?: string; description?: string; hud_mode?: string; default?: boolean }>;
@@ -717,7 +770,7 @@ export class RealApiClient implements ApiClient {
 
   listFeed(): Promise<FeedItem[]> {
     // The community feed is a cloud surface; local studio shows no seeded feed.
-    if (isLocalMode()) return Promise.resolve([]);
+    if (usesLocalAgent()) return Promise.resolve([]);
     return this.fallback.listFeed();
   }
 }

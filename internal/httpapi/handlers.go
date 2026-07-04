@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -74,6 +75,11 @@ type Handlers struct {
 	streamProber    streamclips.Prober
 	musicDir        string
 	capabilities    Capabilities
+	// allowedWebOrigins is the set of exact web Origins permitted to make
+	// cross-site calls from the hosted SPA. A nil or empty map means the hosted
+	// feature is off, so no CORS headers are emitted and cross-site requests keep
+	// the pre-existing behavior. Populated from ZV_ALLOWED_WEB_ORIGINS.
+	allowedWebOrigins map[string]struct{}
 }
 
 type Option func(*Handlers)
@@ -122,6 +128,46 @@ func WithCapabilities(c Capabilities) Option {
 	return func(h *Handlers) {
 		h.capabilities = c
 	}
+}
+
+// WithAllowedWebOrigins records the exact web Origins allowed to make
+// cross-site calls from the hosted SPA. Each entry is trimmed and empty entries
+// are dropped; an empty result leaves the set nil so the hosted feature stays
+// off and existing modes are unaffected.
+func WithAllowedWebOrigins(origins []string) Option {
+	return func(h *Handlers) {
+		set := make(map[string]struct{}, len(origins))
+		for _, o := range origins {
+			o = strings.TrimSpace(o)
+			if o == "" {
+				continue
+			}
+			set[o] = struct{}{}
+		}
+		if len(set) == 0 {
+			h.allowedWebOrigins = nil
+			return
+		}
+		h.allowedWebOrigins = set
+	}
+}
+
+// isAllowedWebOrigin reports whether origin is in the configured allow-list. It
+// returns false when the set is nil/empty (hosted feature off).
+func (h *Handlers) isAllowedWebOrigin(origin string) bool {
+	if len(h.allowedWebOrigins) == 0 {
+		return false
+	}
+	_, ok := h.allowedWebOrigins[origin]
+	return ok
+}
+
+// hosted reports whether hosted mode is active. A non-empty allowed-origin set is
+// the single signal that the browser reaches this agent cross-site from our SPA,
+// i.e. the loopback-agent model is in play, so the Host-pinning rebinding guard
+// applies.
+func (h *Handlers) hosted() bool {
+	return len(h.allowedWebOrigins) > 0
 }
 
 // NewHandlers constructs an HTTP handler set.

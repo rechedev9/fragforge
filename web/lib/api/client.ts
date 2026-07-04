@@ -5,8 +5,6 @@ export interface ApiClient {
   signInWithSteam(): Promise<Session>;
   signOut(): Promise<void>;
   linkMatchHistory(input: { authCode: string; knownCode: string }): Promise<{ ok: boolean; matchesFound: number }>;
-  pairPc(): Promise<{ pairingCode: string }>;
-  getPcStatus(): Promise<{ paired: boolean }>;
   /** Whether gameplay capture (HLAE + CS2) is configured on the local machine. */
   getCaptureReadiness(): Promise<CaptureReadiness>;
   listMatches(): Promise<Match[]>;

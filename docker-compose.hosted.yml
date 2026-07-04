@@ -1,0 +1,55 @@
+# Topology A (hosted): ONLY the Next.js web service.
+#
+#   docker compose -f docker-compose.hosted.yml up --build -d
+#
+# This stack is the thin web frontend for hosted mode. It hosts the SPA plus a
+# small SQLite accounts DB (Steam login) and NOTHING else - no orchestrator, no
+# Postgres, no Redis, no video, no jobs, no heavy compute. The browser on the
+# end-user PC loads the SPA from our HTTPS domain and then talks DIRECTLY to a
+# LOCAL agent at http://127.0.0.1:8787, sending X-FragForge-Token on every
+# request. Job traffic and video bytes never transit this server.
+#
+# Published on 127.0.0.1:3000 only; it is meant to be fronted by `tailscale
+# serve` at https://fragforge.gr-prod.taila10698.ts.net (see
+# docs/hosted-deploy.md). Do not expose port 3000 to the public network.
+services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        # Baked into the client bundle so the browser uses the hosted API
+        # client (direct-to-local-agent), not the same-origin /api proxy.
+        NEXT_PUBLIC_FRAGFORGE_MODE: hosted
+    environment:
+      # Server route handlers read the mode at runtime; must match the build arg
+      # above so the SPA and the server agree on hosted mode.
+      NEXT_PUBLIC_FRAGFORGE_MODE: hosted
+      # Comma-separated exact origins the local agent will accept CORS from. Set
+      # to the tailscale-served origin of THIS deployment. The value is surfaced
+      # to the user (Agent connection panel) and documents the origin the agent
+      # installer must allowlist via ZV_ALLOWED_WEB_ORIGINS on the user PC.
+      ZV_ALLOWED_WEB_ORIGINS: ${ZV_ALLOWED_WEB_ORIGINS:-https://fragforge.gr-prod.taila10698.ts.net}
+      # SQLite accounts DB (Steam login upsert -> ff_session). Node's built-in
+      # node:sqlite backs it; no native module. Parent dir is created on first
+      # use and WAL is enabled. Lives on the named volume below.
+      FRAGFORGE_SQLITE_PATH: /data/fragforge.db
+      # Signs the ff_session cookie. REQUIRED in production - set a strong random
+      # value in the environment (e.g. an .env file next to this compose).
+      ZV_SESSION_SECRET: ${ZV_SESSION_SECRET:-}
+      # Required for REAL Steam match-history linking; without it the UI tells
+      # the user to skip and link later.
+      STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
+      # When set, web/middleware.ts gates every route behind HTTP Basic Auth.
+      # Empty (default) leaves the UI open; Steam login still governs accounts.
+      FRAGFORGE_WEB_PASSWORD: ${FRAGFORGE_WEB_PASSWORD:-}
+    volumes:
+      # Persist the SQLite accounts DB (and its -wal/-shm sidecars) across
+      # rebuilds. Back this volume up (see docs/hosted-deploy.md).
+      - accountsdata:/data
+    ports:
+      - "127.0.0.1:3000:3000" # loopback-only; fronted by `tailscale serve`
+    restart: unless-stopped
+
+volumes:
+  accountsdata:

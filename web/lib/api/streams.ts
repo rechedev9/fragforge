@@ -1,5 +1,18 @@
-import { isLocalMode } from '@/lib/mode';
+import { isLocalMode, isHostedMode } from '@/lib/mode';
+import { agentBaseUrl, agentHeaders } from '@/lib/agent/connection';
 import { SERVICE_UNAVAILABLE_CODE } from './types';
+
+/**
+ * Transport options for RealStreamsApiClient, mirroring RealApiClient. In hosted
+ * mode `native` remaps the same-origin `/api/streams/*` proxy paths to the
+ * agent's NATIVE `/api/stream-jobs/*` routes, `baseUrl` prefixes them with the
+ * agent origin, and `headers` supplies the per-request X-FragForge-Token.
+ */
+export type RealStreamsTransport = {
+  baseUrl?: string;
+  headers?: () => Record<string, string>;
+  native?: boolean;
+};
 
 /**
  * Stream Clips: turn a Twitch clip/VOD (or an uploaded MP4) into vertical
@@ -97,11 +110,49 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** RealStreamsApiClient talks to the same-origin /api/streams/* proxy routes. */
+/**
+ * RealStreamsApiClient talks to the same-origin /api/streams/* proxy routes in
+ * local/cloud, and DIRECTLY to the local agent's native /api/stream-jobs/* routes
+ * in hosted mode (native transport: proxy paths remapped, agent origin prefixed,
+ * X-FragForge-Token attached per request).
+ *
+ * HOSTED CAVEAT: sourceUrl()/videoUrl() return ABSOLUTE agent URLs in hosted
+ * mode. A bare `<video src>`/`<a download>` cannot carry the token header, so the
+ * UI must fetch those bytes WITH the token into a Blob/object URL (see
+ * lib/agent/media). In local/cloud they are same-origin relative paths as before.
+ */
 export class RealStreamsApiClient implements StreamsApiClient {
+  private readonly baseUrl: string;
+  private readonly headers: () => Record<string, string>;
+  private readonly native: boolean;
+
+  constructor(transport: RealStreamsTransport = {}) {
+    this.baseUrl = (transport.baseUrl ?? '').replace(/\/+$/, '');
+    this.headers = transport.headers ?? (() => ({}));
+    this.native = transport.native ?? false;
+  }
+
+  /** Remaps the `/api/streams/*` proxy path to the URL to actually fetch. */
+  private mapPath(path: string): string {
+    if (!this.native) return path;
+    if (path === '/api/streams') return `${this.baseUrl}/api/stream-jobs`;
+    if (path.startsWith('/api/streams/')) {
+      return `${this.baseUrl}/api/stream-jobs/${path.slice('/api/streams/'.length)}`;
+    }
+    return `${this.baseUrl}${path}`;
+  }
+
+  /** The single fetch seam: remaps the path (native) and merges the token header. */
+  private req(path: string, init?: RequestInit): Promise<Response> {
+    const url = this.mapPath(path);
+    if (!this.native) return fetch(url, init);
+    const headers = { ...((init?.headers as Record<string, string> | undefined) ?? {}), ...this.headers() };
+    return fetch(url, { ...init, headers });
+  }
+
   async createFromUrl(input: { sourceUrl: string; title?: string }): Promise<StreamJob> {
     return readJson<StreamJob>(
-      await fetch('/api/streams', {
+      await this.req('/api/streams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source_url: input.sourceUrl, title: input.title }),
@@ -111,33 +162,35 @@ export class RealStreamsApiClient implements StreamsApiClient {
 
   async createFromFile(file: File, title?: string): Promise<StreamJob> {
     const form = new FormData();
-    form.append('file', file);
+    // The proxy renames the browser field `file` to the orchestrator's `video`;
+    // when we hit the agent natively we must send `video` directly.
+    form.append(this.native ? 'video' : 'file', file, file.name);
     if (title) form.append('title', title);
-    return readJson<StreamJob>(await fetch('/api/streams', { method: 'POST', body: form }));
+    return readJson<StreamJob>(await this.req('/api/streams', { method: 'POST', body: form }));
   }
 
   async listJobs(): Promise<StreamJob[]> {
-    const data = await readJson<{ jobs?: StreamJob[] } | StreamJob[]>(await fetch('/api/streams', { cache: 'no-store' }));
+    const data = await readJson<{ jobs?: StreamJob[] } | StreamJob[]>(await this.req('/api/streams', { cache: 'no-store' }));
     return Array.isArray(data) ? data : (data.jobs ?? []);
   }
 
   async getJob(id: string): Promise<StreamJob | null> {
-    const res = await fetch(`/api/streams/${id}`, { cache: 'no-store' });
+    const res = await this.req(`/api/streams/${id}`, { cache: 'no-store' });
     if (res.status === 404) return null;
     return readJson<StreamJob>(res);
   }
 
   sourceUrl(id: string): string {
-    return `/api/streams/${id}/source`;
+    return this.mapPath(`/api/streams/${id}/source`);
   }
 
   async getEditPlan(id: string): Promise<StreamEditPlan> {
-    return readJson<StreamEditPlan>(await fetch(`/api/streams/${id}/edit-plan`, { cache: 'no-store' }));
+    return readJson<StreamEditPlan>(await this.req(`/api/streams/${id}/edit-plan`, { cache: 'no-store' }));
   }
 
   async putEditPlan(id: string, plan: StreamEditPlan): Promise<StreamEditPlan> {
     return readJson<StreamEditPlan>(
-      await fetch(`/api/streams/${id}/edit-plan`, {
+      await this.req(`/api/streams/${id}/edit-plan`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(plan),
@@ -146,17 +199,17 @@ export class RealStreamsApiClient implements StreamsApiClient {
   }
 
   async startRender(id: string, variant: StreamVariant): Promise<StreamRenderState> {
-    return readJson<StreamRenderState>(await fetch(`/api/streams/${id}/renders/${variant}`, { method: 'POST' }));
+    return readJson<StreamRenderState>(await this.req(`/api/streams/${id}/renders/${variant}`, { method: 'POST' }));
   }
 
   async getRenderState(id: string, variant: StreamVariant): Promise<StreamRenderState> {
-    const res = await fetch(`/api/streams/${id}/renders/${variant}`, { cache: 'no-store' });
+    const res = await this.req(`/api/streams/${id}/renders/${variant}`, { cache: 'no-store' });
     if (res.status === 404) return { status: 'none', videos: [] };
     return readJson<StreamRenderState>(res);
   }
 
   videoUrl(id: string, variant: StreamVariant, clipId: string): string {
-    return `/api/streams/${id}/renders/${variant}/videos/${clipId}`;
+    return this.mapPath(`/api/streams/${id}/renders/${variant}/videos/${clipId}`);
   }
 }
 
@@ -270,7 +323,14 @@ export class MockStreamsApiClient implements StreamsApiClient {
   }
 }
 
-export const streamsApi: StreamsApiClient =
-  process.env.NEXT_PUBLIC_API_BASE || isLocalMode() ? new RealStreamsApiClient() : new MockStreamsApiClient();
+function selectStreamsApi(): StreamsApiClient {
+  if (isHostedMode()) {
+    return new RealStreamsApiClient({ baseUrl: agentBaseUrl(), headers: agentHeaders, native: true });
+  }
+  if (process.env.NEXT_PUBLIC_API_BASE || isLocalMode()) return new RealStreamsApiClient();
+  return new MockStreamsApiClient();
+}
+
+export const streamsApi: StreamsApiClient = selectStreamsApi();
 
 export { SERVICE_UNAVAILABLE_CODE };
