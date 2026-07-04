@@ -90,7 +90,7 @@ func (m model) contextLine() string {
 		if j := m.focusedJob(); j != nil {
 			return "step: " + tuiclient.NextStep(j.Status, m.detail.render).Label()
 		}
-		return "no demos yet - press u to upload a .dem"
+		return "no demos yet - press u to upload a .dem, or drop one here"
 	}
 	if s := m.focusedStream(); s != nil {
 		return "step: " + string(tuiclient.NextStreamStep(s.Status))

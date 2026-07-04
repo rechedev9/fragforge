@@ -88,6 +88,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -98,6 +101,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Global quit works in any mode.
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	// Files dropped onto the terminal arrive as a bracketed paste of their
+	// paths; outside the text prompt, treat that as an upload.
+	if msg.Paste && m.mode != modePrompt {
+		return m.handleDrop(string(msg.Runes))
 	}
 	switch m.mode {
 	case modePrompt:
