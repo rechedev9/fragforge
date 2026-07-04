@@ -182,6 +182,30 @@ const (
 	RenderFailed    = "failed"
 )
 
+// PublishBoard mirrors GET /api/jobs/{id}/renders/{variant}/publish
+// (internal/renderplan.PublishBoard): the upload-readiness of a rendered
+// variant's artifacts, plus whether it has been marked uploaded.
+type PublishBoard struct {
+	JobID           string             `json:"job_id"`
+	Variant         string             `json:"variant"`
+	Status          string             `json:"status"`
+	UploadReadyRoot string             `json:"upload_ready_root"`
+	RenderReady     bool               `json:"render_ready"`
+	Uploaded        bool               `json:"uploaded"`
+	Items           []PublishBoardItem `json:"items"`
+	Warnings        []string           `json:"warnings,omitempty"`
+	Error           string             `json:"error,omitempty"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
+type PublishBoardItem struct {
+	SegmentID    string `json:"segment_id"`
+	Status       string `json:"status"`
+	VideoReady   bool   `json:"video_ready"`
+	CoverReady   bool   `json:"cover_ready"`
+	CaptionReady bool   `json:"caption_ready"`
+}
+
 // ---- capabilities / presets ------------------------------------------------
 
 // Capabilities mirrors GET /api/capabilities (internal/httpapi.GetCapabilities).

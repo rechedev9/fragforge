@@ -78,6 +78,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case publishMsg:
+		m.busy = false
+		if m.mode == modePublish && msg.board.JobID == m.pub.jobID {
+			m.pub.board = msg.board
+			m.pub.loaded = true
+		}
+		return m, nil
+
 	case actionMsg:
 		m.busy = false
 		if msg.note != "" {
@@ -119,6 +127,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePresetKey(msg)
 	case modeStreamEdit:
 		return m.handleStreamEditKey(msg)
+	case modePublish:
+		return m.handlePublishKey(msg)
 	default:
 		return m.handleBrowseKey(msg)
 	}
@@ -181,6 +191,58 @@ func (m model) handleDemoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startRenderFlow()
 	case "d":
 		return m.downloadFinal()
+	case "P":
+		return m.openPublish()
+	}
+	return m, nil
+}
+
+// ---- overlays: publish board -----------------------------------------------
+
+// openPublish loads and shows the publish board for the focused job's ready
+// render variant (the terminal step: confirm artifacts are upload-ready and mark
+// the reel as uploaded).
+func (m model) openPublish() (tea.Model, tea.Cmd) {
+	job := m.focusedJob()
+	if job == nil {
+		return m, nil
+	}
+	if m.detail.render == nil || m.detail.render.Status != tuiclient.RenderReady {
+		m.errText = "publish is available once a render is ready"
+		return m, nil
+	}
+	m.pub = publishState{jobID: job.ID, variant: m.detail.render.Variant}
+	m.mode = modePublish
+	m.errText = ""
+	m.busy = true
+	return m, m.loadPublishBoard(job.ID, m.detail.render.Variant)
+}
+
+func (m model) handlePublishKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.mode = modeBrowse
+		return m, nil
+	case "r":
+		m.busy = true
+		return m, m.loadPublishBoard(m.pub.jobID, m.pub.variant)
+	case "m":
+		want := !m.pub.board.Uploaded
+		id, variant := m.pub.jobID, m.pub.variant
+		cl := m.cl
+		m.busy = true
+		return m, func() tea.Msg {
+			c, cancel := ctx()
+			defer cancel()
+			if err := cl.SetRenderUploaded(c, id, variant, want); err != nil {
+				return errMsg{err}
+			}
+			board, err := cl.GetRenderPublishBoard(c, id, variant)
+			if err != nil {
+				return errMsg{err}
+			}
+			return publishMsg{board: board}
+		}
 	}
 	return m, nil
 }

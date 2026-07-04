@@ -112,12 +112,14 @@ func (m model) hintBar() string {
 	case modeStreamEdit:
 		return join(sep, keyHint("↑↓", "clip"), keyHint("a", "add"), keyHint("e", "edit"),
 			keyHint("d", "delete"), keyHint("s", "save"), keyHint("esc", "back"))
+	case modePublish:
+		return join(sep, keyHint("m", "toggle uploaded"), keyHint("r", "refresh"), keyHint("esc", "back"))
 	}
 	if m.screen == screenDemos {
 		return join(sep,
 			keyHint("↑↓", "nav"), keyHint("tab", "streams"), keyHint("u", "upload"),
 			keyHint("enter", "next step"), keyHint("r", "record"), keyHint("c", "compose"),
-			keyHint("R", "render"), keyHint("d", "download"), keyHint("q", "quit"))
+			keyHint("R", "render"), keyHint("d", "download"), keyHint("P", "publish"), keyHint("q", "quit"))
 	}
 	return join(sep,
 		keyHint("↑↓", "nav"), keyHint("tab", "demos"), keyHint("u", "upload"),
@@ -331,6 +333,9 @@ func (m model) viewOverlay(bodyH int) string {
 	case modeStreamEdit:
 		title = "Edit clip plan"
 		content = m.clipEditorView()
+	case modePublish:
+		title = "Publish"
+		content = m.publishView()
 	default:
 		title = ""
 		content = ""
@@ -351,6 +356,47 @@ func (m model) promptTitle() string {
 		return "Clip range (start end [title], seconds)"
 	}
 	return "Input"
+}
+
+// publishView renders the publish board: artifact readiness per segment and
+// whether the reel has been marked uploaded.
+func (m model) publishView() string {
+	if !m.pub.loaded {
+		return itemDim.Render(m.spinner.View() + " loading publish board…")
+	}
+	b := m.pub.board
+	ready := checkboxOff.Render("not ready")
+	if b.RenderReady {
+		ready = checkboxOn.Render("ready")
+	}
+	uploaded := checkboxOff.Render("not uploaded")
+	if b.Uploaded {
+		uploaded = checkboxOn.Render("uploaded")
+	}
+	lines := []string{
+		labelStyle.Render("variant ") + b.Variant,
+		labelStyle.Render("render  ") + ready + "   " + uploaded,
+	}
+	if b.Error != "" {
+		lines = append(lines, errorStyle.Render("error   "+b.Error))
+	}
+	lines = append(lines, "", panelTitle.Render("Artifacts (video / cover / caption)"))
+	if len(b.Items) == 0 {
+		lines = append(lines, itemDim.Render("  (no items)"))
+	}
+	for _, it := range b.Items {
+		lines = append(lines, fmt.Sprintf("  %-10s %s %s %s",
+			shortID(it.SegmentID), mark(it.VideoReady), mark(it.CoverReady), mark(it.CaptionReady)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// mark renders a readiness tick or cross.
+func mark(ok bool) string {
+	if ok {
+		return checkboxOn.Render("✓")
+	}
+	return checkboxOff.Render("✗")
 }
 
 // clipEditorView renders the stream clip list being edited.
@@ -521,6 +567,8 @@ func nextHint(step tuiclient.Step) string {
 		return "→ press r to record segments"
 	case tuiclient.StepRender:
 		return "→ press R to render, c to compose, d to download"
+	case tuiclient.StepReady:
+		return "→ reel ready - press d to download, P to publish"
 	case tuiclient.StepRetry:
 		return "→ press r to retry recording"
 	default:

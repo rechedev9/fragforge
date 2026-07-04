@@ -46,7 +46,8 @@ type fakeJob struct {
 	moments *tuiclient.MomentsDocument
 	renders map[string]*tuiclient.RenderVariantState
 	// pending in-flight stage that hold parks: "record"|"compose"|"render:<variant>".
-	pending string
+	pending  string
+	uploaded bool
 }
 
 type fakeStream struct {
@@ -319,6 +320,43 @@ func (f *orchFake) routes() http.Handler {
 			return
 		}
 		writeJSON(w, 200, *st)
+	})
+	mux.HandleFunc("GET /api/jobs/{id}/renders/{variant}/publish", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		j := f.jobs[r.PathValue("id")]
+		if j == nil {
+			writeErr(w, 404, "not found")
+			return
+		}
+		variant := r.PathValue("variant")
+		st := j.renders[variant]
+		if st == nil || st.Status != tuiclient.RenderReady {
+			writeErr(w, 409, "render not ready")
+			return
+		}
+		writeJSON(w, 200, tuiclient.PublishBoard{
+			JobID: j.job.ID, Variant: variant, Status: "ready", UploadReadyRoot: "jobs/" + j.job.ID + "/upload-ready",
+			RenderReady: true, Uploaded: j.uploaded, UpdatedAt: f.now(),
+			Items: []tuiclient.PublishBoardItem{
+				{SegmentID: "seg-1", Status: "ready", VideoReady: true, CoverReady: true, CaptionReady: true},
+			},
+		})
+	})
+	mux.HandleFunc("POST /api/jobs/{id}/renders/{variant}/publish/uploaded", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Uploaded bool `json:"uploaded"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		j := f.jobs[r.PathValue("id")]
+		if j == nil {
+			writeErr(w, 404, "not found")
+			return
+		}
+		j.uploaded = body.Uploaded
+		writeJSON(w, 200, map[string]any{"uploaded": body.Uploaded})
 	})
 	mux.HandleFunc("GET /api/jobs/{id}/final", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()

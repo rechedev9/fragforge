@@ -285,6 +285,43 @@ func TestStreamClipFromURL(t *testing.T) {
 	}
 }
 
+// TestPublishReelEndToEnd covers the terminal step: render a variant, open its
+// publish board, and mark the reel as uploaded (parity with the desktop publish
+// step, via GetRenderPublishBoard + SetRenderUploaded).
+func TestPublishReelEndToEnd(t *testing.T) {
+	fake := newOrchFake()
+	fake.seedJob(tuiclient.StatusComposed)
+
+	u := startTUI(t, fake)
+	u.wait("composed")
+
+	// R -> preset -> render the default variant to ready.
+	u.key("R")
+	u.wait("Pick a render preset")
+	u.send(enter)
+	u.wait("reel ready") // NextStep StepReady once the render is ready
+
+	// P -> publish board.
+	u.key("P")
+	u.wait("Publish")
+	u.wait("Artifacts")
+	u.wait("not uploaded")
+
+	// m -> mark uploaded. Drain first so the match is the new state, not the
+	// stale "not uploaded" already on screen.
+	u.drain()
+	u.key("m")
+	u.wait("uploaded")
+
+	fm := u.quit()
+	if !fm.pub.board.Uploaded {
+		t.Fatalf("want the reel marked uploaded, got %+v", fm.pub.board)
+	}
+	if !fm.pub.board.RenderReady {
+		t.Fatalf("want render_ready board, got %+v", fm.pub.board)
+	}
+}
+
 // TestRecordGatedWhenCaptureDisabled documents the real Linux-orchestrator
 // behavior: with capture off, the media actions surface a clear, non-fatal
 // explanation instead of enqueuing anything.

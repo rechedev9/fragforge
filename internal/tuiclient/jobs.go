@@ -126,6 +126,21 @@ func (c *Client) GetRenderVariant(ctx context.Context, id, variant string) (Rend
 	return state, err
 }
 
+// GetRenderPublishBoard returns the publish board for a render variant: the
+// upload-readiness of its artifacts and whether it has been marked uploaded.
+func (c *Client) GetRenderPublishBoard(ctx context.Context, id, variant string) (PublishBoard, error) {
+	var board PublishBoard
+	err := c.getJSON(ctx, "/api/jobs/"+id+"/renders/"+variant+"/publish", &board)
+	return board, err
+}
+
+// SetRenderUploaded records that a render variant has (or has not) been uploaded
+// to the operator's channels.
+func (c *Client) SetRenderUploaded(ctx context.Context, id, variant string, uploaded bool) error {
+	body := map[string]bool{"uploaded": uploaded}
+	return c.doJSON(ctx, http.MethodPost, "/api/jobs/"+id+"/renders/"+variant+"/publish/uploaded", body, nil)
+}
+
 // DownloadFinal streams the composed MP4 to dst. Returns a 409 APIError when the
 // job has not been composed yet.
 func (c *Client) DownloadFinal(ctx context.Context, id string, dst io.Writer) error {

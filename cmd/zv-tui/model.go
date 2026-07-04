@@ -39,6 +39,7 @@ const (
 	modeSegments               // multi-select segments to record
 	modePreset                 // pick a render preset
 	modeStreamEdit             // edit a stream job's clip plan
+	modePublish                // publish board for a ready render
 )
 
 type promptKind int
@@ -139,6 +140,15 @@ type model struct {
 	presetCursor  int
 	presetPurpose presetPurpose
 	clipEd        clipEditor
+	pub           publishState
+}
+
+// publishState is the loaded publish board for a ready render variant.
+type publishState struct {
+	jobID   string
+	variant string
+	board   tuiclient.PublishBoard
+	loaded  bool
 }
 
 func newModel(cl *tuiclient.Client, initialDrops []string) model {
