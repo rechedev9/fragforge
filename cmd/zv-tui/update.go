@@ -24,7 +24,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tickMsg:
-		cmds := []tea.Cmd{tick()}
+		cmds := []tea.Cmd{m.tick()}
 		if m.mode == modeBrowse {
 			cmds = append(cmds, m.refreshCurrent())
 		}

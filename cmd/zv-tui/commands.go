@@ -150,7 +150,7 @@ func runAction(note string, fn func(context.Context) error) tea.Cmd {
 	}
 }
 
-// tick schedules the next poll.
-func tick() tea.Cmd {
-	return tea.Tick(pollInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+// tick schedules the next poll at the model's poll interval.
+func (m model) tick() tea.Cmd {
+	return tea.Tick(m.pollInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }

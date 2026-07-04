@@ -11,7 +11,11 @@ import (
 	"github.com/rechedev9/fragforge/internal/tuiclient"
 )
 
-const pollInterval = 2 * time.Second
+// defaultPollInterval is how often the browse screen re-fetches the active list
+// so async pipeline transitions (recording -> recorded, rendering -> ready)
+// surface without a keypress. It is copied into model.pollInterval at
+// construction so tests can dial it down instead of mutating a shared global.
+const defaultPollInterval = 2 * time.Second
 
 // fallbackRenderVariant is the default render variant name used until the preset
 // registry loads; "viral-60-clean" is the documented default. Once presets load
@@ -76,10 +80,11 @@ type segmentPicker struct {
 }
 
 type model struct {
-	cl     *tuiclient.Client
-	width  int
-	height int
-	ready  bool
+	cl           *tuiclient.Client
+	pollInterval time.Duration
+	width        int
+	height       int
+	ready        bool
 
 	screen screen
 	mode   mode
@@ -133,6 +138,7 @@ func newModel(cl *tuiclient.Client, initialDrops []string) model {
 
 	return model{
 		cl:             cl,
+		pollInterval:   defaultPollInterval,
 		initialDrops:   initialDrops,
 		screen:         screenDemos,
 		mode:           modeBrowse,
@@ -149,7 +155,7 @@ func (m model) Init() tea.Cmd {
 		m.loadPresets(),
 		m.loadJobs(),
 		m.loadStreams(),
-		tick(),
+		m.tick(),
 	}
 	drops, _ := m.dropCmds(m.initialDrops)
 	cmds = append(cmds, drops...)
