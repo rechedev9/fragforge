@@ -81,6 +81,16 @@ export default function UploadPage() {
       setStage('scanning');
       try {
         const scan = await api.scanDemo(file);
+        if (scan.players.length === 0) {
+          // A demo can scan "successfully" yet yield an empty roster (e.g. a
+          // Source-1 demo: CS:GO/TF2 carry the HL2DEMO magic and pass the header
+          // checks, then parse to zero players). Without this guard the flow
+          // advances to the picker over an empty card and strands the user.
+          reset(
+            'El escaneo no encontró jugadores en esa demo. ¿Seguro que es una demo de CS2? Prueba con otro archivo .dem.',
+          );
+          return;
+        }
         setJobId(scan.jobId);
         setPlayers(scan.players);
         setMatch(scan.match ?? null);
