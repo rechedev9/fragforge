@@ -67,6 +67,48 @@ test.describe('upload error messaging', () => {
       page.getByText('El servicio de análisis está offline. Arráncalo y vuelve a intentarlo.'),
     ).toHaveCount(0);
   });
+
+  test('reports an empty roster and restores the dropzone instead of stranding the user', async ({ page }) => {
+    // A demo whose magic bytes pass the header checks can still scan to zero
+    // players (e.g. a Source-1 demo). The job reaches "scanned" and the roster
+    // is a valid but empty list - the flow must not advance to an empty picker.
+    await page.route('**/api/demos/scan', (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ jobId: '00000000-0000-4000-8000-000000000002' }),
+      }),
+    );
+    await page.route('**/api/demos/*/status', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        // online:true keeps the cloud-mode poller off its PC_OFFLINE branch.
+        body: JSON.stringify({ status: 'scanned', online: true }),
+      }),
+    );
+    await page.route('**/api/demos/*/roster', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ players: [] }),
+      }),
+    );
+
+    await page.goto('/upload');
+    await page.locator(FILE_INPUT).setInputFiles(DUMMY_DEM);
+
+    await expect(
+      page.getByText(
+        '¿Seguro que es una demo de CS2? Prueba con otro archivo .dem.',
+        { exact: false },
+      ),
+    ).toBeVisible();
+    // The picker heading must never appear for an empty roster...
+    await expect(page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' })).toHaveCount(0);
+    // ...and the dropzone is back, proving the stage reset (user not stranded).
+    await expect(page.getByText('SUELTA UN .DEM AQUÍ')).toBeVisible();
+  });
 });
 
 // Roster scoreboard enrichments: match header, multi-kill Highlights chips, and

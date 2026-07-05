@@ -32,5 +32,9 @@ export default defineConfig({
         url: 'http://localhost:3000',
         reuseExistingServer: true,
         timeout: 120_000,
+        // Force the real HTTP client (not the in-memory mock) so the mocked
+        // upload specs exercise the /api/demos routes even on a checkout
+        // without .env.local; otherwise those specs fail spuriously.
+        env: { NEXT_PUBLIC_API_BASE: '/api' },
       },
 });
