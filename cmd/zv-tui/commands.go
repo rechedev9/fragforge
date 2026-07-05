@@ -17,7 +17,7 @@ func ctx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), actionTimeout)
 }
 
-// loadCaps fetches capture readiness once at startup.
+// loadCaps fetches capture readiness; retried each tick until it succeeds.
 func (m *model) loadCaps() tea.Cmd {
 	cl := m.cl
 	return func() tea.Msg {
@@ -25,13 +25,14 @@ func (m *model) loadCaps() tea.Cmd {
 		defer cancel()
 		caps, err := cl.Capabilities(c)
 		if err != nil {
-			return errMsg{err}
+			return pollErrMsg{pollCaps, err}
 		}
 		return capsMsg{caps}
 	}
 }
 
-// loadPresets fetches the render preset registry once at startup.
+// loadPresets fetches the render preset registry; retried each tick until it
+// succeeds.
 func (m *model) loadPresets() tea.Cmd {
 	cl := m.cl
 	return func() tea.Msg {
@@ -39,7 +40,7 @@ func (m *model) loadPresets() tea.Cmd {
 		defer cancel()
 		list, err := cl.Presets(c)
 		if err != nil {
-			return errMsg{err}
+			return pollErrMsg{pollPresets, err}
 		}
 		return presetsMsg{list.Presets}
 	}
@@ -53,7 +54,7 @@ func (m *model) loadJobs() tea.Cmd {
 		defer cancel()
 		jobs, err := cl.ListJobs(c, 50)
 		if err != nil {
-			return errMsg{err}
+			return pollErrMsg{pollJobs, err}
 		}
 		return jobsMsg{jobs}
 	}
@@ -71,7 +72,7 @@ func (m *model) loadStreams() tea.Cmd {
 			if tuiclient.StatusCode(err) == 501 {
 				return streamsMsg{nil}
 			}
-			return errMsg{err}
+			return pollErrMsg{pollStreams, err}
 		}
 		return streamsMsg{jobs}
 	}
@@ -89,7 +90,7 @@ func (m *model) loadJobDetail(id string) tea.Cmd {
 		defer cancel()
 		job, err := cl.GetJob(c, id)
 		if err != nil {
-			return errMsg{err}
+			return pollErrMsg{pollJobDetail, err}
 		}
 		out := jobDetailMsg{id: id, job: job, plan: job.KillPlan}
 		switch job.Status {
@@ -124,7 +125,7 @@ func (m *model) loadStreamDetail(id string) tea.Cmd {
 		defer cancel()
 		job, err := cl.GetStreamJob(c, id)
 		if err != nil {
-			return errMsg{err}
+			return pollErrMsg{pollStreamDetail, err}
 		}
 		out := streamDetailMsg{id: id, job: job}
 		if plan, err := cl.GetStreamEditPlan(c, id); err == nil {
