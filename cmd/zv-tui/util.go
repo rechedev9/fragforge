@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,14 +55,16 @@ func defaultUploadDir() string {
 }
 
 // saveFinal streams a composed job's MP4 to a file in the current directory and
-// returns its absolute path.
+// returns its absolute path. The download is bounded by transferTimeout (the
+// same generous bound the media uploads use); on any failure the partial file
+// is deleted on purpose, so a failed download never leaves a truncated MP4.
 func saveFinal(cl *tuiclient.Client, id string) (string, error) {
 	name := fmt.Sprintf("fragforge-%s.mp4", shortID(id))
 	f, err := os.Create(name) // #nosec G304 -- fixed name in the operator's cwd
 	if err != nil {
 		return "", err
 	}
-	c, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	c, cancel := transferCtx()
 	defer cancel()
 	if err := cl.DownloadFinal(c, id, f); err != nil {
 		_ = f.Close()
@@ -71,6 +72,7 @@ func saveFinal(cl *tuiclient.Client, id string) (string, error) {
 		return "", err
 	}
 	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
 		return "", err
 	}
 	abs, err := filepath.Abs(name)

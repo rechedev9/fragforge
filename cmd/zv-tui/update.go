@@ -448,12 +448,12 @@ func (m model) submitPrompt(value string) (tea.Model, tea.Cmd) {
 	m.busy = true
 	switch m.promptKind {
 	case promptUploadDemo:
-		return m, runAction("demo uploaded - scanning", func(c context.Context) error {
+		return m, runTransfer("demo uploaded - scanning", func(c context.Context) error {
 			_, err := cl.CreateJob(c, value, "")
 			return err
 		})
 	case promptUploadStream:
-		return m, runAction("stream uploaded", func(c context.Context) error {
+		return m, runTransfer("stream uploaded", func(c context.Context) error {
 			_, err := cl.CreateStreamJobUpload(c, value, "")
 			return err
 		})
