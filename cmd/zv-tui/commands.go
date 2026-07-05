@@ -9,12 +9,23 @@ import (
 	"github.com/rechedev9/fragforge/internal/tuiclient"
 )
 
-// actionTimeout bounds any single API call the TUI makes. Uploads can be large,
-// so it is generous; the client's own HTTP timeout is the finer bound.
+// actionTimeout bounds quick API calls (JSON control-plane requests). Bulk
+// media transfers use transferTimeout instead; the HTTP client itself has no
+// whole-exchange timeout, so these contexts are the only duration bound.
 const actionTimeout = 60 * time.Second
+
+// transferTimeout bounds calls that move a large media body (demo/clip
+// uploads, final MP4 download). Generous because multi-GB files over
+// Tailscale legitimately take minutes, but still finite so a stalled
+// transfer cannot hang the TUI forever.
+const transferTimeout = 15 * time.Minute
 
 func ctx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), actionTimeout)
+}
+
+func transferCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), transferTimeout)
 }
 
 // loadCaps fetches capture readiness once at startup.
@@ -142,6 +153,19 @@ func (m *model) loadStreamDetail(id string) tea.Cmd {
 func runAction(note string, fn func(context.Context) error) tea.Cmd {
 	return func() tea.Msg {
 		c, cancel := ctx()
+		defer cancel()
+		if err := fn(c); err != nil {
+			return errMsg{err}
+		}
+		return actionMsg{note: note, refresh: true}
+	}
+}
+
+// runTransfer is runAction for calls that stream a large file body and
+// therefore need transferTimeout rather than actionTimeout.
+func runTransfer(note string, fn func(context.Context) error) tea.Cmd {
+	return func() tea.Msg {
+		c, cancel := transferCtx()
 		defer cancel()
 		if err := fn(c); err != nil {
 			return errMsg{err}

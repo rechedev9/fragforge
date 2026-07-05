@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestClient(t *testing.T, h http.HandlerFunc) *Client {
@@ -142,6 +143,113 @@ func TestCreateJobUploadsMultipart(t *testing.T) {
 	}
 	if resp.ID != "new" {
 		t.Fatalf("unexpected resp: %+v", resp)
+	}
+}
+
+// TestDefaultClientHasNoWholeExchangeTimeout pins that the nil-HTTPClient
+// default carries connection-phase bounds but no Client.Timeout, so a large
+// body transfer is never capped mid-flight. It also checks that an injected
+// client is used verbatim.
+func TestDefaultClientHasNoWholeExchangeTimeout(t *testing.T) {
+	c := New(Config{BaseURL: "http://example.invalid"})
+	if c.hc.Timeout != 0 {
+		t.Fatalf("default client Timeout = %v, want 0 (no whole-exchange cap)", c.hc.Timeout)
+	}
+	tr, ok := c.hc.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("default transport = %T, want *http.Transport", c.hc.Transport)
+	}
+	if tr.ResponseHeaderTimeout != defaultResponseHeaderTimeout {
+		t.Fatalf("ResponseHeaderTimeout = %v, want %v", tr.ResponseHeaderTimeout, defaultResponseHeaderTimeout)
+	}
+	if tr.DialContext == nil {
+		t.Fatal("DialContext is nil, want a dialer with a connect timeout")
+	}
+
+	custom := &http.Client{}
+	c2 := New(Config{BaseURL: "http://example.invalid", HTTPClient: custom})
+	if c2.hc != custom {
+		t.Fatal("injected HTTPClient was not used verbatim")
+	}
+}
+
+// TestDownloadFinalHonorsContextDeadlineWhenStalled exercises the real default
+// client (not srv.Client()) against a server that flushes a few bytes then
+// stalls. With no Client.Timeout, only the caller context bounds the transfer;
+// the call must fail promptly when that context expires.
+func TestDownloadFinalHonorsContextDeadlineWhenStalled(t *testing.T) {
+	// srvDone is closed by the deferred call when the test returns, before the
+	// srv.Close cleanup runs, so the handler always unblocks and Close never
+	// hangs, even if Go does not detect the client disconnect on its own.
+	srvDone := make(chan struct{})
+	defer close(srvDone)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("PARTIAL"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		// Stall until the client cancels (or the test ends).
+		select {
+		case <-r.Context().Done():
+		case <-srvDone:
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(Config{BaseURL: srv.URL})
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := c.DownloadFinal(ctx, "id", io.Discard)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected an error when the transfer stalls past the context deadline")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("stalled download took %v to fail, want prompt cancellation", elapsed)
+	}
+}
+
+// TestCreateJobHonorsContextDeadlineWhenServerStalls does the same for the
+// upload path: the server never reads the body to completion, so only the
+// caller context can end the exchange. This also drives the uploadMultipart
+// pipe-writer goroutine cleanup under cancellation.
+func TestCreateJobHonorsContextDeadlineWhenServerStalls(t *testing.T) {
+	dir := t.TempDir()
+	demo := filepath.Join(dir, "match.dem")
+	if err := os.WriteFile(demo, []byte("PBDEMS2fake"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// srvDone unblocks the handler when the test returns (deferred, so it runs
+	// before the srv.Close cleanup). On the upload path the server never reads
+	// the body, so it may not detect the client disconnect and cancel
+	// r.Context(); without this, srv.Close would hang.
+	srvDone := make(chan struct{})
+	defer close(srvDone)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Do not read the body to completion; stall until the client cancels
+		// (or the test ends).
+		select {
+		case <-r.Context().Done():
+		case <-srvDone:
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(Config{BaseURL: srv.URL})
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := c.CreateJob(ctx, demo, "")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected an error when the upload stalls past the context deadline")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("stalled upload took %v to fail, want prompt cancellation", elapsed)
 	}
 }
 

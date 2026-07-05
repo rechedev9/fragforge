@@ -67,12 +67,12 @@ func (m *model) dropCmds(paths []string) (cmds []tea.Cmd, skipped int) {
 		p := p
 		switch classifyDrop(p) {
 		case dropDemo:
-			cmds = append(cmds, runAction("demo uploaded - scanning "+filepath.Base(p), func(c context.Context) error {
+			cmds = append(cmds, runTransfer("demo uploaded - scanning "+filepath.Base(p), func(c context.Context) error {
 				_, err := cl.CreateJob(c, p, "")
 				return err
 			}))
 		case dropStream:
-			cmds = append(cmds, runAction("stream uploaded "+filepath.Base(p), func(c context.Context) error {
+			cmds = append(cmds, runTransfer("stream uploaded "+filepath.Base(p), func(c context.Context) error {
 				_, err := cl.CreateStreamJobUpload(c, p, "")
 				return err
 			}))

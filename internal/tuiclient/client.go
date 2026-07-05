@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,7 +40,11 @@ type Config struct {
 	// ZV_MUTATION_TOKEN. A loopback orchestrator with no token configured
 	// accepts requests without one, so an empty token is valid.
 	Token string
-	// HTTPClient is optional; a 30s-timeout client is used when nil.
+	// HTTPClient is optional. When nil, a client with connect and
+	// response-header timeouts but no whole-exchange timeout is used, so large
+	// upload/download bodies are never capped mid-transfer. Per-request
+	// duration is bounded by the ctx passed to each method, so do not pass
+	// context.Background() for calls that must terminate.
 	HTTPClient *http.Client
 }
 
@@ -66,9 +71,30 @@ func New(cfg Config) *Client {
 	}
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		hc = newDefaultHTTPClient()
 	}
 	return &Client{baseURL: base, token: token, hc: hc}
+}
+
+// Connection-phase bounds for the default client. There is deliberately no
+// whole-exchange http.Client.Timeout: it would cap large upload/download
+// bodies mid-transfer. Callers bound total request duration via context.
+const (
+	defaultDialTimeout           = 10 * time.Second
+	defaultResponseHeaderTimeout = 30 * time.Second
+)
+
+// newDefaultHTTPClient builds the client used when Config.HTTPClient is nil.
+// It clones http.DefaultTransport (keeping proxy support and sane TLS/idle
+// defaults) and adds bounds that fail fast on an unreachable or unresponsive
+// orchestrator without limiting how long a healthy body transfer may run.
+// ResponseHeaderTimeout starts only after the request body (e.g. a multipart
+// demo upload) has been fully written, so it never cuts an upload short.
+func newDefaultHTTPClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = (&net.Dialer{Timeout: defaultDialTimeout, KeepAlive: 30 * time.Second}).DialContext
+	tr.ResponseHeaderTimeout = defaultResponseHeaderTimeout
+	return &http.Client{Transport: tr}
 }
 
 // BaseURL returns the resolved orchestrator root, for display.
