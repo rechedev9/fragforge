@@ -17,6 +17,7 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const { pathToFileURL } = require('url');
 
 // A single running instance owns the orchestrator; a second launch just focuses
 // the existing window instead of spawning a duplicate backend on new ports.
@@ -50,13 +51,25 @@ const musicDir = path.join(dataDir, 'music');
 
 // All child output is mirrored to this file so a failed boot is diagnosable
 // from a user report: the packaged app has no console, so stdout alone is
-// invisible. Truncated on every launch; the error screen shows its tail.
+// invisible. The error screen shows its tail.
 const logFile = path.join(app.getPath('userData'), 'studio.log');
 let logStream = null;
 function logLine(text) {
   process.stdout.write(text);
   try {
-    if (!logStream) logStream = fs.createWriteStream(logFile, { flags: 'w' });
+    if (!logStream) {
+      // Rotate rather than truncate: a crash right before this run's launch
+      // (e.g. an install that never got past its previous boot) would
+      // otherwise vanish the moment this run's first line is written, so
+      // keep one previous run's log around for a bug report.
+      try {
+        fs.renameSync(logFile, `${logFile}.1`);
+      } catch {
+        // no previous log (first launch ever) or rename failed; either way
+        // this run's log still gets written below
+      }
+      logStream = fs.createWriteStream(logFile, { flags: 'w' });
+    }
     logStream.write(text);
   } catch {
     // Logging must never break the app; stdout still has the line in dev.
@@ -106,19 +119,56 @@ const TOOLS = {
   },
 };
 
-/** Downloads url to destPath and returns its sha256 hex digest. */
-async function downloadFile(url, destPath) {
-  const res = await fetchStream(url);
+/**
+ * Downloads url to destPath, staging through `<destPath>.tmp` and renaming
+ * only once every byte has arrived, so a request that dies mid-stream (a
+ * network drop, or the caller's own abort on timeout) never leaves a partial
+ * file sitting at destPath. Returns the sha256 hex digest of the downloaded
+ * bytes. onProgress(bytesSoFar, totalBytes), if given, fires as data arrives
+ * (totalBytes is undefined when the server omits Content-Length). Pass an
+ * AbortSignal to cancel an in-flight download: the request and response
+ * stream are destroyed so nothing writes after the signal fires.
+ */
+async function downloadFile(url, destPath, { signal, onProgress } = {}) {
+  const res = await fetchStream(url, { signal });
+  const total = Number(res.headers['content-length']) || undefined;
+  const tmp = `${destPath}.tmp`;
   const hash = crypto.createHash('sha256');
-  await new Promise((resolve, reject) => {
-    const out = fs.createWriteStream(destPath);
-    res.on('data', (chunk) => hash.update(chunk));
-    res.pipe(out);
-    res.on('error', reject);
-    out.on('error', reject);
-    out.on('finish', resolve);
-  });
-  return hash.digest('hex');
+  try {
+    let received = 0;
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(tmp);
+      // Shared by the stream-error path and the abort-signal path below so a
+      // cancellation always tears down both ends instead of leaving the
+      // response free to keep writing into `out`.
+      const fail = (err) => {
+        res.destroy();
+        out.destroy();
+        reject(err);
+      };
+      res.on('data', (chunk) => {
+        hash.update(chunk);
+        received += chunk.length;
+        if (onProgress) onProgress(received, total);
+      });
+      res.pipe(out);
+      res.on('error', fail);
+      out.on('error', fail);
+      out.on('finish', resolve);
+      if (signal) {
+        if (signal.aborted) {
+          fail(new Error('download aborted'));
+        } else {
+          signal.addEventListener('abort', () => fail(new Error('download aborted')), { once: true });
+        }
+      }
+    });
+    fs.renameSync(tmp, destPath);
+    return hash.digest('hex');
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 /** Single-quote a string for a PowerShell command ('' escapes ' inside). */
@@ -142,12 +192,18 @@ function expandArchive(zipPath, destDir) {
   });
 }
 
+// Throttle for download-progress status updates: frequent enough to look
+// alive, infrequent enough not to repaint the loading screen on every chunk.
+const PROGRESS_REPORT_MIN_INTERVAL_MS = 1000;
+
 /**
  * Ensures one tool from TOOLS is installed under userData\tools and returns
  * its exe path, or '' on failure (offline, bad hash, timeout); the caller then
  * simply omits the env var and the orchestrator falls back to auto-detection.
  * Idempotent: a cached install returns instantly. Each tool is capped by its
- * own timeout so one stalled download can never wedge the boot.
+ * own timeout so one stalled download can never wedge the boot; on timeout
+ * the in-flight HTTP request is aborted (not just abandoned), so nothing
+ * writes to disk after this function has already told its caller it failed.
  */
 async function provisionTool(name, onStatus) {
   const tool = TOOLS[name];
@@ -162,13 +218,32 @@ async function provisionTool(name, onStatus) {
   // reach here), so the loading screen doesn't flash a status for instant boots.
   if (onStatus) onStatus(name);
 
+  const controller = new AbortController();
+  let lastReportAt = 0;
+  let lastPct = -1;
+  const onProgress = (done, total) => {
+    if (!onStatus) return;
+    const now = Date.now();
+    if (now - lastReportAt < PROGRESS_REPORT_MIN_INTERVAL_MS) return;
+    if (total) {
+      const pct = Math.floor((done / total) * 100);
+      if (pct === lastPct) return;
+      lastPct = pct;
+      lastReportAt = now;
+      onStatus(name, `${pct}%`);
+    } else {
+      lastReportAt = now;
+      onStatus(name, `${(done / (1024 * 1024)).toFixed(0)} MB`);
+    }
+  };
+
   const work = (async () => {
     fs.mkdirSync(dir, { recursive: true });
     const part = path.join(dir, 'download.part');
     const zipPath = path.join(dir, 'download.zip');
     try {
       logLine(`[tools] downloading ${name} ${tool.version}...\n`);
-      const digest = await downloadFile(tool.url, part);
+      const digest = await downloadFile(tool.url, part, { signal: controller.signal, onProgress });
       if (digest !== tool.sha256) {
         throw new Error(`sha256 mismatch: got ${digest}, want ${tool.sha256}`);
       }
@@ -194,7 +269,13 @@ async function provisionTool(name, onStatus) {
     return await Promise.race([
       work,
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`timed out after ${tool.timeoutMs}ms`)), tool.timeoutMs)),
+        setTimeout(() => {
+          // Abort the underlying request so the download actually stops
+          // instead of continuing to stream (and write .part bytes) in the
+          // background after this function has already reported failure.
+          controller.abort();
+          reject(new Error(`timed out after ${tool.timeoutMs}ms`));
+        }, tool.timeoutMs)),
     ]);
   } catch (err) {
     logLine(`[tools] ${name} provisioning failed (feature stays unconfigured, retried next boot): ${err}\n`);
@@ -209,7 +290,9 @@ const TOOL_LABELS = { hlae: 'HLAE', ffmpeg: 'FFmpeg', ytdlp: 'yt-dlp' };
 /**
  * Provisions all runtime tools concurrently and returns the env vars to hand
  * the orchestrator. ffprobe.exe sits next to ffmpeg.exe in the same archive.
- * onStatus(name), if given, fires once per tool that actually needs a download.
+ * onStatus(name, detail), if given, fires once per tool that actually needs a
+ * download (detail undefined), then again as coarse progress trickles in
+ * (detail a short string like "45%" or "12 MB").
  */
 async function provisionTools(onStatus) {
   if (process.platform !== 'win32') return {};
@@ -229,14 +312,24 @@ async function provisionTools(onStatus) {
   return env;
 }
 
-/** GET that follows redirects (archive.org download links bounce to mirrors). */
-function fetchStream(url, redirectsLeft = 5) {
+// Idle-socket timeout for a download in progress: generous (large archives on
+// a slow line), but stalled sockets are a real failure mode worth cutting off
+// rather than hanging until the per-tool timeout in provisionTool.
+const DOWNLOAD_SOCKET_IDLE_TIMEOUT_MS = 60_000;
+
+/**
+ * GET that follows redirects (archive.org download links bounce to mirrors).
+ * Pass signal to abort the request (and any pending redirect chain) so a
+ * caller-side timeout actually stops the network activity instead of just
+ * abandoning the promise.
+ */
+function fetchStream(url, { redirectsLeft = 5, signal } = {}) {
   return new Promise((resolve, reject) => {
     const get = url.startsWith('https:') ? https.get : http.get;
-    const req = get(url, (res) => {
+    const req = get(url, { signal }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft > 0) {
         res.resume();
-        return resolve(fetchStream(new URL(res.headers.location, url).toString(), redirectsLeft - 1));
+        return resolve(fetchStream(new URL(res.headers.location, url).toString(), { redirectsLeft: redirectsLeft - 1, signal }));
       }
       if (res.statusCode !== 200) {
         res.resume();
@@ -245,7 +338,7 @@ function fetchStream(url, redirectsLeft = 5) {
       resolve(res);
     });
     req.on('error', reject);
-    req.setTimeout(60000, () => req.destroy(new Error(`GET ${url}: timed out`)));
+    req.setTimeout(DOWNLOAD_SOCKET_IDLE_TIMEOUT_MS, () => req.destroy(new Error(`GET ${url}: timed out`)));
   });
 }
 
@@ -287,22 +380,12 @@ async function provisionMusic() {
       }
       continue;
     }
-    // Download to a temp name and rename so a half-written file never shows up
-    // as a playable track.
-    const tmp = `${dest}.part`;
+    // downloadFile stages through a temp name and renames on success, so a
+    // half-written file never shows up as a playable track.
     try {
-      const res = await fetchStream(t.downloadUrl);
-      await new Promise((resolve, reject) => {
-        const out = fs.createWriteStream(tmp);
-        res.pipe(out);
-        res.on('error', reject);
-        out.on('error', reject);
-        out.on('finish', resolve);
-      });
-      fs.renameSync(tmp, dest);
+      await downloadFile(t.downloadUrl, dest);
       logLine(`[music] downloaded ${t.id}.${t.ext}\n`);
     } catch (err) {
-      fs.rmSync(tmp, { force: true });
       logLine(`[music] skip ${t.id}: ${err}\n`);
     }
   }
@@ -368,6 +451,12 @@ async function stablePort(key) {
   return port;
 }
 
+// Per-attempt socket timeout and delay between polls for waitForHttp; short
+// relative to the overall deadline the caller passes in, so a single slow
+// attempt never eats a meaningful chunk of the boot budget.
+const HEALTH_REQUEST_TIMEOUT_MS = 2000;
+const HEALTH_POLL_INTERVAL_MS = 400;
+
 /** Polls an HTTP URL until it answers 2xx/3xx or the timeout elapses. */
 function waitForHttp(url, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -379,11 +468,11 @@ function waitForHttp(url, timeoutMs) {
         retry();
       });
       req.on('error', retry);
-      req.setTimeout(2000, () => req.destroy());
+      req.setTimeout(HEALTH_REQUEST_TIMEOUT_MS, () => req.destroy());
     };
     const retry = () => {
       if (Date.now() > deadline) return reject(new Error(`timed out waiting for ${url}`));
-      setTimeout(attempt, 400);
+      setTimeout(attempt, HEALTH_POLL_INTERVAL_MS);
     };
     attempt();
   });
@@ -443,6 +532,18 @@ function logTail(maxLines = 40) {
 
 let mainWindow = null;
 
+/**
+ * True if mainWindow exists and Electron hasn't torn it down yet. The window
+ * can disappear out from under any async continuation (boot() awaits ports,
+ * downloads, child-process health checks; the user can close the window, or
+ * a fatal renderer crash can destroy it, at any point during those awaits),
+ * so every place that touches mainWindow after an await must check this
+ * first instead of just checking for null.
+ */
+function windowAlive() {
+  return mainWindow !== null && !mainWindow.isDestroyed();
+}
+
 // Origins the window is allowed to navigate to on its own, populated once the
 // boot-time ports are known (see boot()). Referenced by the handlers below via
 // closure, so it is safe to register those handlers before the ports exist.
@@ -456,6 +557,25 @@ function isLoopbackOrigin(url) {
     return false;
   }
 }
+
+// The exact file:// URL for loading.html, computed once: the will-navigate
+// guard below allows navigating straight to this URL and nothing else under
+// file:/data:, so a page can never navigate the window to an arbitrary local
+// file or an attacker-crafted data: payload.
+const loadingFileUrl = pathToFileURL(path.join(__dirname, 'loading.html')).href;
+
+// data: URLs the main process itself generated and is currently showing (only
+// showErrorScreen creates these). Cleared and repopulated with just the
+// latest one on every call, so at most one data: URL is ever "trusted" at a
+// time; that is the (b) half of the will-navigate allowlist alongside (a)
+// loadingFileUrl above.
+const allowedInternalUrls = new Set();
+
+// Fake, unresolvable "URL" the error screen's retry button links to. The
+// renderer runs sandboxed with no preload/IPC, so a plain <a href> navigation
+// intercepted by will-navigate is the only way for a button click to reach
+// the main process; Chromium never actually resolves this host.
+const RETRY_URL = 'https://retry.fragforge.invalid/';
 
 const windowFile = path.join(app.getPath('userData'), 'window.json');
 
@@ -481,7 +601,7 @@ function loadWindowState() {
 
 /** Best-effort save of the window's current size/position/maximize state so the app reopens where the user left it. */
 function saveWindowBounds() {
-  if (!mainWindow) return;
+  if (!windowAlive()) return;
   try {
     // getNormalBounds(), not getBounds(): while maximized, getBounds() would
     // report the full-screen size, so un-maximizing next launch would
@@ -496,6 +616,12 @@ function saveWindowBounds() {
 // Guards mainWindow.reload() so a crash-loop in the renderer reloads once
 // instead of hammering a dead server forever.
 let renderProcessGoneReloaded = false;
+let renderProcessGoneResetTimer = null;
+
+// How long a reloaded page must stay up before an unrelated crash hours later
+// gets its own free reload again, instead of the stale flag from a long-past
+// crash sending it straight to the error screen.
+const RENDER_CRASH_RESET_DELAY_MS = 60_000;
 
 function createWindow(loadingOnly) {
   const { bounds, isMaximized } = loadWindowState();
@@ -516,6 +642,13 @@ function createWindow(loadingOnly) {
   mainWindow.removeMenu();
   if (isMaximized) mainWindow.maximize();
   mainWindow.on('close', saveWindowBounds);
+  // The window can be destroyed (user closes it, or Chromium tears it down
+  // after a fatal render-process crash) while boot() or a post-boot watcher
+  // is mid-await; clearing the reference lets windowAlive() catch every one
+  // of those spots instead of them throwing into a dead BrowserWindow.
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 
   // Deny every window.open (no popups in a kiosk-style desktop wrapper);
   // an http(s) target that isn't our own loopback server is handed to the
@@ -525,11 +658,20 @@ function createWindow(loadingOnly) {
     return { action: 'deny' };
   });
 
-  // Same idea for in-window navigation: only our own orchestrator/web origins
-  // (plus the local loading.html file and the inline data: error screen) may
-  // navigate the window directly; anything else opens externally instead.
+  // Same idea for in-window navigation: only our own orchestrator/web
+  // origins, the loading.html file, and the error screen's own current data:
+  // URL may navigate the window directly. Everything else - including any
+  // other data:/file: URL - is blocked and, if http(s), opened externally
+  // instead. The retry link on the error screen is a special case: it is
+  // intercepted here and turned into a real retryBoot() call rather than
+  // ever being allowed to "navigate" anywhere.
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith('data:') || url.startsWith('file://') || isLoopbackOrigin(url)) return;
+    if (url === RETRY_URL) {
+      event.preventDefault();
+      retryBoot();
+      return;
+    }
+    if (url === loadingFileUrl || allowedInternalUrls.has(url) || isLoopbackOrigin(url)) return;
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
   });
@@ -537,14 +679,27 @@ function createWindow(loadingOnly) {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     logLine(`[window] render process gone: ${JSON.stringify(details)}\n`);
     if (quitting) return;
+    if (renderProcessGoneResetTimer) {
+      clearTimeout(renderProcessGoneResetTimer);
+      renderProcessGoneResetTimer = null;
+    }
     if (!renderProcessGoneReloaded) {
       renderProcessGoneReloaded = true;
-      mainWindow.reload();
+      if (windowAlive()) mainWindow.reload();
+      // Only treat the crash flag as "used up" for a while: once the reload
+      // has stood for RENDER_CRASH_RESET_DELAY_MS without a further crash,
+      // reset it so a later, unrelated crash still gets its own free reload
+      // instead of going straight to the error screen.
+      renderProcessGoneResetTimer = setTimeout(() => {
+        renderProcessGoneReloaded = false;
+        renderProcessGoneResetTimer = null;
+      }, RENDER_CRASH_RESET_DELAY_MS);
       return;
     }
-    // A second crash means the reload above didn't fix whatever is wrong
-    // (a fatal Chromium bug, a corrupted profile); show the error screen
-    // instead of silently reloading forever and leaving a dead window.
+    // A second crash within the window above means the reload didn't fix
+    // whatever is wrong (a fatal Chromium bug, a corrupted profile); show the
+    // error screen instead of silently reloading forever and leaving a dead
+    // window.
     showErrorScreen(
       `La interfaz se ha bloqueado repetidamente (motivo: ${details.reason}).`,
       'La interfaz se ha bloqueado repetidamente',
@@ -562,7 +717,7 @@ let loadingScreenShowing = false;
 
 /** Updates the loading screen's #status line; a silent no-op once we've navigated away from it (real app, or error screen). */
 function setLoadingStatus(text) {
-  if (!mainWindow || !loadingScreenShowing) return;
+  if (!windowAlive() || !loadingScreenShowing) return;
   mainWindow.webContents
     .executeJavaScript(
       `(() => { const el = document.getElementById('status'); if (el) el.textContent = ${JSON.stringify(text)}; })()`,
@@ -573,24 +728,48 @@ function setLoadingStatus(text) {
 /** Renders the fatal-error screen as a data: URL, so it never depends on the servers that just failed or died. */
 function showErrorScreen(err, title, hint) {
   loadingScreenShowing = false;
-  if (!mainWindow) return;
+  if (!windowAlive()) return;
   const defaultTitle = 'FragForge Studio no pudo arrancar';
   const defaultHint =
     'Si un antivirus ha bloqueado o puesto en cuarentena archivos de FragForge, restáuralos y vuelve a abrir la app.';
   const html = `<!doctype html><html><head><meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
-    <style>body{font:16px system-ui;background:#0a0a0a;color:#eee;padding:2rem}</style></head>
+    <style>
+      body{font:16px system-ui;background:#0a0a0a;color:#eee;padding:2rem}
+      a.retry{display:inline-block;margin-top:1rem;padding:.6rem 1.2rem;background:#22d9ee;color:#04121a;
+        font-weight:600;text-decoration:none;border-radius:4px}
+    </style></head>
     <body>
       <h2>${escapeHtml(title || defaultTitle)}</h2>
       <p>${escapeHtml(err)}</p>
       <p style="color:#999">${hint || defaultHint} Registro completo: ${escapeHtml(logFile)}</p>
+      <a class="retry" href="${RETRY_URL}">Reintentar</a>
       <pre style="background:#111;padding:1rem;overflow:auto;max-height:40vh;font-size:12px">${logTail()}</pre>
     </body></html>`;
-  mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  const url = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+  // Only the error screen currently on display is a trusted navigation
+  // target; drop whatever the previous error screen (if any) allowed.
+  allowedInternalUrls.clear();
+  allowedInternalUrls.add(url);
+  mainWindow.loadURL(url);
 }
 
+// Generous overall deadline for each server to answer its health check: a
+// first-ever boot can still be mid-way through provisioning a stalled tool
+// download inside its own per-tool timeout, so this only needs to bound how
+// long a genuinely wedged/crash-looping child is waited on.
+const BOOT_HEALTH_TIMEOUT_MS = 60_000;
+
 async function boot() {
-  createWindow(true);
+  // Reuse the existing window on a retry (see retryBoot()) instead of
+  // spawning a second BrowserWindow on top of the one showing the error
+  // screen; only the very first boot (or a fresh boot after the window was
+  // fully closed) needs to create one.
+  if (windowAlive()) {
+    mainWindow.loadFile(path.join(__dirname, 'loading.html'));
+  } else {
+    createWindow(true);
+  }
   loadingScreenShowing = true;
 
   setLoadingStatus('Eligiendo puertos libres…');
@@ -612,8 +791,8 @@ async function boot() {
   // Each tool has its own timeout, so worst case the app boots without one and
   // the UI says which feature is unconfigured.
   setLoadingStatus('Descargando herramientas (~110 MB, solo el primer arranque)…');
-  const toolEnv = await provisionTools((name) =>
-    setLoadingStatus(`Descargando ${TOOL_LABELS[name] || name}…`));
+  const toolEnv = await provisionTools((name, detail) =>
+    setLoadingStatus(`Descargando ${TOOL_LABELS[name] || name}${detail ? ` (${detail})` : ''}…`));
 
   // The orchestrator: SQLite job repo on disk (so reels survive an app restart)
   // + inline queue, capture and render tools from the provisioned env above,
@@ -644,8 +823,8 @@ async function boot() {
   try {
     // Racing against child exit turns "timed out waiting for healthz" into the
     // real cause when a backend dies at startup instead of coming up slowly.
-    await Promise.race([waitForHttp(`${orchestratorUrl}/healthz`, 60000), orch.exited]);
-    await Promise.race([waitForHttp(`http://127.0.0.1:${webPort}/`, 60000), web.exited]);
+    await Promise.race([waitForHttp(`${orchestratorUrl}/healthz`, BOOT_HEALTH_TIMEOUT_MS), orch.exited]);
+    await Promise.race([waitForHttp(`http://127.0.0.1:${webPort}/`, BOOT_HEALTH_TIMEOUT_MS), web.exited]);
   } catch (err) {
     logLine(`[boot] failed: ${err}\n`);
     showErrorScreen(err);
@@ -674,7 +853,36 @@ async function boot() {
   // the only place that offers both.
   setLoadingStatus('Abriendo la interfaz…');
   loadingScreenShowing = false;
-  if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${webPort}/matches`);
+  if (windowAlive()) mainWindow.loadURL(`http://127.0.0.1:${webPort}/matches`);
+}
+
+// Guards against overlapping boot() runs: the initial app.whenReady() boot
+// and a user mashing the error screen's retry button both go through
+// runBoot(), which is a no-op while a boot is already in flight.
+let booting = false;
+
+/** Runs boot(), refusing to start a second one concurrently (ports/children would race). */
+function runBoot() {
+  if (booting) return;
+  booting = true;
+  boot()
+    .catch((err) => logLine(`[boot] unexpected error: ${err}\n`))
+    .finally(() => {
+      booting = false;
+    });
+}
+
+/**
+ * Retry handler for the error screen's "Reintentar" button (wired through
+ * will-navigate, see createWindow()). Kills off whatever children the failed
+ * attempt left running, drops them from the tracking list, and re-enters
+ * boot() from the top on the same window.
+ */
+function retryBoot() {
+  if (booting) return;
+  for (const child of children) killTree(child);
+  children.length = 0;
+  runBoot();
 }
 
 // Set in 'before-quit' so post-boot crash watching (above) and
@@ -702,16 +910,15 @@ function shutdown() {
 }
 
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  }
+  if (!windowAlive()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
 });
 
 app.whenReady().then(() => {
   // Local app needs no browser permissions (camera/mic/geolocation/notifications/etc).
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-  return boot();
+  runBoot();
 });
 
 app.on('window-all-closed', () => app.quit());
