@@ -54,7 +54,9 @@ stages `zv.exe`, `zv-orchestrator.exe`, `zv-editor.exe`, and the standalone
 server into `build-resources/`), then `electron-builder` produces the
 installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
 where `<version>` is the `version` field in `desktop/package.json`). The app
-icon lives at `build/icon.ico`, which electron-builder picks up automatically.
+icon lives at `build/icon.ico`, which electron-builder picks up automatically;
+`assemble.mjs` fails fast if it's missing. `zv-recorder.exe` is bundled too,
+but only when it's present in `bin/` - it's optional at assemble time.
 
 This v1 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
 on first run - choose "More info" -> "Run anyway". Code signing and auto-update

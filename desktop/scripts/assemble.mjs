@@ -35,6 +35,17 @@ for (const required of [zvExe, zvOrchestrator, zvEditor]) {
   }
 }
 
+// electron-builder picks up build/icon.ico automatically (see desktop/README.md);
+// it does not fail loudly if it's missing, it just ships an installer with the
+// default Electron icon. Fail here instead, before the (slow) Next.js build
+// below, so a missing icon is caught in seconds rather than discovered by
+// eyeballing the finished installer.
+const iconFile = join(desktop, 'build', 'icon.ico');
+if (!existsSync(iconFile)) {
+  console.error(`\nmissing ${iconFile}\nelectron-builder needs this for the app/installer icon.\n`);
+  process.exit(1);
+}
+
 // 1. Build the web in local mode. NEXT_PUBLIC_FRAGFORGE_MODE is inlined into the
 //    client bundle at build time, so the desktop distributable is local-only.
 console.log('[assemble] building web (NEXT_PUBLIC_FRAGFORGE_MODE=local)...');
