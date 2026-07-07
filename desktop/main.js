@@ -9,8 +9,8 @@
 // Both children bind loopback on dynamically-chosen free ports, so two installs
 // (or a stray process) never collide on a fixed port.
 
-const { app, BrowserWindow } = require('electron');
-const { spawn } = require('child_process');
+const { app, BrowserWindow, shell, session } = require('electron');
+const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -149,7 +149,7 @@ function expandArchive(zipPath, destDir) {
  * Idempotent: a cached install returns instantly. Each tool is capped by its
  * own timeout so one stalled download can never wedge the boot.
  */
-async function provisionTool(name) {
+async function provisionTool(name, onStatus) {
   const tool = TOOLS[name];
   const dir = path.join(toolsRoot(), name, tool.version);
   const exe = path.join(dir, tool.exeRel);
@@ -158,6 +158,9 @@ async function provisionTool(name) {
     const legacy = path.join(tool.legacyDir(), tool.exeRel);
     if (fs.existsSync(legacy)) return legacy;
   }
+  // Only fires when a real download is about to start (cache hits above never
+  // reach here), so the loading screen doesn't flash a status for instant boots.
+  if (onStatus) onStatus(name);
 
   const work = (async () => {
     fs.mkdirSync(dir, { recursive: true });
@@ -199,16 +202,21 @@ async function provisionTool(name) {
   }
 }
 
+// Display names for the loading-screen per-tool status lines; TOOLS keys are
+// the internal provisioning names, these are what a user recognizes.
+const TOOL_LABELS = { hlae: 'HLAE', ffmpeg: 'FFmpeg', ytdlp: 'yt-dlp' };
+
 /**
  * Provisions all runtime tools concurrently and returns the env vars to hand
  * the orchestrator. ffprobe.exe sits next to ffmpeg.exe in the same archive.
+ * onStatus(name), if given, fires once per tool that actually needs a download.
  */
-async function provisionTools() {
+async function provisionTools(onStatus) {
   if (process.platform !== 'win32') return {};
   const [hlae, ffmpeg, ytdlp] = await Promise.all([
-    provisionTool('hlae'),
-    provisionTool('ffmpeg'),
-    provisionTool('ytdlp'),
+    provisionTool('hlae', onStatus),
+    provisionTool('ffmpeg', onStatus),
+    provisionTool('ytdlp', onStatus),
   ]);
   const env = {};
   if (hlae) env.ZV_HLAE_PATH = hlae;
@@ -340,7 +348,17 @@ async function stablePort(key) {
   } catch {
     // first launch or unreadable file; fall through to picking a new port
   }
-  if (Number.isInteger(saved[key]) && (await portFree(saved[key]))) return saved[key];
+  if (Number.isInteger(saved[key])) {
+    if (await portFree(saved[key])) return saved[key];
+    // Something else grabbed the saved port (another instance that ignored
+    // the single-instance lock, a stray leftover process, an unrelated app);
+    // picking a fresh port is safe but changes the origin the web UI depends
+    // on, so make that visible instead of silently shifting under the user.
+    const hint = key === 'web'
+      ? ' the reel library kept in the browser localStorage is keyed by origin, so it may appear empty on the new port'
+      : '';
+    logLine(`[ports] saved ${key} port ${saved[key]} was taken, picking a new one;${hint}\n`);
+  }
   const port = await freePort();
   try {
     fs.writeFileSync(portsFile, JSON.stringify({ ...saved, [key]: port }));
@@ -389,6 +407,9 @@ function launch(label, exe, args, env) {
   const exited = new Promise((_, reject) => {
     child.on('error', (err) => {
       logLine(`[${label}] failed to start: ${err}\n`);
+      // User-facing strings (here and in the loading/error screens) are in
+      // Spanish: FragForge Studio targets the Spanish-speaking CS2
+      // content-creator market, so the desktop chrome speaks their language.
       reject(new Error(`${label} no pudo iniciarse: ${err.message}`));
     });
     child.on('exit', (code) => {
@@ -400,15 +421,21 @@ function launch(label, exe, args, env) {
   return { child, exited };
 }
 
+/** Escapes the HTML-sensitive characters in untrusted text (log lines, error messages) before it is dropped into a loaded page. */
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /** Last lines of studio.log, HTML-escaped for the error screen. */
 function logTail(maxLines = 40) {
   try {
     const lines = fs.readFileSync(logFile, 'utf8').split('\n');
-    return lines
-      .slice(-maxLines)
-      .join('\n')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;');
+    return escapeHtml(lines.slice(-maxLines).join('\n'));
   } catch {
     return '(sin registro)';
   }
@@ -416,25 +443,164 @@ function logTail(maxLines = 40) {
 
 let mainWindow = null;
 
+// Origins the window is allowed to navigate to on its own, populated once the
+// boot-time ports are known (see boot()). Referenced by the handlers below via
+// closure, so it is safe to register those handlers before the ports exist.
+const allowedOrigins = new Set();
+
+/** True if url's origin is one of the loopback servers we just spawned. */
+function isLoopbackOrigin(url) {
+  try {
+    return allowedOrigins.has(new URL(url).origin);
+  } catch {
+    return false;
+  }
+}
+
+const windowFile = path.join(app.getPath('userData'), 'window.json');
+
+/** Reads saved window bounds and maximize state, falling back to sane defaults if missing, corrupt, or implausibly small. */
+function loadWindowState() {
+  const fallback = { bounds: { width: 1280, height: 900 }, isMaximized: false };
+  try {
+    const saved = JSON.parse(fs.readFileSync(windowFile, 'utf8'));
+    const { width, height, x, y, isMaximized } = saved;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 800 || height < 600) {
+      return fallback;
+    }
+    const bounds = { width, height };
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      bounds.x = x;
+      bounds.y = y;
+    }
+    return { bounds, isMaximized: isMaximized === true };
+  } catch {
+    return fallback;
+  }
+}
+
+/** Best-effort save of the window's current size/position/maximize state so the app reopens where the user left it. */
+function saveWindowBounds() {
+  if (!mainWindow) return;
+  try {
+    // getNormalBounds(), not getBounds(): while maximized, getBounds() would
+    // report the full-screen size, so un-maximizing next launch would
+    // restore into that instead of a sane windowed size.
+    const bounds = mainWindow.getNormalBounds();
+    fs.writeFileSync(windowFile, JSON.stringify({ ...bounds, isMaximized: mainWindow.isMaximized() }));
+  } catch (err) {
+    logLine(`[window] could not persist bounds: ${err}\n`);
+  }
+}
+
+// Guards mainWindow.reload() so a crash-loop in the renderer reloads once
+// instead of hammering a dead server forever.
+let renderProcessGoneReloaded = false;
+
 function createWindow(loadingOnly) {
+  const { bounds, isMaximized } = loadWindowState();
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 900,
+    ...bounds,
     backgroundColor: '#0a0a0a',
     title: 'FragForge Studio',
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      // Packaged users have no menu and should never land in DevTools by
+      // accident; dev keeps it open for diagnosis (packaged-side diagnosis
+      // is the studio.log tail shown on the error screen instead).
+      devTools: !app.isPackaged,
+    },
   });
   mainWindow.removeMenu();
+  if (isMaximized) mainWindow.maximize();
+  mainWindow.on('close', saveWindowBounds);
+
+  // Deny every window.open (no popups in a kiosk-style desktop wrapper);
+  // an http(s) target that isn't our own loopback server is handed to the
+  // user's real browser instead of silently vanishing.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url) && !isLoopbackOrigin(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  // Same idea for in-window navigation: only our own orchestrator/web origins
+  // (plus the local loading.html file and the inline data: error screen) may
+  // navigate the window directly; anything else opens externally instead.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('data:') || url.startsWith('file://') || isLoopbackOrigin(url)) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    logLine(`[window] render process gone: ${JSON.stringify(details)}\n`);
+    if (quitting) return;
+    if (!renderProcessGoneReloaded) {
+      renderProcessGoneReloaded = true;
+      mainWindow.reload();
+      return;
+    }
+    // A second crash means the reload above didn't fix whatever is wrong
+    // (a fatal Chromium bug, a corrupted profile); show the error screen
+    // instead of silently reloading forever and leaving a dead window.
+    showErrorScreen(
+      `La interfaz se ha bloqueado repetidamente (motivo: ${details.reason}).`,
+      'La interfaz se ha bloqueado repetidamente',
+      'Cierra FragForge Studio y vuelve a abrirlo. Si el problema persiste, revisa el registro.',
+    );
+  });
+
   if (loadingOnly) mainWindow.loadFile(path.join(__dirname, 'loading.html'));
   return mainWindow;
 }
 
+// True while the loading.html screen is the thing on screen, so
+// setLoadingStatus knows whether its target element can even exist.
+let loadingScreenShowing = false;
+
+/** Updates the loading screen's #status line; a silent no-op once we've navigated away from it (real app, or error screen). */
+function setLoadingStatus(text) {
+  if (!mainWindow || !loadingScreenShowing) return;
+  mainWindow.webContents
+    .executeJavaScript(
+      `(() => { const el = document.getElementById('status'); if (el) el.textContent = ${JSON.stringify(text)}; })()`,
+    )
+    .catch(() => {}); // the page may already be gone; never block boot on this
+}
+
+/** Renders the fatal-error screen as a data: URL, so it never depends on the servers that just failed or died. */
+function showErrorScreen(err, title, hint) {
+  loadingScreenShowing = false;
+  if (!mainWindow) return;
+  const defaultTitle = 'FragForge Studio no pudo arrancar';
+  const defaultHint =
+    'Si un antivirus ha bloqueado o puesto en cuarentena archivos de FragForge, restáuralos y vuelve a abrir la app.';
+  const html = `<!doctype html><html><head><meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+    <style>body{font:16px system-ui;background:#0a0a0a;color:#eee;padding:2rem}</style></head>
+    <body>
+      <h2>${escapeHtml(title || defaultTitle)}</h2>
+      <p>${escapeHtml(err)}</p>
+      <p style="color:#999">${hint || defaultHint} Registro completo: ${escapeHtml(logFile)}</p>
+      <pre style="background:#111;padding:1rem;overflow:auto;max-height:40vh;font-size:12px">${logTail()}</pre>
+    </body></html>`;
+  mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+}
+
 async function boot() {
   createWindow(true);
+  loadingScreenShowing = true;
 
+  setLoadingStatus('Eligiendo puertos libres…');
   const orchPort = await stablePort('orchestrator');
   const webPort = await stablePort('web');
   const orchestratorUrl = `http://127.0.0.1:${orchPort}`;
+  // Ports are only known now, so this is the earliest point the navigation
+  // guards in createWindow() have anything real to allow.
+  allowedOrigins.add(`http://127.0.0.1:${orchPort}`);
+  allowedOrigins.add(`http://127.0.0.1:${webPort}`);
 
   // Fire-and-forget: tracks land while the app boots (and even mid-session);
   // /api/songs rescans the dir per request.
@@ -445,12 +611,15 @@ async function boot() {
   // downloads ~110 MB total; later boots return the cached installs instantly.
   // Each tool has its own timeout, so worst case the app boots without one and
   // the UI says which feature is unconfigured.
-  const toolEnv = await provisionTools();
+  setLoadingStatus('Descargando herramientas (~110 MB, solo el primer arranque)…');
+  const toolEnv = await provisionTools((name) =>
+    setLoadingStatus(`Descargando ${TOOL_LABELS[name] || name}…`));
 
   // The orchestrator: SQLite job repo on disk (so reels survive an app restart)
   // + inline queue, capture and render tools from the provisioned env above,
   // anything missing auto-detected (CS2/recorder/editor). "sqlite" with no
   // path stores <dataDir>/jobs.db. Loopback bind needs no mutation token.
+  setLoadingStatus('Iniciando el orquestador…');
   const orch = launch('orchestrator', orchestratorExe, [], {
     ZV_DATABASE_URL: 'sqlite',
     ZV_DATA_DIR: dataDir,
@@ -462,6 +631,7 @@ async function boot() {
   // The Next.js standalone server, run by Electron's own Node (no separate Node
   // runtime shipped). NEXT_PUBLIC_FRAGFORGE_MODE is baked into the client bundle
   // at build time; it is set here too for the server route handlers.
+  setLoadingStatus('Iniciando el servidor web…');
   const web = launch('web', process.execPath, [nextServer], {
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
@@ -478,29 +648,57 @@ async function boot() {
     await Promise.race([waitForHttp(`http://127.0.0.1:${webPort}/`, 60000), web.exited]);
   } catch (err) {
     logLine(`[boot] failed: ${err}\n`);
-    if (mainWindow) {
-      mainWindow.loadURL(
-        'data:text/html;charset=utf-8,' +
-          encodeURIComponent(`<body style="font:16px system-ui;background:#0a0a0a;color:#eee;padding:2rem">
-            <h2>FragForge Studio no pudo arrancar</h2>
-            <p>${String(err).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>
-            <p style="color:#999">Si un antivirus ha bloqueado o puesto en cuarentena archivos de FragForge, restáuralos y vuelve a abrir la app. Registro completo: ${logFile.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>
-            <pre style="background:#111;padding:1rem;overflow:auto;max-height:40vh;font-size:12px">${logTail()}</pre></body>`),
-      );
-    }
+    showErrorScreen(err);
     return;
   }
+
+  // Boot succeeded, but the children can still die later (the orchestrator
+  // loses its capture device, Next.js hits a fatal error, etc.); watch both
+  // for the rest of the session so a post-boot crash shows the same error
+  // screen instead of leaving the window frozen on stale content.
+  const watchPostBoot = (child) =>
+    child.exited.catch((err) => {
+      if (quitting) return;
+      logLine(`[boot] post-boot crash: ${err}\n`);
+      showErrorScreen(
+        err,
+        'FragForge Studio se ha detenido',
+        'El backend se detuvo de forma inesperada. Cierra y vuelve a abrir la app.',
+      );
+    });
+  watchPostBoot(orch);
+  watchPostBoot(web);
 
   // Land on the dashboard (the app shell), not a single flow: Studio has both
   // the demo-upload flow and the Twitch stream-clips flow, and the sidebar is
   // the only place that offers both.
+  setLoadingStatus('Abriendo la interfaz…');
+  loadingScreenShowing = false;
   if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${webPort}/matches`);
 }
 
-function shutdown() {
-  for (const child of children) {
-    if (!child.killed) child.kill();
+// Set in 'before-quit' so post-boot crash watching (above) and
+// render-process-gone (in createWindow) don't fight an intentional shutdown
+// by throwing up an error screen or reloading a window that's going away.
+let quitting = false;
+
+/** Kills one tracked child and, on Windows, its whole descendant tree (the orchestrator spawns zv-recorder -> HLAE -> cs2.exe). */
+function killTree(child) {
+  if (!child || !child.pid) return;
+  if (child.killed || child.exitCode !== null) return;
+  if (process.platform === 'win32') {
+    // child.kill() only signals the direct process; grandchildren would
+    // survive as orphans holding the GPU/capture device, so ask Windows to
+    // tear down the whole process tree instead. Synchronous so this finishes
+    // before 'before-quit'/'exit' lets the app close.
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+  } else {
+    child.kill();
   }
+}
+
+function shutdown() {
+  for (const child of children) killTree(child);
 }
 
 app.on('second-instance', () => {
@@ -510,8 +708,15 @@ app.on('second-instance', () => {
   }
 });
 
-app.whenReady().then(boot);
+app.whenReady().then(() => {
+  // Local app needs no browser permissions (camera/mic/geolocation/notifications/etc).
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  return boot();
+});
 
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', shutdown);
+app.on('before-quit', () => {
+  quitting = true;
+  shutdown();
+});
 process.on('exit', shutdown);
