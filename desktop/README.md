@@ -6,10 +6,27 @@ native window, so an end user never touches Node, a terminal, or a browser.
 
 It bundles the same pieces `scripts/local-studio.ps1` runs:
 
-- `zv.exe` (the orchestrator) - started in memory mode, HLAE/CS2 auto-detected.
+- `zv-orchestrator.exe` - spawned directly (not via `zv serve`), so quitting
+  the app kills the real server instead of leaving an orphaned grandchild
+  holding the port and the SQLite job db. Runs with `ZV_DATABASE_URL=sqlite`
+  (job state persists in `<userData>/data/jobs.db` across restarts) and
+  `ZV_DATA_DIR=<userData>/data`; HLAE/CS2/FFmpeg are auto-detected, or use the
+  tools provisioned on first boot below.
 - The Next.js standalone server - started with Electron's own Node (no separate
   Node runtime shipped), in local mode so the UI proxies the whole pipeline to
   the orchestrator.
+
+Both processes bind loopback (`ZV_HTTP_ADDR=127.0.0.1:<port>`) on ports chosen
+once per install and persisted in `<userData>/ports.json`; the web port in
+particular must stay stable across launches because the reel library lives in
+the browser's `localStorage`, which is keyed by origin (`host:port`).
+
+On first boot the app provisions HLAE, FFmpeg, and yt-dlp (~110 MB total) into
+`<userData>/tools`, each verified against a pinned sha256 digest, plus the
+music catalog; every download is best-effort, so an offline first boot just
+leaves that feature unconfigured until the next launch. The window lands on
+`/matches` (the app shell/dashboard, not a single flow), since Studio has both
+the demo-upload path and the Twitch stream-clips path.
 
 Capture still needs CS2 + HLAE installed on the machine (Windows + GPU); the app
 only removes the setup friction, not that requirement. Job data (demos,
@@ -33,9 +50,11 @@ npm run dist
 ```
 
 `npm run dist` runs `scripts/assemble.mjs` (builds the web in local mode and
-stages `zv.exe` + the standalone server into `build-resources/`), then
-`electron-builder` produces the installer under `dist-installer/`
-(`FragForge Studio Setup 0.1.0.exe`).
+stages `zv.exe`, `zv-orchestrator.exe`, `zv-editor.exe`, and the standalone
+server into `build-resources/`), then `electron-builder` produces the
+installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
+where `<version>` is the `version` field in `desktop/package.json`). The app
+icon lives at `build/icon.ico`, which electron-builder picks up automatically.
 
 This v1 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
 on first run - choose "More info" -> "Run anyway". Code signing and auto-update
@@ -44,13 +63,14 @@ are intentionally out of scope for v1.
 ## Run without packaging (dev)
 
 ```powershell
-# From the repo root, once: build zv.exe and the standalone bundle.
+# From the repo root, once: build the Go binaries and the standalone bundle.
 .\scripts\build.ps1
 cd desktop; npm install
 npm run assemble        # builds the web + stages build-resources/
 
-# In dev, main.js resolves zv.exe from ..\bin and the server from
-# ..\web\.next\standalone. Launch the Electron shell:
+# In dev, main.js resolves every bundled resource (zv-orchestrator.exe,
+# zv-editor.exe, the web server) from .\build-resources, the same layout
+# `npm run assemble` stages for packaging. Launch the Electron shell:
 npm start
 ```
 
@@ -58,12 +78,18 @@ npm start
 
 `main.js` (Electron main process):
 
-1. Picks two free loopback ports.
-2. Spawns `zv.exe serve` (`ZV_DATABASE_URL=memory`, `ZV_DATA_DIR=<userData>/data`,
-   `ZV_HTTP_ADDR=127.0.0.1:<orchPort>`).
-3. Spawns the Next standalone `server.js` via `ELECTRON_RUN_AS_NODE`
+1. Reads or picks two per-install-stable loopback ports (`orchestrator`,
+   `web`), persisted in `<userData>/ports.json`.
+2. Kicks off music catalog provisioning in the background, and awaits
+   provisioning of HLAE/FFmpeg/yt-dlp into `<userData>/tools` (first boot
+   only; later boots return the cached installs instantly).
+3. Spawns `zv-orchestrator.exe` directly - not `zv.exe serve` - so quitting the
+   app reliably kills the real server (`ZV_DATABASE_URL=sqlite`,
+   `ZV_DATA_DIR=<userData>/data`, `ZV_HTTP_ADDR=127.0.0.1:<orchPort>`, plus any
+   provisioned tool paths).
+4. Spawns the Next standalone `server.js` via `ELECTRON_RUN_AS_NODE`
    (`NEXT_PUBLIC_FRAGFORGE_MODE=local`, `ORCHESTRATOR_URL` pointing at the
    orchestrator, `PORT=<webPort>`).
-4. Waits for `/healthz` and the web root, then loads `/upload` in the window.
-5. Kills both children on quit. A single-instance lock prevents a second launch
+5. Waits for `/healthz` and the web root, then loads `/matches` in the window.
+6. Kills both children on quit. A single-instance lock prevents a second launch
    from spawning a duplicate backend.
