@@ -348,7 +348,17 @@ async function stablePort(key) {
   } catch {
     // first launch or unreadable file; fall through to picking a new port
   }
-  if (Number.isInteger(saved[key]) && (await portFree(saved[key]))) return saved[key];
+  if (Number.isInteger(saved[key])) {
+    if (await portFree(saved[key])) return saved[key];
+    // Something else grabbed the saved port (another instance that ignored
+    // the single-instance lock, a stray leftover process, an unrelated app);
+    // picking a fresh port is safe but changes the origin the web UI depends
+    // on, so make that visible instead of silently shifting under the user.
+    const hint = key === 'web'
+      ? ' the reel library kept in the browser localStorage is keyed by origin, so it may appear empty on the new port'
+      : '';
+    logLine(`[ports] saved ${key} port ${saved[key]} was taken, picking a new one;${hint}\n`);
+  }
   const port = await freePort();
   try {
     fs.writeFileSync(portsFile, JSON.stringify({ ...saved, [key]: port }));
@@ -449,12 +459,12 @@ function isLoopbackOrigin(url) {
 
 const windowFile = path.join(app.getPath('userData'), 'window.json');
 
-/** Reads saved window bounds, falling back to a sane default if missing, corrupt, or implausibly small. */
-function loadWindowBounds() {
-  const fallback = { width: 1280, height: 900 };
+/** Reads saved window bounds and maximize state, falling back to sane defaults if missing, corrupt, or implausibly small. */
+function loadWindowState() {
+  const fallback = { bounds: { width: 1280, height: 900 }, isMaximized: false };
   try {
     const saved = JSON.parse(fs.readFileSync(windowFile, 'utf8'));
-    const { width, height, x, y } = saved;
+    const { width, height, x, y, isMaximized } = saved;
     if (!Number.isFinite(width) || !Number.isFinite(height) || width < 800 || height < 600) {
       return fallback;
     }
@@ -463,17 +473,21 @@ function loadWindowBounds() {
       bounds.x = x;
       bounds.y = y;
     }
-    return bounds;
+    return { bounds, isMaximized: isMaximized === true };
   } catch {
     return fallback;
   }
 }
 
-/** Best-effort save of the window's current size/position so the app reopens where the user left it. */
+/** Best-effort save of the window's current size/position/maximize state so the app reopens where the user left it. */
 function saveWindowBounds() {
   if (!mainWindow) return;
   try {
-    fs.writeFileSync(windowFile, JSON.stringify(mainWindow.getBounds()));
+    // getNormalBounds(), not getBounds(): while maximized, getBounds() would
+    // report the full-screen size, so un-maximizing next launch would
+    // restore into that instead of a sane windowed size.
+    const bounds = mainWindow.getNormalBounds();
+    fs.writeFileSync(windowFile, JSON.stringify({ ...bounds, isMaximized: mainWindow.isMaximized() }));
   } catch (err) {
     logLine(`[window] could not persist bounds: ${err}\n`);
   }
@@ -484,13 +498,23 @@ function saveWindowBounds() {
 let renderProcessGoneReloaded = false;
 
 function createWindow(loadingOnly) {
+  const { bounds, isMaximized } = loadWindowState();
   mainWindow = new BrowserWindow({
-    ...loadWindowBounds(),
+    ...bounds,
     backgroundColor: '#0a0a0a',
     title: 'FragForge Studio',
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      // Packaged users have no menu and should never land in DevTools by
+      // accident; dev keeps it open for diagnosis (packaged-side diagnosis
+      // is the studio.log tail shown on the error screen instead).
+      devTools: !app.isPackaged,
+    },
   });
   mainWindow.removeMenu();
+  if (isMaximized) mainWindow.maximize();
   mainWindow.on('close', saveWindowBounds);
 
   // Deny every window.open (no popups in a kiosk-style desktop wrapper);
@@ -512,10 +536,20 @@ function createWindow(loadingOnly) {
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     logLine(`[window] render process gone: ${JSON.stringify(details)}\n`);
-    if (!renderProcessGoneReloaded && !quitting) {
+    if (quitting) return;
+    if (!renderProcessGoneReloaded) {
       renderProcessGoneReloaded = true;
       mainWindow.reload();
+      return;
     }
+    // A second crash means the reload above didn't fix whatever is wrong
+    // (a fatal Chromium bug, a corrupted profile); show the error screen
+    // instead of silently reloading forever and leaving a dead window.
+    showErrorScreen(
+      `La interfaz se ha bloqueado repetidamente (motivo: ${details.reason}).`,
+      'La interfaz se ha bloqueado repetidamente',
+      'Cierra FragForge Studio y vuelve a abrirlo. Si el problema persiste, revisa el registro.',
+    );
   });
 
   if (loadingOnly) mainWindow.loadFile(path.join(__dirname, 'loading.html'));
