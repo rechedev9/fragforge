@@ -9,7 +9,32 @@ import (
 // Messages carry the result of async work back into the Bubble Tea update loop.
 // Every client call runs in a tea.Cmd goroutine and returns one of these.
 
+// errMsg reports a failed operator-initiated action (upload, parse, record,
+// download, ...). It clears the busy flag and is shown until acknowledged or
+// superseded. Background fetch failures use pollErrMsg instead.
 type errMsg struct{ err error }
+
+// pollSource identifies which background fetch a pollErrMsg came from, so the
+// next successful fetch of the same data can clear it.
+type pollSource int
+
+const (
+	pollCaps pollSource = iota
+	pollPresets
+	pollJobs
+	pollStreams
+	pollJobDetail
+	pollStreamDetail
+)
+
+// pollErrMsg reports a failed background fetch (list/detail poll, caps/preset
+// load). Unlike errMsg it never touches the busy flag - an operator action may
+// still be in flight - and it clears automatically when the same source next
+// succeeds, so a transient blip does not leave a stale error on screen.
+type pollErrMsg struct {
+	source pollSource
+	err    error
+}
 
 type noticeMsg string
 

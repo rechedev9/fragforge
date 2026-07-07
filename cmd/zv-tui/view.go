@@ -68,6 +68,9 @@ func (m model) capsSummary() string {
 
 // ---- footer ----------------------------------------------------------------
 
+// viewFooter picks one status line by priority: action error, then in-flight
+// action (busy must not be masked by background poll noise), then an ongoing
+// poll error (which outranks a stale success notice), then notice, then hint.
 func (m model) viewFooter() string {
 	var status string
 	switch {
@@ -75,6 +78,8 @@ func (m model) viewFooter() string {
 		status = errorStyle.Render("✗ " + truncate(m.errText, m.width-2))
 	case m.busy:
 		status = m.spinner.View() + " working…"
+	case m.pollErrText() != "":
+		status = errorStyle.Render("✗ " + truncate(m.pollErrText(), m.width-2))
 	case m.notice != "":
 		status = noticeStyle.Render("✓ " + truncate(m.notice, m.width-2))
 	default:

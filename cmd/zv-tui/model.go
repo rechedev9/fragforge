@@ -84,9 +84,10 @@ type model struct {
 	screen screen
 	mode   mode
 
-	caps       tuiclient.Capabilities
-	capsLoaded bool
-	presets    []tuiclient.Preset
+	caps          tuiclient.Capabilities
+	capsLoaded    bool
+	presets       []tuiclient.Preset
+	presetsLoaded bool
 	// defaultVariant is the render variant used when the operator does not pick a
 	// preset; it tracks the preset registry default (set from presetsMsg on the
 	// Update goroutine, read only there and when building Cmds - no shared global).
@@ -95,6 +96,10 @@ type model struct {
 	busy           bool
 	notice         string
 	errText        string
+	// pollErrs holds the latest background-fetch error per source. An entry is
+	// set by pollErrMsg and deleted when the same source next succeeds, so only
+	// ongoing failures stay visible (see pollErrText).
+	pollErrs map[pollSource]string
 
 	// demos
 	jobs      []tuiclient.Job
@@ -139,6 +144,7 @@ func newModel(cl *tuiclient.Client, initialDrops []string) model {
 		defaultVariant: fallbackRenderVariant,
 		spinner:        sp,
 		prompt:         ti,
+		pollErrs:       make(map[pollSource]string),
 	}
 }
 
@@ -170,6 +176,23 @@ func (m model) focusedStream() *tuiclient.StreamJob {
 		return nil
 	}
 	return &m.streams[m.streamCursor]
+}
+
+// pollErrText returns the ongoing background-fetch error relevant to the
+// current screen, or "". Errors from the other screen's sources are not shown:
+// that screen is not being polled, so they could be stale. Caps/preset load
+// failures are global (and retried each tick until they succeed).
+func (m model) pollErrText() string {
+	sources := []pollSource{pollJobs, pollJobDetail, pollCaps, pollPresets}
+	if m.screen == screenStreams {
+		sources = []pollSource{pollStreams, pollStreamDetail, pollCaps, pollPresets}
+	}
+	for _, s := range sources {
+		if t := m.pollErrs[s]; t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 // recordEnabled/renderEnabled/composeEnabled gate the media actions on the

@@ -25,6 +25,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		cmds := []tea.Cmd{tick()}
+		// Caps/presets normally load once at startup; keep retrying while they
+		// have not, so starting before the orchestrator (or a blip during
+		// startup) heals instead of leaving features disabled forever.
+		if !m.capsLoaded {
+			cmds = append(cmds, m.loadCaps())
+		}
+		if !m.presetsLoaded {
+			cmds = append(cmds, m.loadPresets())
+		}
 		if m.mode == modeBrowse {
 			cmds = append(cmds, m.refreshCurrent())
 		}
@@ -35,6 +44,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errText = msg.err.Error()
 		return m, nil
 
+	case pollErrMsg:
+		// A background poll failed. Record it per source without touching busy:
+		// an operator-initiated action may still be in flight, and the next
+		// successful poll of the same source clears the error.
+		m.pollErrs[msg.source] = msg.err.Error()
+		return m, nil
+
 	case noticeMsg:
 		m.notice = string(msg)
 		return m, nil
@@ -42,10 +58,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case capsMsg:
 		m.caps = msg.caps
 		m.capsLoaded = true
+		delete(m.pollErrs, pollCaps)
 		return m, nil
 
 	case presetsMsg:
 		m.presets = msg.presets
+		m.presetsLoaded = true
+		delete(m.pollErrs, pollPresets)
 		for _, p := range msg.presets {
 			if p.Default {
 				m.defaultVariant = p.Name
@@ -56,14 +75,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case jobsMsg:
 		m.jobs = msg.jobs
 		m.clampJobCursor()
+		delete(m.pollErrs, pollJobs)
 		return m, m.detailCmd()
 
 	case streamsMsg:
 		m.streams = msg.jobs
 		m.clampStreamCursor()
+		delete(m.pollErrs, pollStreams)
 		return m, m.streamDetailCmd()
 
 	case jobDetailMsg:
+		delete(m.pollErrs, pollJobDetail)
 		if msg.id == m.currentJobID() {
 			m.detail = jobDetail{job: msg.job, plan: msg.plan, roster: msg.roster, render: msg.render, loaded: true}
 			m.detailID = msg.id
@@ -71,6 +93,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case streamDetailMsg:
+		delete(m.pollErrs, pollStreamDetail)
 		if msg.id == m.currentStreamID() {
 			m.streamDetail = streamDetail{job: msg.job, plan: msg.plan, render: msg.render, loaded: true}
 			m.streamID = msg.id
@@ -373,6 +396,9 @@ func (m *model) detailCmd() tea.Cmd {
 	if id == "" {
 		m.detail = jobDetail{}
 		m.detailID = ""
+		// No job focused means the detail source stops polling; drop its error
+		// so it cannot linger with nothing left to clear it.
+		delete(m.pollErrs, pollJobDetail)
 		return nil
 	}
 	if id != m.detailID {
@@ -380,6 +406,7 @@ func (m *model) detailCmd() tea.Cmd {
 		m.detailID = id
 		m.errText = ""
 		m.notice = ""
+		delete(m.pollErrs, pollJobDetail)
 	}
 	return m.loadJobDetail(id)
 }
@@ -389,6 +416,7 @@ func (m *model) streamDetailCmd() tea.Cmd {
 	if id == "" {
 		m.streamDetail = streamDetail{}
 		m.streamID = ""
+		delete(m.pollErrs, pollStreamDetail)
 		return nil
 	}
 	if id != m.streamID {
@@ -396,6 +424,7 @@ func (m *model) streamDetailCmd() tea.Cmd {
 		m.streamID = id
 		m.errText = ""
 		m.notice = ""
+		delete(m.pollErrs, pollStreamDetail)
 	}
 	return m.loadStreamDetail(id)
 }
