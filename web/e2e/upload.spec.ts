@@ -210,7 +210,7 @@ test.describe('upload happy path (real demo + orchestrator)', () => {
 
     // Scanning... -> the picker. The heading only switches once a roster exists.
     await expect(page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' })).toBeVisible({ timeout: 150_000 });
-    // At least one player row (each carries a crosshair icon) must render.
-    await expect(page.locator('button:has(.lucide-crosshair)').first()).toBeVisible();
+    // At least one player row (each carries a monogram avatar) must render.
+    await expect(page.getByTestId('player-avatar').first()).toBeVisible();
   });
 });

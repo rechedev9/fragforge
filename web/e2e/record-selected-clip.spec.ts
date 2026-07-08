@@ -26,7 +26,7 @@ test('reel records only the selected clip, not the whole demo', async ({ page, r
   await page.goto('/upload');
   await page.locator('input[type=file]').setInputFiles(DEMO);
   await page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' }).waitFor({ timeout: 180_000 });
-  await page.locator('button:has(.lucide-crosshair)').first().click();
+  await page.getByTestId('player-avatar').first().click();
   await page.waitForURL(/\/matches\//, { timeout: 180_000 });
   const jobId = page.url().split('/matches/')[1].split(/[/?#]/)[0];
   console.log('[pipeline] jobId=' + jobId);
