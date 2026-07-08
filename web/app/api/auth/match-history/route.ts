@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { enumerateSharecodes, SteamApiError } from '@/lib/auth/steam';
-import { verifySession, signSession, SESSION_COOKIE, SESSION_MAX_AGE } from '@/lib/auth/session';
+import { verifySession, signSession, isGuest, SESSION_COOKIE, SESSION_MAX_AGE } from '@/lib/auth/session';
 
 export const runtime = 'nodejs';
 
@@ -16,6 +16,14 @@ export async function POST(request: Request): Promise<Response> {
   const session = verifySession(jar.get(SESSION_COOKIE)?.value);
   if (!session) {
     return NextResponse.json({ error: 'not signed in' }, { status: 401 });
+  }
+  // Match history queries the Steam Web API with the user's real SteamID64; a
+  // guest id would fail. Require a Steam login for this route specifically.
+  if (isGuest(session)) {
+    return NextResponse.json(
+      { error: 'Sign in with Steam to link your match history.', code: 'steam_login_required' },
+      { status: 401 },
+    );
   }
 
   let body: { authCode?: string; knownCode?: string };

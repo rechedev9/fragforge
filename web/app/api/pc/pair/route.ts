@@ -1,38 +1,32 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { verifySession, SESSION_COOKIE } from '@/lib/auth/session';
-import { ensureUser } from '@/lib/cloud/users';
+import { verifySession, SESSION_COOKIE, SESSION_MAX_AGE } from '@/lib/auth/session';
+import { issuePairingCode } from '@/lib/cloud/pcPairing';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { hashToken } from '@/lib/cloud/agentAuth';
 
 export const runtime = 'nodejs';
 
-// A short, human-typeable one-time pairing code (no ambiguous chars).
-function pairingCode(): string {
-  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
-}
-
 /**
- * POST /api/pc/pair — the authenticated browser mints a one-time pairing code
- * for the desktop agent to redeem at /api/agent/pair. Fails closed (500) if
- * Supabase is unreachable: without the DB there is nothing to pair against.
+ * POST /api/pc/pair — mints a one-time pairing code for the desktop agent to
+ * redeem at /api/agent/pair. No Steam login is required: without a session a
+ * guest session is minted and its cookie set, so manually uploading a demo never
+ * depends on linking a Steam account. Fails closed (500) if Supabase is
+ * unreachable: without the DB there is nothing to pair against.
  */
 export async function POST(): Promise<Response> {
   const jar = await cookies();
-  const s = verifySession(jar.get(SESSION_COOKIE)?.value);
-  if (!s) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const session = verifySession(jar.get(SESSION_COOKIE)?.value);
 
-  const userId = await ensureUser(s.steamid64, s.persona, s.avatar);
-  const code = pairingCode();
-  // Store the code hashed with a 10-minute TTL encoded in the name field.
-  const expires = Date.now() + 10 * 60 * 1000;
-  const { error } = await supabaseAdmin().from('agents').insert({
-    user_id: userId,
-    name: `pending:${expires}`,
-    token_hash: hashToken(`code:${code}`),
-  });
-  if (error) return NextResponse.json({ error: 'pairing failed' }, { status: 500 });
-  return NextResponse.json({ pairingCode: code });
+  const outcome = await issuePairingCode(session, supabaseAdmin());
+  if (!outcome) return NextResponse.json({ error: 'pairing failed' }, { status: 500 });
+
+  if (outcome.sessionCookie) {
+    jar.set(SESSION_COOKIE, outcome.sessionCookie.token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: SESSION_MAX_AGE,
+    });
+  }
+  return NextResponse.json({ pairingCode: outcome.pairingCode });
 }
