@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Strict CSP, matching loading.html: this page loads with no network
+      access and needs none. The <form> below "submits" to a fake
+      https://pair.fragforge.invalid/ origin and the skip link points at
+      https://pair-skip.fragforge.invalid/; both are intercepted by main.js's
+      will-navigate handler before Chromium ever resolves them (form-action
+      navigation is not covered by default-src, so it is not blocked by the
+      CSP below - the same trick the error screen's retry link relies on).
+      style-src 'unsafe-inline' is only for the <style> block; the main
+      process's executeJavaScript() calls that fill #status and #cloud-url
+      inject via the debugger protocol, not a page <script>, so
+      script-src 'none' (the default-src fallback) does not block them.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+    <title>FragForge Studio</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex; align-items: center; justify-content: center;
+        position: relative;
+        overflow: hidden;
+        background: #060a14;
+        color: #eafcff;
+        font: 15px/1.5 ui-monospace, "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+      }
+      /* NEON HUD grid - same 48px cyan grid as loading.html / web/app/globals.css .neon-grid,
+         inlined since this file loads with no network access. */
+      body::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(34, 217, 238, .04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(34, 217, 238, .04) 1px, transparent 1px);
+        background-size: 48px 48px;
+        pointer-events: none;
+      }
+      /* Scanlines overlay, matching .neon-scanlines. */
+      body::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, .015) 0 1px, transparent 1px 4px);
+        pointer-events: none;
+      }
+      .box { position: relative; text-align: center; width: 360px; max-width: 90vw; }
+      .wordmark {
+        font: 700 20px/1 "Segoe UI", system-ui, sans-serif;
+        letter-spacing: .04em;
+        color: #eafcff;
+      }
+      .wordmark .slashes { color: #22d9ee; }
+      .katakana {
+        margin-top: 4px;
+        font-size: 10px;
+        letter-spacing: .26em;
+        color: #ff2d78;
+      }
+      .title {
+        margin-top: 28px;
+        font-size: 13px;
+        letter-spacing: .1em;
+        text-transform: uppercase;
+        color: #eafcff;
+      }
+      .hint {
+        margin-top: 10px;
+        font-size: 12px;
+        line-height: 1.6;
+        color: #9fb3c4;
+      }
+      .cloud-url {
+        color: #22d9ee;
+      }
+      form {
+        margin-top: 22px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      input[name="code"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: .7rem .8rem;
+        background: #0a1220;
+        border: 1px solid rgba(34, 217, 238, .35);
+        border-radius: 4px;
+        color: #eafcff;
+        font: inherit;
+        letter-spacing: .3em;
+        text-align: center;
+        text-transform: uppercase;
+      }
+      input[name="code"]:focus {
+        outline: none;
+        border-color: #22d9ee;
+        box-shadow: 0 0 0 2px rgba(34, 217, 238, .25);
+      }
+      button[type="submit"] {
+        width: 100%;
+        padding: .7rem 1.2rem;
+        background: #22d9ee;
+        color: #04121a;
+        font: inherit;
+        font-weight: 600;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button[type="submit"]:hover { background: #58e6f7; }
+      .status {
+        margin-top: 4px;
+        min-height: 1.4em;
+        font-size: 12px;
+        letter-spacing: .04em;
+        color: #ff2d78;
+      }
+      .skip {
+        display: inline-block;
+        margin-top: 22px;
+        font-size: 11px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: #5b6d80;
+        text-decoration: none;
+      }
+      .skip:hover { color: #9fb3c4; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <div class="wordmark">FRAG<span class="slashes">//</span>FORGE</div>
+      <div class="katakana">フラグ・フォージ</div>
+      <div class="title">Conecta con FragForge Cloud</div>
+      <!-- id="cloud-url": main.js fills this with the actual cloud URL (default
+           https://fragforge.167-233-55-246.sslip.io, overridable via
+           FRAGFORGE_CLOUD_URL) once the page finishes loading. -->
+      <div class="hint">
+        Genera un código en <span class="cloud-url" id="cloud-url">fragforge.167-233-55-246.sslip.io</span>/connect
+        y escríbelo aquí para que este PC quede disponible como agente de captura remoto.
+      </div>
+      <!--
+        Plain form GET, no JS: submitting navigates the window to
+        https://pair.fragforge.invalid/?code=XXXXXXXX, which main.js's
+        will-navigate handler intercepts, prevents, and turns into a real
+        zv-agent.exe --pair call.
+      -->
+      <form action="https://pair.fragforge.invalid/" method="GET">
+        <input
+          type="text"
+          name="code"
+          maxlength="8"
+          autocapitalize="characters"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
+          placeholder="CÓDIGO DE 8 CARACTERES"
+          required
+        />
+        <button type="submit">Emparejar</button>
+      </form>
+      <!-- id="status": main.js's setPairStatus() fills this after a failed
+           pairing attempt (mirrors setLoadingStatus() on loading.html). -->
+      <div class="status" id="status"></div>
+      <!--
+        Same interception trick as the form above: this href is never
+        actually resolved, will-navigate turns the click into
+        handlePairSkip().
+      -->
+      <a class="skip" href="https://pair-skip.fragforge.invalid/">Seguir en modo local</a>
+    </div>
+  </body>
+</html>

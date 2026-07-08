@@ -112,6 +112,21 @@ func TestHeartbeatCarriesEnvDerivedPort(t *testing.T) {
 	}
 }
 
+func TestOrchestratorURL(t *testing.T) {
+	t.Run("unset returns empty", func(t *testing.T) {
+		t.Setenv("FRAGFORGE_ORCHESTRATOR_URL", "")
+		if got := orchestratorURL(); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+	t.Run("set returns the env value", func(t *testing.T) {
+		t.Setenv("FRAGFORGE_ORCHESTRATOR_URL", "http://127.0.0.1:8080")
+		if got := orchestratorURL(); got != "http://127.0.0.1:8080" {
+			t.Errorf("got %q, want http://127.0.0.1:8080", got)
+		}
+	})
+}
+
 func TestChildDataDir(t *testing.T) {
 	t.Run("inherits env when ZV_DATA_DIR set", func(t *testing.T) {
 		t.Setenv("ZV_DATA_DIR", "C:/some/data")

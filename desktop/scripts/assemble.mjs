@@ -24,11 +24,14 @@ const out = join(desktop, 'build-resources');
 // in the same bin/ so the orchestrator auto-detects it and enables the render
 // worker; without it every created reel fails after capture with an
 // unconfigured render:variant queue. zv.exe is staged for CLI use next to the
-// app's data.
+// app's data. zv-agent.exe is the FragForge Cloud capture agent: main.js
+// spawns it once the user has paired (see pair.html), which is how Studio
+// doubles as a cloud-paired capture agent, not just Local Studio.
 const zvExe = join(bin, 'zv.exe');
 const zvOrchestrator = join(bin, 'zv-orchestrator.exe');
 const zvEditor = join(bin, 'zv-editor.exe');
-for (const required of [zvExe, zvOrchestrator, zvEditor]) {
+const zvAgent = join(bin, 'zv-agent.exe');
+for (const required of [zvExe, zvOrchestrator, zvEditor, zvAgent]) {
   if (!existsSync(required)) {
     console.error(`\nmissing ${required}\nBuild the Go binaries first:  .\\scripts\\build.ps1\n`);
     process.exit(1);
@@ -74,6 +77,7 @@ if (existsSync(publicDir)) cpSync(publicDir, join(out, 'web', 'public'), { recur
 cpSync(zvExe, join(out, 'bin', 'zv.exe'));
 cpSync(zvOrchestrator, join(out, 'bin', 'zv-orchestrator.exe'));
 cpSync(zvEditor, join(out, 'bin', 'zv-editor.exe'));
+cpSync(zvAgent, join(out, 'bin', 'zv-agent.exe'));
 const recorder = join(bin, 'zv-recorder.exe');
 if (existsSync(recorder)) cpSync(recorder, join(out, 'bin', 'zv-recorder.exe'));
 

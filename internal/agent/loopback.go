@@ -36,6 +36,12 @@ type LoopbackConfig struct {
 	// DataDir, when set, is passed to the child as ZV_DATA_DIR so its sqlite job
 	// history lands alongside the agent's data.
 	DataDir string
+	// OrchestratorURL, when non-empty, points at an already-running
+	// orchestrator (FRAGFORGE_ORCHESTRATOR_URL) instead of spawning a child.
+	// It must be an "http://" URL with an explicit port on a loopback host;
+	// RunLoopback fronts it with the same auth+CORS proxy and skips spawning
+	// entirely.
+	OrchestratorURL string
 }
 
 // orchestratorReadyTimeout bounds how long RunLoopback waits for the child
@@ -45,6 +51,8 @@ const orchestratorReadyTimeout = 30 * time.Second
 
 // RunLoopback starts and supervises a child zv-orchestrator bound to a dynamic
 // loopback port and fronts it with an auth+CORS reverse proxy on cfg.Addr.
+// When cfg.OrchestratorURL is set, it skips spawning entirely and fronts that
+// already-running orchestrator instead (see runLoopbackExternal).
 //
 // The child is owned here: it is started, waited on in a dedicated goroutine,
 // and terminated when ctx is cancelled or the proxy fails. If the child exits
@@ -59,6 +67,9 @@ func RunLoopback(ctx context.Context, cfg LoopbackConfig) error {
 	// self-heals a legacy config to a real token before it reaches here.
 	if cfg.Token == "" {
 		return fmt.Errorf("loopback token is required")
+	}
+	if cfg.OrchestratorURL != "" {
+		return runLoopbackExternal(ctx, cfg)
 	}
 	orch := cfg.OrchestratorPath
 	if orch == "" {
@@ -134,6 +145,71 @@ func RunLoopback(ctx context.Context, cfg LoopbackConfig) error {
 		<-childExit
 	}
 	return retErr
+}
+
+// runLoopbackExternal fronts an already-running orchestrator (cfg.OrchestratorURL)
+// with the same auth+CORS proxy RunLoopback builds for a spawned child, minus
+// the process lifecycle: no child to start, wait on, or kill. It waits for the
+// external orchestrator's /healthz with the same backoff/timeout as the spawn
+// path (passing a nil childExit, which never fires), then serves until ctx is
+// cancelled or the proxy server itself fails.
+func runLoopbackExternal(ctx context.Context, cfg LoopbackConfig) error {
+	target, err := validateOrchestratorURL(cfg.OrchestratorURL)
+	if err != nil {
+		return err
+	}
+
+	if err := waitOrchestratorReady(ctx, target, nil); err != nil {
+		return err
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           newLoopbackHandler(proxy, cfg.Token, cfg.Origins),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	srvErr := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			srvErr <- err
+		}
+	}()
+
+	var retErr error
+	select {
+	case <-ctx.Done():
+		retErr = ctx.Err()
+	case err := <-srvErr:
+		retErr = fmt.Errorf("loopback proxy: %w", err)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = srv.Shutdown(shutdownCtx)
+	cancel()
+	return retErr
+}
+
+// validateOrchestratorURL parses and validates an external orchestrator URL:
+// "http" scheme (never "https", since the loopback host has no certificate),
+// an explicit port, and a loopback host. An unspecified port (which would
+// default to :80) is rejected rather than silently assumed, since a missing
+// port is far more likely a misconfiguration than an intentional bind.
+func validateOrchestratorURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("orchestrator url %q: %w", raw, err)
+	}
+	if u.Scheme != "http" {
+		return nil, fmt.Errorf("orchestrator url %q must use the http scheme", raw)
+	}
+	if _, _, err := net.SplitHostPort(u.Host); err != nil {
+		return nil, fmt.Errorf("orchestrator url %q must include an explicit port", raw)
+	}
+	if !httpapi.IsLoopbackAddr(u.Host) {
+		return nil, fmt.Errorf("orchestrator url %q must have a loopback host", raw)
+	}
+	return u, nil
 }
 
 // waitOrchestratorReady polls the child's /healthz until it answers, the child

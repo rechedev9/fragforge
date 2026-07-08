@@ -61,6 +61,14 @@ func childDataDir() string {
 	return filepath.Join(filepath.Dir(p), "data")
 }
 
+// orchestratorURL is the already-running orchestrator's base URL
+// (FRAGFORGE_ORCHESTRATOR_URL). When set, the agent's loopback proxy fronts
+// that orchestrator directly instead of spawning and supervising a child
+// zv-orchestrator; see agent.RunLoopback.
+func orchestratorURL() string {
+	return os.Getenv("FRAGFORGE_ORCHESTRATOR_URL")
+}
+
 // webOrigins is the CORS allowlist (FRAGFORGE_WEB_ORIGIN, comma-separated,
 // default https://app.fragforge.gg).
 func webOrigins() []string {

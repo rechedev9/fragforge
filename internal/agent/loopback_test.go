@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -301,5 +303,168 @@ func TestRunLoopbackChildDies(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("got nil error, want non-nil when child exits before ready")
+	}
+}
+
+func TestValidateOrchestratorURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"loopback ipv4 with port", "http://127.0.0.1:8080", false},
+		{"localhost with port", "http://localhost:8080", false},
+		{"loopback ipv6 with port", "http://[::1]:8080", false},
+		{"non-loopback host rejected", "http://192.168.1.5:8080", true},
+		{"missing port rejected", "http://127.0.0.1", true},
+		{"https rejected", "https://127.0.0.1:8080", true},
+		{"malformed url rejected", "://bad", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateOrchestratorURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("got err %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestRunLoopbackExternalProxiesAuthedRequests proves external mode proxies to
+// an already-running orchestrator (no spawn) and still enforces the loopback
+// Bearer auth on every proxied request.
+func TestRunLoopbackExternalProxiesAuthedRequests(t *testing.T) {
+	var reached bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		reached = true
+		_, _ = w.Write([]byte("upstream-ok"))
+	}))
+	defer backend.Close()
+
+	port, err := freeLoopbackPort()
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- RunLoopback(ctx, LoopbackConfig{
+			Addr:            addr,
+			Token:           "tok",
+			Origins:         []string{"https://app.fragforge.gg"},
+			OrchestratorURL: backend.URL,
+		})
+	}()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	var resp *http.Response
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		req, reqErr := http.NewRequest(http.MethodGet, "http://"+addr+"/api/jobs", nil)
+		if reqErr != nil {
+			t.Fatalf("build request: %v", reqErr)
+		}
+		req.Header.Set("Authorization", "Bearer tok")
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("request proxy: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("got status %d, want 200", resp.StatusCode)
+	}
+	if !reached {
+		t.Error("got upstream not reached, want reached")
+	}
+
+	unauthedReq, err := http.NewRequest(http.MethodGet, "http://"+addr+"/api/jobs", nil)
+	if err != nil {
+		t.Fatalf("build unauthed request: %v", err)
+	}
+	unauthedResp, err := client.Do(unauthedReq)
+	if err != nil {
+		t.Fatalf("unauthenticated request: %v", err)
+	}
+	defer func() { _ = unauthedResp.Body.Close() }()
+	if unauthedResp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("got status %d, want 401", unauthedResp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil && err != context.Canceled {
+			t.Fatalf("RunLoopback returned %v, want context.Canceled or nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunLoopback did not return after context cancel")
+	}
+}
+
+// TestRunLoopbackExternalHealthzNeverAnswers proves external mode surfaces an
+// error rather than hanging forever when the configured orchestrator never
+// answers /healthz; it uses ctx cancellation to bound the wait instead of the
+// full 30s ready timeout.
+func TestRunLoopbackExternalHealthzNeverAnswers(t *testing.T) {
+	port, err := freeLoopbackPort()
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	unreachable := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	err = RunLoopback(ctx, LoopbackConfig{
+		Addr:            "127.0.0.1:0",
+		Token:           "tok",
+		OrchestratorURL: unreachable,
+	})
+	if err == nil {
+		t.Fatal("got nil error, want error when healthz never answers")
+	}
+}
+
+// TestRunLoopbackExternalCtxCancel proves external mode has no childExit arm:
+// with a healthy backend, cancelling ctx must still shut the proxy down
+// cleanly (only ctx.Done() and the proxy server error can unblock it).
+func TestRunLoopbackExternalCtxCancel(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunLoopback(ctx, LoopbackConfig{
+			Addr:            "127.0.0.1:0",
+			Token:           "tok",
+			OrchestratorURL: backend.URL,
+		})
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil && err != context.Canceled {
+			t.Fatalf("RunLoopback returned %v, want context.Canceled or nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunLoopback did not return after context cancel")
 	}
 }
