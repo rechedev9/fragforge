@@ -28,3 +28,15 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     restart: unless-stopped
+
+  # Marketing landing page (static Next app, no secrets, no orchestrator).
+  # Fronted by the same Caddy as the web container; the VPS-local
+  # docker-compose.override.yml joins it to the fragbot_default network with
+  # the alias Caddy proxies to.
+  landing:
+    build:
+      context: ../../landing
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3100:3000"
+    restart: unless-stopped
