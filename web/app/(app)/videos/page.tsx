@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Film } from 'lucide-react';
 import type { Video, VideoStatus } from '@/lib/api/types';
 import { api } from '@/lib/api';
+import { startPollLoop } from '@/lib/poll-loop';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { PipelineSteps } from '@/components/brand/pipeline-steps';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -45,12 +46,10 @@ export default function VideosPage() {
   const [videos, setVideos] = useState<Video[] | null>(null);
   const [filter, setFilter] = useState<VideoFormatFilter>('all');
 
-  // Guards against overlapping listVideos() calls if one is still in flight
-  // when the next interval tick fires.
+  // Guards against overlapping listVideos() calls if a manual refresh is still
+  // in flight when the next poll tick fires (the poll loop itself never overlaps
+  // its own ticks).
   const inFlight = useRef(false);
-  // The pending poll timer, tracked in a ref so unmount always clears the most
-  // recently scheduled one (the tick reschedules across an await boundary).
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const reload = useCallback(async (): Promise<Video[] | undefined> => {
     if (inFlight.current) return undefined;
@@ -70,20 +69,24 @@ export default function VideosPage() {
   useEffect(() => {
     let active = true;
 
-    const tick = async () => {
-      const next = await reload();
-      if (!active) return;
-      if (next) setVideos(next);
-      // `next` is undefined only if a manual refresh raced this tick; treat that
-      // as "keep polling fast" so a just-created reel is never stranded.
-      const delay = next === undefined || hasActiveReel(next) ? FAST_POLL_MS : IDLE_POLL_MS;
-      pollTimer.current = setTimeout(() => void tick(), delay);
-    };
+    // A tick that throws (transient proxy/orchestrator hiccup) must not kill the
+    // loop: startPollLoop catches it and reschedules at the idle cadence, so the
+    // page keeps polling instead of freezing every reel in its last state.
+    const stop = startPollLoop({
+      tick: async () => {
+        const next = await reload();
+        if (active && next) setVideos(next);
+        // `next` is undefined only if a manual refresh raced this tick; treat
+        // that as "keep polling fast" so a just-created reel is never stranded.
+        return next === undefined || hasActiveReel(next) ? 'fast' : 'idle';
+      },
+      fastMs: FAST_POLL_MS,
+      idleMs: IDLE_POLL_MS,
+    });
 
-    void tick();
     return () => {
       active = false;
-      if (pollTimer.current) clearTimeout(pollTimer.current);
+      stop();
     };
   }, [reload]);
 
