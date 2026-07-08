@@ -18,7 +18,7 @@ import HeroForge from "@/components/hero-forge";
 // release. The canonical asset name comes from desktop/package.json version.
 // The href must remain byte-for-byte this string.
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v0.3.2/FragForge.Studio.Setup.0.3.2.exe";
+  "https://github.com/rechedev9/fragforge/releases/download/v0.3.3/FragForge.Studio.Setup.0.3.3.exe";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
 // NEON HUD wordmark: FRAG//FORGE in Chakra Petch, the "//" in signal cyan —
@@ -139,7 +139,7 @@ export default function Home() {
           </div>
 
           <p className="font-mono text-sm tracking-[0.08em] text-muted-foreground">
-            v0.3.2 <span className="text-primary/70">·</span> 152 MB{" "}
+            v0.3.3 <span className="text-primary/70">·</span> 152 MB{" "}
             <span className="text-primary/70">·</span> Windows 10/11
           </p>
         </div>
