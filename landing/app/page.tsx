@@ -139,7 +139,7 @@ export default function Home() {
           </div>
 
           <p className="font-mono text-sm tracking-[0.08em] text-muted-foreground">
-            v0.3.0 <span className="text-primary/70">·</span> 124 MB{" "}
+            v0.3.0 <span className="text-primary/70">·</span> 152 MB{" "}
             <span className="text-primary/70">·</span> Windows 10/11
           </p>
         </div>
