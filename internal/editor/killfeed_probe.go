@@ -26,6 +26,19 @@ const (
 	// killfeedOverlayScale keeps the on-screen overlay size consistent with
 	// the historical 360px-crop / 430px-overlay default.
 	killfeedOverlayScale = 430.0 / 360.0
+	// killfeedMaxHighlightHeightDiv caps a notice ring's height at frame
+	// height / 12: a kill notice bar is ~37px tall at 1080p, so /12 (90px)
+	// leaves headroom for higher resolutions while rejecting tall scene
+	// geometry like a red wall or container.
+	killfeedMaxHighlightHeightDiv = 12
+	// killfeedMinHighlightAspect is the minimum width/height ratio of a notice
+	// ring: kill notices are wide and short, so a qualifying component must be
+	// at least twice as wide as it is tall.
+	killfeedMinHighlightAspect = 2
+	// killfeedMaxHighlightFill caps the fraction of a component's bounding box
+	// its pixels may fill: a 2px border ring fills ~13% of its bbox, while
+	// solid scene red fills ~100%, so anything over half is rejected as a blob.
+	killfeedMaxHighlightFill = 0.5
 )
 
 // refineKillfeedEffects replaces the static killfeed crop defaults with a
@@ -117,10 +130,15 @@ func killfeedSamplePart(short *ShortEdit, effect Effect) (int, float64) {
 }
 
 // detectKillfeedHighlight finds the red border CS2 draws around the local
-// player's kill notices in two passes: saturated red locates the notice in
-// the top-right region, then a looser threshold within a few pixels of that
-// box picks up the border's anti-aliased edge. Returns the padded bounding
-// box.
+// player's kill notices in the top-right region. The first pass is
+// shape-aware: it groups strict saturated-red pixels into connected
+// components and keeps only those shaped like a notice highlight ring - wide,
+// short, and mostly hollow. This rejects red scene geometry (a wall or
+// container) that passes the same color threshold but forms a tall, solid
+// blob, which previously got unioned into the crop. A second, looser pass
+// within a few pixels of the qualifying rings picks up the border's
+// anti-aliased edge. Returns the padded bounding box, or ok=false when no
+// component looks like a notice.
 func detectKillfeedHighlight(frame image.Image) (image.Rectangle, bool) {
 	bounds := frame.Bounds()
 	scanRegion := image.Rect(
@@ -129,8 +147,20 @@ func detectKillfeedHighlight(frame image.Image) (image.Rectangle, bool) {
 		bounds.Max.X,
 		bounds.Min.Y+bounds.Dy()*3/10,
 	)
-	core, count := redPixelBounds(frame, scanRegion, 150, 55)
-	if count < killfeedMinHighlightPixels {
+	maxHeight := bounds.Dy() / killfeedMaxHighlightHeightDiv
+	core := image.Rectangle{}
+	qualified := 0
+	for _, comp := range redComponents(frame, scanRegion, 150, 55) {
+		if isNoticeRing(comp, maxHeight) {
+			if qualified == 0 {
+				core = comp.bounds
+			} else {
+				core = core.Union(comp.bounds)
+			}
+			qualified++
+		}
+	}
+	if qualified == 0 {
 		return image.Rectangle{}, false
 	}
 	edgeRegion := core.Inset(-killfeedBorderSearchRadius).Intersect(bounds)
@@ -139,6 +169,109 @@ func detectKillfeedHighlight(frame image.Image) (image.Rectangle, bool) {
 		core = core.Union(edge)
 	}
 	return core.Inset(-killfeedHighlightMargin).Intersect(bounds), true
+}
+
+// redComponent is a connected group of strict-red pixels: its bounding box and
+// pixel count, used to tell a thin notice ring from a solid scene blob.
+type redComponent struct {
+	bounds image.Rectangle
+	count  int
+}
+
+// isNoticeRing reports whether a red component is shaped like a CS2 kill-notice
+// highlight border rather than solid scene geometry: enough pixels to clear
+// noise, short (a notice bar), wide (notices are wide and short), and mostly
+// hollow (a 2px ring barely fills its bounding box, a solid red wall fills it
+// completely).
+func isNoticeRing(comp redComponent, maxHeight int) bool {
+	if comp.count < killfeedMinHighlightPixels {
+		return false
+	}
+	w, h := comp.bounds.Dx(), comp.bounds.Dy()
+	if h == 0 || w == 0 || h > maxHeight {
+		return false
+	}
+	if w < killfeedMinHighlightAspect*h {
+		return false
+	}
+	fill := float64(comp.count) / float64(w*h)
+	return fill <= killfeedMaxHighlightFill
+}
+
+// redComponents groups the strict-red pixels of region (same threshold as
+// redPixelBounds) into 8-connected components via BFS over a bool grid indexed
+// relative to region. Region is small (~768x324 at 1080p), so a dense grid is
+// cheap and simple.
+func redComponents(frame image.Image, region image.Rectangle, minRed, maxGreenBlue uint32) []redComponent {
+	w, h := region.Dx(), region.Dy()
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+	red := make([]bool, w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r, g, b, _ := frame.At(region.Min.X+x, region.Min.Y+y).RGBA()
+			if r>>8 > minRed && g>>8 < maxGreenBlue && b>>8 < maxGreenBlue {
+				red[y*w+x] = true
+			}
+		}
+	}
+	visited := make([]bool, w*h)
+	var comps []redComponent
+	queue := make([]int, 0, 64)
+	for start := 0; start < w*h; start++ {
+		if !red[start] || visited[start] {
+			continue
+		}
+		visited[start] = true
+		queue = queue[:0]
+		queue = append(queue, start)
+		sx, sy := start%w, start/w
+		minX, minY, maxX, maxY := sx, sy, sx, sy
+		count := 0
+		for len(queue) > 0 {
+			idx := queue[len(queue)-1]
+			queue = queue[:len(queue)-1]
+			count++
+			cx, cy := idx%w, idx/w
+			if cx < minX {
+				minX = cx
+			}
+			if cx > maxX {
+				maxX = cx
+			}
+			if cy < minY {
+				minY = cy
+			}
+			if cy > maxY {
+				maxY = cy
+			}
+			for dy := -1; dy <= 1; dy++ {
+				for dx := -1; dx <= 1; dx++ {
+					if dx == 0 && dy == 0 {
+						continue
+					}
+					nx, ny := cx+dx, cy+dy
+					if nx < 0 || nx >= w || ny < 0 || ny >= h {
+						continue
+					}
+					nidx := ny*w + nx
+					if red[nidx] && !visited[nidx] {
+						visited[nidx] = true
+						queue = append(queue, nidx)
+					}
+				}
+			}
+		}
+		comps = append(comps, redComponent{
+			bounds: image.Rect(
+				region.Min.X+minX, region.Min.Y+minY,
+				region.Min.X+maxX+1, region.Min.Y+maxY+1,
+			),
+			count: count,
+		})
+	}
+	return comps
 }
 
 // redPixelBounds returns the bounding box and count of pixels within region
