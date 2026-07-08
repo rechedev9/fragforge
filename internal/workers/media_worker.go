@@ -384,6 +384,12 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 	if err != nil {
 		return err
 	}
+	// Persist the ordered segment ids this reel captures so the job poll scopes
+	// capture progress to this reel, not the whole kill plan. Overwritten at the
+	// start of every record task (last writer wins - it is the in-flight reel).
+	if err := putCaptureSelection(w.storage, j.ID, killPlanSegmentIDs(recordPlan)); err != nil {
+		return fmt.Errorf("persist capture selection: %w", err)
+	}
 
 	ready, keys, err := recordingOutputsReady(w.storage, j.ID, requested)
 	if err != nil {
@@ -426,6 +432,19 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		return err
 	}
 
+	// Upload each segment clip to durable storage as the recorder finishes it,
+	// so the job poll reports live capture progress mid-run. The watcher is
+	// owned here: cancelled the moment the recorder exits and waited for before
+	// results are read. Best-effort by construction — it can never fail the
+	// task, and uploadRecordingOutputs below re-uploads every clip as the
+	// authoritative reconciliation pass.
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		newSegmentClipWatcher(w.storage, j.ID, filepath.Join(outDir, "segments")).watch(watchCtx, segmentWatchInterval)
+	}()
+
 	_, runErr := w.runner.Run(ctx, cfg.RecorderPath,
 		"--killplan", killPlanPath,
 		"--demo", demoPath,
@@ -435,6 +454,8 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		"--hud", cfg.HUDMode,
 		"--timeout", cfg.Timeout,
 	)
+	stopWatch()
+	<-watchDone
 
 	resultPath := filepath.Join(outDir, "recording-result.json")
 	var result recording.RecordingResult
@@ -1500,6 +1521,16 @@ func compileSegmentsArgs(segmentIDs []string) []string {
 		return nil
 	}
 	return []string{"--compile-segments", "--segments", strings.Join(segmentIDs, ",")}
+}
+
+// putCaptureSelection persists the ordered segment ids a record run will
+// capture, so the job poll can scope capture progress to this reel.
+func putCaptureSelection(store storage.Storage, id uuid.UUID, segmentIDs []string) error {
+	b, err := json.Marshal(segmentIDs)
+	if err != nil {
+		return err
+	}
+	return store.Put(artifacts.CaptureSelectionKey(id), bytes.NewReader(b))
 }
 
 // killPlanSegmentIDs lists every segment id in the plan, in plan order.

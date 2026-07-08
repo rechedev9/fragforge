@@ -30,6 +30,15 @@ func SegmentClipKey(id uuid.UUID, segmentID string) (string, error) {
 	return path.Join(JobPrefix(id), "recording", "segments", segmentID+".mp4"), nil
 }
 
+// CaptureSelectionKey is the storage key for the ordered segment ids the
+// in-flight recording run will capture. The record worker overwrites it at the
+// start of every record task (last writer wins - it is the in-flight reel), and
+// the job poll reads it to scope capture progress to that reel instead of the
+// whole kill plan.
+func CaptureSelectionKey(id uuid.UUID) string {
+	return path.Join(JobPrefix(id), "recording", "capture-selection.json")
+}
+
 func CompositionResultKey(id uuid.UUID) string {
 	return path.Join(JobPrefix(id), "composition", "composition-result.json")
 }

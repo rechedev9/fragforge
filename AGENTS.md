@@ -109,10 +109,18 @@ Real `.dem` files are never committed, so the fixture stays local.
 
 ## Deployment
 
-There is no hosted/CI deploy in the repo: no GitHub Actions, no Vercel/Netlify/Fly config, no deploy scripts.
-"Production" therefore means: merge the working branch into `main` and push.
-A Vercel/Railway project may be connected to the GitHub repo and auto-deploy on push to `main`, but that cannot be verified from the clone, so confirm in the dashboard.
-Do not invent a VPS or Vercel setup; if real hosting is wanted, treat it as an explicit infra task and ask for the target.
+The hosted control plane runs on the user's Hetzner VPS (gr-prod), deployed 2026-07-08; there is no CI deploy.
+Deploying means: merge to `main`, then on gr-prod `cd /root/projects/fragforge && git pull && cd deploy/vps && docker compose up -d --build`.
+
+- Public URL: `https://fragforge.167-233-55-246.sslip.io` (sslip.io subdomain; TLS terminated by FragBot's Caddy at `/opt/fragbot/deploy/Caddyfile`, which proxies to `fragforge-web:3000`).
+- The Caddy container shares the bot's network namespace, so the web container joins the external `fragbot_default` network with alias `fragforge-web` via a VPS-local `docker-compose.override.yml` (not in git).
+  After Caddyfile changes, `docker restart fragbot-caddy-1`; `caddy reload` inside the container does not reliably pick up changes.
+- Secrets live only in `/root/projects/fragforge/deploy/vps/.env` on the VPS.
+  `FRAGFORGE_WEB_PASSWORD` stays empty: the Basic Auth gate would break agent pair/heartbeat; Steam login plus per-agent tokens are the auth.
+- Supabase control-plane DB: project `fragforge-cloud` (ref `wbpjuilfrnzdxfluulnr`, org rechedev9, free tier - it auto-pauses when idle; restore from the dashboard or the Management API).
+  The Supabase CLI is installed and authenticated on gr-prod.
+- Migration note: Supabase no longer allows `delete from storage.*` in SQL; bucket removal (0002) must go through the Storage API (`POST /storage/v1/bucket/{id}/empty`, then `DELETE /storage/v1/bucket/{id}`).
+- Desktop agents on any PC with HLAE+CS2 pair against the public URL: run `zv-agent` with `FRAGFORGE_CLOUD_URL` and `FRAGFORGE_WEB_ORIGIN` both set to it.
 
 ### Local Studio (web UI + local HLAE/CS2 capture)
 

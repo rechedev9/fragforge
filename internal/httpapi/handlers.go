@@ -363,7 +363,24 @@ func (h *Handlers) GetJob(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "get job", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, j)
+	writeJSON(w, http.StatusOK, h.jobResponse(j))
+}
+
+// jobResponse is the GET /api/jobs/{id} body: the job plus optional capture
+// progress. Progress is present only while the job is capturing and at least one
+// segment clip exists (see captureProgress); otherwise the field is omitted and
+// the response is byte-for-byte the raw job as before.
+type jobResponse struct {
+	job.Job
+	Progress *captureProgressView `json:"progress,omitempty"`
+}
+
+func (h *Handlers) jobResponse(j job.Job) jobResponse {
+	resp := jobResponse{Job: j}
+	if progress, ok := captureProgress(h.storage, j); ok {
+		resp.Progress = &progress
+	}
+	return resp
 }
 
 // GetPlan handles GET /api/jobs/{id}/plan.
@@ -926,6 +943,23 @@ type renderArtifactLister interface {
 	List(prefix string) ([]string, error)
 }
 
+// listArtifactDir lists the base file names in the storage directory that holds
+// key (e.g. the segments dir for a segment-clip key, or the videos dir for a
+// render-video key). ok is false when the backend cannot list directories or the
+// listing failed; a directory a stage has not written yet lists as empty with
+// ok true. Callers build their own key and filter the returned names.
+func listArtifactDir(store storage.Storage, key string) ([]string, bool) {
+	lister, ok := store.(renderArtifactLister)
+	if !ok {
+		return nil, false
+	}
+	files, err := lister.List(path.Dir(key))
+	if err != nil {
+		return nil, false
+	}
+	return files, true
+}
+
 // renderVariantResponse augments the durable render state with the reel's real
 // on-disk artifact names, so the client addresses the reel's video and cover by
 // the names the editor actually wrote instead of guessing them from segment ids.
@@ -960,19 +994,15 @@ func (h *Handlers) writeRenderVariant(w http.ResponseWriter, state *renderplan.R
 // the same key resolution the videos/{name} and covers/{name} handlers use. The
 // result is empty when the backend cannot list or the directory is absent.
 func (h *Handlers) listRenderArtifactNames(id uuid.UUID, variant string, kind renderplan.RenderVariantArtifactKind) ([]string, error) {
-	lister, ok := h.storage.(renderArtifactLister)
-	if !ok {
-		return []string{}, nil
-	}
 	ref, err := renderplan.NewRenderVariantArtifactRef(id, variant, kind, artifactNamePlaceholder)
 	if err != nil {
 		return nil, err
 	}
-	dir, ext := path.Dir(ref.Key), path.Ext(ref.Key)
-	files, err := lister.List(dir)
-	if err != nil {
-		return nil, err
+	files, ok := listArtifactDir(h.storage, ref.Key)
+	if !ok {
+		return []string{}, nil
 	}
+	ext := path.Ext(ref.Key)
 	names := make([]string, 0, len(files))
 	for _, f := range files {
 		if ext != "" && !strings.HasSuffix(f, ext) {

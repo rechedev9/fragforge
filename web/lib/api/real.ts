@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch, CaptureProgress } from './types';
 import { SERVICE_UNAVAILABLE_CODE } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
@@ -558,6 +558,7 @@ export class RealApiClient implements ApiClient {
       jobFailureReason: job.failureReason,
       renderStatus: render.status,
       renderFailureReason: render.failureReason,
+      captureProgress: job.captureProgress,
     });
     this.applyView(intent, view);
     if (view.action !== 'none') void this.drive(intent, view.action);
@@ -566,7 +567,9 @@ export class RealApiClient implements ApiClient {
   /** Writes a reel's derived view onto its live Video, wiring URLs once ready. */
   private applyView(intent: ReelIntent, view: ReelView): void {
     const base = this.reels.get(intent.videoId) ?? videoFromIntent(intent);
-    const next: Video = { ...base, status: view.status, failureReason: view.failureReason };
+    // captureProgress is present only while recording (view carries it through);
+    // any other status clears it so a stale percent never lingers on the card.
+    const next: Video = { ...base, status: view.status, failureReason: view.failureReason, captureProgress: view.captureProgress };
     // The server-reported artifact names are present once the render is ready
     // (fetchRenderStatus fills them). If a tick sees ready before the names are
     // known, leave the URLs unset so the card keeps its placeholder until the
@@ -717,12 +720,31 @@ export class RealApiClient implements ApiClient {
     return render.videoName;
   }
 
-  /** Reads job status + failure reason; null when the job is unknown (404). */
-  private async fetchStatusFull(jobId: string): Promise<{ status: string; failureReason?: string } | null> {
+  /**
+   * Reads job status + failure reason (+ live capture progress while recording);
+   * null when the job is unknown (404). Cloud and local share this path: both hit
+   * GET /api/jobs/{id} (loopback or same-origin proxy), so the progress the
+   * orchestrator reports flows to the card the same way in either mode.
+   */
+  private async fetchStatusFull(
+    jobId: string,
+  ): Promise<{ status: string; failureReason?: string; captureProgress?: CaptureProgress } | null> {
     const res = await this.send((dp) => ({ url: dp.jobStatusUrl(jobId) }));
     if (res.status === 404) return null;
-    const data = await readJson<{ status: string; failure_reason?: string }>(res);
-    return { status: data.status, failureReason: data.failure_reason };
+    const data = await readJson<{
+      status: string;
+      failure_reason?: string;
+      progress?: { done?: number; total?: number };
+    }>(res);
+    const full: { status: string; failureReason?: string; captureProgress?: CaptureProgress } = {
+      status: data.status,
+      failureReason: data.failure_reason,
+    };
+    const p = data.progress;
+    if (p && typeof p.done === 'number' && typeof p.total === 'number' && p.total > 0) {
+      full.captureProgress = { done: p.done, total: p.total };
+    }
+    return full;
   }
 
   /** Reads the job status string; null when the job is unknown (404). */

@@ -35,9 +35,12 @@ drop table if exists jobs;
 -- processed there by the local orchestrator.
 drop table if exists demos;
 
--- Remove the demos/artifacts Storage buckets and their objects. Deleting the
--- objects rows first satisfies the storage.objects -> storage.buckets FK;
--- this mirrors Supabase's own documented pattern for dropping a bucket in a
--- migration (storage.objects rows do not cascade automatically).
-delete from storage.objects where bucket_id in ('demos', 'artifacts');
-delete from storage.buckets where id in ('demos', 'artifacts');
+-- The demos/artifacts Storage buckets cannot be dropped here: Supabase blocks
+-- direct SQL deletes on storage tables (storage.protect_delete raises 42501),
+-- verified against the live project on 2026-07-08. Remove them through the
+-- Storage API instead, once, with the service role key:
+--
+--   POST   {SUPABASE_URL}/storage/v1/bucket/demos/empty
+--   DELETE {SUPABASE_URL}/storage/v1/bucket/demos
+--   POST   {SUPABASE_URL}/storage/v1/bucket/artifacts/empty
+--   DELETE {SUPABASE_URL}/storage/v1/bucket/artifacts
