@@ -129,6 +129,13 @@ export default function UploadPage() {
         const match = await api.parseDemo({ jobId, steamId });
         router.push('/matches/' + match.id);
       } catch (err) {
+        if (err instanceof Error && err.message === 'PC_OFFLINE') {
+          // The PC dropped mid-parse (cloud loopback died). Route to the same
+          // waiting-for-pc state as runScan; fileName/pendingFile are still set
+          // from the scan, so Retry re-runs the whole file once the PC is back.
+          setStage('waiting-for-pc');
+          return;
+        }
         reset(
           isServiceUnavailable(err)
             ? 'El servicio de análisis está offline. Arráncalo y vuelve a intentarlo.'

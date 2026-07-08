@@ -17,12 +17,16 @@ COPY . .
 # clone has no such directory at all; guarantee it exists so the runner's COPY
 # never fails on a clean checkout.
 RUN mkdir -p public
-# local mode: the compose stack is the self-contained no-login analyze flow
-# (web -> orchestrator container), not the Supabase cloud control-plane. The
-# var is inlined into the client bundle here and must also be present at
-# runtime for the server route handlers (set in docker-compose.app.yml).
+# FRAGFORGE_MODE build arg selects the data plane baked into the client
+# bundle. Default "local" keeps the self-contained no-login analyze flow
+# (web -> orchestrator container, docker-compose.app.yml) unchanged; the VPS
+# control-plane deploy (deploy/vps/docker-compose.yml) overrides it to
+# "cloud" so the bundle talks to Supabase + a paired agent instead. The var
+# is inlined into the client bundle here and must also be present at runtime
+# for the server route handlers (set by whichever compose file builds this).
+ARG FRAGFORGE_MODE=local
 ENV NEXT_PUBLIC_API_BASE=/api \
-    NEXT_PUBLIC_FRAGFORGE_MODE=local \
+    NEXT_PUBLIC_FRAGFORGE_MODE=${FRAGFORGE_MODE} \
     NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 

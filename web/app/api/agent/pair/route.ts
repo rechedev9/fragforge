@@ -11,9 +11,13 @@ export const runtime = 'nodejs';
  * success it is rekeyed in place to the agent's real token hash and name.
  */
 export async function POST(request: Request): Promise<Response> {
-  const body = (await request.json().catch(() => null)) as { code?: string; name?: string } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { code?: string; name?: string; loopbackToken?: string; loopbackPort?: number }
+    | null;
   const code = body?.code?.trim();
   if (!code) return NextResponse.json({ error: 'missing code' }, { status: 400 });
+  const loopbackToken = typeof body?.loopbackToken === 'string' ? body.loopbackToken : '';
+  const loopbackPort = Number.isInteger(body?.loopbackPort) ? Number(body?.loopbackPort) : 8090;
 
   const db = supabaseAdmin();
   const pendingHash = hashToken(`code:${code}`);
@@ -38,7 +42,12 @@ export async function POST(request: Request): Promise<Response> {
   // gets zero rows back (treated the same as an already-consumed code).
   const { data: updated, error } = await db
     .from('agents')
-    .update({ token_hash: hashToken(token), name: body?.name?.slice(0, 64) || 'PC' })
+    .update({
+      token_hash: hashToken(token),
+      name: body?.name?.slice(0, 64) || 'PC',
+      loopback_token: loopbackToken,
+      loopback_port: loopbackPort,
+    })
     .eq('id', pending.id)
     .eq('token_hash', pendingHash)
     .select('id')

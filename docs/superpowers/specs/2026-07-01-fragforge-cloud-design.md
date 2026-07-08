@@ -1,5 +1,10 @@
 # FragForge Cloud - Diseño (subproducto TypeScript sobre Vercel)
 
+> **Nota (2026-07-08):** el plano de datos descrito aquí (Supabase Storage para demos/artefactos, `jobs` en Postgres, `claim_next_job`) fue rediseñado local-first.
+> Ese rediseño reemplaza las secciones 7 (Storage) y 9 (URLs firmadas) de este documento.
+> Ver `docs/superpowers/specs/2026-07-08-local-first-cloud-data-plane.md` para el contrato vigente.
+> Este documento se conserva sin reescribir como registro histórico del brainstorming original.
+
 - Fecha: 2026-07-01
 - Estado: aprobado (brainstorming), pendiente de plan de implementación
 - Autor: reche + Claude

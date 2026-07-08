@@ -127,7 +127,8 @@ One flag selects the data plane, `NEXT_PUBLIC_FRAGFORGE_MODE` (default `cloud`):
 
 - `local`: the web talks only to the local orchestrator; scan/status/roster proxy to it (`web/app/api/demos/_local.ts`), and the rest of the pipeline (parse/plan/record/renders/capabilities) already does.
   A single orchestrator job UUID flows through scan -> parse -> record -> render, so the record button captures with the job that scan created.
-- `cloud`: uploads and scan go to Supabase and a paired desktop agent captures (the hosted control-plane).
+- `cloud`: after Steam login and pairing through Supabase (control plane only: identity, pairing, agent liveness), the browser talks directly to the paired desktop agent's local loopback proxy for the entire data plane (upload, scan, roster, parse, plan, record, render); no `.dem` or rendered media ever reaches Supabase or the hosted web.
+  See `docs/superpowers/specs/2026-07-08-local-first-cloud-data-plane.md`.
 
 Unlike the Docker stack below, this is a native Windows run, so capture works.
 See [`docs/local-studio.md`](docs/local-studio.md) for prerequisites and what the flag switches.

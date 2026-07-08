@@ -216,7 +216,7 @@ func main() {
 	// Defense-in-depth gating only kicks in on an exposed (non-loopback) bind;
 	// the loopback default stays unauthenticated and unthrottled for the local
 	// UI and e2e.
-	exposed := !isLoopbackHTTPAddr(cfg.HTTPAddr)
+	exposed := !httpapi.IsLoopbackAddr(cfg.HTTPAddr)
 	rateLimitRPS := 0.0
 	rateLimitBurst := 0
 	if exposed {
