@@ -62,13 +62,13 @@ export async function localStatus(jobId: string): Promise<Response> {
   // is omitted by the orchestrator unless the job failed; progress is present
   // only while capturing (segments done/total) so the library card can show a
   // real percent. Both are forwarded only when the orchestrator sends them.
-  type CaptureProgress = { stage: string; done: number; total: number };
+  type CaptureProgress = { done: number; total: number };
   const data = (await res.json()) as { status: string; failure_reason?: string; progress?: CaptureProgress };
   const body: { status: string; failure_reason?: string; progress?: CaptureProgress } = { status: data.status };
   if (data.failure_reason) body.failure_reason = data.failure_reason;
   const p = data.progress;
   if (p && typeof p.done === 'number' && typeof p.total === 'number' && p.total > 0) {
-    body.progress = { stage: p.stage, done: p.done, total: p.total };
+    body.progress = { done: p.done, total: p.total };
   }
   return NextResponse.json(body);
 }

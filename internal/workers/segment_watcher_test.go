@@ -56,7 +56,9 @@ func segmentKey(t *testing.T, id uuid.UUID, segmentID string) string {
 // TestSegmentClipWatcherGrowingDir drives the watcher tick by tick over a
 // recorder segments dir that grows the way a live capture grows it: a clip
 // appears, keeps growing for a while, stabilizes, and a later clip follows.
-// Only stable clips upload, each exactly once.
+// Only stable clips upload, each exactly once. tick uploads as a side effect and
+// returns nothing, so progress is asserted from the counting store and the
+// watcher's uploaded set.
 func TestSegmentClipWatcherGrowingDir(t *testing.T) {
 	store := newCountingStore(t)
 	jobID := uuid.New()
@@ -64,26 +66,29 @@ func TestSegmentClipWatcherGrowingDir(t *testing.T) {
 	w := newSegmentClipWatcher(store, jobID, dir)
 
 	// No segments dir yet: nothing uploads, nothing panics.
-	if got := w.tick(); got != nil {
-		t.Fatalf("tick on missing dir = %v, want nil", got)
+	w.tick()
+	if len(store.puts) != 0 {
+		t.Fatalf("tick on missing dir uploaded %v, want none", store.puts)
 	}
 
 	// First sighting of a clip is never uploaded (it may still be growing).
 	writeClip(t, dir, "s1.mp4", 4)
-	if got := w.tick(); got != nil {
-		t.Fatalf("tick on first sighting = %v, want nil", got)
+	w.tick()
+	if len(store.puts) != 0 {
+		t.Fatalf("tick on first sighting uploaded %v, want none", store.puts)
 	}
 
 	// The clip grew since the last tick: still not stable.
 	writeClip(t, dir, "s1.mp4", 8)
-	if got := w.tick(); got != nil {
-		t.Fatalf("tick on growing clip = %v, want nil", got)
+	w.tick()
+	if len(store.puts) != 0 {
+		t.Fatalf("tick on growing clip uploaded %v, want none", store.puts)
 	}
 
 	// Unchanged across two ticks: stable, upload once.
-	got := w.tick()
-	if len(got) != 1 || got[0] != "s1" {
-		t.Fatalf("tick on stable clip = %v, want [s1]", got)
+	w.tick()
+	if !w.uploaded["s1"] {
+		t.Fatal("s1 not marked uploaded after stabilizing")
 	}
 	if ok, _ := store.Exists(segmentKey(t, jobID, "s1")); !ok {
 		t.Fatal("s1 clip not uploaded to storage")
@@ -91,12 +96,13 @@ func TestSegmentClipWatcherGrowingDir(t *testing.T) {
 
 	// A second clip lands later; s1 is never re-uploaded.
 	writeClip(t, dir, "s2.mp4", 6)
-	if got := w.tick(); got != nil {
-		t.Fatalf("tick on first sighting of s2 = %v, want nil", got)
+	w.tick() // first sighting of s2
+	if w.uploaded["s2"] {
+		t.Fatal("s2 uploaded on first sighting, want still growing")
 	}
-	got = w.tick()
-	if len(got) != 1 || got[0] != "s2" {
-		t.Fatalf("tick on stable s2 = %v, want [s2]", got)
+	w.tick()
+	if !w.uploaded["s2"] {
+		t.Fatal("s2 not marked uploaded after stabilizing")
 	}
 	if n := store.puts[segmentKey(t, jobID, "s1")]; n != 1 {
 		t.Fatalf("s1 uploaded %d times, want exactly 1", n)
@@ -105,9 +111,13 @@ func TestSegmentClipWatcherGrowingDir(t *testing.T) {
 		t.Fatalf("s2 uploaded %d times, want exactly 1", n)
 	}
 
-	// Further ticks stay quiet.
-	if got := w.tick(); got != nil {
-		t.Fatalf("idle tick = %v, want nil", got)
+	// Further ticks stay quiet: no new puts.
+	w.tick()
+	if n := store.puts[segmentKey(t, jobID, "s1")]; n != 1 {
+		t.Fatalf("idle tick re-uploaded s1: %d puts, want 1", n)
+	}
+	if n := store.puts[segmentKey(t, jobID, "s2")]; n != 1 {
+		t.Fatalf("idle tick re-uploaded s2: %d puts, want 1", n)
 	}
 }
 
@@ -125,9 +135,7 @@ func TestSegmentClipWatcherSkipsUnstableAndJunk(t *testing.T) {
 
 	w := newSegmentClipWatcher(store, jobID, dir)
 	for i := 0; i < 3; i++ {
-		if got := w.tick(); got != nil {
-			t.Fatalf("tick %d = %v, want nil", i, got)
-		}
+		w.tick()
 	}
 	if len(store.puts) != 0 {
 		t.Fatalf("puts = %v, want none", store.puts)
@@ -150,9 +158,9 @@ func TestSegmentClipWatcherOverwriteIsNotAnError(t *testing.T) {
 	w := newSegmentClipWatcher(store, jobID, dir)
 	writeClip(t, dir, "s1.mp4", 8)
 	w.tick() // first sighting
-	got := w.tick()
-	if len(got) != 1 || got[0] != "s1" {
-		t.Fatalf("tick = %v, want [s1]", got)
+	w.tick()
+	if !w.uploaded["s1"] {
+		t.Fatal("s1 not marked uploaded after stabilizing")
 	}
 	rc, err := store.Open(key)
 	if err != nil {

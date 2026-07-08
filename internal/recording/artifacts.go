@@ -177,8 +177,19 @@ func mapTakesToSegments(artifacts []RecordingArtifact, segments []RecordingSegme
 	sort.SliceStable(takes, func(i, j int) bool {
 		return takeLess(takes[i], takes[j])
 	})
-	out := map[string]string{}
-	for i, take := range takes {
+	return mapTakeOrderToSegments(takes, segments)
+}
+
+// mapTakeOrderToSegments maps an ordered list of artifact-bearing take ids to
+// segment ids positionally: the i-th take records the i-th plan segment. The
+// caller must pass takes in take order with any artifact-less take already
+// dropped, so a middle take that produced no media never shifts later takes onto
+// the wrong segment. Both the end-of-run mapping (mapTakesToSegments) and the
+// mid-run incremental muxer (finishedTakePairs) share this compression, so their
+// take->segment assignment can never drift.
+func mapTakeOrderToSegments(takeIDs []string, segments []RecordingSegment) map[string]string {
+	out := make(map[string]string, len(takeIDs))
+	for i, take := range takeIDs {
 		if i < len(segments) {
 			out[take] = segments[i].ID
 		}

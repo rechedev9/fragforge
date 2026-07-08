@@ -90,6 +90,21 @@ func TestFinishedTakePairs(t *testing.T) {
 			segments: []string{"s1"},
 			want:     []string{"s1"},
 		},
+		{
+			// An artifact-less middle take must not consume a segment slot: the
+			// later take's clip must publish under the COMPRESSED segment id
+			// (s2), exactly what the end-of-run mapTakesToSegments assigns, not
+			// under the positional s3.
+			name: "artifact-less middle take does not shift later takes",
+			takes: map[string][]string{
+				"take0000": {"video.mp4", "audio.wav"},
+				"take0001": {},                         // no artifacts
+				"take0002": {"video.mp4", "audio.wav"}, // finished (take0003 exists)
+				"take0003": {"video.mp4"},              // newest, still streaming
+			},
+			segments: []string{"s1", "s2", "s3"},
+			want:     []string{"s1", "s2"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,6 +128,30 @@ func TestFinishedTakePairs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestFinishedTakePairsMatchesEndOfRunMapping locks the mid-run muxer to the
+// end-of-run take->segment mapping: with an artifact-less middle take, the
+// segment each finished take publishes under must equal what mapTakesToSegments
+// assigns from the discovered artifacts, so a clip is never published under one
+// id mid-run and kept (skip-if-exists) under a different id at the end.
+func TestFinishedTakePairsMatchesEndOfRunMapping(t *testing.T) {
+	dir := t.TempDir()
+	writeTakeFiles(t, dir, "take0000", "video.mp4", "audio.wav")
+	writeTakeFiles(t, dir, "take0001") // artifact-less middle take
+	writeTakeFiles(t, dir, "take0002", "video.mp4", "audio.wav")
+	writeTakeFiles(t, dir, "take0003", "video.mp4", "audio.wav")
+	plan := incrementalTestPlan(dir, "s1", "s2", "s3")
+
+	// End-of-run mapping over the discovered artifacts (take0003 included).
+	endOfRun := mapTakesToSegments(discoverMediaFiles(dir), plan.Segments)
+
+	for _, pair := range finishedTakePairs(plan) {
+		take := filepath.Base(filepath.Dir(pair.videoPath))
+		if want := endOfRun[take]; pair.segmentID != want {
+			t.Fatalf("%s -> %q, want %q (end-of-run mapping)", take, pair.segmentID, want)
+		}
 	}
 }
 

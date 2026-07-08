@@ -64,31 +64,39 @@ type finishedTake struct {
 }
 
 // finishedTakePairs maps completed take directories to plan segments. Takes are
-// direct children of the plan's output dir, sorted by take number; the i-th
-// take records the i-th plan segment (the same positional mapping as
-// mapTakesToSegments). The newest take is excluded because HLAE may still be
-// writing it, and a take without both video.mp4 and audio.wav is skipped.
+// direct children of the plan's output dir, sorted by take number. Only takes
+// that hold both video.mp4 and audio.wav consume a segment slot, and the i-th
+// such take records the i-th plan segment - the same compression the end-of-run
+// mapTakesToSegments applies, so an artifact-less middle take never shifts later
+// takes onto the wrong segment. The newest take is excluded because HLAE may
+// still be writing it.
 func finishedTakePairs(plan RecordingPlan) []finishedTake {
 	takes := takeDirNames(plan.OutputDir)
 	if len(takes) < 2 {
 		return nil
 	}
-	finished := len(takes) - 1 // the newest take may still be streaming
-	if finished > len(plan.Segments) {
-		finished = len(plan.Segments)
-	}
-	out := make([]finishedTake, 0, finished)
-	for i := 0; i < finished; i++ {
-		video := filepath.Join(plan.OutputDir, takes[i], "video.mp4")
-		audio := filepath.Join(plan.OutputDir, takes[i], "audio.wav")
+	// The newest take may still be streaming; the end-of-run pass owns it.
+	candidates := takes[:len(takes)-1]
+	bearing := make([]finishedTake, 0, len(candidates))
+	takeIDs := make([]string, 0, len(candidates))
+	for _, take := range candidates {
+		video := filepath.Join(plan.OutputDir, take, "video.mp4")
+		audio := filepath.Join(plan.OutputDir, take, "audio.wav")
 		if !fileExists(video) || !fileExists(audio) {
-			continue
+			continue // an artifact-less take consumes no segment slot
 		}
-		out = append(out, finishedTake{
-			segmentID: plan.Segments[i].ID,
-			videoPath: video,
-			audioPath: audio,
-		})
+		bearing = append(bearing, finishedTake{videoPath: video, audioPath: audio})
+		takeIDs = append(takeIDs, take)
+	}
+	takeSegments := mapTakeOrderToSegments(takeIDs, plan.Segments)
+	out := make([]finishedTake, 0, len(bearing))
+	for i, take := range takeIDs {
+		segmentID, ok := takeSegments[take]
+		if !ok {
+			continue // more takes than segments
+		}
+		bearing[i].segmentID = segmentID
+		out = append(out, bearing[i])
 	}
 	return out
 }

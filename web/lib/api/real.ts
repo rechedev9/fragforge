@@ -734,7 +734,7 @@ export class RealApiClient implements ApiClient {
     const data = await readJson<{
       status: string;
       failure_reason?: string;
-      progress?: { stage?: string; done?: number; total?: number };
+      progress?: { done?: number; total?: number };
     }>(res);
     const full: { status: string; failureReason?: string; captureProgress?: CaptureProgress } = {
       status: data.status,

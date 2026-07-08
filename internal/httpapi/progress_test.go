@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -36,12 +37,26 @@ func writeSegmentClips(t *testing.T, store storage.Storage, id uuid.UUID, segmen
 	}
 }
 
+// writeCaptureSelection persists the reel's segment-id selection, mirroring what
+// the record worker writes at the start of a capture.
+func writeCaptureSelection(t *testing.T, store storage.Storage, id uuid.UUID, segmentIDs []string) {
+	t.Helper()
+	b, err := json.Marshal(segmentIDs)
+	if err != nil {
+		t.Fatalf("marshal selection: %v", err)
+	}
+	if err := store.Put(artifacts.CaptureSelectionKey(id), bytes.NewReader(b)); err != nil {
+		t.Fatalf("put capture selection: %v", err)
+	}
+}
+
 func TestCaptureProgress(t *testing.T) {
 	tests := []struct {
 		name      string
 		status    job.Status
 		plan      *killplan.Plan
 		clips     []string
+		selection []string // nil = no selection artifact (fall back to full plan)
 		wantOK    bool
 		wantDone  int
 		wantTotal int
@@ -94,6 +109,29 @@ func TestCaptureProgress(t *testing.T) {
 			wantDone:  3,
 			wantTotal: 3,
 		},
+		{
+			// The reel selects s2,s3 out of a 4-segment plan; s1 is a stale clip
+			// from a previous reel and must not be counted, and total is the
+			// selection size (2), not the plan size (4).
+			name:      "selection scopes total and ignores stale clips",
+			status:    job.StatusRecording,
+			plan:      segmentPlan(4),
+			clips:     []string{"s1", "s2"},
+			selection: []string{"s2", "s3"},
+			wantOK:    true,
+			wantDone:  1,
+			wantTotal: 2,
+		},
+		{
+			name:      "selection fully recorded reports full",
+			status:    job.StatusRecording,
+			plan:      segmentPlan(4),
+			clips:     []string{"s2", "s3"},
+			selection: []string{"s2", "s3"},
+			wantOK:    true,
+			wantDone:  2,
+			wantTotal: 2,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,6 +143,9 @@ func TestCaptureProgress(t *testing.T) {
 			if tt.clips != nil {
 				writeSegmentClips(t, store, jobID, tt.clips...)
 			}
+			if tt.selection != nil {
+				writeCaptureSelection(t, store, jobID, tt.selection)
+			}
 			j := job.Job{ID: jobID, Status: tt.status, KillPlan: tt.plan}
 
 			got, ok := captureProgress(store, j)
@@ -113,9 +154,6 @@ func TestCaptureProgress(t *testing.T) {
 			}
 			if !tt.wantOK {
 				return
-			}
-			if got.Stage != "recording" {
-				t.Errorf("stage = %q, want %q", got.Stage, "recording")
 			}
 			if got.Done != tt.wantDone {
 				t.Errorf("done = %d, want %d", got.Done, tt.wantDone)

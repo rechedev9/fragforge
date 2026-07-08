@@ -67,14 +67,14 @@ func (w *segmentClipWatcher) watch(ctx context.Context, interval time.Duration) 
 }
 
 // tick scans the segments dir once and uploads every stable, not-yet-uploaded
-// clip, returning the segment ids uploaded this tick. A missing dir means no
-// segment has finished yet; upload errors are logged and retried next tick.
-func (w *segmentClipWatcher) tick() []string {
+// clip. A missing dir means no segment has finished yet; upload errors are
+// logged and retried next tick. Progress is observed by the job poll counting
+// the uploaded clips, so tick has nothing to return.
+func (w *segmentClipWatcher) tick() {
 	entries, err := os.ReadDir(w.dir)
 	if err != nil {
-		return nil // dir appears with the first finished segment
+		return // dir appears with the first finished segment
 	}
-	var uploadedNow []string
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.EqualFold(filepath.Ext(name), ".mp4") {
@@ -104,7 +104,5 @@ func (w *segmentClipWatcher) tick() []string {
 			continue
 		}
 		w.uploaded[segmentID] = true
-		uploadedNow = append(uploadedNow, segmentID)
 	}
-	return uploadedNow
 }

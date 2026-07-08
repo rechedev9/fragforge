@@ -384,6 +384,12 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 	if err != nil {
 		return err
 	}
+	// Persist the ordered segment ids this reel captures so the job poll scopes
+	// capture progress to this reel, not the whole kill plan. Overwritten at the
+	// start of every record task (last writer wins - it is the in-flight reel).
+	if err := putCaptureSelection(w.storage, j.ID, killPlanSegmentIDs(recordPlan)); err != nil {
+		return fmt.Errorf("persist capture selection: %w", err)
+	}
 
 	ready, keys, err := recordingOutputsReady(w.storage, j.ID, requested)
 	if err != nil {
@@ -1515,6 +1521,16 @@ func compileSegmentsArgs(segmentIDs []string) []string {
 		return nil
 	}
 	return []string{"--compile-segments", "--segments", strings.Join(segmentIDs, ",")}
+}
+
+// putCaptureSelection persists the ordered segment ids a record run will
+// capture, so the job poll can scope capture progress to this reel.
+func putCaptureSelection(store storage.Storage, id uuid.UUID, segmentIDs []string) error {
+	b, err := json.Marshal(segmentIDs)
+	if err != nil {
+		return err
+	}
+	return store.Put(artifacts.CaptureSelectionKey(id), bytes.NewReader(b))
 }
 
 // killPlanSegmentIDs lists every segment id in the plan, in plan order.

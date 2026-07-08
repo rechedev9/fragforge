@@ -23,9 +23,17 @@ export function RenderingCard({ video }: { video: Video }) {
   const isComposing = video.status === 'composing';
   const formatBadge = video.editConfig ? FORMAT_LABEL[video.editConfig.format] : undefined;
 
-  // Real capture progress, present only once at least one segment clip exists.
-  const progress = isCapturing ? video.captureProgress : undefined;
-  const capturePct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : undefined;
+  // Real capture progress, present only while capturing and once at least one
+  // segment clip exists. A single derived value carries done, total, and the
+  // percent together so the JSX guards on one thing.
+  const capture =
+    isCapturing && video.captureProgress && video.captureProgress.total > 0
+      ? {
+          done: video.captureProgress.done,
+          total: video.captureProgress.total,
+          pct: Math.round((video.captureProgress.done / video.captureProgress.total) * 100),
+        }
+      : undefined;
 
   let accentClass: string;
   if (isCapturing) {
@@ -56,10 +64,10 @@ export function RenderingCard({ video }: { video: Video }) {
   let progressBar: ReactNode;
   if (isCapturing) {
     progressBar =
-      capturePct !== undefined ? (
+      capture !== undefined ? (
         <span
           className="block h-[3px] bg-destructive shadow-[0_0_8px_rgba(255,45,120,0.6)] transition-[width] duration-500"
-          style={{ width: `${capturePct}%` }}
+          style={{ width: `${capture.pct}%` }}
         />
       ) : (
         <span className="neon-pulse block h-[3px] w-2/3 bg-destructive shadow-[0_0_8px_rgba(255,45,120,0.6)]" />
@@ -106,7 +114,7 @@ export function RenderingCard({ video }: { video: Video }) {
         {isCapturing ? (
           <div className="flex items-center justify-between font-[family-name:var(--font-mono)] text-[9.5px] uppercase tracking-[0.16em]">
             <span className="text-destructive">
-              {progress ? `CAPTURANDO ${progress.done}/${progress.total} · ${capturePct}%` : 'CAPTURANDO'}
+              {capture ? `CAPTURANDO ${capture.done}/${capture.total} · ${capture.pct}%` : 'CAPTURANDO'}
             </span>
           </div>
         ) : (
