@@ -12,6 +12,19 @@ export function ratingClass(rating: number): string {
   return 'text-rose-400';
 }
 
+/** Tailwind background-colour class for a rating bar fill, matching ratingClass's bands. */
+export function ratingBarClass(rating: number): string {
+  if (rating >= 1.15) return 'bg-emerald-400';
+  if (rating >= 0.95) return 'bg-foreground';
+  if (rating >= 0.8) return 'bg-amber-400';
+  return 'bg-rose-400';
+}
+
+/** 0-100 fill for a rating bar, scaled so a 2.0 rating (an elite pace) fills it. */
+export function ratingBarPct(rating: number): number {
+  return Math.min(100, Math.max(0, (rating / 2) * 100));
+}
+
 /** Relative time like "hace 2 h" / "hace 3 d" / "ahora mismo" from an ISO string or epoch ms. */
 export function timeAgo(value: string | number): string {
   const then = typeof value === 'number' ? value : Date.parse(value);
