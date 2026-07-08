@@ -53,6 +53,12 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
     a.remove();
   };
 
+  // In cloud mode the reel's media is a DOM object URL (blob:) fetched through the
+  // Bearer-gated loopback: it lives and dies with this tab, so there is no
+  // persistent URL to share. Hide Share entirely there rather than copy a link
+  // that dies with the tab. Download and inline playback still work with blob:.
+  const canShare = video.downloadUrl != null && !video.downloadUrl.startsWith('blob:');
+
   const handleShare = async () => {
     if (!video.downloadUrl) return;
     const url = new URL(video.downloadUrl, window.location.origin).href;
@@ -110,14 +116,15 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
             >
               <Eye className="size-3.5" /> Ver
             </button>
-            <button
-              type="button"
-              onClick={handleShare}
-              disabled={!video.downloadUrl}
-              className="inline-flex items-center gap-1.5 border border-primary/40 bg-background/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-40"
-            >
-              <Share2 className="size-3.5" /> Compartir
-            </button>
+            {canShare ? (
+              <button
+                type="button"
+                onClick={handleShare}
+                className="inline-flex items-center gap-1.5 border border-primary/40 bg-background/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-primary/10"
+              >
+                <Share2 className="size-3.5" /> Compartir
+              </button>
+            ) : null}
           </div>
         </div>
 

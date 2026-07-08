@@ -172,8 +172,12 @@ export class RealApiClient implements ApiClient {
   private readonly driving = new Set<string>();
   /** Cloud-mode loopback endpoint (port + token), resolved once from /api/pc/status. */
   private loopback: Loopback | null = null;
+  /** Memoized data plane for the resolved loopback (or the constant local proxy). */
+  private dpCache: DataPlane | null = null;
   /** Cloud-mode DOM object URLs for each ready reel's mp4/cover (Bearer-fetched). */
   private readonly media = new Map<string, { video?: string; cover?: string }>();
+  /** Reels with a loadMedia fetch in flight, so a tick never double-fetches media. */
+  private readonly mediaLoading = new Set<string>();
 
   constructor() {
     // Rehydrate the reels the user asked for so the Library survives a hard reload
@@ -184,10 +188,23 @@ export class RealApiClient implements ApiClient {
     }
   }
 
-  /** The active data plane: same-origin proxy (local) or cloud loopback. */
+  /**
+   * The active data plane: same-origin proxy (local) or cloud loopback. Memoized
+   * so a poll tick's dozen requests reuse one built plane instead of rebuilding
+   * its closures each call; invalidateLoopback drops the cache when the loopback
+   * changes (401, offline). Local mode's plane is constant, so it caches once.
+   */
   private async dp(): Promise<DataPlane> {
-    if (isLocalMode()) return dataPlane(null);
-    return dataPlane(await this.ensureLoopback());
+    if (this.dpCache) return this.dpCache;
+    const lb = isLocalMode() ? null : await this.ensureLoopback();
+    this.dpCache = dataPlane(lb);
+    return this.dpCache;
+  }
+
+  /** Drops the cached loopback and its data plane so the next call re-resolves. */
+  private invalidateLoopback(): void {
+    this.loopback = null;
+    this.dpCache = null;
   }
 
   /**
@@ -214,14 +231,27 @@ export class RealApiClient implements ApiClient {
    * Issues one data-plane request. `build` receives the resolved DataPlane and
    * returns a URL plus optional init; send() merges the transport's auth headers
    * and, on a cloud 401 (a rotated/stale token), drops the cached loopback so the
-   * next call re-resolves it from /api/pc/status.
+   * next call re-resolves it from /api/pc/status. In cloud mode a fetch rejection
+   * means the loopback died mid-flight (PC slept, agent quit): translate it to
+   * PC_OFFLINE (and drop the cached loopback) so callers offer Retry instead of a
+   * raw network error. Local mode keeps propagating so the 503 service_unavailable
+   * contract is untouched.
    */
   private async send(build: (dp: DataPlane) => { url: string; init?: RequestInit }): Promise<Response> {
     const dp = await this.dp();
     const { url, init } = build(dp);
     const headers = { ...dp.headers, ...((init?.headers as Record<string, string> | undefined) ?? {}) };
-    const res = await fetch(url, { ...init, headers });
-    if (res.status === 401 && !isLocalMode()) this.loopback = null;
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, headers });
+    } catch (err) {
+      if (!isLocalMode()) {
+        this.invalidateLoopback();
+        throw new Error('PC_OFFLINE');
+      }
+      throw err;
+    }
+    if (res.status === 401 && !isLocalMode()) this.invalidateLoopback();
     return res;
   }
 
@@ -243,7 +273,7 @@ export class RealApiClient implements ApiClient {
     // "open FragForge Agent" state) instead of a failed upload mid-stream. Local
     // mode has no probe and always passes.
     if (!(await this.probeHealthz(dp))) {
-      this.loopback = null;
+      this.invalidateLoopback();
       throw new Error('PC_OFFLINE');
     }
 
@@ -351,7 +381,7 @@ export class RealApiClient implements ApiClient {
         status = await this.fetchStatus(jobId);
       } catch (err) {
         if (!isLocalMode()) {
-          this.loopback = null;
+          this.invalidateLoopback();
           throw new Error('PC_OFFLINE');
         }
         throw err;
@@ -497,7 +527,11 @@ export class RealApiClient implements ApiClient {
   }
 
   private async reconcileOne(intent: ReelIntent): Promise<void> {
-    const job = await this.fetchStatusFull(intent.jobId);
+    // Job and render status have no happy-path data dependency; fetch in parallel.
+    const [job, render] = await Promise.all([
+      this.fetchStatusFull(intent.jobId),
+      this.fetchRenderStatus(intent.jobId, variantOf(intent)),
+    ]);
     if (job === null) {
       // Memory-mode orchestrator restart drops jobs; surface it instead of spinning.
       this.applyView(intent, {
@@ -507,7 +541,6 @@ export class RealApiClient implements ApiClient {
       });
       return;
     }
-    const render = await this.fetchRenderStatus(intent.jobId, variantOf(intent));
     const view = deriveReelView({
       jobStatus: job.status,
       jobFailureReason: job.failureReason,
@@ -534,14 +567,13 @@ export class RealApiClient implements ApiClient {
         // Cloud: the bytes sit behind the Bearer-gated loopback, which a bare
         // <video>/<img> src cannot authenticate to. Serve DOM object URLs
         // fetched with the token; loadMedia fills them on a later tick, and the
-        // card shows its placeholder cover until then.
+        // card shows its placeholder cover until then. Surface whatever is cached
+        // (possibly a partial entry when one of the two fetches failed) and kick
+        // loadMedia to fill the rest until both pieces are present.
         const cached = this.media.get(intent.videoId);
-        if (cached) {
-          next.downloadUrl = cached.video;
-          next.thumbnailUrl = cached.cover;
-        } else {
-          void this.loadMedia(intent);
-        }
+        next.downloadUrl = cached?.video;
+        next.thumbnailUrl = cached?.cover;
+        if (!cached || !cached.video || !cached.cover) void this.loadMedia(intent);
       }
     }
     this.reels.set(intent.videoId, next);
@@ -550,22 +582,34 @@ export class RealApiClient implements ApiClient {
   /**
    * Cloud mode only: fetches a ready reel's mp4 and cover through the
    * authenticated loopback and caches DOM object URLs, then surfaces them on the
-   * live reel. Runs at most once per reel (the media cache guards re-entry); a
-   * failure leaves the cache empty so a later reconcile tick retries.
+   * live reel. Self-healing: when only one of the two fetches succeeded, the
+   * partial entry is cached and a later tick re-fetches only the missing piece and
+   * merges it, so a transient cover (or video) failure does not strand the reel
+   * without media until reload. An in-flight guard keeps concurrent ticks from
+   * double-fetching the same piece and orphaning object URLs.
    */
   private async loadMedia(intent: ReelIntent): Promise<void> {
-    if (this.media.has(intent.videoId)) return;
-    const variant = variantOf(intent);
-    const name = reelName(intent.segmentIds);
-    const [video, cover] = await Promise.all([
-      this.objectUrl((dp) => dp.videoUrl(intent.jobId, variant, name)),
-      this.objectUrl((dp) => dp.coverUrl(intent.jobId, variant, name)),
-    ]);
-    if (!video && !cover) return; // nothing fetched (offline / not ready yet): retry next tick
-    this.media.set(intent.videoId, { video, cover });
-    const reel = this.reels.get(intent.videoId);
-    if (reel && reel.status === 'ready') {
-      this.reels.set(intent.videoId, { ...reel, downloadUrl: video, thumbnailUrl: cover });
+    const cached = this.media.get(intent.videoId);
+    if (cached?.video && cached?.cover) return; // already fully loaded
+    if (this.mediaLoading.has(intent.videoId)) return;
+    this.mediaLoading.add(intent.videoId);
+    try {
+      const variant = variantOf(intent);
+      const name = reelName(intent.segmentIds);
+      // Reuse the already-fetched piece verbatim (no re-fetch, so no URL to
+      // orphan) and fetch only what is still missing.
+      const [video, cover] = await Promise.all([
+        cached?.video ? Promise.resolve(cached.video) : this.objectUrl((dp) => dp.videoUrl(intent.jobId, variant, name)),
+        cached?.cover ? Promise.resolve(cached.cover) : this.objectUrl((dp) => dp.coverUrl(intent.jobId, variant, name)),
+      ]);
+      if (!video && !cover) return; // nothing fetched (offline / not ready yet): retry next tick
+      this.media.set(intent.videoId, { video, cover });
+      const reel = this.reels.get(intent.videoId);
+      if (reel && reel.status === 'ready') {
+        this.reels.set(intent.videoId, { ...reel, downloadUrl: video, thumbnailUrl: cover });
+      }
+    } finally {
+      this.mediaLoading.delete(intent.videoId);
     }
   }
 

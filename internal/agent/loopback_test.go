@@ -59,6 +59,45 @@ func TestLoopbackHandlerAuth(t *testing.T) {
 	}
 }
 
+func TestLoopbackHandlerEmptyTokenRejectsEverything(t *testing.T) {
+	origins := []string{"https://app.fragforge.gg"}
+	tests := []struct {
+		name       string
+		authHeader string
+	}{
+		{"no auth header", ""},
+		{"bare bearer", "Bearer "},
+		{"bearer empty matches empty token", "Bearer "},
+		{"some token", "Bearer anything"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var reached bool
+			// An empty configured token must authorize nothing.
+			h := newLoopbackHandler(stubBackend(t, &reached), "", origins)
+			req := httptest.NewRequest(http.MethodGet, "/api/jobs", nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("got status %d, want 401", rec.Code)
+			}
+			if reached {
+				t.Errorf("upstream reached with empty configured token, want reject")
+			}
+		})
+	}
+}
+
+func TestRunLoopbackRejectsEmptyToken(t *testing.T) {
+	err := RunLoopback(context.Background(), LoopbackConfig{Addr: "127.0.0.1:0", Token: ""})
+	if err == nil {
+		t.Fatal("got nil error, want rejection of empty loopback token")
+	}
+}
+
 func TestLoopbackHandlerCORS(t *testing.T) {
 	origins := []string{"https://app.fragforge.gg", "https://staging.fragforge.gg"}
 	tests := []struct {

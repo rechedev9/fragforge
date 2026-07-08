@@ -24,10 +24,17 @@ func loopbackAddr() string {
 }
 
 // loopbackPort extracts the port from loopbackAddr; it is the port the browser
-// connects to and the value registered with the control plane. Falls back to
-// 8090 if the address has no parseable port.
+// connects to and the value registered with the control plane.
 func loopbackPort() int {
-	_, portStr, err := net.SplitHostPort(loopbackAddr())
+	return portFromAddr(loopbackAddr())
+}
+
+// portFromAddr parses the port out of a "host:port" address, falling back to
+// 8090 when it has no parseable port. Callers that need both the address and
+// its port should hold the address once and pass it here, so heartbeat and
+// proxy bind agree on the same run-time value.
+func portFromAddr(addr string) int {
+	_, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
 		return 8090
 	}
@@ -36,6 +43,22 @@ func loopbackPort() int {
 		return 8090
 	}
 	return p
+}
+
+// childDataDir picks ZV_DATA_DIR for the supervised orchestrator. When the
+// parent env already exports ZV_DATA_DIR, it returns "" so the child inherits
+// that value; otherwise it anchors the child's data next to the agent config so
+// the sqlite job history lands in a stable per-user path instead of ./data
+// under whatever CWD a service was launched with (e.g. C:\Windows\System32).
+func childDataDir() string {
+	if os.Getenv("ZV_DATA_DIR") != "" {
+		return ""
+	}
+	p, err := configPath()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(p), "data")
 }
 
 // webOrigins is the CORS allowlist (FRAGFORGE_WEB_ORIGIN, comma-separated,

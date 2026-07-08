@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rechedev9/fragforge/internal/httpapi"
 )
 
 // LoopbackConfig configures the loopback data-plane proxy the agent fronts the
@@ -51,6 +53,12 @@ const orchestratorReadyTimeout = 30 * time.Second
 func RunLoopback(ctx context.Context, cfg LoopbackConfig) error {
 	if err := validateLoopbackAddr(cfg.Addr); err != nil {
 		return err
+	}
+	// Defense in depth: an empty token would make authorized match any (or no)
+	// credential, so refuse to run an unauthenticated data plane. The agent
+	// self-heals a legacy config to a real token before it reaches here.
+	if cfg.Token == "" {
+		return fmt.Errorf("loopback token is required")
 	}
 	orch := cfg.OrchestratorPath
 	if orch == "" {
@@ -132,10 +140,13 @@ func RunLoopback(ctx context.Context, cfg LoopbackConfig) error {
 // exits, ctx is cancelled, or the ready timeout elapses.
 func waitOrchestratorReady(ctx context.Context, target *url.URL, childExit <-chan error) error {
 	deadline := time.After(orchestratorReadyTimeout)
-	tick := time.NewTicker(50 * time.Millisecond)
-	defer tick.Stop()
 	healthURL := target.String() + "/healthz"
 	client := &http.Client{Timeout: 2 * time.Second}
+	// Exponential backoff: the child's cold start (DB init, capture-tool
+	// detection) takes hundreds of ms to seconds, so a flat fast tick would
+	// mostly burn connection-refused dials.
+	wait := 50 * time.Millisecond
+	const maxWait = 500 * time.Millisecond
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
 		if err != nil {
@@ -155,7 +166,10 @@ func waitOrchestratorReady(ctx context.Context, target *url.URL, childExit <-cha
 			return fmt.Errorf("orchestrator exited before ready: %w", err)
 		case <-deadline:
 			return fmt.Errorf("orchestrator not ready after %s", orchestratorReadyTimeout)
-		case <-tick.C:
+		case <-time.After(wait):
+			if wait *= 2; wait > maxWait {
+				wait = maxWait
+			}
 		}
 	}
 }
@@ -196,6 +210,12 @@ func newLoopbackHandler(proxy http.Handler, token string, origins []string) http
 }
 
 func authorized(r *http.Request, token string) bool {
+	// An empty configured token must authorize nothing: ConstantTimeCompare of
+	// two empty strings is 1, which would let a bare "Authorization: Bearer "
+	// (or a legacy tokenless config) through.
+	if token == "" {
+		return false
+	}
 	const prefix = "Bearer "
 	h := r.Header.Get("Authorization")
 	if !strings.HasPrefix(h, prefix) {
@@ -206,17 +226,10 @@ func authorized(r *http.Request, token string) bool {
 }
 
 // validateLoopbackAddr rejects a bind that is not a loopback host, so the
-// data-plane proxy can never be reachable off the machine.
+// data-plane proxy can never be reachable off the machine. It wraps the shared
+// httpapi.IsLoopbackAddr predicate with the agent's error message.
 func validateLoopbackAddr(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return fmt.Errorf("invalid loopback addr %q: %w", addr, err)
-	}
-	if host == "localhost" {
-		return nil
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
+	if !httpapi.IsLoopbackAddr(addr) {
 		return fmt.Errorf("loopback addr %q must bind a loopback host", addr)
 	}
 	return nil

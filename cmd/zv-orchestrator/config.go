@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -108,7 +107,7 @@ func loadConfig() (config, error) {
 	if c.QueueMode != queueModeRedis && c.QueueMode != queueModeInline {
 		return c, fmt.Errorf("ZV_QUEUE_MODE must be %q or %q", queueModeRedis, queueModeInline)
 	}
-	if !isLoopbackHTTPAddr(c.HTTPAddr) && c.MutationToken == "" {
+	if !httpapi.IsLoopbackAddr(c.HTTPAddr) && c.MutationToken == "" {
 		return c, fmt.Errorf("ZV_MUTATION_TOKEN is required when ZV_HTTP_ADDR is not loopback")
 	}
 
@@ -283,16 +282,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func isLoopbackHTTPAddr(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }

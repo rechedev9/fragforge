@@ -97,6 +97,24 @@ test.describe('cloud upload — direct-to-loopback data plane', () => {
     ).toBeVisible();
   });
 
+  test('lands on the PC-offline state when the loopback dies mid-upload', async ({ page }) => {
+    // Healthz passes (the PC was up at probe time), but the loopback drops before
+    // the scan POST lands — the classic "PC slept mid-flight". The client must
+    // translate that fetch rejection to PC_OFFLINE and show the actionable offline
+    // state, not a raw network error / generic scan failure.
+    await mockPcStatus(page);
+    await mockHealthzOk(page);
+    await page.route(`${LOOPBACK}/api/jobs`, (route) => route.abort());
+
+    await page.goto('/upload');
+    await page.locator(FILE_INPUT).setInputFiles(DUMMY_DEM);
+
+    await expect(page.getByText('Tu PC está offline')).toBeVisible({ timeout: 15_000 });
+    await expect(
+      page.getByText('Abre FragForge Agent en tu PC para analizar esta demo y reintenta.'),
+    ).toBeVisible();
+  });
+
   test('reports a scan failure and returns to the dropzone', async ({ page }) => {
     await mockPcStatus(page);
     await mockHealthzOk(page);
