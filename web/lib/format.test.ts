@@ -2,7 +2,7 @@
 // (Spanish NEON HUD skin). Run: node --test "lib/**/*.test.ts"
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { timeAgo, playsSelectionLabel, formatKd } from './format.ts';
+import { timeAgo, playsSelectionLabel, formatKd, ratingBarClass, ratingBarPct } from './format.ts';
 import type { Play } from './api/types.ts';
 
 function play(overrides: Partial<Play>): Play {
@@ -60,4 +60,24 @@ test('playsSelectionLabel: duplicate rounds collapse in the summary', () => {
 
 test('formatKd renders two decimals', () => {
   assert.equal(formatKd(2.2), '2.20');
+});
+
+test('ratingBarPct scales against a 2.0 ceiling', () => {
+  assert.equal(ratingBarPct(1.42), 71);
+  assert.equal(ratingBarPct(0), 0);
+});
+
+test('ratingBarPct clamps an above-ceiling rating to 100', () => {
+  assert.equal(ratingBarPct(2.5), 100);
+});
+
+test('ratingBarPct clamps a negative rating to 0', () => {
+  assert.equal(ratingBarPct(-1), 0);
+});
+
+test('ratingBarClass matches ratingClass band boundaries', () => {
+  assert.equal(ratingBarClass(1.15), 'bg-emerald-400');
+  assert.equal(ratingBarClass(0.95), 'bg-foreground');
+  assert.equal(ratingBarClass(0.8), 'bg-amber-400');
+  assert.equal(ratingBarClass(0.79), 'bg-rose-400');
 });

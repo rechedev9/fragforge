@@ -1,10 +1,9 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { Crosshair } from 'lucide-react';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
-import { ratingClass } from '@/lib/format';
+import { ratingBarClass, ratingBarPct, ratingClass } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 
 export type PlayerPickerProps = {
@@ -28,6 +27,11 @@ const STAT_TOOLTIPS: Record<string, string> = {
 function prettyMapName(map: string): string {
   const stripped = map.replace(/^(de|cs)_/, '');
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
+/** First one or two glyphs of a name, uppercased, for the row's monogram avatar. */
+function initials(name: string): string {
+  return Array.from(name.trim()).slice(0, 2).join('').toUpperCase();
 }
 
 /**
@@ -67,7 +71,24 @@ type Column = {
   tone?: (p: DemoPlayer) => string;
   /** Secondary columns hide below the sm breakpoint so the player name never collapses. */
   secondary?: boolean;
+  /** Overrides the default text cell, e.g. the rating column's value-plus-bar. */
+  render?: (p: DemoPlayer) => ReactNode;
 };
+
+/** Rating cell: the number plus a bar showing it against a 2.0 (elite-pace) ceiling. */
+function RatingCell({ rating }: { rating: number }) {
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <span className={ratingClass(rating)}>{rating.toFixed(2)}</span>
+      <span className="h-[3px] w-10 bg-muted">
+        <span
+          className={cn('block h-full', ratingBarClass(rating))}
+          style={{ width: `${ratingBarPct(rating)}%` }}
+        />
+      </span>
+    </span>
+  );
+}
 
 function signed(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
@@ -117,7 +138,7 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
 
   const showMvp = players.some((p) => p.mvps > 0);
   const columns: Column[] = [
-    { key: 'rating', label: 'RAT', value: (p) => p.rating.toFixed(2), tone: (p) => ratingClass(p.rating) },
+    { key: 'rating', label: 'RAT', value: (p) => p.rating.toFixed(2), render: (p) => <RatingCell rating={p.rating} /> },
     { key: 'k', label: 'K', value: (p) => `${p.kills}` },
     { key: 'd', label: 'D', value: (p) => `${p.deaths}` },
     { key: 'a', label: 'A', value: (p) => `${p.assists}` },
@@ -213,20 +234,25 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                       'grid w-full cursor-pointer items-center gap-x-1 border-b border-border/40 px-3 py-2.5 text-left transition-colors last:border-b-0',
                       'focus:outline-none focus-visible:bg-primary/10',
                       gridClass,
+                      // The recommended row keeps a permanent left accent + tint so it reads at a
+                      // glance even when the user's mouse is elsewhere; the ring below layers on
+                      // top for whichever row is the current pick target (hover/keyboard focus).
+                      isRecommended && 'bg-primary/10 shadow-[inset_3px_0_0_0_var(--primary)]',
                       active
                         ? 'bg-primary/10 ring-1 ring-inset ring-primary/60'
-                        : 'hover:bg-muted/40 hover:ring-1 hover:ring-inset hover:ring-border',
+                        : !isRecommended && 'hover:bg-muted/40 hover:ring-1 hover:ring-inset hover:ring-border',
                     )}
                   >
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="flex min-w-0 items-center gap-2.5">
                         <span
+                          data-testid="player-avatar"
                           className={cn(
-                            'inline-flex size-7 shrink-0 items-center justify-center rounded-md border',
+                            'inline-flex size-7 shrink-0 items-center justify-center rounded-md border font-[family-name:var(--font-display)] text-[0.65rem] font-bold leading-none',
                             active ? 'border-primary/50 bg-primary/15 text-primary' : meta.chip,
                           )}
                         >
-                          <Crosshair className="size-3.5" />
+                          {initials(p.name)}
                         </span>
                         {/* min-w-0 lets this shrink inside the flex row without evicting the name;
                             the name never has to share a row with the Recommended badge, which
@@ -252,7 +278,7 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                           c.tone?.(p) ?? 'text-foreground',
                         )}
                       >
-                        {c.value(p)}
+                        {c.render ? c.render(p) : c.value(p)}
                       </span>
                     ))}
                   </button>

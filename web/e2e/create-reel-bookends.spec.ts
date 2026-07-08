@@ -70,7 +70,7 @@ async function gotoCreateReel(page: Page, jobStatus: { value: string }): Promise
   await page.goto('/upload');
   await page.locator('input[type=file]').setInputFiles(DUMMY_DEM);
   await page.getByRole('heading', { name: '¿A QUIÉN QUIERES CLIPEAR?' }).waitFor();
-  await page.locator('button:has(.lucide-crosshair)').first().click();
+  await page.getByTestId('player-avatar').first().click();
 
   await page.waitForURL(/\/matches\//);
   await page.getByText('JUGADAS DETECTADAS · 1').waitFor();
