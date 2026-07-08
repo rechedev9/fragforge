@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 // in lockstep on a new release. The canonical asset name comes from
 // desktop/package.json version.
 const AGENT_DOWNLOAD_URL =
-  'https://github.com/rechedev9/fragforge/releases/download/v0.3.1/FragForge.Studio.Setup.0.3.1.exe';
+  'https://github.com/rechedev9/fragforge/releases/download/v0.3.2/FragForge.Studio.Setup.0.3.2.exe';
 
 export type PairPcStepProps = {
   /**
