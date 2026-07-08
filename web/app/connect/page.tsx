@@ -37,6 +37,12 @@ export default function ConnectPage() {
     if (session?.matchHistoryLinked) setStep(1);
   }, [session?.matchHistoryLinked]);
 
+  // Deep link straight to PC pairing (/connect?step=pair): pairing works as a
+  // guest, so nothing may force the Steam-linking step first.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('step') === 'pair') setStep(1);
+  }, []);
+
   function enterStudio() {
     dismissOnboarding();
     router.push('/matches');
@@ -87,7 +93,7 @@ export default function ConnectPage() {
         <div className="flex flex-1 flex-col items-center justify-center gap-6 py-10">
           <div className="neon-brackets relative w-full max-w-[620px] border border-primary/35 bg-card/85 px-7 py-9 sm:px-11">
             {step === 0 ? (
-              <LinkHistoryStep onLinked={() => setStep(1)} />
+              <LinkHistoryStep onLinked={() => setStep(1)} onSkipToPairing={() => setStep(1)} />
             ) : (
               <PairPcStep onEnter={enterStudio} onPairedChange={setPaired} />
             )}

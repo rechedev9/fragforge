@@ -95,6 +95,11 @@ test.describe('cloud upload — direct-to-loopback data plane', () => {
     await expect(
       page.getByText('Abre FragForge Agent en tu PC para analizar esta demo y reintenta.'),
     ).toBeVisible();
+    // The offline card must offer the no-login pairing path, not a dead end.
+    await expect(page.getByRole('link', { name: 'Empareja este PC' })).toHaveAttribute(
+      'href',
+      '/connect?step=pair',
+    );
   });
 
   test('lands on the PC-offline state when the loopback dies mid-upload', async ({ page }) => {
