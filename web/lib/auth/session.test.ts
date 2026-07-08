@@ -1,7 +1,7 @@
 // Unit tests for the signed-cookie session. Run: node --test session.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { signSession, verifySession } from './session.ts';
+import { signSession, verifySession, guestSession, isGuest, GUEST_PERSONA } from './session.ts';
 import type { SessionPayload } from './session.ts';
 
 const payload: SessionPayload = {
@@ -38,4 +38,23 @@ test('rejects garbage and empty tokens', () => {
 
 test('rejects a non-17-digit steamid even if well-signed', () => {
   assert.equal(verifySession(signSession({ ...payload, steamid64: '123' })), null);
+});
+
+test('guestSession is an anonymous, non-Steam session', () => {
+  const guest = guestSession();
+  assert.match(guest.steamid64, /^guest:[0-9a-f-]{36}$/);
+  assert.equal(guest.persona, GUEST_PERSONA);
+  assert.equal(guest.avatar, '');
+  assert.equal(guest.matchHistoryLinked, false);
+  assert.equal(isGuest(guest), true);
+  assert.equal(isGuest(payload), false);
+});
+
+test('round-trips a signed guest session', () => {
+  const guest = guestSession();
+  assert.deepEqual(verifySession(signSession(guest)), guest);
+});
+
+test('rejects a malformed guest id even if well-signed', () => {
+  assert.equal(verifySession(signSession({ ...payload, steamid64: 'guest:not-a-uuid' })), null);
 });

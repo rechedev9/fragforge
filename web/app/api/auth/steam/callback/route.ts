@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyCallback, fetchPersona } from '@/lib/auth/steam';
-import { signSession, SESSION_COOKIE, SESSION_MAX_AGE } from '@/lib/auth/session';
+import { signSession, verifySession, isGuest, SESSION_COOKIE, SESSION_MAX_AGE } from '@/lib/auth/session';
 import { ensureUser } from '@/lib/cloud/users';
+import { migrateGuestAgents } from '@/lib/cloud/pcPairing';
+import { supabaseAdmin } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
@@ -20,14 +22,23 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const { persona, avatar } = await fetchPersona(steamid);
+  const jar = await cookies();
+  const prior = verifySession(jar.get(SESSION_COOKIE)?.value);
   try {
-    await ensureUser(steamid, persona, avatar);
+    const steamUserId = await ensureUser(steamid, persona, avatar);
+    // If the browser paired a PC as a guest before logging in, move those agents
+    // to the Steam user so the PC stays paired rather than silently unpairing.
+    if (prior && isGuest(prior)) {
+      const guestUserId = await ensureUser(prior.steamid64, prior.persona, prior.avatar);
+      if (guestUserId !== steamUserId) {
+        await migrateGuestAgents(guestUserId, steamUserId, supabaseAdmin());
+      }
+    }
   } catch (err) {
-    console.error('ensureUser on login callback failed (continuing, will retry on pair/status)', err);
+    console.error('ensureUser/guest-migration on login callback failed (continuing, will retry on pair/status)', err);
   }
   const token = signSession({ steamid64: steamid, persona, avatar, matchHistoryLinked: false });
 
-  const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',

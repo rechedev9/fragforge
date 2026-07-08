@@ -8,17 +8,19 @@ import { pcStatus } from '@/lib/cloud/pcStatus';
 export const runtime = 'nodejs';
 
 /**
- * GET /api/pc/status — session-gated pairing + liveness for the signed-in user's
- * agent, plus the loopback endpoint the browser dials in cloud mode. Returns
+ * GET /api/pc/status — pairing + liveness for the current user's agent, plus the
+ * loopback endpoint the browser dials in cloud mode. Returns
  * `{ paired, online, loopback: { port, token } | null }`; `loopback` is non-null
  * only when a paired agent has reported one. The token here is the browser's
  * credential for the same-machine loopback data plane, so this route is the only
- * place it crosses the control plane.
+ * place it crosses the control plane. With no session there is nothing paired
+ * yet, so it returns the unpaired shape (200) — not a 401 the UI would read as
+ * offline-with-no-remedy. It mints no cookie on a GET.
  */
 export async function GET(): Promise<Response> {
   const jar = await cookies();
   const s = verifySession(jar.get(SESSION_COOKIE)?.value);
-  if (!s) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!s) return NextResponse.json(pcStatus(null), { headers: { 'cache-control': 'no-store' } });
 
   const userId = await ensureUser(s.steamid64, s.persona, s.avatar);
   const { data } = await supabaseAdmin()
