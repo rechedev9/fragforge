@@ -10,7 +10,7 @@
 // (or a stray process) never collide on a fixed port.
 
 const { app, BrowserWindow, shell, session } = require('electron');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -18,6 +18,9 @@ const http = require('http');
 const https = require('https');
 const net = require('net');
 const { pathToFileURL } = require('url');
+const { promisify } = require('util');
+
+const execFileAsync = promisify(execFile);
 
 // A single running instance owns the orchestrator; a second launch just focuses
 // the existing window instead of spawning a duplicate backend on new ports.
@@ -48,6 +51,24 @@ const orchestratorExe = resourcePath(
 const nextServer = resourcePath('web', 'server.js');
 const dataDir = path.join(app.getPath('userData'), 'data');
 const musicDir = path.join(dataDir, 'music');
+
+// zv-agent: the FragForge Cloud capture agent. Studio doubles as a paired
+// cloud agent, not just Local Studio - once paired it runs alongside the
+// orchestrator/web pair above and fronts this same local orchestrator for the
+// hosted web's data plane. See pair.html for the pairing UI.
+const agentExe = resourcePath('bin', process.platform === 'win32' ? 'zv-agent.exe' : 'zv-agent');
+// zv-agent persists its pairing config at os.UserConfigDir()/fragforge/agent.json
+// (cmd/zv-agent/config.go); on Windows that is app.getPath('appData'), NOT
+// Electron's per-app userData dir. Studio must read/spawn against that exact
+// path rather than reimplement or relocate it.
+const agentConfigPath = path.join(app.getPath('appData'), 'fragforge', 'agent.json');
+// Studio-side "don't ask again" flag for the pairing screen; separate from
+// agent.json because skipping pairing is a Studio UI preference, not
+// something zv-agent itself needs to know about.
+const cloudConfigPath = path.join(app.getPath('userData'), 'cloud.json');
+const DEFAULT_CLOUD_URL = 'https://fragforge.167-233-55-246.sslip.io';
+const cloudUrl = process.env.FRAGFORGE_CLOUD_URL || DEFAULT_CLOUD_URL;
+const webOrigin = process.env.FRAGFORGE_WEB_ORIGIN || DEFAULT_CLOUD_URL;
 
 // All child output is mirrored to this file so a failed boot is diagnosable
 // from a user report: the packaged app has no console, so stdout alone is
@@ -564,6 +585,10 @@ function isLoopbackOrigin(url) {
 // file or an attacker-crafted data: payload.
 const loadingFileUrl = pathToFileURL(path.join(__dirname, 'loading.html')).href;
 
+// Same idea for pair.html: the will-navigate guard allows navigating straight
+// to this URL and nothing else under file:/data: (alongside loadingFileUrl).
+const pairFileUrl = pathToFileURL(path.join(__dirname, 'pair.html')).href;
+
 // data: URLs the main process itself generated and is currently showing (only
 // showErrorScreen creates these). Cleared and repopulated with just the
 // latest one on every call, so at most one data: URL is ever "trusted" at a
@@ -576,6 +601,19 @@ const allowedInternalUrls = new Set();
 // intercepted by will-navigate is the only way for a button click to reach
 // the main process; Chromium never actually resolves this host.
 const RETRY_URL = 'https://retry.fragforge.invalid/';
+
+// Same trick for the pairing screen (pair.html), sandboxed with no
+// preload/IPC too: a plain <form method="GET"> submit and a plain <a href>
+// are the only way its buttons can reach the main process, intercepted by
+// will-navigate below. PAIR_SUBMIT_ORIGIN carries the code as a `?code=`
+// query param, so it is matched by origin rather than by exact string.
+const PAIR_SUBMIT_ORIGIN = 'https://pair.fragforge.invalid';
+const PAIR_SKIP_URL = 'https://pair-skip.fragforge.invalid/';
+// Reachable later, not just during boot: the hosted web's /connect page tells
+// users to "open the agent" on their PC, which is expected to link here so a
+// user who already skipped (or is mid-session on /matches) can still reach
+// the pairing screen without restarting the app.
+const PAIR_OPEN_URL = 'https://pair-open.fragforge.invalid/';
 
 const windowFile = path.join(app.getPath('userData'), 'window.json');
 
@@ -671,7 +709,30 @@ function createWindow(loadingOnly) {
       retryBoot();
       return;
     }
-    if (url === loadingFileUrl || allowedInternalUrls.has(url) || isLoopbackOrigin(url)) return;
+    let parsed = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // not a well-formed URL; falls through to the allowlist checks below
+    }
+    if (parsed && parsed.origin === PAIR_SUBMIT_ORIGIN) {
+      event.preventDefault();
+      handlePairSubmit(parsed.searchParams.get('code') || '').catch((err) =>
+        logLine(`[pair] unexpected error: ${err}\n`),
+      );
+      return;
+    }
+    if (url === PAIR_SKIP_URL) {
+      event.preventDefault();
+      handlePairSkip();
+      return;
+    }
+    if (url === PAIR_OPEN_URL) {
+      event.preventDefault();
+      showPairScreen();
+      return;
+    }
+    if (url === loadingFileUrl || url === pairFileUrl || allowedInternalUrls.has(url) || isLoopbackOrigin(url)) return;
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
   });
@@ -754,6 +815,183 @@ function showErrorScreen(err, title, hint) {
   mainWindow.loadURL(url);
 }
 
+// Ports of the two servers spawned by the boot currently in flight, set at
+// the top of boot() as soon as they're known. The pairing-screen handlers
+// below (invoked later, from will-navigate, long after boot()'s own local
+// variables are out of scope) need them to spawn the agent and to know where
+// "/matches" is.
+let currentOrchPort = null;
+let currentWebPort = null;
+
+/** Reads the Studio-side "don't ask again" pairing flag from cloud.json. */
+function readSkipPairing() {
+  try {
+    return JSON.parse(fs.readFileSync(cloudConfigPath, 'utf8')).skipPairing === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Persists the "don't ask again" pairing flag so the next boot goes straight to /matches. */
+function writeSkipPairing() {
+  try {
+    fs.writeFileSync(cloudConfigPath, JSON.stringify({ skipPairing: true }));
+  } catch (err) {
+    logLine(`[pair] could not persist skip flag: ${err}\n`);
+  }
+}
+
+/** Loads pair.html and fills in the cloud URL once the page exists. */
+function showPairScreen() {
+  loadingScreenShowing = false;
+  if (!windowAlive()) return;
+  mainWindow.loadFile(path.join(__dirname, 'pair.html'));
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (!windowAlive()) return;
+    mainWindow.webContents
+      .executeJavaScript(
+        `(() => { const el = document.getElementById('cloud-url'); if (el) el.textContent = ${JSON.stringify(cloudUrl)}; })()`,
+      )
+      .catch(() => {}); // page may already be gone; never block on this
+  });
+}
+
+/** Updates pair.html's #status line (mirrors setLoadingStatus for loading.html). */
+function setPairStatus(text) {
+  if (!windowAlive()) return;
+  mainWindow.webContents
+    .executeJavaScript(
+      `(() => { const el = document.getElementById('status'); if (el) el.textContent = ${JSON.stringify(text)}; })()`,
+    )
+    .catch(() => {});
+}
+
+/** Sends the window to the app shell once boot (or pairing) is done. */
+function loadMatches() {
+  loadingScreenShowing = false;
+  if (currentWebPort !== null && windowAlive()) {
+    mainWindow.loadURL(`http://127.0.0.1:${currentWebPort}/matches`);
+  }
+}
+
+// Cap on how long zv-agent --pair may run before it's treated as a failure;
+// it only makes one short HTTPS round-trip to the control plane, so a wedge
+// here means the network is unreachable, not that it needs more time.
+const PAIR_TIMEOUT_MS = 30_000;
+
+/**
+ * Runs `zv-agent.exe --pair <code>` asynchronously and, on success, starts
+ * serving as a cloud agent and moves on to /matches; on failure, re-renders
+ * the pairing screen with the error instead of navigating away from it.
+ *
+ * Must not block the main process: watchPostBoot(orch)/watchPostBoot(web) and
+ * the agent relaunch timer are also main-process work, and a synchronous wait
+ * here (previously spawnSync, up to PAIR_TIMEOUT_MS) froze the whole app -
+ * every window, IPC, and those watchers - for the duration of every pairing
+ * attempt.
+ */
+async function handlePairSubmit(code) {
+  if (!code) {
+    setPairStatus('Introduce el código de 8 caracteres.');
+    return;
+  }
+  if (!fs.existsSync(agentExe)) {
+    logLine('[pair] zv-agent.exe missing from this install\n');
+    setPairStatus('No se encontró el agente de captura en esta instalación.');
+    return;
+  }
+  setPairStatus('Emparejando…');
+  try {
+    await execFileAsync(agentExe, ['--pair', code], {
+      env: { ...process.env, FRAGFORGE_CLOUD_URL: cloudUrl },
+      windowsHide: true,
+      timeout: PAIR_TIMEOUT_MS,
+      encoding: 'utf8',
+    });
+  } catch (err) {
+    if (err.killed || err.signal) {
+      logLine(`[pair] zv-agent --pair killed by signal ${err.signal} (likely timeout)\n`);
+      setPairStatus('El emparejamiento tardó demasiado. Comprueba tu conexión e inténtalo de nuevo.');
+      return;
+    }
+    if (typeof err.code !== 'number') {
+      logLine(`[pair] zv-agent --pair failed to start: ${err}\n`);
+      setPairStatus(`No se pudo iniciar el emparejamiento: ${err.message}`);
+      return;
+    }
+    const detail = (err.stderr || err.stdout || '').trim();
+    logLine(`[pair] zv-agent --pair exited ${err.code}: ${detail}\n`);
+    setPairStatus(`El código no es válido o ha caducado${detail ? `: ${detail}` : ''}.`);
+    return;
+  }
+  logLine('[pair] paired successfully\n');
+  if (currentOrchPort !== null) spawnAgent(currentOrchPort);
+  loadMatches();
+}
+
+/** "Seguir en modo local": persist the skip flag and enter the app normally. */
+function handlePairSkip() {
+  writeSkipPairing();
+  loadMatches();
+}
+
+// Agent relaunch policy: one retry 30s after an unexpected exit, and only one
+// - a second exit within 5 minutes of that relaunch just logs, since a
+// crash-loop retrying every 30s would otherwise hammer the control plane.
+const AGENT_RELAUNCH_DELAY_MS = 30_000;
+const AGENT_RELAUNCH_WINDOW_MS = 5 * 60_000;
+let agentRelaunchedOnce = false;
+let agentFirstExitAt = 0;
+let agentRelaunchTimer = null;
+
+// The currently-running agent child, if any. Tracked separately from
+// `children` so spawnAgent() can replace a still-alive agent (e.g. a user
+// re-pairing from PAIR_OPEN_URL, see showPairScreen()) instead of racing it:
+// zv-agent's loopback proxy binds a fixed default port, so a second instance
+// would just fail to bind and exit while the first keeps running.
+let agentChild = null;
+
+/** Watches a spawned agent's exit and applies the relaunch policy above. Best-effort: never shows the error screen. */
+function watchAgent(exited, orchPort) {
+  exited.catch((err) => {
+    if (quitting) return;
+    logLine(`[agent] exited: ${err}\n`);
+    const now = Date.now();
+    if (agentRelaunchedOnce && now - agentFirstExitAt < AGENT_RELAUNCH_WINDOW_MS) {
+      logLine('[agent] exited again within 5 minutes of the last relaunch; not retrying\n');
+      return;
+    }
+    agentRelaunchedOnce = true;
+    agentFirstExitAt = now;
+    agentRelaunchTimer = setTimeout(() => {
+      agentRelaunchTimer = null;
+      if (quitting) return;
+      spawnAgent(orchPort);
+    }, AGENT_RELAUNCH_DELAY_MS);
+  });
+}
+
+/** Spawns zv-agent.exe fronting the local orchestrator; best-effort and not part of the fatal boot sequence. */
+function spawnAgent(orchPort) {
+  if (!fs.existsSync(agentExe)) {
+    logLine('[agent] zv-agent.exe missing, skipping\n');
+    return;
+  }
+  if (agentChild && agentChild.exitCode === null && !agentChild.killed) {
+    logLine('[agent] replacing already-running agent\n');
+    killTree(agentChild);
+    const idx = children.indexOf(agentChild);
+    if (idx !== -1) children.splice(idx, 1);
+  }
+  const { child, exited } = launch('agent', agentExe, [], {
+    FRAGFORGE_ORCHESTRATOR_URL: `http://127.0.0.1:${orchPort}`,
+    FRAGFORGE_CLOUD_URL: cloudUrl,
+    FRAGFORGE_WEB_ORIGIN: webOrigin,
+  });
+  agentChild = child;
+  watchAgent(exited, orchPort);
+}
+
 // Generous overall deadline for each server to answer its health check: a
 // first-ever boot can still be mid-way through provisioning a stalled tool
 // download inside its own per-tool timeout, so this only needs to bound how
@@ -776,6 +1014,8 @@ async function boot() {
   const orchPort = await stablePort('orchestrator');
   const webPort = await stablePort('web');
   const orchestratorUrl = `http://127.0.0.1:${orchPort}`;
+  currentOrchPort = orchPort;
+  currentWebPort = webPort;
   // Ports are only known now, so this is the earliest point the navigation
   // guards in createWindow() have anything real to allow.
   allowedOrigins.add(`http://127.0.0.1:${orchPort}`);
@@ -848,12 +1088,25 @@ async function boot() {
   watchPostBoot(orch);
   watchPostBoot(web);
 
+  // The cloud agent is best-effort and deliberately outside the fatal
+  // sequence above: it is a bonus (this PC becomes usable as a remote capture
+  // agent from the hosted web), not something a Local Studio user needs.
+  if (fs.existsSync(agentConfigPath)) {
+    setLoadingStatus('Conectando con FragForge Cloud…');
+    spawnAgent(orchPort);
+  } else if (!readSkipPairing()) {
+    // Not paired yet and the user hasn't dismissed pairing before: offer it
+    // instead of landing on /matches. handlePairSubmit()/handlePairSkip()
+    // take it from here (both eventually call loadMatches()).
+    showPairScreen();
+    return;
+  }
+
   // Land on the dashboard (the app shell), not a single flow: Studio has both
   // the demo-upload flow and the Twitch stream-clips flow, and the sidebar is
   // the only place that offers both.
   setLoadingStatus('Abriendo la interfaz…');
-  loadingScreenShowing = false;
-  if (windowAlive()) mainWindow.loadURL(`http://127.0.0.1:${webPort}/matches`);
+  loadMatches();
 }
 
 // Guards against overlapping boot() runs: the initial app.whenReady() boot
@@ -882,6 +1135,12 @@ function retryBoot() {
   if (booting) return;
   for (const child of children) killTree(child);
   children.length = 0;
+  if (agentRelaunchTimer) {
+    clearTimeout(agentRelaunchTimer);
+    agentRelaunchTimer = null;
+  }
+  agentRelaunchedOnce = false;
+  agentFirstExitAt = 0;
   runBoot();
 }
 
@@ -907,6 +1166,10 @@ function killTree(child) {
 
 function shutdown() {
   for (const child of children) killTree(child);
+  if (agentRelaunchTimer) {
+    clearTimeout(agentRelaunchTimer);
+    agentRelaunchTimer = null;
+  }
 }
 
 app.on('second-instance', () => {

@@ -9,7 +9,9 @@ import (
 
 // run serves the local data plane: it heartbeats the control plane for liveness
 // and supervises the child orchestrator behind the loopback auth proxy until
-// ctx is cancelled.
+// ctx is cancelled. When FRAGFORGE_ORCHESTRATOR_URL is set, it fronts that
+// already-running orchestrator instead of spawning a child; in that mode the
+// spawn-only DataDir is irrelevant and left unset.
 func run(ctx context.Context, cfg Config) error {
 	c := agent.NewClient(cfg.BaseURL, cfg.Token)
 	capabilities := map[string]any{"parser": true}
@@ -21,10 +23,15 @@ func run(ctx context.Context, cfg Config) error {
 	port := portFromAddr(addr)
 	go agent.HeartbeatLoop(ctx, c, capabilities, cfg.LoopbackToken, port, 20*time.Second)
 
-	return agent.RunLoopback(ctx, agent.LoopbackConfig{
-		Addr:    addr,
-		Token:   cfg.LoopbackToken,
-		Origins: webOrigins(),
-		DataDir: childDataDir(),
-	})
+	extURL := orchestratorURL()
+	lbCfg := agent.LoopbackConfig{
+		Addr:            addr,
+		Token:           cfg.LoopbackToken,
+		Origins:         webOrigins(),
+		OrchestratorURL: extURL,
+	}
+	if extURL == "" {
+		lbCfg.DataDir = childDataDir()
+	}
+	return agent.RunLoopback(ctx, lbCfg)
 }

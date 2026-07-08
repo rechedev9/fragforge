@@ -1,6 +1,6 @@
 {
   "name": "fragforge-studio",
-  "version": "0.2.13",
+  "version": "0.3.0",
   "private": true,
   "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
   "author": "FragForge",
@@ -22,7 +22,8 @@
     },
     "files": [
       "main.js",
-      "loading.html"
+      "loading.html",
+      "pair.html"
     ],
     "extraResources": [
       {

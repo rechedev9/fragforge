@@ -14,10 +14,11 @@ import {
 import type { LucideIcon } from "lucide-react";
 import HeroForge from "@/components/hero-forge";
 
-// Canonical download facts, verified against the live GitHub Release v0.2.13.
+// Canonical download facts, kept in lockstep with the FragForge Studio
+// release. The canonical asset name comes from desktop/package.json version.
 // The href must remain byte-for-byte this string.
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v0.2.13/FragForge.Studio.Setup.0.2.13.exe";
+  "https://github.com/rechedev9/fragforge/releases/download/v0.3.0/FragForge.Studio.Setup.0.3.0.exe";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
 // NEON HUD wordmark: FRAG//FORGE in Chakra Petch, the "//" in signal cyan —
@@ -138,7 +139,7 @@ export default function Home() {
           </div>
 
           <p className="font-mono text-sm tracking-[0.08em] text-muted-foreground">
-            v0.2.13 <span className="text-primary/70">·</span> 124 MB{" "}
+            v0.3.0 <span className="text-primary/70">·</span> 124 MB{" "}
             <span className="text-primary/70">·</span> Windows 10/11
           </p>
         </div>

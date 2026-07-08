@@ -12,9 +12,10 @@ import { cn } from '@/lib/utils';
 // The FragForge Studio Windows installer, the same canonical release asset
 // the landing page's download CTA points at. Kept as a literal here since
 // web/ and landing/ are separate Next apps with no shared config; bump both
-// in lockstep on a new release.
+// in lockstep on a new release. The canonical asset name comes from
+// desktop/package.json version.
 const AGENT_DOWNLOAD_URL =
-  'https://github.com/rechedev9/fragforge/releases/download/v0.2.13/FragForge.Studio.Setup.0.2.13.exe';
+  'https://github.com/rechedev9/fragforge/releases/download/v0.3.0/FragForge.Studio.Setup.0.3.0.exe';
 
 export type PairPcStepProps = {
   /**
@@ -115,8 +116,8 @@ export function PairPcStep({ onEnter, onPairedChange }: PairPcStepProps = {}) {
         </button>
 
         <p className="mx-auto mt-5 max-w-sm text-sm leading-relaxed text-muted-foreground">
-          Abre el <span className="text-foreground">agente FragForge</span> en tu PC gaming y
-          escribe este código.
+          Abre <span className="text-foreground">FragForge Studio</span> en tu PC gaming.
+          Si aún no lo emparejaste, verás la pantalla para introducir este código al abrirlo.
           <br />
           Es lo que graba y renderiza tus reels en tu propio rig.
         </p>
@@ -145,7 +146,7 @@ export function PairPcStep({ onEnter, onPairedChange }: PairPcStepProps = {}) {
             rel="noopener noreferrer"
             className="neon-notch inline-flex items-center bg-primary px-6 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Descargar agente (Windows)
+            Descargar FragForge Studio (Windows)
           </a>
           <button type="button" onClick={enter} className="border border-primary/35 px-6 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-semibold tracking-[0.05em] text-primary transition-colors hover:bg-primary/10">
             Ya lo tengo — entrar al estudio
@@ -190,9 +191,9 @@ export function PairPcStep({ onEnter, onPairedChange }: PairPcStepProps = {}) {
       </p>
 
       <ol className="mt-5 space-y-2.5 text-sm text-muted-foreground">
-        <Step n={1}>Instala el agente FragForge en tu PC gaming.</Step>
+        <Step n={1}>Instala FragForge Studio en tu PC gaming.</Step>
         <Step n={2}>Genera un código de emparejamiento abajo.</Step>
-        <Step n={3}>Escribe el código en el agente para vincularlo a tu cuenta.</Step>
+        <Step n={3}>Escribe el código en FragForge Studio para vincularlo a tu cuenta.</Step>
       </ol>
 
       <div className="mt-5 border border-border bg-card/50 p-4">
