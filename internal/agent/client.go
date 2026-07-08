@@ -1,5 +1,6 @@
-// Package agent is the FragForge capture agent: it connects out to the cloud
-// control-plane, claims jobs, and runs the reused media pipeline locally.
+// Package agent is the FragForge capture agent: it pairs with the cloud
+// control-plane, sends liveness heartbeats, and supervises a local
+// zv-orchestrator behind a loopback auth proxy for the browser data plane.
 package agent
 
 import (

@@ -8,7 +8,7 @@ import (
 
 func TestConfigRoundTrip(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	want := Config{BaseURL: "https://x", Token: "tok", AgentID: "ag1"}
+	want := Config{BaseURL: "https://x", Token: "tok", AgentID: "ag1", LoopbackToken: "lbtok", LoopbackPort: 8090}
 	if err := saveConfig(want); err != nil {
 		t.Fatalf("save: %v", err)
 	}

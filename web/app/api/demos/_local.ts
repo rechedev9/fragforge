@@ -4,10 +4,10 @@ import { orchestratorUrl, mutationHeaders, forwardError, callOrchestrator, servi
 /**
  * Local-mode `/api/demos/*` handlers. In local mode the web is a thin proxy to a
  * local orchestrator (`zv serve`) on the same machine, which owns the whole
- * pipeline (scan, parse, record with HLAE/CS2, render). These mirror the
- * pre-cloud orchestrator-proxy routes; the cloud (Supabase) handlers stay in the
- * route files and are selected by isLocalMode(). Everything runs server-side so
- * the orchestrator URL and token never reach the browser.
+ * pipeline (scan, parse, record with HLAE/CS2, render). Cloud mode never reaches
+ * these routes: the browser talks straight to the paired agent's loopback, so
+ * the whole /api/demos/* surface is now a pure same-origin proxy. Everything runs
+ * server-side so the orchestrator URL and token never reach the browser.
  */
 
 // Matches the orchestrator's 500 MiB MaxBytesReader cap. Enforced here too so a

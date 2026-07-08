@@ -5,6 +5,7 @@ import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
+import { dataPlane, type DataPlane, type Loopback, type PcStatus } from './dataplane';
 import { isLocalMode } from '@/lib/mode';
 import { playsSelectionLabel } from '@/lib/format';
 
@@ -149,14 +150,17 @@ function videoFromIntent(intent: ReelIntent): Video {
 }
 
 /**
- * RealApiClient talks to the same-origin Next route handlers under /api/demos/*,
- * which proxy the local orchestrator. The orchestrator is the source of truth: the
- * client persists only lightweight reel INTENTS (reel-store) and derives each reel's
- * live status by reconciling against the orchestrator on every poll (reel-reconcile),
- * driving record→render idempotently. A hard reload re-reads server state and
- * resumes exactly where it left off. Everything outside the upload→reel path
- * (steam, library seeds, feed) delegates to a MockApiClient. Selected by index.ts
- * when NEXT_PUBLIC_API_BASE is set.
+ * RealApiClient drives the whole upload→parse→record→render pipeline against one
+ * orchestrator, reached over a mode-selected data plane (see lib/api/dataplane):
+ * local mode proxies through the same-origin /api/demos/* routes; cloud mode
+ * talks straight to the paired agent's loopback with a Bearer token read from
+ * /api/pc/status. The orchestrator is the source of truth: the client persists
+ * only lightweight reel INTENTS (reel-store) and derives each reel's live status
+ * by reconciling against it on every poll (reel-reconcile), driving record→render
+ * idempotently. A hard reload re-reads server state and resumes exactly where it
+ * left off. Everything outside the upload→reel path (steam, library seeds, feed)
+ * delegates to a MockApiClient. Selected by index.ts when NEXT_PUBLIC_API_BASE is
+ * set or in local mode.
  */
 export class RealApiClient implements ApiClient {
   private readonly fallback = new MockApiClient();
@@ -166,6 +170,10 @@ export class RealApiClient implements ApiClient {
   private readonly intents = new Map<string, ReelIntent>();
   /** Reels with a record/render POST in flight, so a tick never double-drives. */
   private readonly driving = new Set<string>();
+  /** Cloud-mode loopback endpoint (port + token), resolved once from /api/pc/status. */
+  private loopback: Loopback | null = null;
+  /** Cloud-mode DOM object URLs for each ready reel's mp4/cover (Bearer-fetched). */
+  private readonly media = new Map<string, { video?: string; cover?: string }>();
 
   constructor() {
     // Rehydrate the reels the user asked for so the Library survives a hard reload
@@ -176,40 +184,99 @@ export class RealApiClient implements ApiClient {
     }
   }
 
-  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
-    const form = new FormData();
-    form.append('file', file);
-    const { jobId } = await readJson<{ jobId: string }>(
-      await fetch('/api/demos/scan', { method: 'POST', body: form }),
-    );
+  /** The active data plane: same-origin proxy (local) or cloud loopback. */
+  private async dp(): Promise<DataPlane> {
+    if (isLocalMode()) return dataPlane(null);
+    return dataPlane(await this.ensureLoopback());
+  }
 
-    // Local studio scans synchronously on this machine (orchestrator status
-    // reaches 'scanned'); cloud scans hand off to a paired agent and also watch
-    // whether the user's PC is online (PC_OFFLINE).
-    if (isLocalMode()) {
-      await this.waitForStatus(jobId, 'scanned');
-    } else {
-      await this.waitForScan(jobId);
+  /**
+   * Resolves and caches the cloud loopback endpoint from /api/pc/status. A user
+   * with no paired agent (or one that has not reported a loopback yet) has
+   * nothing on their PC to reach, so this reports PC_OFFLINE and lets the upload
+   * flow show the actionable "open FragForge Agent" state.
+   */
+  private async ensureLoopback(): Promise<Loopback> {
+    if (this.loopback) return this.loopback;
+    const status = await this.fetchPcStatus();
+    if (!status.loopback) throw new Error('PC_OFFLINE');
+    this.loopback = status.loopback;
+    return this.loopback;
+  }
+
+  private async fetchPcStatus(): Promise<PcStatus> {
+    const res = await fetch('/api/pc/status', { cache: 'no-store' });
+    if (!res.ok) return { paired: false, online: false, loopback: null };
+    return (await res.json()) as PcStatus;
+  }
+
+  /**
+   * Issues one data-plane request. `build` receives the resolved DataPlane and
+   * returns a URL plus optional init; send() merges the transport's auth headers
+   * and, on a cloud 401 (a rotated/stale token), drops the cached loopback so the
+   * next call re-resolves it from /api/pc/status.
+   */
+  private async send(build: (dp: DataPlane) => { url: string; init?: RequestInit }): Promise<Response> {
+    const dp = await this.dp();
+    const { url, init } = build(dp);
+    const headers = { ...dp.headers, ...((init?.headers as Record<string, string> | undefined) ?? {}) };
+    const res = await fetch(url, { ...init, headers });
+    if (res.status === 401 && !isLocalMode()) this.loopback = null;
+    return res;
+  }
+
+  /** Loopback liveness for cloud mode; local mode has no separate probe. */
+  private async probeHealthz(dp: DataPlane): Promise<boolean> {
+    if (!dp.healthzUrl) return true;
+    try {
+      const res = await fetch(dp.healthzUrl, { headers: dp.headers, cache: 'no-store' });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
+    const dp = await this.dp();
+    // Cloud mode is a public-HTTPS -> loopback hop: probe the agent's /healthz
+    // before uploading so an offline PC surfaces as PC_OFFLINE (an actionable
+    // "open FragForge Agent" state) instead of a failed upload mid-stream. Local
+    // mode has no probe and always passes.
+    if (!(await this.probeHealthz(dp))) {
+      this.loopback = null;
+      throw new Error('PC_OFFLINE');
     }
 
-    const roster = await readJson<RosterResponse>(await fetch(`/api/demos/${jobId}/roster`));
+    const form = new FormData();
+    form.append(dp.scanField, file);
+    const scanned = await readJson<unknown>(
+      await this.send((d) => ({ url: d.scanUrl, init: { method: 'POST', body: form } })),
+    );
+    const jobId = dp.scanJobId(scanned);
+
+    await this.waitForStatus(jobId, 'scanned');
+
+    const roster = await readJson<RosterResponse>(await this.send((d) => ({ url: d.rosterUrl(jobId) })));
     return { jobId, players: roster.players.map(toDemoPlayer), match: toRosterMatch(roster.match) };
   }
 
   async parseDemo(input: { jobId: string; steamId: string }): Promise<Match> {
     await readJson<unknown>(
-      await fetch(`/api/demos/${input.jobId}/parse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ steamId: input.steamId }),
-      }),
+      await this.send((dp) => ({
+        url: dp.parseUrl(input.jobId),
+        init: {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dp.parseBody(input.steamId)),
+        },
+      })),
     );
 
     await this.waitForStatus(input.jobId, 'parsed');
 
     const [plan, roster] = await Promise.all([
-      readJson<KillPlan>(await fetch(`/api/demos/${input.jobId}/plan`)),
-      readJson<RosterResponse>(await fetch(`/api/demos/${input.jobId}/roster`)),
+      readJson<KillPlan>(await this.send((dp) => ({ url: dp.planUrl(input.jobId) }))),
+      readJson<RosterResponse>(await this.send((dp) => ({ url: dp.rosterUrl(input.jobId) }))),
     ]);
 
     const picked = roster.players.find((p) => p.steamid64 === input.steamId);
@@ -225,7 +292,7 @@ export class RealApiClient implements ApiClient {
     // The plan exists once parsing finishes and stays through record/render.
     if (!PLAN_READY.has(status)) return null;
 
-    const plan = await readJson<KillPlan>(await fetch(`/api/demos/${id}/plan`));
+    const plan = await readJson<KillPlan>(await this.send((dp) => ({ url: dp.planUrl(id) })));
     return planToMatch(id, plan, await this.summaryPlayer(id, plan));
   }
 
@@ -237,7 +304,7 @@ export class RealApiClient implements ApiClient {
    */
   private async summaryPlayer(jobId: string, plan: KillPlan): Promise<DemoPlayer> {
     try {
-      const { players } = await readJson<RosterResponse>(await fetch(`/api/demos/${jobId}/roster`));
+      const { players } = await readJson<RosterResponse>(await this.send((dp) => ({ url: dp.rosterUrl(jobId) })));
       const row = players.find((p) => p.steamid64 === plan.target?.steamid64) ?? players[0];
       if (row) return toDemoPlayer(row);
     } catch {
@@ -267,47 +334,33 @@ export class RealApiClient implements ApiClient {
     // No plan until parsing finishes; it persists through record/render.
     if (status === null || !PLAN_READY.has(status)) return [];
 
-    const plan = await readJson<KillPlan>(await fetch(`/api/demos/${matchId}/plan`));
+    const plan = await readJson<KillPlan>(await this.send((dp) => ({ url: dp.planUrl(matchId) })));
     return planToPlays(matchId, plan);
   }
 
-  /** Polls /status until it reaches `want`; throws on `failed` or timeout. */
+  /**
+   * Polls /status until it reaches `want`; throws on `failed` or timeout. In
+   * cloud mode a loopback that drops mid-poll (PC slept, agent quit) throws from
+   * the fetch; that is translated to PC_OFFLINE so the flow offers Retry instead
+   * of a raw network error.
+   */
   private async waitForStatus(jobId: string, want: string, maxAttempts = 240): Promise<void> {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const status = await this.fetchStatus(jobId);
+      let status: string | null;
+      try {
+        status = await this.fetchStatus(jobId);
+      } catch (err) {
+        if (!isLocalMode()) {
+          this.loopback = null;
+          throw new Error('PC_OFFLINE');
+        }
+        throw err;
+      }
       if (status === want) return;
       if (status === 'failed') throw new Error(`job ${jobId} failed`);
       await sleep(800);
     }
     throw new Error(`timed out waiting for ${want}`);
-  }
-
-  /**
-   * Polls /status until the cloud scan job reaches 'scanned', for the async
-   * browser -> Supabase -> paired-agent scan flow. Unlike waitForStatus, this
-   * also watches `online`: the status route reports whether the user's agent
-   * heartbeat within the last minute, so a scan that never progresses because
-   * the user's PC is off is reported distinctly (PC_OFFLINE) rather than as a
-   * generic timeout, letting the UI show an actionable "open FragForge Agent"
-   * message instead of a dead spinner.
-   */
-  private async waitForScan(jobId: string, maxAttempts = 200): Promise<void> {
-    let consecutiveOffline = 0;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await sleep(1500);
-      const data = await readJson<{ status: string; failure_reason?: string; online?: boolean }>(
-        await fetch(`/api/demos/${jobId}/status`),
-      );
-      if (data.status === 'scanned') return;
-      if (data.status === 'failed') throw new Error(data.failure_reason || 'scan failed');
-      if (data.online === false) {
-        consecutiveOffline++;
-        if (consecutiveOffline > 4) throw new Error('PC_OFFLINE');
-      } else {
-        consecutiveOffline = 0;
-      }
-    }
-    throw new Error('scan timed out');
   }
 
   /**
@@ -419,13 +472,12 @@ export class RealApiClient implements ApiClient {
     try {
       const variant = variantOf(intent);
       const name = reelName(intent.segmentIds);
-      await fetch(`/api/demos/${intent.jobId}/renders/${variant}/videos/${name}`, {
-        method: 'DELETE',
-      });
+      await this.send((dp) => ({ url: dp.videoUrl(intent.jobId, variant, name), init: { method: 'DELETE' } }));
     } catch {
       // Orchestrator offline: the artifacts stay on disk, but the reel still
       // leaves the library. A future render of the same job overwrites them.
     }
+    this.revokeMedia(id);
     this.intents.delete(id);
     this.reels.delete(id);
     saveReelIntents(Array.from(this.intents.values()));
@@ -473,10 +525,68 @@ export class RealApiClient implements ApiClient {
     if (view.status === 'ready') {
       const variant = variantOf(intent);
       const name = reelName(intent.segmentIds);
-      next.downloadUrl = `/api/demos/${intent.jobId}/renders/${variant}/videos/${name}`;
-      next.thumbnailUrl = `/api/demos/${intent.jobId}/renders/${variant}/covers/${name}`;
+      if (isLocalMode()) {
+        // Same-origin proxy URLs the browser can hand straight to <video>/<img>.
+        const dp = dataPlane(null);
+        next.downloadUrl = dp.videoUrl(intent.jobId, variant, name);
+        next.thumbnailUrl = dp.coverUrl(intent.jobId, variant, name);
+      } else {
+        // Cloud: the bytes sit behind the Bearer-gated loopback, which a bare
+        // <video>/<img> src cannot authenticate to. Serve DOM object URLs
+        // fetched with the token; loadMedia fills them on a later tick, and the
+        // card shows its placeholder cover until then.
+        const cached = this.media.get(intent.videoId);
+        if (cached) {
+          next.downloadUrl = cached.video;
+          next.thumbnailUrl = cached.cover;
+        } else {
+          void this.loadMedia(intent);
+        }
+      }
     }
     this.reels.set(intent.videoId, next);
+  }
+
+  /**
+   * Cloud mode only: fetches a ready reel's mp4 and cover through the
+   * authenticated loopback and caches DOM object URLs, then surfaces them on the
+   * live reel. Runs at most once per reel (the media cache guards re-entry); a
+   * failure leaves the cache empty so a later reconcile tick retries.
+   */
+  private async loadMedia(intent: ReelIntent): Promise<void> {
+    if (this.media.has(intent.videoId)) return;
+    const variant = variantOf(intent);
+    const name = reelName(intent.segmentIds);
+    const [video, cover] = await Promise.all([
+      this.objectUrl((dp) => dp.videoUrl(intent.jobId, variant, name)),
+      this.objectUrl((dp) => dp.coverUrl(intent.jobId, variant, name)),
+    ]);
+    if (!video && !cover) return; // nothing fetched (offline / not ready yet): retry next tick
+    this.media.set(intent.videoId, { video, cover });
+    const reel = this.reels.get(intent.videoId);
+    if (reel && reel.status === 'ready') {
+      this.reels.set(intent.videoId, { ...reel, downloadUrl: video, thumbnailUrl: cover });
+    }
+  }
+
+  /** Fetches one loopback artifact and wraps it in a DOM object URL, or undefined. */
+  private async objectUrl(build: (dp: DataPlane) => string): Promise<string | undefined> {
+    try {
+      const res = await this.send((dp) => ({ url: build(dp) }));
+      if (!res.ok) return undefined;
+      return URL.createObjectURL(await res.blob());
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Releases any object URLs held for a reel (cloud mode). */
+  private revokeMedia(videoId: string): void {
+    const held = this.media.get(videoId);
+    if (!held) return;
+    if (held.video) URL.revokeObjectURL(held.video);
+    if (held.cover) URL.revokeObjectURL(held.cover);
+    this.media.delete(videoId);
   }
 
   /** Issues the single pipeline POST for `action`, guarded so it fires at most once. */
@@ -491,19 +601,25 @@ export class RealApiClient implements ApiClient {
             // segment_ids scopes the capture to exactly the selected clips (in plan
             // order) instead of recording the whole demo. 2+ ids render as one
             // concatenated reel.
-            await fetch(`/api/demos/${intent.jobId}/record`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ preset: variant, segment_ids: intent.segmentIds }),
-            })
-          : await fetch(`/api/demos/${intent.jobId}/renders/${variant}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                music: intent.mode === 'music' ? intent.songId : undefined,
-                edit: buildEditRequest(intent.editConfig),
-              }),
-            });
+            await this.send((dp) => ({
+              url: dp.recordUrl(intent.jobId),
+              init: {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ preset: variant, segment_ids: intent.segmentIds }),
+              },
+            }))
+          : await this.send((dp) => ({
+              url: dp.renderUrl(intent.jobId, variant),
+              init: {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  music: intent.mode === 'music' ? intent.songId : undefined,
+                  edit: buildEditRequest(intent.editConfig),
+                }),
+              },
+            }));
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
         // A 503 means the orchestrator is momentarily unreachable; let the next
@@ -529,7 +645,7 @@ export class RealApiClient implements ApiClient {
 
   /** Reads job status + failure reason; null when the job is unknown (404). */
   private async fetchStatusFull(jobId: string): Promise<{ status: string; failureReason?: string } | null> {
-    const res = await fetch(`/api/demos/${jobId}/status`);
+    const res = await this.send((dp) => ({ url: dp.jobStatusUrl(jobId) }));
     if (res.status === 404) return null;
     const data = await readJson<{ status: string; failure_reason?: string }>(res);
     return { status: data.status, failureReason: data.failure_reason };
@@ -543,7 +659,7 @@ export class RealApiClient implements ApiClient {
 
   /** Reads the reel render-variant state; 'none' when the render has not started. */
   private async fetchRenderStatus(jobId: string, variant: string): Promise<{ status: RenderStatus; failureReason?: string }> {
-    const res = await fetch(`/api/demos/${jobId}/renders/${variant}`);
+    const res = await this.send((dp) => ({ url: dp.renderUrl(jobId, variant) }));
     if (!res.ok) return { status: 'none' }; // 404 = render not started yet
     const data = (await res.json()) as { status?: string; failure_reason?: string };
     const known = new Set<RenderStatus>(['queued', 'rendering', 'ready', 'failed']);
@@ -629,7 +745,7 @@ export class RealApiClient implements ApiClient {
     // Local studio is the machine itself; report paired without hitting the
     // cloud-only /api/pc/status route (which needs Supabase).
     if (isLocalMode()) return { paired: true };
-    return readJson<{ paired: boolean }>(await fetch('/api/pc/status', { cache: 'no-store' }));
+    return { paired: (await this.fetchPcStatus()).paired };
   }
 
   /**
@@ -640,7 +756,7 @@ export class RealApiClient implements ApiClient {
    */
   async getCaptureReadiness(): Promise<CaptureReadiness> {
     try {
-      const res = await fetch('/api/capabilities', { cache: 'no-store' });
+      const res = await this.send((dp) => ({ url: dp.capabilitiesUrl, init: { cache: 'no-store' } }));
       if (!res.ok) {
         // Any non-ok here is a transport/backend problem (the orchestrator reports
         // "unconfigured" via a 200 with record.enabled=false), so treat it as

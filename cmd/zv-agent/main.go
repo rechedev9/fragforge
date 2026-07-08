@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/rechedev9/fragforge/internal/agent"
 )
@@ -17,17 +19,11 @@ func main() {
 	name := flag.String("name", hostname(), "agent display name")
 	flag.Parse()
 
-	ctx := context.Background()
-
 	if *pairCode != "" {
-		token, id, err := agent.Pair(ctx, *baseURL, *pairCode, *name)
-		if err != nil {
+		if err := pair(*baseURL, *pairCode, *name); err != nil {
 			log.Fatalf("pair: %v", err)
 		}
-		if err := saveConfig(Config{BaseURL: *baseURL, Token: token, AgentID: id}); err != nil {
-			log.Fatalf("save config: %v", err)
-		}
-		fmt.Println("paired. run zv-agent with no flags to start working.")
+		fmt.Println("paired. run zv-agent with no flags to serve the local data plane.")
 		return
 	}
 
@@ -35,9 +31,34 @@ func main() {
 	if err != nil {
 		log.Fatalf("not paired yet: run zv-agent --pair <code> first (%v)", err)
 	}
-	if err := run(ctx, cfg); err != nil {
+
+	// Cancel on SIGINT/SIGTERM so the supervised child orchestrator is torn down.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, cfg); err != nil && ctx.Err() == nil {
 		log.Fatalf("agent: %v", err)
 	}
+}
+
+// pair generates the loopback credential, registers it with the control plane,
+// and persists the full config (cloud token plus loopback token and port).
+func pair(baseURL, code, name string) error {
+	loopbackToken, err := agent.GenerateLoopbackToken()
+	if err != nil {
+		return err
+	}
+	port := loopbackPort()
+	token, id, err := agent.Pair(context.Background(), baseURL, code, name, loopbackToken, port)
+	if err != nil {
+		return err
+	}
+	return saveConfig(Config{
+		BaseURL:       baseURL,
+		Token:         token,
+		AgentID:       id,
+		LoopbackToken: loopbackToken,
+		LoopbackPort:  port,
+	})
 }
 
 func envOr(k, def string) string {
