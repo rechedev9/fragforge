@@ -4,11 +4,33 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
+// setTestConfigDir redirects os.UserConfigDir to a per-test temp dir on every
+// platform: XDG_CONFIG_HOME only moves it on Unix, while Windows reads
+// %AppData% and ignores XDG entirely - so a test that only sets XDG silently
+// reads AND WRITES the user's real agent.json on Windows (this clobbered a
+// real pairing once). The final assertion makes any future platform where the
+// redirection does not take effect fail loudly instead of touching real state.
+func setTestConfigDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("APPDATA", dir)
+	p, err := configPath()
+	if err != nil {
+		t.Fatalf("config path: %v", err)
+	}
+	if !strings.HasPrefix(p, dir) {
+		t.Fatalf("config path %q escaped the test dir %q; refusing to touch the real user config", p, dir)
+	}
+	return dir
+}
+
 func TestConfigRoundTrip(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfigDir(t)
 	want := Config{BaseURL: "https://x", Token: "tok", AgentID: "ag1", LoopbackToken: "lbtok", LoopbackPort: 8090}
 	if err := saveConfig(want); err != nil {
 		t.Fatalf("save: %v", err)
@@ -36,7 +58,7 @@ func TestConfigRoundTrip(t *testing.T) {
 // proxy existed (no loopback_token / loopback_port) and verifies the run path
 // generates a token, records the env-derived port, and persists both.
 func TestEnsureLoopbackConfigHealsLegacy(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfigDir(t)
 	t.Setenv("FRAGFORGE_LOOPBACK_ADDR", "127.0.0.1:9123")
 
 	// Legacy agent.json: only the cloud fields, no loopback credential.
@@ -83,7 +105,7 @@ func TestEnsureLoopbackConfigHealsLegacy(t *testing.T) {
 
 // TestEnsureLoopbackConfigKeepsExistingToken is a no-op when already healed.
 func TestEnsureLoopbackConfigKeepsExistingToken(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfigDir(t)
 	cfg := Config{BaseURL: "https://x", Token: "tok", LoopbackToken: "keep", LoopbackPort: 8090}
 	got, err := ensureLoopbackConfig(cfg)
 	if err != nil {
@@ -136,7 +158,7 @@ func TestChildDataDir(t *testing.T) {
 	})
 	t.Run("anchors next to config when unset", func(t *testing.T) {
 		t.Setenv("ZV_DATA_DIR", "")
-		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		setTestConfigDir(t)
 		p, err := configPath()
 		if err != nil {
 			t.Fatalf("config path: %v", err)
