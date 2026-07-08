@@ -9,7 +9,7 @@ import { dataPlane, type DataPlane, type Loopback, type PcStatus } from './datap
 import { isLocalMode } from '@/lib/mode';
 import { playsSelectionLabel } from '@/lib/format';
 
-/** Segment ids joined into the one path segment the record/render/video routes key on. */
+/** Segment ids joined into the stable local id for a reel (not an artifact path). */
 function reelName(segmentIds: string[]): string {
   return segmentIds.join('_');
 }
@@ -176,6 +176,8 @@ export class RealApiClient implements ApiClient {
   private dpCache: DataPlane | null = null;
   /** Cloud-mode DOM object URLs for each ready reel's mp4/cover (Bearer-fetched). */
   private readonly media = new Map<string, { video?: string; cover?: string }>();
+  /** Server-reported artifact names for each reel (the file names the editor wrote). */
+  private readonly artifactNames = new Map<string, { video: string; cover: string }>();
   /** Reels with a loadMedia fetch in flight, so a tick never double-fetches media. */
   private readonly mediaLoading = new Set<string>();
 
@@ -501,13 +503,18 @@ export class RealApiClient implements ApiClient {
 
     try {
       const variant = variantOf(intent);
-      const name = reelName(intent.segmentIds);
-      await this.send((dp) => ({ url: dp.videoUrl(intent.jobId, variant, name), init: { method: 'DELETE' } }));
+      const name = await this.resolveArtifactName(intent, variant);
+      // No name means nothing was ever rendered for this reel, so there is no
+      // artifact to delete - just drop it locally below.
+      if (name) {
+        await this.send((dp) => ({ url: dp.videoUrl(intent.jobId, variant, name), init: { method: 'DELETE' } }));
+      }
     } catch {
       // Orchestrator offline: the artifacts stay on disk, but the reel still
       // leaves the library. A future render of the same job overwrites them.
     }
     this.revokeMedia(id);
+    this.artifactNames.delete(id);
     this.intents.delete(id);
     this.reels.delete(id);
     saveReelIntents(Array.from(this.intents.values()));
@@ -532,6 +539,11 @@ export class RealApiClient implements ApiClient {
       this.fetchStatusFull(intent.jobId),
       this.fetchRenderStatus(intent.jobId, variantOf(intent)),
     ]);
+    // Capture the server's real artifact names so applyView/loadMedia address
+    // the reel by the editor's file names instead of guessing from segment ids.
+    if (render.videoName && render.coverName) {
+      this.artifactNames.set(intent.videoId, { video: render.videoName, cover: render.coverName });
+    }
     if (job === null) {
       // Memory-mode orchestrator restart drops jobs; surface it instead of spinning.
       this.applyView(intent, {
@@ -555,14 +567,18 @@ export class RealApiClient implements ApiClient {
   private applyView(intent: ReelIntent, view: ReelView): void {
     const base = this.reels.get(intent.videoId) ?? videoFromIntent(intent);
     const next: Video = { ...base, status: view.status, failureReason: view.failureReason };
-    if (view.status === 'ready') {
+    // The server-reported artifact names are present once the render is ready
+    // (fetchRenderStatus fills them). If a tick sees ready before the names are
+    // known, leave the URLs unset so the card keeps its placeholder until the
+    // next tick resolves them - the same not-yet-ready handling as before.
+    const names = this.artifactNames.get(intent.videoId);
+    if (view.status === 'ready' && names) {
       const variant = variantOf(intent);
-      const name = reelName(intent.segmentIds);
       if (isLocalMode()) {
         // Same-origin proxy URLs the browser can hand straight to <video>/<img>.
         const dp = dataPlane(null);
-        next.downloadUrl = dp.videoUrl(intent.jobId, variant, name);
-        next.thumbnailUrl = dp.coverUrl(intent.jobId, variant, name);
+        next.downloadUrl = dp.videoUrl(intent.jobId, variant, names.video);
+        next.thumbnailUrl = dp.coverUrl(intent.jobId, variant, names.cover);
       } else {
         // Cloud: the bytes sit behind the Bearer-gated loopback, which a bare
         // <video>/<img> src cannot authenticate to. Serve DOM object URLs
@@ -592,15 +608,16 @@ export class RealApiClient implements ApiClient {
     const cached = this.media.get(intent.videoId);
     if (cached?.video && cached?.cover) return; // already fully loaded
     if (this.mediaLoading.has(intent.videoId)) return;
+    const names = this.artifactNames.get(intent.videoId);
+    if (!names) return; // names not resolved yet; a later tick retries once ready
     this.mediaLoading.add(intent.videoId);
     try {
       const variant = variantOf(intent);
-      const name = reelName(intent.segmentIds);
       // Reuse the already-fetched piece verbatim (no re-fetch, so no URL to
       // orphan) and fetch only what is still missing.
       const [video, cover] = await Promise.all([
-        cached?.video ? Promise.resolve(cached.video) : this.objectUrl((dp) => dp.videoUrl(intent.jobId, variant, name)),
-        cached?.cover ? Promise.resolve(cached.cover) : this.objectUrl((dp) => dp.coverUrl(intent.jobId, variant, name)),
+        cached?.video ? Promise.resolve(cached.video) : this.objectUrl((dp) => dp.videoUrl(intent.jobId, variant, names.video)),
+        cached?.cover ? Promise.resolve(cached.cover) : this.objectUrl((dp) => dp.coverUrl(intent.jobId, variant, names.cover)),
       ]);
       if (!video && !cover) return; // nothing fetched (offline / not ready yet): retry next tick
       this.media.set(intent.videoId, { video, cover });
@@ -687,6 +704,19 @@ export class RealApiClient implements ApiClient {
     }
   }
 
+  /**
+   * The reel's real artifact name for delete: the cached server name when the
+   * reel has been reconciled this session, else fetched fresh (a delete right
+   * after a hard reload has no cached name yet). Undefined when nothing was
+   * rendered, so there is no artifact to remove.
+   */
+  private async resolveArtifactName(intent: ReelIntent, variant: string): Promise<string | undefined> {
+    const cached = this.artifactNames.get(intent.videoId);
+    if (cached) return cached.video;
+    const render = await this.fetchRenderStatus(intent.jobId, variant);
+    return render.videoName;
+  }
+
   /** Reads job status + failure reason; null when the job is unknown (404). */
   private async fetchStatusFull(jobId: string): Promise<{ status: string; failureReason?: string } | null> {
     const res = await this.send((dp) => ({ url: dp.jobStatusUrl(jobId) }));
@@ -701,14 +731,23 @@ export class RealApiClient implements ApiClient {
     return full ? full.status : null;
   }
 
-  /** Reads the reel render-variant state; 'none' when the render has not started. */
-  private async fetchRenderStatus(jobId: string, variant: string): Promise<{ status: RenderStatus; failureReason?: string }> {
+  /**
+   * Reads the reel render-variant state; 'none' when the render has not started.
+   * The orchestrator reports the reel's real artifact file names (videos[0]/
+   * covers[0]) so the client addresses the mp4/cover by the name the editor
+   * actually wrote (e.g. "demo-compilation") instead of guessing it from the
+   * segment ids. They are absent until the render is ready.
+   */
+  private async fetchRenderStatus(
+    jobId: string,
+    variant: string,
+  ): Promise<{ status: RenderStatus; failureReason?: string; videoName?: string; coverName?: string }> {
     const res = await this.send((dp) => ({ url: dp.renderUrl(jobId, variant) }));
     if (!res.ok) return { status: 'none' }; // 404 = render not started yet
-    const data = (await res.json()) as { status?: string; failure_reason?: string };
+    const data = (await res.json()) as { status?: string; failure_reason?: string; videos?: string[]; covers?: string[] };
     const known = new Set<RenderStatus>(['queued', 'rendering', 'ready', 'failed']);
     const status: RenderStatus = data.status && known.has(data.status as RenderStatus) ? (data.status as RenderStatus) : 'none';
-    return { status, failureReason: data.failure_reason };
+    return { status, failureReason: data.failure_reason, videoName: data.videos?.[0], coverName: data.covers?.[0] };
   }
 
   // --- everything below delegates to the mock fallback (out of scope here) ---

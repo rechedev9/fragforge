@@ -71,6 +71,30 @@ func (l *Local) Open(key string) (io.ReadCloser, error) {
 	return os.Open(path)
 }
 
+// List returns the base file names present directly under the directory at key,
+// non-recursively. A missing directory yields no names (not an error), so
+// callers can list an artifact dir a stage has not written yet.
+func (l *Local) List(key string) ([]string, error) {
+	dir, err := l.resolve(key)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
 // Delete removes the file at key inside the storage root. A missing key is
 // not an error, so deletes are idempotent and safe to retry.
 func (l *Local) Delete(key string) error {

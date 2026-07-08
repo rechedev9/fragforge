@@ -12,7 +12,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -874,7 +876,7 @@ func (h *Handlers) GetRenderVariant(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "read render state", err)
 		return
 	} else if ok {
-		writeJSON(w, http.StatusOK, state)
+		h.writeRenderVariant(w, state)
 		return
 	}
 	resultRef, err := renderplan.NewRenderVariantArtifactRef(j.ID, variant, renderplan.RenderVariantArtifactResult, "")
@@ -914,7 +916,71 @@ func (h *Handlers) GetRenderVariant(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "build render state", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, state)
+	h.writeRenderVariant(w, &state)
+}
+
+// renderArtifactLister is the optional storage capability GetRenderVariant uses
+// to report the reel's real artifact file names. Local filesystem storage
+// implements it; a backend without listing reports empty arrays.
+type renderArtifactLister interface {
+	List(prefix string) ([]string, error)
+}
+
+// renderVariantResponse augments the durable render state with the reel's real
+// on-disk artifact names, so the client addresses the reel's video and cover by
+// the names the editor actually wrote instead of guessing them from segment ids.
+type renderVariantResponse struct {
+	*renderplan.RenderVariantState
+	Videos []string `json:"videos"`
+	Covers []string `json:"covers"`
+}
+
+// artifactNamePlaceholder is a valid artifact token used only to resolve a
+// variant's artifact directory key; its base name is discarded.
+const artifactNamePlaceholder = "placeholder"
+
+// writeRenderVariant writes the render-variant state plus the reel's real video
+// and cover artifact names (empty arrays when the variant has none yet).
+func (h *Handlers) writeRenderVariant(w http.ResponseWriter, state *renderplan.RenderVariantState) {
+	videos, err := h.listRenderArtifactNames(state.JobID, state.Variant, renderplan.RenderVariantArtifactVideo)
+	if err != nil {
+		internalError(w, "list render videos", err)
+		return
+	}
+	covers, err := h.listRenderArtifactNames(state.JobID, state.Variant, renderplan.RenderVariantArtifactCover)
+	if err != nil {
+		internalError(w, "list render covers", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, renderVariantResponse{RenderVariantState: state, Videos: videos, Covers: covers})
+}
+
+// listRenderArtifactNames returns the artifact names (file base names, extension
+// stripped) present under the variant's directory for the given kind, reusing
+// the same key resolution the videos/{name} and covers/{name} handlers use. The
+// result is empty when the backend cannot list or the directory is absent.
+func (h *Handlers) listRenderArtifactNames(id uuid.UUID, variant string, kind renderplan.RenderVariantArtifactKind) ([]string, error) {
+	lister, ok := h.storage.(renderArtifactLister)
+	if !ok {
+		return []string{}, nil
+	}
+	ref, err := renderplan.NewRenderVariantArtifactRef(id, variant, kind, artifactNamePlaceholder)
+	if err != nil {
+		return nil, err
+	}
+	dir, ext := path.Dir(ref.Key), path.Ext(ref.Key)
+	files, err := lister.List(dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(files))
+	for _, f := range files {
+		if ext != "" && !strings.HasSuffix(f, ext) {
+			continue
+		}
+		names = append(names, strings.TrimSuffix(f, ext))
+	}
+	return names, nil
 }
 
 func (h *Handlers) readRenderVariantState(id uuid.UUID, variant string) (*renderplan.RenderVariantState, bool, error) {
