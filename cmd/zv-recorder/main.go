@@ -158,7 +158,36 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
+	// Publish each segment clip while HLAE is still recording so observers (the
+	// orchestrator's capture-progress poll) see segments as they finish instead
+	// of only after the whole run. Owned by this run: cancelled and waited for
+	// as soon as the capture process exits, and strictly best-effort — the
+	// post-run MuxSegmentClips pass below re-muxes anything still missing.
+	muxCtx, stopMux := context.WithCancel(ctx)
+	muxDone := make(chan struct{})
+	go func() {
+		defer close(muxDone)
+		muxer := recording.NewIncrementalMuxer(plan, ffmpegPath)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-muxCtx.Done():
+				return
+			case <-ticker.C:
+				for _, id := range muxer.MuxFinished(muxCtx) {
+					log.Printf("segment %s recorded", id)
+				}
+			}
+		}
+	}()
+	stopIncrementalMux := func() {
+		stopMux()
+		<-muxDone
+	}
+
 	if err := launchAndWait(ctx, absHLAEExe, absCS2Exe, plan, scriptPath); err != nil {
+		stopIncrementalMux()
 		result.Error = err.Error()
 		// Best-effort diagnostics: launchAndWait commonly fails because ctx hit
 		// its deadline, so collect artifacts under a fresh, short-lived context
@@ -170,6 +199,7 @@ func run() error {
 		_ = writeResult(plan.OutputDir, result)
 		return err
 	}
+	stopIncrementalMux()
 
 	// Post-processing (ffprobe/ffmpeg) runs after recording, so give it its own
 	// timeout budget: bounded so a hung subprocess cannot run indefinitely, but

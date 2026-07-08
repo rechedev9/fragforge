@@ -11,15 +11,21 @@ const FORMAT_LABEL: Record<string, string> = { 'short-9x16': '9:16', 'landscape-
  * A render still in flight (queued / recording / composing) — the mockup's
  * EN COLA, CAPTURANDO and EDITANDO cards, each with its own accent: dim and
  * idle while queued, magenta with a pulsing REC dot while capturing, and a
- * cyan-to-violet gradient sweep while composing. There is no queue-position
- * or percent-complete field in the API, so this shows the stage, not a
- * fabricated number — an indeterminate bar stands in for progress instead.
+ * cyan-to-violet gradient sweep while composing. While capturing, the
+ * orchestrator reports real segment progress (done/total), so the card shows
+ * "CAPTURANDO 2/4 · 50%" with the bar driven by the true percent; until the
+ * first segment lands (or for the editing stage, which has no such signal) an
+ * indeterminate bar stands in instead of a fabricated number.
  */
 export function RenderingCard({ video }: { video: Video }) {
   const isQueued = video.status === 'queued';
   const isCapturing = video.status === 'recording';
   const isComposing = video.status === 'composing';
   const formatBadge = video.editConfig ? FORMAT_LABEL[video.editConfig.format] : undefined;
+
+  // Real capture progress, present only once at least one segment clip exists.
+  const progress = isCapturing ? video.captureProgress : undefined;
+  const capturePct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : undefined;
 
   let accentClass: string;
   if (isCapturing) {
@@ -49,7 +55,15 @@ export function RenderingCard({ video }: { video: Video }) {
 
   let progressBar: ReactNode;
   if (isCapturing) {
-    progressBar = <span className="neon-pulse block h-[3px] w-2/3 bg-destructive shadow-[0_0_8px_rgba(255,45,120,0.6)]" />;
+    progressBar =
+      capturePct !== undefined ? (
+        <span
+          className="block h-[3px] bg-destructive shadow-[0_0_8px_rgba(255,45,120,0.6)] transition-[width] duration-500"
+          style={{ width: `${capturePct}%` }}
+        />
+      ) : (
+        <span className="neon-pulse block h-[3px] w-2/3 bg-destructive shadow-[0_0_8px_rgba(255,45,120,0.6)]" />
+      );
   } else if (isComposing) {
     progressBar = <span className="neon-pulse block h-[3px] w-1/2 bg-gradient-to-r from-primary to-chart-3" />;
   } else {
@@ -91,7 +105,9 @@ export function RenderingCard({ video }: { video: Video }) {
 
         {isCapturing ? (
           <div className="flex items-center justify-between font-[family-name:var(--font-mono)] text-[9.5px] uppercase tracking-[0.16em]">
-            <span className="text-destructive">CAPTURANDO</span>
+            <span className="text-destructive">
+              {progress ? `CAPTURANDO ${progress.done}/${progress.total} · ${capturePct}%` : 'CAPTURANDO'}
+            </span>
           </div>
         ) : (
           <p className="font-[family-name:var(--font-mono)] text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">

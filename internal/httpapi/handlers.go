@@ -363,7 +363,24 @@ func (h *Handlers) GetJob(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "get job", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, j)
+	writeJSON(w, http.StatusOK, h.jobResponse(j))
+}
+
+// jobResponse is the GET /api/jobs/{id} body: the job plus optional capture
+// progress. Progress is present only while the job is capturing and at least one
+// segment clip exists (see captureProgress); otherwise the field is omitted and
+// the response is byte-for-byte the raw job as before.
+type jobResponse struct {
+	job.Job
+	Progress *captureProgressView `json:"progress,omitempty"`
+}
+
+func (h *Handlers) jobResponse(j job.Job) jobResponse {
+	resp := jobResponse{Job: j}
+	if progress, ok := captureProgress(h.storage, j); ok {
+		resp.Progress = &progress
+	}
+	return resp
 }
 
 // GetPlan handles GET /api/jobs/{id}/plan.

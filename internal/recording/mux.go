@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 )
@@ -47,21 +46,18 @@ func MuxSegmentClips(ctx context.Context, plan RecordingPlan, artifacts []Record
 			Role:      "segment",
 			Path:      path,
 		}
-		// #nosec G204 -- ffmpegPath is configured locally and media paths are passed as arguments.
-		cmd := exec.CommandContext(ctx, ffmpegPath,
-			"-y",
-			"-v", "error",
-			"-i", pair.video.Path,
-			"-i", pair.audio.Path,
-			"-map", "0:v:0",
-			"-map", "1:a:0",
-			"-c:v", "copy",
-			"-c:a", "aac",
-			"-b:a", "192k",
-			"-shortest",
-			path,
-		)
-		if err := cmd.Run(); err != nil {
+		// A clip the IncrementalMuxer already published mid-run was muxed from
+		// the same take inputs; re-muxing would rewrite a file an observer may be
+		// uploading right now, so keep it and only collect its metadata.
+		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+			artifact.SizeBytes = info.Size()
+			if ffprobePath != "" {
+				probeArtifact(ctx, ffprobePath, &artifact)
+			}
+			out = append(out, artifact)
+			continue
+		}
+		if err := muxPair(ctx, ffmpegPath, pair.video.Path, pair.audio.Path, path); err != nil {
 			artifact.ProbeError = fmt.Sprintf("ffmpeg mux: %v", err)
 			out = append(out, artifact)
 			continue

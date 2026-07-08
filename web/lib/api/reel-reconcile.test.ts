@@ -19,6 +19,25 @@ test('recording → show recording, do not re-drive record', () => {
   assert.deepEqual(view({ jobStatus: 'recording' }), { status: 'recording', action: 'none' });
 });
 
+test('recording with progress → carries segments done/total to the card', () => {
+  assert.deepEqual(
+    view({ jobStatus: 'recording', captureProgress: { done: 2, total: 4 } }),
+    { status: 'recording', action: 'none', captureProgress: { done: 2, total: 4 } },
+  );
+});
+
+test('recording without progress → no captureProgress key (indeterminate bar)', () => {
+  const v = view({ jobStatus: 'recording' });
+  assert.equal('captureProgress' in v, false);
+});
+
+test('progress is ignored when not recording (never leaks onto other stages)', () => {
+  assert.deepEqual(
+    view({ jobStatus: 'recorded', captureProgress: { done: 2, total: 4 } }),
+    { status: 'composing', action: 'render' },
+  );
+});
+
 test('recorded + no render → drive render', () => {
   assert.deepEqual(view({ jobStatus: 'recorded' }), { status: 'composing', action: 'render' });
 });

@@ -426,6 +426,19 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		return err
 	}
 
+	// Upload each segment clip to durable storage as the recorder finishes it,
+	// so the job poll reports live capture progress mid-run. The watcher is
+	// owned here: cancelled the moment the recorder exits and waited for before
+	// results are read. Best-effort by construction — it can never fail the
+	// task, and uploadRecordingOutputs below re-uploads every clip as the
+	// authoritative reconciliation pass.
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		newSegmentClipWatcher(w.storage, j.ID, filepath.Join(outDir, "segments")).watch(watchCtx, segmentWatchInterval)
+	}()
+
 	_, runErr := w.runner.Run(ctx, cfg.RecorderPath,
 		"--killplan", killPlanPath,
 		"--demo", demoPath,
@@ -435,6 +448,8 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		"--hud", cfg.HUDMode,
 		"--timeout", cfg.Timeout,
 	)
+	stopWatch()
+	<-watchDone
 
 	resultPath := filepath.Join(outDir, "recording-result.json")
 	var result recording.RecordingResult
