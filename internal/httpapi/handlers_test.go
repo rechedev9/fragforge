@@ -1591,6 +1591,102 @@ func TestGetRenderVariantReturnsReadyArtifactStatus(t *testing.T) {
 	}
 }
 
+func TestGetRenderVariantReportsArtifactNames(t *testing.T) {
+	// Regression: the render-variant GET must report the reel's real on-disk
+	// artifact names so the client stops guessing them from segment ids (which
+	// 404'd because the editor writes a single "demo-compilation" compilation).
+	// Uses real Local storage because the names come from listing the variant's
+	// videos/ and covers/ dirs.
+	cases := []struct {
+		name       string
+		writeFiles bool
+		wantVideos string
+		wantCovers string
+	}{
+		{
+			name:       "video and cover present are listed",
+			writeFiles: true,
+			wantVideos: `"videos":["demo-compilation"]`,
+			wantCovers: `"covers":["demo-compilation"]`,
+		},
+		{
+			name:       "missing artifact dirs list as empty arrays",
+			writeFiles: false,
+			wantVideos: `"videos":[]`,
+			wantCovers: `"covers":[]`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			store, err := storage.NewLocal(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			variant := editor.PresetViral60Clean
+			j := job.Job{ID: uuid.New(), Status: job.StatusDone, Rules: rules.Default()}
+			repo.jobs[j.ID] = j
+
+			loadout, err := renderplan.LoadoutForVariant(variant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+				JobID:   j.ID,
+				Loadout: loadout,
+				Status:  renderplan.RenderVariantStatusReady,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			statusKey, err := artifacts.RenderVariantStatusKey(j.ID, variant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Put(statusKey, bytes.NewReader(b)); err != nil {
+				t.Fatal(err)
+			}
+			if tc.writeFiles {
+				videoKey, err := artifacts.RenderVariantVideoKey(j.ID, variant, "demo-compilation")
+				if err != nil {
+					t.Fatal(err)
+				}
+				coverKey, err := artifacts.RenderVariantCoverKey(j.ID, variant, "demo-compilation")
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, key := range []string{videoKey, coverKey} {
+					if err := store.Put(key, bytes.NewReader([]byte("artifact"))); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			h := NewHandlers(repo, store, &fakeQueue{})
+
+			r := chi.NewRouter()
+			r.Get("/api/jobs/{id}/renders/{variant}", h.GetRenderVariant)
+			req := httptest.NewRequest(http.MethodGet, "/api/jobs/"+j.ID.String()+"/renders/"+variant, nil)
+			rw := httptest.NewRecorder()
+			r.ServeHTTP(rw, req)
+
+			if rw.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+			}
+			body := rw.Body.String()
+			if !strings.Contains(body, tc.wantVideos) {
+				t.Errorf("body = %s\nwant videos %s", body, tc.wantVideos)
+			}
+			if !strings.Contains(body, tc.wantCovers) {
+				t.Errorf("body = %s\nwant covers %s", body, tc.wantCovers)
+			}
+		})
+	}
+}
+
 func TestGetMomentsPrefersStoredArtifact(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()
