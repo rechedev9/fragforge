@@ -15,6 +15,13 @@ import (
 func killfeedTestFrame(t *testing.T, notice image.Rectangle) image.Image {
 	t.Helper()
 	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	drawKillfeedNotice(frame, notice)
+	return frame
+}
+
+// drawKillfeedNotice paints a single CS2-style highlighted kill notice (a 2px
+// saturated-red border ring around a dimmer anti-aliased fill) onto frame.
+func drawKillfeedNotice(frame *image.RGBA, notice image.Rectangle) {
 	dim := color.RGBA{R: 130, G: 45, B: 45, A: 255}
 	for y := notice.Min.Y; y < notice.Max.Y; y++ {
 		for x := notice.Min.X; x < notice.Max.X; x++ {
@@ -35,7 +42,18 @@ func killfeedTestFrame(t *testing.T, notice image.Rectangle) image.Image {
 			frame.Set(inner.Max.X-1-d, y, red)
 		}
 	}
-	return frame
+}
+
+// fillSolidRed paints a solid saturated-red block, simulating red scene
+// geometry (a wall or container) that passes the strict red threshold but is
+// not a thin notice ring.
+func fillSolidRed(frame *image.RGBA, block image.Rectangle) {
+	wall := color.RGBA{R: 200, G: 30, B: 30, A: 255}
+	for y := block.Min.Y; y < block.Max.Y; y++ {
+		for x := block.Min.X; x < block.Max.X; x++ {
+			frame.Set(x, y, wall)
+		}
+	}
 }
 
 func TestDetectKillfeedHighlight(t *testing.T) {
@@ -73,6 +91,53 @@ func TestDetectKillfeedHighlightIgnoresDistantDimRed(t *testing.T) {
 	}
 	if rect.Max.Y > notice.Max.Y+2 {
 		t.Fatalf("rect = %v, want it to ignore dim red noise below notice %v", rect, notice)
+	}
+}
+
+func TestDetectKillfeedHighlightIgnoresSolidRedScene(t *testing.T) {
+	notice := image.Rect(1700, 115, 1910, 152)
+	frame := killfeedTestFrame(t, notice).(*image.RGBA)
+	// a solid saturated-red wall inside the scan region but away from the
+	// notice must not be unioned into the crop: it is a tall solid blob, not a
+	// thin notice ring.
+	fillSolidRed(frame, image.Rect(1250, 0, 1500, 324))
+	rect, ok := detectKillfeedHighlight(frame)
+	if !ok {
+		t.Fatal("detectKillfeedHighlight ok = false, want true")
+	}
+	if rect.Min.X > notice.Min.X || rect.Min.Y > notice.Min.Y || rect.Max.X < notice.Max.X || rect.Max.Y < notice.Max.Y {
+		t.Fatalf("rect = %v, want it to cover the full notice %v", rect, notice)
+	}
+	if rect.Min.X < 1690 {
+		t.Fatalf("rect = %v, want it not to stretch into the red wall (Min.X >= 1690)", rect)
+	}
+	if rect.Min.X < notice.Min.X-2 || rect.Min.Y < notice.Min.Y-2 || rect.Max.X > notice.Max.X+2 || rect.Max.Y > notice.Max.Y+2 {
+		t.Fatalf("rect = %v, want at most %dpx beyond notice %v", rect, killfeedHighlightMargin, notice)
+	}
+}
+
+func TestDetectKillfeedHighlightRejectsSceneOnlyRed(t *testing.T) {
+	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	// only a solid red wall in the scan region, no kill notice at all.
+	fillSolidRed(frame, image.Rect(1250, 0, 1500, 324))
+	if _, ok := detectKillfeedHighlight(frame); ok {
+		t.Fatal("detectKillfeedHighlight on scene-only red ok = true, want false")
+	}
+}
+
+func TestDetectKillfeedHighlightCoversStackedNotices(t *testing.T) {
+	top := image.Rect(1700, 70, 1910, 106)
+	bottom := image.Rect(1690, 115, 1910, 151)
+	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	drawKillfeedNotice(frame, top)
+	drawKillfeedNotice(frame, bottom)
+	rect, ok := detectKillfeedHighlight(frame)
+	if !ok {
+		t.Fatal("detectKillfeedHighlight ok = false, want true")
+	}
+	both := top.Union(bottom)
+	if rect.Min.X > both.Min.X || rect.Min.Y > both.Min.Y || rect.Max.X < both.Max.X || rect.Max.Y < both.Max.Y {
+		t.Fatalf("rect = %v, want it to cover both stacked notices %v", rect, both)
 	}
 }
 
