@@ -13,6 +13,8 @@ import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 export type LinkHistoryStepProps = {
   /** Called once the history is linked, with the number of matches found. */
   onLinked: (matchesFound: number) => void;
+  /** Called when the player skips Steam linking and goes straight to PC pairing. */
+  onSkipToPairing?: () => void;
 };
 
 /**
@@ -20,7 +22,7 @@ export type LinkHistoryStepProps = {
  * and most recent sharecode. On success it reports the match count and lets the
  * onboarding advance to PC pairing.
  */
-export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
+export function LinkHistoryStep({ onLinked, onSkipToPairing }: LinkHistoryStepProps) {
   const { refresh } = useSession();
   const [authCode, setAuthCode] = useState('');
   const [knownCode, setKnownCode] = useState('');
@@ -207,6 +209,16 @@ export function LinkHistoryStep({ onLinked }: LinkHistoryStepProps) {
             'Cargar mis partidas'
           )}
         </Button>
+
+        {onSkipToPairing ? (
+          <button
+            type="button"
+            onClick={onSkipToPairing}
+            className="w-full text-center font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Emparejar mi PC sin vincular Steam →
+          </button>
+        ) : null}
       </form>
     </div>
   );

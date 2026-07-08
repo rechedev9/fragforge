@@ -176,6 +176,13 @@ export default function UploadPage() {
           <p className="text-sm text-muted-foreground">
             Abre FragForge Agent en tu PC para analizar esta demo y reintenta.
           </p>
+          <p className="text-sm text-muted-foreground">
+            ¿Primera vez?{' '}
+            <Link href="/connect?step=pair" className="font-medium text-primary hover:underline">
+              Empareja este PC
+            </Link>{' '}
+            — sin login.
+          </p>
           {fileName ? (
             <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
               <FileVideo className="size-4" />
