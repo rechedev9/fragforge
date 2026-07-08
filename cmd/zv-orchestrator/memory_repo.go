@@ -20,6 +20,7 @@ type orchestratorJobRepository interface {
 	Get(context.Context, uuid.UUID) (job.Job, error)
 	GetMeta(context.Context, uuid.UUID) (job.Job, error)
 	List(context.Context, int) ([]job.Job, error)
+	ListByStatus(context.Context, job.Status) ([]job.Job, error)
 	UpdateStatus(context.Context, uuid.UUID, job.Status, string) error
 	SetParseInputs(context.Context, uuid.UUID, string, rules.Rules) error
 	SetKillPlan(context.Context, uuid.UUID, killplan.Plan) error
@@ -100,6 +101,21 @@ func (r *memoryJobRepository) List(ctx context.Context, limit int) ([]job.Job, e
 	})
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r *memoryJobRepository) ListByStatus(ctx context.Context, status job.Status) ([]job.Job, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []job.Job{}
+	for _, j := range r.jobs {
+		if j.Status == status {
+			out = append(out, cloneJob(j))
+		}
 	}
 	return out, nil
 }

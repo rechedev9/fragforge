@@ -142,6 +142,35 @@ func (r *sqliteJobRepository) List(ctx context.Context, limit int) ([]job.Job, e
 	return out, nil
 }
 
+func (r *sqliteJobRepository) ListByStatus(ctx context.Context, status job.Status) ([]job.Job, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT data FROM jobs WHERE status = ? ORDER BY updated_at DESC, created_at DESC`,
+		status.String(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query jobs by status: %w", err)
+	}
+	defer rows.Close()
+
+	out := []job.Job{}
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("scan job: %w", err)
+		}
+		var j job.Job
+		if err := json.Unmarshal(data, &j); err != nil {
+			return nil, fmt.Errorf("unmarshal job: %w", err)
+		}
+		j.KillPlan = nil
+		out = append(out, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate jobs: %w", err)
+	}
+	return out, nil
+}
+
 func (r *sqliteJobRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status job.Status, failureReason string) error {
 	return r.mutate(ctx, id, func(j *job.Job) error {
 		j.Status = status

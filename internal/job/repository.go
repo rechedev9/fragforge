@@ -170,6 +170,45 @@ func (r *Repository) List(ctx context.Context, limit int) ([]Job, error) {
 	return jobs, nil
 }
 
+// ListByStatus returns every job currently in status, without the large
+// kill_plan payload. It is used by the startup sweep that fails jobs stranded in
+// a transient in-flight status by a crashed or quit orchestrator, so it is
+// unbounded (the set of interrupted jobs is small in practice).
+func (r *Repository) ListByStatus(ctx context.Context, status Status) ([]Job, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, status, COALESCE(failure_reason,''), demo_path, demo_sha256,
+		        target_steamid, rules, created_at, updated_at
+		 FROM jobs WHERE status = $1 ORDER BY updated_at DESC, created_at DESC`, status.String(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query jobs by status: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := []Job{}
+	for rows.Next() {
+		var j Job
+		var statusStr string
+		var rulesJSON []byte
+		if err := rows.Scan(&j.ID, &statusStr, &j.FailureReason, &j.DemoPath, &j.DemoSHA256,
+			&j.TargetSteamID, &rulesJSON, &j.CreatedAt, &j.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan job: %w", err)
+		}
+		j.Status, err = ParseStatus(statusStr)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(rulesJSON, &j.Rules); err != nil {
+			return nil, fmt.Errorf("unmarshal rules: %w", err)
+		}
+		jobs = append(jobs, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate jobs: %w", err)
+	}
+	return jobs, nil
+}
+
 // UpdateStatus moves the job to a new status. failureReason is set when status=failed.
 func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status Status, failureReason string) error {
 	tag, err := r.pool.Exec(ctx,

@@ -14,6 +14,7 @@ import (
 
 	"github.com/rechedev9/fragforge/internal/httpapi"
 	"github.com/rechedev9/fragforge/internal/job"
+	"github.com/rechedev9/fragforge/internal/obs"
 	"github.com/rechedev9/fragforge/internal/storage"
 	"github.com/rechedev9/fragforge/internal/streamclips"
 	"github.com/rechedev9/fragforge/internal/tasks"
@@ -101,6 +102,17 @@ func main() {
 		}
 		repo = job.NewRepository(pool)
 		streamRepo = streamclips.NewRepository(pool)
+	}
+
+	// Reconcile jobs stranded in a transient in-flight status by a previous
+	// process that crashed or was quit mid-stage. Do it after the repo is ready
+	// and before serving traffic, so the UI never shows a forever-"recording"
+	// card for a job whose worker died. Covers the memory, sqlite, and Postgres
+	// repos alike (all implement ListByStatus/UpdateStatus).
+	if n, err := sweepInterruptedJobs(ctx, repo, obs.Default()); err != nil {
+		log.Printf("startup: sweep interrupted jobs failed: %v", err)
+	} else if n > 0 {
+		log.Printf("startup: marked %d interrupted job(s) as failed", n)
 	}
 
 	taskHandlers := map[string]taskHandler{}
