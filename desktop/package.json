@@ -1,6 +1,6 @@
 {
   "name": "fragforge-studio",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
   "author": "FragForge",
@@ -48,6 +48,10 @@
       {
         "from": "build-resources/music",
         "to": "music"
+      },
+      {
+        "from": "build-resources/hlae-patch",
+        "to": "hlae-patch"
       }
     ],
     "win": {

@@ -1,0 +1,405 @@
+diff --git a/AfxHookSource2/ClientEntitySystem.cpp b/AfxHookSource2/ClientEntitySystem.cpp
+index 97c2231..24ad200 100644
+--- a/AfxHookSource2/ClientEntitySystem.cpp
++++ b/AfxHookSource2/ClientEntitySystem.cpp
+@@ -68,7 +68,7 @@ const char * CEntityInstance::GetDebugName() {
+     */    
+ 	const char * pszName = (const char*)*(unsigned char**)(*(unsigned char**)((unsigned char*)this + 0x10) + 0x18);
+ 	if(pszName) return pszName;
+-	return **(const char***)(*(unsigned char**)(*(unsigned char**)((unsigned char*)this + 0x10) + 0x8)+0x50);
++	return **(const char***)(*(unsigned char**)(*(unsigned char**)((unsigned char*)this + 0x10) + 0x8)+0x58);
+ }
+ 
+ // Retrieved from script function.
+@@ -204,10 +204,14 @@ SOURCESDK::CS2::CBaseHandle CEntityInstance::GetObserverTarget() {
+ 	return SOURCESDK::CS2::CEntityHandle::CEntityHandle(*(unsigned int*)((unsigned char*)pObserverServices + g_clientDllOffsets.CPlayer_ObserverServices.m_hObserverTarget));    
+ }
+ 
+-SOURCESDK::CS2::CBaseHandle CEntityInstance::GetHandle() {
+-	if (auto pEntityIdentity = *(u_char**)((u_char*)this + g_clientDllOffsets.CEntityInstance.m_pEntity)) {
+-		return SOURCESDK::CS2::CEntityHandle::CEntityHandle(*(uint32_t*)(pEntityIdentity + 0x10));
+-	}
++SOURCESDK::CS2::CBaseHandle CEntityInstance::GetHandle() {
++	if (auto pEntityIdentity = *(u_char**)((u_char*)this + g_clientDllOffsets.CEntityInstance.m_pEntity)) {
++		const uint32_t identityIndex = *(uint32_t*)(pEntityIdentity + 0x10);
++		const uint32_t flags = *(uint32_t*)(pEntityIdentity + 0x30);
++		const uint32_t entryIndex = identityIndex == UINT32_MAX ? 0x7fff : identityIndex & 0x7fff;
++		const uint32_t serial = (identityIndex >> 15) - (flags & 1);
++		return SOURCESDK::CS2::CEntityHandle::CEntityHandle((serial << 15) | entryIndex);
++	}
+ 
+ 	return SOURCESDK::CS2::CEntityHandle::CEntityHandle();
+ }
+diff --git a/AfxHookSource2/DeathMsg.cpp b/AfxHookSource2/DeathMsg.cpp
+index f11e2fa..994fcd6 100644
+--- a/AfxHookSource2/DeathMsg.cpp
++++ b/AfxHookSource2/DeathMsg.cpp
+@@ -50,29 +50,21 @@ struct CPanel2D {
+ 	}
+ };
+ 
+-struct StylePropertySymbolMap {
+-    uint8_t findSymbol(const char* stylePropertyName) {
+-        if (!symbols) return 0xFF;
+-
+-		for (int i = 0; i < symbols->numElements; ++i) {
+-            if (std::strcmp(symbols->memory[i].key.Get(), stylePropertyName) == 0)
+-                return symbols->memory[i].value;
+-        }
+-
+-        return 0xFF;
+-    }
+-
+-    SOURCESDK::CS2::CUtlMap<SOURCESDK::CS2::CUtlString, uint8_t>* symbols;
+-} g_PanoramaStylePropertySymbols;
+-
+-CON_COMMAND(__mirv_panorama_dump_style_symbols, "") {
+-	auto symbols = g_PanoramaStylePropertySymbols.symbols;
+-
+-	for (int i = 0; i < symbols->numElements; ++i) {
+-		auto node = symbols->memory[i];
+-		advancedfx::Message("%i: %s\n", node.value, node.key.Get());
+-	}
+-}
++struct StylePropertySymbolMap {
++	typedef uint8_t* (__fastcall *Resolve_t)(uint8_t* out, const char* stylePropertyName);
++
++    uint8_t findSymbol(const char* stylePropertyName) {
++		uint8_t result = 0xFF;
++		if (resolve) resolve(&result, stylePropertyName);
++		return result;
++    }
++
++	Resolve_t resolve = nullptr;
++} g_PanoramaStylePropertySymbols;
++
++CON_COMMAND(__mirv_panorama_dump_style_symbols, "") {
++	advancedfx::Warning("Style-symbol dumping is unavailable for this Panorama build.\n");
++}
+ 
+ struct StylePropertyOpacity {
+ 	void* vtable;
+@@ -693,7 +685,7 @@ CON_COMMAND(__mirv_panorama_print_children, "") {
+ 	}
+ }
+ 
+-typedef uint32_t* (__fastcall *g_Original_hashString_t)(uint32_t* pResult, const char* string);
++typedef uint32_t (__fastcall *g_Original_hashString_t)(const char* string, size_t length, uint32_t seed);
+ g_Original_hashString_t g_Original_hashString = nullptr;
+ 
+ 
+@@ -703,10 +695,10 @@ public:
+ 	MyDeathMsgGameEventWrapper(SOURCESDK::CS2::IGameEvent * event)
+ 	: m_Event(event) { }
+ 
+-	SOURCESDK::CS2::CKV3MemberName hashString(const char * string) {
+-		uint32_t hash;
+-		g_Original_hashString(&hash, string);
+-		return SOURCESDK::CS2::CKV3MemberName(hash, -1, string);
++	SOURCESDK::CS2::CKV3MemberName hashString(const char * string) {
++		size_t length = strlen(string);
++		uint32_t hash = g_Original_hashString(string, length, (uint32_t)length ^ 0x31415926);
++		return SOURCESDK::CS2::CKV3MemberName(hash, -1, string);
+ 	}
+ 
+ 	bool IsHashStringEqual(const char * a, const SOURCESDK::CS2::CKV3MemberName & b) {
+@@ -1230,14 +1222,13 @@ void __fastcall My_Panorama_CStylePropertyWashColor_Clone(void * This, void * pT
+ 
+ void getDeathMsgAddrs(HMODULE clientDll) {
+ 	// can be found with strings like "attacker" and "userid", etc. it basically takes all info from player_death event
+-	if (auto addr = getAddress(clientDll, "48 89 54 24 10 48 89 4C 24 08 55 53 56 57 41 54 48 8D AC 24 10 E0 FF FF B8 F0 ?? ?? ?? E8 ?? ?? ?? ?? 48 2B")) {
++	if (auto addr = getAddress(clientDll, "48 89 4C 24 08 55 53 41 54 41 55 41 56 48 8D AC 24 60 F7 FF FF")) {
+ 		g_Original_handlePlayerDeath = (g_Original_handlePlayerDeath_t)(addr);
+ 	} else ErrorBox(MkErrStr(__FILE__, __LINE__));
+ 
+-	// called in multiple places with strings like "userid", "attacker", etc. as second argument
+-	// e.g. in function above too
+-	if (auto addr = getAddress(clientDll, "48 8B 58 ?? 0F 29 B4 24 C0 20 00 00 E8 ?? ?? ?? ??")) {
+-		g_Original_hashString = (g_Original_hashString_t)(addr + 12 + 5 + *(int32_t*)(addr + 12 + 1));
++	// called in multiple places with strings like "userid", "attacker", etc.
++	if (auto addr = getAddress(clientDll, "48 83 EC 28 45 8B D0 4C 8B C9 48 83 FA 04 0F 82 ?? ?? ?? ?? 0F B6 09 48 89 5C 24 20 8D 41 BF 3C 19 77 03 80 C1 20")) {
++		g_Original_hashString = (g_Original_hashString_t)addr;
+ 	} else ErrorBox(MkErrStr(__FILE__, __LINE__));	
+ 
+ 	// snippet from function handlePlayerDeath above	
+@@ -1323,12 +1314,12 @@ LAB_1809a7de1
+ 
+ 	// function has "file://{resources}/layout/hud/hud.xml" string and also references CCSGO_Hud vftable
+ 	// hudpanel is DAT that param_1 assigned to     
+-	size_t g_HudPanel_addr = getAddress(clientDll, "48 89 AE ?? ?? ?? ?? 89 AE ?? ?? ?? ?? C6 86 ?? ?? ?? ?? 01 48 89 86 ?? ?? ?? ?? 48 89 35 ?? ?? ?? ?? e8 ?? ?? ?? ??");
++	size_t g_HudPanel_addr = getAddress(clientDll, "48 89 AE ?? ?? ?? ?? 89 AE ?? ?? ?? ?? C6 86 ?? ?? ?? ?? 01 48 89 86 ?? ?? ?? ?? 48 89 86 ?? ?? ?? ?? 48 89 35 ?? ?? ?? ?? E8 ?? ?? ?? ??");
+ 	if (g_HudPanel_addr == 0) {
+ 		ErrorBox(MkErrStr(__FILE__, __LINE__));	
+ 		return false;
+ 	} else {
+-		g_HudPanel_addr += 30;
++		g_HudPanel_addr += 37;
+ 	};
+ 
+ 	// function has CreatePanelWithCurrentContext string
+@@ -1406,19 +1397,16 @@ bool getPanoramaAddrs(HMODULE panoramaDll) {
+ 		}
+ 	}		
+ 
+-	{
+-		// after "Need to increase size of static g_StylePropertyRegistrations (MAX_PANORAMA_STYLE_SYMBOLS) before registering more styles, failed on %s"
+-		// lVar11 = FUN_180161290(); <----- we are looking for that it returns
+-		// ....
+-		// FUN_1800bce60(lVar11 + 8,&local_48,&local_68);
+-		auto addr = getAddress(panoramaDll, "7F ?? 48 8D 05 ?? ?? ?? ?? 48 83 C4 ?? C3");
+-		if (0 == addr)
+-			ErrorBox(MkErrStr(__FILE__, __LINE__));	
+-		else {
+-			auto out = addr + 7 + *(int32_t*)(addr + 5);
+-			g_PanoramaStylePropertySymbols.symbols = (SOURCESDK::CS2::CUtlMap<SOURCESDK::CS2::CUtlString, uint8_t>*)(out + 8 + 2);
+-		}
+-	}
++	{
++		// Style-property symbol resolver. Calling the game function avoids
++		// depending on the private map layout, which changed in the July 2026
++		// Panorama update.
++		auto addr = getAddress(panoramaDll, "40 55 56 57 41 54 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 44 8B 05 ?? ?? ?? ?? 48 8B F9 65 48 8B 04 25 58 00 00 00 45 33 E4 C6 01 FF 48 8B F2");
++		if (0 == addr)
++			ErrorBox(MkErrStr(__FILE__, __LINE__));
++		else
++			g_PanoramaStylePropertySymbols.resolve = (StylePropertySymbolMap::Resolve_t)addr;
++	}
+ 
+ 	{
+ 		// Can be found in constructor for any CStyleProperty
+diff --git a/AfxHookSource2/MirvColors.cpp b/AfxHookSource2/MirvColors.cpp
+index 47cd27d..bdadc58 100644
+--- a/AfxHookSource2/MirvColors.cpp
++++ b/AfxHookSource2/MirvColors.cpp
+@@ -296,7 +296,7 @@ void __fastcall new_drawStuff(CEntityInstance* param_1, char param_2) {
+ 
+ bool getAddresses(HMODULE clientDll) {
+ 	// called with offset to m_Glow of C_BaseModelEntity as first argument
+-	size_t g_Original_setGlowColor_addr = getAddress(clientDll, "40 53 48 83 EC 20 48 8B D9 48 83 C1 40 39 11 ?? ?? 89 11 ?? ?? ?? ?? ?? 48 8B 4B 18 48 85 C9 ?? ?? 48 83");
++	size_t g_Original_setGlowColor_addr = getAddress(clientDll, "40 53 48 83 EC 20 48 8B D9 48 83 C1 40 38 11 75 1E 8B C2 C1 E8 08 38 41 01 75 14 8B C2 C1 E8 10 38 41 02 75 0A 8B C2 C1 E8 18 38 41 03 74 02 89 11 E8 ?? ?? ?? ?? 48 8B 4B 18 48 85 C9");
+ 	if(g_Original_setGlowColor_addr == 0) {
+ 		ErrorBox(MkErrStr(__FILE__, __LINE__));
+ 		return false;
+diff --git a/AfxHookSource2/MirvCommands.cpp b/AfxHookSource2/MirvCommands.cpp
+index eed4e3d..f664789 100644
+--- a/AfxHookSource2/MirvCommands.cpp
++++ b/AfxHookSource2/MirvCommands.cpp
+@@ -465,11 +465,10 @@ bool getAddressesFromClient(HMODULE clientDll) {
+ 
+ 	// called in func with 'cs_win_panel_match' in the end in if/else statement
+ 	// in func itself it starts with 'if (*(char *)(param_1 + 8) == '\0')'
+-	size_t g_Original_EOM_addr = getAddress(clientDll, "48 8B C4 41 55 41 56 48 83 EC ?? 80 79");
+-	if(g_Original_EOM_addr == 0) {
+-		ErrorBox(MkErrStr(__FILE__, __LINE__));
+-		res = false;
+-	}
++	size_t g_Original_EOM_addr = getAddress(clientDll, "48 8B C4 41 55 41 56 48 83 EC ?? 80 79");
++	if(g_Original_EOM_addr == 0) {
++		advancedfx::Warning("AFXWARNING: mirv_endofmatch is unavailable for this CS2 build.\n");
++	}
+ 
+ 	// See where spec_show_xray is checked, has offsets to glowProperty
+ 	// Also called first in 242 vtable function for C_BaseModelEntity and other 100+ entities with m_Glow (CGlowProperty)
+@@ -479,7 +478,7 @@ bool getAddressesFromClient(HMODULE clientDll) {
+ 		res = false;
+ 	}
+ 
+-	g_Original_EOM = (g_Original_EOM_t)(g_Original_EOM_addr);
++	g_Original_EOM = (g_Original_EOM_t)(g_Original_EOM_addr);
+ 	g_Original_setGlowProps = (g_Original_setGlowProps_t)(g_Original_setGlowProps_addr);
+ 
+ 	// C_BaseModelEntity vtable 242 it should have 2 function calls with m_Glow (CGlowProperty)
+@@ -529,7 +528,7 @@ void HookMirvCommands(HMODULE clientDll) {
+     DetourUpdateThread(GetCurrentThread());
+ 
+ 	DetourAttach(&(PVOID&)g_Original_OnFlashMaxAlphaChanged, new_OnFlashMaxAlphaChanged);
+-	DetourAttach(&(PVOID&)g_Original_EOM, new_EOM);
++	if (g_Original_EOM) DetourAttach(&(PVOID&)g_Original_EOM, new_EOM);
+ 	DetourAttach(&(PVOID&)g_Original_setGlowProps, new_setGlowProps);
+ 	DetourAttach(&(PVOID&)org_shouldGlow, new_shouldGlow);
+ 	DetourAttach(&(PVOID&)org_ForceUpdateSkybox, new_ForceUpdateSkybox);
+diff --git a/AfxHookSource2/RenderSystemDX11Hooks.cpp b/AfxHookSource2/RenderSystemDX11Hooks.cpp
+index c5acbd5..8c622da 100644
+--- a/AfxHookSource2/RenderSystemDX11Hooks.cpp
++++ b/AfxHookSource2/RenderSystemDX11Hooks.cpp
+@@ -2187,7 +2187,7 @@ unsigned char * __fastcall New_SceneSystem_CreateRenderContextPtr1(unsigned char
+ 		// rendersystemdx11.dll
+ 		// vtable for CRenderContextDx11
+ 		// find fn with "CRenderContextDx11::EndQuery - Bad query or D3D device\n"
+-		// then in vtable the one we need is 15 indexes later
++		// then in vtable the one we need is 17 indexes later
+ 		// it starts like this
+ 		// 
+ 		// {
+@@ -2208,7 +2208,7 @@ unsigned char * __fastcall New_SceneSystem_CreateRenderContextPtr1(unsigned char
+ 		//   }
+ 
+         if (void* pCRenderContextDx11_SoftwareCommandList = *(void**)param_1) {
+-            auto fnQueueCallback = (void(__fastcall*)(void* pCRenderConStextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[140];
++            auto fnQueueCallback = (void(__fastcall*)(void* pCRenderConStextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[142];
+             va_list args;
+             va_start(args, fmt);
+             fnQueueCallback(pCRenderContextDx11_SoftwareCommandList, new CRenderSystemConsolePrint(1, saveFmt,args));
+@@ -2224,13 +2224,13 @@ unsigned char * __fastcall New_SceneSystem_CreateRenderContextPtr1(unsigned char
+         if(pszArg0 && 0 == strcmp("Player 0",pszArg0) && pszArg1) {
+             if (0 == strcmp("ClearSmokeTargets (4)", pszArg1)) {
+                 if (void* pCRenderContextDx11_SoftwareCommandList = *(void**)param_1) {
+-                    auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[140];
++                    auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[142];
+                     fnQueueCallback(pCRenderContextDx11_SoftwareCommandList, new CAfxRenderCallbackBeforeMaybeDrawSmoke());
+                 }
+             }
+             else if (0 == strcmp("ClearSmokeTargets", pszArg1)) {
+                 if (void* pCRenderContextDx11_SoftwareCommandList = *(void**)param_1) {
+-                    auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[140];
++                    auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[142];
+                     fnQueueCallback(pCRenderContextDx11_SoftwareCommandList, new CAfxRenderCallbackAfterMaybeSmokeDrawn());
+                 }
+             }
+@@ -2243,7 +2243,7 @@ unsigned char * __fastcall New_SceneSystem_CreateRenderContextPtr1(unsigned char
+         const char * pszArg0 = va_arg(args, const char *);
+         if(pszArg0 && 0 == strcmp("CSGOHud",pszArg0)) {
+             if (void* pCRenderContextDx11_SoftwareCommandList = *(void**)param_1) {
+-                auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[140];
++                auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[142];
+                 fnQueueCallback(pCRenderContextDx11_SoftwareCommandList, new CAfxRenderCallbackBeforeUi());
+             }
+         }
+@@ -2262,7 +2262,7 @@ unsigned char * __fastcall New_SceneSystem_CreateRenderContextPtr2(unsigned char
+ 
+     if (fmt && 0 == strcmp(fmt, "UpdateBuffers")) {
+         if (void* pCRenderContextDx11_SoftwareCommandList = *(void**)param_1) {
+-            auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[140];
++            auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[142];
+             fnQueueCallback(pCRenderContextDx11_SoftwareCommandList, new CAfxRenderCallbackUpdateBuffers());
+         }
+     }
+@@ -2271,7 +2271,7 @@ unsigned char * __fastcall New_SceneSystem_CreateRenderContextPtr2(unsigned char
+         const char * saveFmt = fmt ? fmt : "[nullptr]";
+ 
+         if (void* pCRenderContextDx11_SoftwareCommandList = *(void**)param_1) {
+-            auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[140];
++            auto fnQueueCallback = (void(__fastcall*)(void* pCRenderContextDx11_SoftwareCommandList, void* pCallback))(*(void***)pCRenderContextDx11_SoftwareCommandList)[142];
+             va_list args;
+             va_start(args, fmt);
+             fnQueueCallback(pCRenderContextDx11_SoftwareCommandList, new CRenderSystemConsolePrint(2, saveFmt, args));
+@@ -2392,7 +2392,7 @@ void Hook_SceneSystem(void * hModule) {
+ 
+         // First reference to "WARNING: Trying to create a CRenderContextPtr without a valid context.\n"
+         {
+-            Afx::BinUtils::MemRange result = FindPatternString(textRange, "40 53 56 57 48 83 ec 20 49 8b 00 49 8b d8 48 8b f9 45 33 c0 48 8b cb 49 8b f1 ff 90 e0 01 00 00");
++            Afx::BinUtils::MemRange result = FindPatternString(textRange, "40 53 56 57 48 83 ec 20 49 8b 00 49 8b d8 48 8b f9 45 33 c0 48 8b cb 49 8b f1 ff 90 e8 01 00 00");
+             if (!result.IsEmpty()) {
+                 g_Old_SceneSystem_CreateRenderContextPtr1 = (SceneSystem_CreateRenderContextPtr1_t)result.Start;	
+                 DetourTransactionBegin();
+diff --git a/AfxHookSource2/ReplaceName.cpp b/AfxHookSource2/ReplaceName.cpp
+index 49e5f90..cb34ce9 100644
+--- a/AfxHookSource2/ReplaceName.cpp
++++ b/AfxHookSource2/ReplaceName.cpp
+@@ -103,7 +103,7 @@ void HookReplaceName(HMODULE clientDll)
+ 			DetourAttach(&(PVOID&)g_Org_GetDecoratedPlayerName, New_GetDecoratedPlayerName);
+ 			if(NO_ERROR != DetourTransactionCommit()) ErrorBox(MkErrStr(__FILE__, __LINE__));
+ 		} 
+-		else ErrorBox(MkErrStr(__FILE__, __LINE__));
++		else advancedfx::Warning("AFXWARNING: decorated player-name replacement is unavailable for this CS2 build.\n");
+ 
+         /*
+             GetDecoratedPlayerName references a function on "?AVCCSPlayerController@@" vtable as follows:
+diff --git a/AfxHookSource2/addresses.cpp b/AfxHookSource2/addresses.cpp
+index 6876b65..7e8e05d 100644
+--- a/AfxHookSource2/addresses.cpp
++++ b/AfxHookSource2/addresses.cpp
+@@ -111,7 +111,7 @@ void Addresses_InitEngine2Dll(AfxAddr engine2Dll)
+                  c0 01 00 00
+     */
+ 	{
+-		MemRange result = FindPatternString(textRange, "48 89 5C 24 18 55 56 57 41 56 41 57 48 83 EC 70 48 8D 05 ?? ?? ?? ??");
++		MemRange result = FindPatternString(textRange, "4C 8B DC 49 89 5B 10 49 89 6B 18 49 89 73 20 57 41 56 41 57 48 83 EC 70 49 C7 43 B0 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ??");
+ 																	  
+ 		if (!result.IsEmpty()) {
+             AFXADDR_SET(cs2_engine_CRenderService_OnClientOutput, result.Start);
+@@ -151,21 +151,16 @@ void Addresses_InitClientDll(AfxAddr clientDll) {
+ 		else ErrorBox(MkErrStr(__FILE__, __LINE__));
+ 	}
+ 
+-	// in the end of g_Original_handlePlayerDeath function
+-	{
+-		MemRange result = FindPatternString(textRange, "0F B7 15 ?? ?? ?? ?? F3 41 0F 10 55 ??");
+-		if (!result.IsEmpty()) {
+-            AFXADDR_SET(cs2_deathmsg_lifetime_offset, *(uint8_t*)(result.Start + 12));
+-		}
+-		else
+-			ErrorBox(MkErrStr(__FILE__, __LINE__));
+-	}
+-	{
+-		MemRange result = FindPatternString(textRange, "44 38 64 24 ?? 74 ?? F3 41 0F 10 75 ??");
+-		if (!result.IsEmpty()) {
+-            AFXADDR_SET(cs2_deathmsg_lifetimemod_offset, *(uint8_t*)(result.Start + 12));
+-		}
+-		else
+-			ErrorBox(MkErrStr(__FILE__, __LINE__));
+-	}
+-}
++	// Near the end of g_Original_handlePlayerDeath. Both values are fields of
++	// CCSGO_HudDeathNotice and are passed to the same Panorama attribute setter.
++	{
++		MemRange result = FindPatternString(textRange, "0F B7 15 ?? ?? ?? ?? F3 0F 10 53 ?? E8 ?? ?? ?? ?? 45 84 E4 75 ?? 45 84 FF 75 ?? F3 0F 10 15 ?? ?? ?? ?? EB ?? F3 0F 10 53 ??");
++		if (!result.IsEmpty()) {
++			AFXADDR_SET(cs2_deathmsg_lifetime_offset, *(uint8_t*)(result.Start + 11));
++			AFXADDR_SET(cs2_deathmsg_lifetimemod_offset, *(uint8_t*)(result.Start + 41));
++		}
++		else {
++			ErrorBox(MkErrStr(__FILE__, __LINE__));
++		}
++	}
++}
+diff --git a/AfxHookSource2/main.cpp b/AfxHookSource2/main.cpp
+index b060af0..6937943 100644
+--- a/AfxHookSource2/main.cpp
++++ b/AfxHookSource2/main.cpp
+@@ -1064,7 +1064,7 @@ void HookClientDll(HMODULE clientDll) {
+ 
+ 	*/
+ 	{
+-		Afx::BinUtils::MemRange result = FindPatternString(textRange, "48 8b 0d ?? ?? ?? ?? 48 8b 01 ff 90 50 01 00 00 0f 57 ff 84 c0 74 63 ba ff ff ff ff");
++		Afx::BinUtils::MemRange result = FindPatternString(textRange, "48 8b 0d ?? ?? ?? ?? 48 8b 01 ff 90 50 01 00 00 0f 57 ff 84 c0 74 57 ba ff ff ff ff");
+ 																	  
+ 		if (!result.IsEmpty()) {
+ 			/*
+@@ -1076,7 +1076,7 @@ void HookClientDll(HMODULE clientDll) {
+ 			90                   nop
+ 			*/
+ 			unsigned char asmCode[16]={
+-				0x48, 0x89, 0xf1,
++				0x4c, 0x89, 0xf1,
+ 				0x48, 0xb8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+ 				0xff, 0x10,
+ 				0x90
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index fcc9fd4..3231559 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -29,14 +29,14 @@ message(STATUS "AFX_RUST_CARGO_LOCKED=${AFX_RUST_CARGO_LOCKED}")
+ #
+ 
+ execute_process(
+-    COMMAND "$ENV{ProgramFiles\(x86\)}\\Microsoft Visual Studio\\Installer\\vswhere.exe" "-latest" "-version" "[17.0,18.0)" "-property" "installationPath"
++    COMMAND "$ENV{ProgramFiles\(x86\)}\\Microsoft Visual Studio\\Installer\\vswhere.exe" "-latest" "-products" "*" "-version" "[17.0,18.0)" "-property" "installationPath"
+     OUTPUT_VARIABLE VS_INSTALLPATH
+     OUTPUT_STRIP_TRAILING_WHITESPACE
+ )
+ string(REPLACE "\\" "/" VS_INSTALLPATH ${VS_INSTALLPATH})
+ 
+ execute_process(
+-    COMMAND "$ENV{ProgramFiles\(x86\)}\\Microsoft Visual Studio\\Installer\\vswhere.exe" "-latest" "-version" "[17.0,18.0)" "-requires" "Microsoft.Component.MSBuild" "-find" "MSBuild\\**\\**\\Bin\\MSBuild.exe"
++    COMMAND "$ENV{ProgramFiles\(x86\)}\\Microsoft Visual Studio\\Installer\\vswhere.exe" "-latest" "-products" "*" "-version" "[17.0,18.0)" "-requires" "Microsoft.Component.MSBuild" "-find" "MSBuild\\**\\**\\Bin\\MSBuild.exe"
+     OUTPUT_VARIABLE VS_MSBUILD
+     OUTPUT_STRIP_TRAILING_WHITESPACE
+ )
+diff --git a/deps/release/prop b/deps/release/prop
+index 97a84c5..b4c312c 160000
+--- a/deps/release/prop
++++ b/deps/release/prop
+@@ -1 +1 @@
+-Subproject commit 97a84c581317c3f6ae46c08b79b14e1c42bc165f
++Subproject commit b4c312cb819664cb3560e8a114b6daf18e727dc8

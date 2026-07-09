@@ -18,7 +18,7 @@ import HeroForge from "@/components/hero-forge";
 // release. The canonical asset name comes from desktop/package.json version.
 // The href must remain byte-for-byte this string.
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v0.3.3/FragForge.Studio.Setup.0.3.3.exe";
+  "https://github.com/rechedev9/fragforge/releases/download/v0.3.4/FragForge.Studio.Setup.0.3.4.exe";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
 // NEON HUD wordmark: FRAG//FORGE in Chakra Petch, the "//" in signal cyan —
@@ -54,7 +54,7 @@ const FEATURES: { icon: LucideIcon; title: string; body: string }[] = [
   {
     icon: Cpu,
     title: "Real capture",
-    body: "FragForge drives HLAE + CS2 on your own GPU to record a clean, HUD-less POV of every frag at full quality.",
+    body: "FragForge provisions its verified HLAE hook and drives CS2 on your own GPU to record every frag at full quality.",
   },
   {
     icon: Clapperboard,
@@ -85,7 +85,7 @@ const STEPS: { title: string; body: string }[] = [
 const REQUIREMENTS: { icon: LucideIcon; label: string }[] = [
   { icon: MonitorCheck, label: "Windows 10 or 11, 64-bit" },
   { icon: Gamepad2, label: "Counter-Strike 2 installed via Steam" },
-  { icon: Film, label: "HLAE installed (for gameplay capture)" },
+  { icon: Film, label: "HLAE is installed and patched automatically" },
   { icon: Zap, label: "Dedicated GPU recommended" },
   { icon: HardDrive, label: "~1 GB free disk space" },
 ];
@@ -139,7 +139,7 @@ export default function Home() {
           </div>
 
           <p className="font-mono text-sm tracking-[0.08em] text-muted-foreground">
-            v0.3.3 <span className="text-primary/70">·</span> 152 MB{" "}
+            v0.3.4 <span className="text-primary/70">·</span> 150 MB{" "}
             <span className="text-primary/70">·</span> Windows 10/11
           </p>
         </div>

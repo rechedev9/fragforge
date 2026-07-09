@@ -20,7 +20,7 @@ export function Wordmark({ className, katakana = true }: WordmarkProps) {
         FORGE
       </span>
       {katakana ? (
-        <span aria-hidden className="text-[10px] leading-tight tracking-[0.26em] text-destructive">
+        <span aria-hidden className="text-[10px] leading-tight tracking-[0.26em] text-brand-accent">
           フラグ・フォージ
         </span>
       ) : null}

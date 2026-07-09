@@ -1,257 +1,195 @@
-# FragForge — Web design system (v2)
+# FragForge Studio — design system v3
 
-This is the design contract for the FragForge web app under `web/`. It replaces
-the v1 look (which was a near-copy of a competitor: dark + violet + top tabs).
-v2 is a distinct, opinionated identity built on **shadcn/ui**.
+This file is the presentation contract for `web/`. The typed API layer,
+polling, local/cloud routing, and the demo-to-render state machines are not
+part of the visual system and must remain stable during UI work.
 
-The data layer does **not** change: the typed `ApiClient` + `MockApiClient` in
-`web/lib/api/*` and `useSession()` stay exactly as they are. v2 is a
-presentation-layer redesign only, so the Fase 2 swap to a real backend is
-untouched.
+## Product idea
 
----
+FragForge is a local-first replay workstation: a focused CS2 production tool,
+not a generic SaaS dashboard and not a decorative cyberpunk HUD. The interface
+should feel like a calm broadcast control room: technical, dense where data is
+useful, and quiet around the current action.
 
-## 1. Concept
+The visual identity is:
 
-**"The replay studio."** FragForge turns your own CS2 demos into highlight
-reels, recorded on your own rig. The UI should feel like a focused creator/
-editing tool (Linear / Vercel / a demo-review app), not a marketing SaaS
-dashboard. Confident, fast, a little broadcast-room. We lean into the one thing
-that is uniquely ours: a transparent **capture → edit → reel** pipeline that
-runs on the player's PC.
+- blue-black canvas and layered navy surfaces;
+- cyan for primary action, selection, navigation, and keyboard focus;
+- magenta for the wordmark micro-accent and stream-specific signals such as
+  REC, facecam, music, and likes;
+- mint for ready/success, amber for warnings/expiry, red for failures and
+  destructive actions;
+- angular geometry, thin borders, restrained corner cuts, and minimal glow;
+- subtle grid and scanline texture on the canvas only.
 
-**Two ways in.** (1) *Steam* — sign in, link your match history, and forge reels
-from your own demos. (2) *Upload* — drop any `.dem` (yours or someone else's),
-no login required, and analyze it the same way. Both converge on the identical
-highlight → render pipeline; only the front door differs.
+## Bottom-up hierarchy
 
-Differentiators from v1 (these are non-negotiable, they are what makes it "not a
-copy"):
+Visual changes are made in this order:
 
-1. **Left sidebar IA**, not a centered 3-tab top bar.
-2. **Acid-lime signal color** on desaturated charcoal — not violet.
-3. **Monospace, tabular numbers** for every stat (scoreboard / demo-tick feel).
-4. A **pipeline stepper** (Queued → Capturing → Editing → Ready) as a first-class
-   component — our product story made visible.
-5. A **filmstrip** play selector (horizontal tiles), not a vertical card list.
-6. A **"LIVE ON YOUR RIG" REC** indicator tying renders to the user's machine.
-7. Subtle **film grain** for a tape/replay texture.
+1. tokens in `app/globals.css`;
+2. primitives in `components/ui`;
+3. Studio patterns in `components/studio`;
+4. domain components (`matches`, `upload`, `videos`, `feed`, `streams`);
+5. pages and responsive composition.
 
-Working brand name: **FragForge** (wordmark: lime "Frag" + white "Forge", with a
-small spark/forge mark). Trivial to rename — it is one component.
+Pages should not duplicate title blocks, empty-state layouts, button geometry,
+input focus rules, or filter-chip styling when a shared component exists.
 
----
+## Foundations
 
-## 2. Foundations
+### Color roles
 
-### Color (dark-first, shadcn tokens in `app/globals.css`)
+The CSS variables in `app/globals.css` are the source of truth.
 
-Use shadcn's CSS-variable theming for Tailwind v4 (oklch). Base color on init =
-`neutral`, then OVERRIDE the token values below. App is forced dark (`<html
-class="dark">`); the `.dark` block is the source of truth.
+| Role | Token | Use |
+| --- | --- | --- |
+| Canvas | `--background` | app background |
+| Panel | `--surface` / `--card` | standard surfaces |
+| Raised panel | `--surface-raised` | selected or important surfaces |
+| Text | `--foreground` | headings and essential content |
+| Secondary text | `--muted-foreground` | descriptions and metadata |
+| Primary signal | `--primary` | CTA, active nav, focus, selection |
+| Stream signal | `--stream` | REC, stream, facecam, music, likes |
+| Ready | `--success` | completed and available |
+| Warning | `--warning` | expiry and recoverable warning |
+| Danger | `--destructive` | error, failure, delete |
 
-```
-/* .dark */
---background:        oklch(0.145 0.006 264);  /* deep cool charcoal */
---foreground:        oklch(0.985 0 0);
---card:              oklch(0.185 0.006 264);
---card-foreground:   oklch(0.985 0 0);
---popover:           oklch(0.185 0.006 264);
---popover-foreground:oklch(0.985 0 0);
---primary:           oklch(0.905 0.182 124);  /* ACID LIME — signal color */
---primary-foreground:oklch(0.205 0.03 124);   /* near-black text on lime */
---secondary:         oklch(0.245 0.006 264);
---secondary-foreground: oklch(0.985 0 0);
---muted:             oklch(0.245 0.006 264);
---muted-foreground:  oklch(0.66 0.01 264);
---accent:            oklch(0.27 0.008 264);
---accent-foreground: oklch(0.985 0 0);
---destructive:       oklch(0.62 0.21 25);      /* red — REC dot / destructive */
---border:            oklch(0.275 0.006 264);
---input:             oklch(0.275 0.006 264);
---ring:              oklch(0.905 0.182 124);   /* lime focus ring */
---radius:            0.75rem;
-/* sidebar */
---sidebar:               oklch(0.13 0.006 264); /* a touch darker than bg */
---sidebar-foreground:    oklch(0.82 0.01 264);
---sidebar-primary:       oklch(0.905 0.182 124);
---sidebar-primary-foreground: oklch(0.205 0.03 124);
---sidebar-accent:        oklch(0.22 0.006 264);
---sidebar-accent-foreground: oklch(0.985 0 0);
---sidebar-border:        oklch(0.24 0.006 264);
---sidebar-ring:          oklch(0.905 0.182 124);
-```
+Do not use magenta as a generic error colour or as the active navigation colour.
+Do not rely on colour alone to communicate state.
 
-**Lime discipline:** lime is a *signal*, used sparingly — primary CTA, active
-nav item, brand mark, focus ring, the active/done pipeline step, win bars, and
-selection rings. Everything else is neutral charcoal + zinc text. Overusing lime
-reads cheap; restraint reads premium. Red is reserved for the live REC dot and
-destructive actions. Win = lime, loss = muted zinc (not red).
+### Type
 
-### Type (via `next/font/google`)
+- Display/UI: Chakra Petch (`--font-display`, `--font-sans`).
+- Operational metadata and numbers: Share Tech Mono (`--font-mono`) with
+  tabular figures.
+- Desktop H1: 40–42px; mobile H1: 30–32px.
+- Standard body copy: 15px/24px.
+- Labels: at least 13px; essential text never below 12px.
+- Wide tracking and full uppercase are reserved for eyebrows, states, and
+  compact metadata—not paragraphs.
 
-- **Display** — `Space Grotesk` (`--font-display`): all big headings, hero,
-  screen H1s, the wordmark. Used uppercase with tight tracking for section
-  eyebrows.
-- **Body/UI** — `Inter` (`--font-sans`): default text, buttons, labels.
-- **Mono/numbers** — `JetBrains Mono` (`--font-mono`): EVERY stat, score, K/D,
-  tick, duration, countdown, pairing code. Always `tabular-nums`.
+### Space and controls
 
-Map `--font-sans`/`--font-mono` into the shadcn `@theme inline` block and add
-`--font-display`. Headings use `font-[family-name:var(--font-display)]`.
+Use the scale `4, 8, 12, 16, 24, 32, 48, 64, 96`.
 
-### Space, radius, motion
+- Default button/input: 44px high.
+- Small button/icon control: at least 40px high.
+- Panel padding: 20–24px mobile, 24–32px desktop.
+- Main content gap: 28–40px.
+- Sidebar row: 48px.
+- Focus: visible 2px cyan ring with a dark offset.
 
-- Generous whitespace; max content width ~1200px; comfortable line-height.
-- Radius 0.75rem base; cards `rounded-xl`; pills/badges `rounded-full`.
-- Borders are 1px hairlines (`--border`), never heavy.
-- Motion: fast (150–200ms), ease-out. Rendering cards get a subtle shimmer.
-  Honor `prefers-reduced-motion` (disable shimmer/pulse).
+### Surfaces and texture
 
-### Texture
+`studio-panel` is the normal content surface. `studio-panel-raised` adds visual
+priority, and `studio-panel-interactive` supplies restrained hover elevation.
+The background grid and scanlines remain low-opacity and must never reduce text
+contrast. Use one dominant angular treatment per component: a notch, brackets,
+or an accented border—not all three.
 
-- A global, very low-opacity **film-grain** overlay (`GrainOverlay`, fixed,
-  `pointer-events-none`, ~3–5% opacity SVG/feTurbulence). Subtle.
-- Auth hero only: a faint scanline/vignette gradient on top of the grain.
+## Shared patterns
 
----
+### `StudioPageHeader`
 
-## 3. Navigation / shell
+Every Studio page uses the same eyebrow, title, description, and optional
+action area. Title and content share the same left edge.
 
-A persistent **left sidebar** (shadcn `Sidebar`), collapsible, mobile → `Sheet`:
+### `StudioEmptyState`
 
-- Top: FragForge wordmark + spark mark.
-- Items: **Matches** (target icon), **Upload** (upload-cloud icon), **Library**
-  (film icon), **Feed** (compass/flame icon). Active item = lime text + lime left
-  accent.
-- Footer: a **slots meter** (`used / total`, a thin lime progress) with a small
-  "Get more" button, then the user (avatar + persona, dropdown → sign out).
+Empty states are bounded, actionable panels with an icon, H2, concise copy,
+one primary action, an optional secondary action, and an optional trust/status
+line. They should normally remain between 640px and 760px wide instead of
+stretching across the full workspace.
 
-Onboarding screens (`/` auth, `/connect`) render WITHOUT the sidebar (root
-layout only) — you are not "in the app" yet. Everything else lives under the
-`(app)` route group whose layout renders the sidebar shell.
+### Buttons and fields
 
----
+Primary buttons use cyan. Stream import actions may use magenta when their
+category is already clear. Destructive actions use red. Inputs use solid-enough
+navy surfaces, a visible border, a real label, and inline validation.
 
-## 4. Signature components (shared, built in Foundation)
+### Filters
 
-- **`StatMono`** — a labeled mono number (muted label above/inline, value in
-  JetBrains Mono `tabular-nums`). Used for K / D / A / MVP / K/D / scores / ticks.
-- **`ScoreBar`** — thin vertical accent bar on match rows: lime = win, zinc =
-  loss. Quick visual scan.
-- **`PipelineSteps`** — horizontal stepper: `Queued → Capturing → Editing →
-  Ready`. Done steps lime-filled, active step pulses lime, future steps muted.
-  Maps from `VideoStatus` (queued→Queued, recording→Capturing, composing→Editing,
-  ready→Ready). This is the hero of the product story.
-- **`RecDot`** — small pulsing red dot + optional "LIVE ON YOUR RIG" label, for
-  videos in `recording` state.
-- **`SectionEyebrow`** — uppercase Space Grotesk label + count, for section heads.
-- **`GrainOverlay`** — the global texture layer.
-- **`Filmstrip`** — horizontal `ScrollArea` row of selectable play tiles.
+Segmented controls have 40px minimum height, `aria-label`/`aria-pressed`
+semantics from Radix, and cyan active state. On narrow screens they may scroll
+horizontally, but must not shrink labels below readability.
 
-Build the rest from shadcn primitives directly.
+### Status
 
-### shadcn components to install
+Queued, recording, composing, ready, failed, and expiry states always include
+text or an icon as well as colour. Pipeline information belongs inside the
+relevant card or section, never floating in unused page space.
 
-`sidebar, button, card, dialog, badge, input, label, avatar, progress, tabs,
-tooltip, scroll-area, separator, skeleton, dropdown-menu, sheet, sonner,
-toggle-group`. Wire `<Toaster />` (sonner) into the root layout.
+## Shell
 
----
+- Desktop sidebar: 240px; collapses to the existing icon rail.
+- Main content: maximum 1440px with fluid 24–48px horizontal padding.
+- Active navigation is always cyan. Stream retains a small magenta category
+  marker.
+- Creation destinations and content destinations are separated by spacing.
+- Capture readiness is a fully clickable operational status with a readable
+  icon, label, hint, keyboard focus, and diagnostic dialog.
+- Mobile retains the existing sheet navigation and 56px top bar.
 
-## 5. Screens
+`/upload` remains outside the authenticated route group because it supports the
+no-login flow. It uses a compact standalone top bar and the same content tokens,
+widths, typography, and controls as the Studio shell.
 
-All screens keep the SAME `api` calls and flow as v1; only the look/layout
-changes.
+## Screen contracts
 
-### `/` — Auth
-Full-bleed dark hero with grain + scanline. Left: huge Space Grotesk headline
-("FORGE YOUR FRAGS INTO REELS" or similar), a one-line subhead, a lime
-**"Continue with Steam"** button (Steam glyph), a secondary outline **"Upload a
-demo"** button (→ `/upload`, no login) for the file flow, and a trust line *"No
-AI. Your POV. Your rig."*. Right: a stylized reel/filmstrip motif (CSS, no real
-video). On sign-in → `/connect` if history not linked, else `/matches`.
+### Matches
 
-### `/upload` — Upload a demo (Flow B, no login)
-Renders on the root layout (no sidebar) like `/connect`. A centered card with a
-dashed **drop zone** (`DemoDropzone`): drag-and-drop or click-to-browse a single
-`.dem`, extension-validated. The real flow is **scan → player picker → parse**:
-on select it shows a brief "Scanning roster…" state (`scanDemo`), then a
-**`PlayerPicker`** ("Who do you want to clip?") listing the demo's players with
-mono K/D/A (top fragger auto-highlighted, click to confirm). Picking a player
-runs `parseDemo({ jobId, steamId })` ("Forging highlights…") and routes to
-`/matches/[id]` — the same find-highlights screen Steam matches use. Uploaded
-matches have no round score, so `score` is `''` and `mvps` is `0`; the summary
-strip hides the win/loss + score chips and shows the highlight count instead.
-The deprecated single-shot `uploadDemo` remains for the mock. Copy leans on
-"analyze any demo, yours or anyone's, no login · the .dem never leaves your
-machine".
+The page is the Studio inbox. Empty state routes to demo upload and stream
+import. Populated rows are dense scoreboard surfaces: map/context, score,
+K/D/A/MVP/KD, timestamp/highlight count, and a clear 44px action. Search and
+filters remain usable on mobile.
 
-### `/connect` — Onboarding (vertical stepper, not two side cards)
-A centered, two-step **stepper**:
-1. **Link your match history** — shadcn `Input`s for the auth code and most
-   recent sharecode, a helper line + "How to get these" link to Steam, a lime
-   "Load my matches" button (calls `linkMatchHistory`, shows matches found,
-   advances).
-2. **Pair your PC** — explains the BYO-PC agent (your Steam + GPU do the
-   recording). "Generate pairing code" (`pairPc`) reveals a copyable mono code
-   and a paired/not-paired `Badge` (`getPcStatus`). Then "Enter the studio" →
-   `/matches`.
-Use a clean numbered stepper rail on the left of the content.
+### Upload
 
-### `/matches` — Matches (the studio's "inbox")
-Sidebar + main. Header: Space Grotesk title "Matches" + subhead, a `ToggleGroup`
-filter (All / Wins / Best frags) and a search `Input`. Body: a list of
-**scoreboard rows** — each row: `ScoreBar` (win/loss), map name + map chip, score
-in mono, "N highlights" badge, a row of `StatMono` (K D A MVP K/D), `timeAgo`,
-and a lime "Find highlights" button → `/matches/[id]`. Dense but breathable;
-hover elevates the row.
+Keep the real `scan -> player picker -> parse` flow. The dropzone is one large
+keyboard-operable target with clear drag, focus, error, scanning, picking,
+offline, and parsing states. State that processing is local in readable text.
 
-### `/matches/[id]` — Find highlights
-Top: a compact match summary strip (map, score in mono, key stats). Then
-**"We found N highlights"** rendered as a **`Filmstrip`** of play tiles
-(thumbnail block, mono round/tick, a kills pip, weapon). Selecting a tile gives
-it a lime ring. Below: two large **mode cards** — **Clean POV** and **Music
-Edit** — each with an icon, one-line pitch, and (Music) "pick a song next". A
-sticky bottom action bar shows the selection and a lime **"Create reel"**.
-Choosing Music opens a shadcn **`Dialog`** song picker: each row = title/artist,
-a play/preview toggle (no real audio — UI state only, with a tiny equalizer
-animation while "playing"), and a lime "Use this track". Confirm → `createVideo`
-→ `/videos`.
+### Stream clips
 
-### `/videos` — Library
-Header "Library". Section **Rendering** (status not ready/failed): cards showing
-the thumbnail (dimmed), `RecDot` + "LIVE ON YOUR RIG" when capturing, the
-**`PipelineSteps`** stepper, and a shimmer. Poll `listVideos()` every ~1.5s so a
-fresh job advances Queued→Capturing→Editing→Ready live. Section **Ready**: a grid
-of cards — thumbnail with a hover overlay (`View` / `Download` / `Share`), title,
-map · score in mono, a subtle "expires in 14h" chip (mono countdown via
-`formatCountdown`), and a Publish toggle (`publishVideo`) that flips to a lime
-"Published" `Badge`. Use `Skeleton` while loading.
+The source panel uses a neutral surface; magenta identifies the stream action,
+not the whole background. URL and MP4 paths remain equally discoverable. On
+wide screens, use otherwise-empty space for a small output/processing summary.
+Do not mix visual refactoring with changes to acquisition or render state.
 
-### `/feed` — Feed
-"Feed" header + subhead. A responsive **portrait masonry grid** of community
-reels: 9:16 thumbnail with a soft gradient foot, author avatar + name, map chip,
-and a heart + like count (local toggle, lime when liked). Creator-forward, hover
-reveals a play affordance. `Skeleton` while loading.
+### Library
 
----
+Use an auto-fill grid with cards around 260–300px wide. A reel card owns its
+thumbnail, format, title, pipeline/status, expiry, and actions. Preserve real
+media URLs, publishing, deletion, and polling semantics.
 
-## 6. Voice
+### Feed
 
-Confident, concise, gamer-literate, zero cringe. "Find your highlights." "Your
-reel is rendering on your rig." "Ready to post." Avoid hype words and emoji.
+Use a responsive card grid with clear play and like targets. Empty state routes
+to the Library and upload flow. Community/like details may use magenta; global
+selection remains cyan.
 
----
+## Responsive and accessibility
 
-## 7. What NOT to do
+Validate at 390, 768, 1024, 1440, and 1920px and at 200% zoom.
 
-- No violet as the brand color. No centered top-tab navigation. No stat "pills"
-  as the primary stat treatment (use mono numbers). No generic stock-SaaS hero.
-- Keep `web/lib/api/*` and `useSession()` stable. The contract may grow only
-  **additively** when a new flow needs it (e.g. the `uploadDemo` method and the
-  optional `Match.source` field added for Flow B, and the `scanDemo`/`parseDemo`
-  methods + `DemoPlayer` type added for the real scan→pick→parse upload flow) so
-  the Fase 2 real-backend swap stays intact; never change or remove existing
-  fields/signatures.
-- No real audio, no real video — placeholders only (picsum/dicebear) this phase.
+- Below 768px, forms and paired actions stack; filters may scroll.
+- Cards collapse to one column without horizontal overflow.
+- Interactive targets are at least 40px and normally 44px.
+- Standard text contrast is at least 4.5:1; controls/focus at least 3:1.
+- Use `aria-current` for navigation, `aria-live` or `role=alert` for async
+  status/errors, and accessible names for icon actions.
+- Respect `prefers-reduced-motion` and `forced-colors`.
+- Never hide essential controls behind hover only; keyboard focus must reveal
+  equivalent actions.
+
+## Functional invariants
+
+- Keep `web/lib/api/*`, API field names, object URLs, polling, and local/cloud
+  routing stable unless the task explicitly changes behaviour.
+- Preserve `/upload` file input and roster flow.
+- Preserve accessible labels and existing E2E hooks such as `data-slot="card"`,
+  `data-testid="player-avatar"`, download/delete labels, and sticky reel action.
+- The match-detail highlight selector remains a vertical list; do not revive
+  the obsolete horizontal filmstrip contract.
+- Use real API data. Never fabricate progress, duration, output format, or
+  media availability merely to fill a design.

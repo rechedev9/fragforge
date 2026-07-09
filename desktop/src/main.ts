@@ -19,6 +19,8 @@ import * as https from 'node:https';
 import * as net from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { escapeHtml, psQuote } from './escaping';
+import { compareHLAEVersions, parseLatestHLAERelease } from './hlae-release';
+import { installBundledHLAEPatch } from './hlae-patch';
 import { validateWindowState, type WindowState } from './window-state';
 import { lastLines } from './log-tail';
 
@@ -102,10 +104,13 @@ interface DownloadOptions {
 
 // Third-party tools the pipeline needs at runtime but that cannot ship inside
 // the installer (size, licensing hygiene): they are provisioned into userData
-// on first boot from pinned release URLs with pinned sha256 digests, then
-// handed to the orchestrator via env vars (env always wins over its
-// auto-detection). Every download is best-effort: a failure just leaves that
-// feature unconfigured, the UI explains, and the next boot retries.
+// on first boot and handed to the orchestrator via env vars (env always wins
+// over its auto-detection). FFmpeg and yt-dlp use pinned release URLs and
+// sha256 digests. HLAE has a pinned fallback plus a bounded lookup of the
+// official advancedfx latest release, whose repository URL and GitHub-provided
+// sha256 digest are validated before download. Every download is best-effort:
+// a failure just leaves that feature unconfigured, the UI explains, and the
+// next boot retries.
 //
 // - HLAE (advancedfx, MIT): drives CS2 capture. Zip ships its LICENSES/.
 // - FFmpeg (BtbN autobuild, GPL): every render (reels and stream clips) shells
@@ -124,8 +129,6 @@ interface ToolSpec {
   kind: 'zip' | 'exe';
   exeRel: string;
   timeoutMs: number;
-  // Pre-tools-dir layout kept for installs provisioned by 0.2.11/0.2.12.
-  legacyDir?: () => string;
 }
 
 // Fires once per tool that actually needs a download (detail undefined), then
@@ -134,13 +137,12 @@ type StatusReporter = (name: ToolName, detail?: string) => void;
 
 const TOOLS: Record<ToolName, ToolSpec> = {
   hlae: {
-    version: '2.190.1',
-    url: 'https://github.com/advancedfx/advancedfx/releases/download/v2.190.1/hlae_2_190_1.zip',
-    sha256: 'b8c0a6d99201ba017e877c3ba95fd1c3a60b33dc1159218828c7c0a785e59ca3',
+    version: '2.190.2',
+    url: 'https://github.com/advancedfx/advancedfx/releases/download/v2.190.2/hlae_2_190_2.zip',
+    sha256: '2594d7cfb452ad0cec250f3c5e60c3d7209276de297efd0df2fa7ec0e8c874fa',
     kind: 'zip',
     exeRel: 'HLAE.exe',
     timeoutMs: 90_000,
-    legacyDir: () => path.join(app.getPath('userData'), 'hlae', '2.190.1'),
   },
   ffmpeg: {
     version: 'n8.1.2',
@@ -159,6 +161,40 @@ const TOOLS: Record<ToolName, ToolSpec> = {
     timeoutMs: 90_000,
   },
 };
+
+const HLAE_LATEST_RELEASE_API = 'https://api.github.com/repos/advancedfx/advancedfx/releases/latest';
+const HLAE_RELEASE_LOOKUP_TIMEOUT_MS = 5_000;
+
+async function resolveHLAEToolSpec(): Promise<ToolSpec> {
+  const fallback = TOOLS.hlae;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HLAE_RELEASE_LOOKUP_TIMEOUT_MS);
+  try {
+    const response = await fetch(HLAE_LATEST_RELEASE_API, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'FragForge-Studio',
+      },
+    });
+    if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+    const payload: unknown = await response.json();
+    const latest = parseLatestHLAERelease(payload);
+    if (latest === null) throw new Error('GitHub response did not contain a verified HLAE zip asset');
+    if (compareHLAEVersions(latest.version, fallback.version) < 0) {
+      throw new Error(`GitHub latest version ${latest.version} is older than pinned ${fallback.version}`);
+    }
+    if (latest.version !== fallback.version) {
+      logLine(`[tools] discovered newer HLAE ${latest.version} (pinned fallback ${fallback.version})\n`);
+    }
+    return { ...fallback, ...latest };
+  } catch (err) {
+    logLine(`[tools] HLAE release lookup failed, using pinned ${fallback.version}: ${String(err)}\n`);
+    return fallback;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * Downloads url to destPath, staging through `<destPath>.tmp` and renaming
@@ -241,15 +277,11 @@ const PROGRESS_REPORT_MIN_INTERVAL_MS = 1000;
  * the in-flight HTTP request is aborted (not just abandoned), so nothing
  * writes to disk after this function has already told its caller it failed.
  */
-async function provisionTool(name: ToolName, onStatus?: StatusReporter): Promise<string> {
-  const tool = TOOLS[name];
+async function provisionTool(name: ToolName, onStatus?: StatusReporter, override?: ToolSpec): Promise<string> {
+  const tool = override ?? TOOLS[name];
   const dir = path.join(toolsRoot(), name, tool.version);
   const exe = path.join(dir, tool.exeRel);
   if (fs.existsSync(exe)) return exe;
-  if (tool.legacyDir) {
-    const legacy = path.join(tool.legacyDir(), tool.exeRel);
-    if (fs.existsSync(legacy)) return legacy;
-  }
   // Only fires when a real download is about to start (cache hits above never
   // reach here), so the loading screen doesn't flash a status for instant boots.
   if (onStatus) onStatus(name);
@@ -332,12 +364,23 @@ const TOOL_LABELS: Record<ToolName, string> = { hlae: 'HLAE', ffmpeg: 'FFmpeg', 
  */
 async function provisionTools(onStatus?: StatusReporter): Promise<Record<string, string>> {
   if (process.platform !== 'win32') return {};
-  const [hlae, ffmpeg, ytdlp] = await Promise.all([
-    provisionTool('hlae', onStatus),
+  const hlaeSpec = await resolveHLAEToolSpec();
+  const [provisionedHLAE, ffmpeg, ytdlp] = await Promise.all([
+    provisionTool('hlae', onStatus, hlaeSpec),
     provisionTool('ffmpeg', onStatus),
     provisionTool('ytdlp', onStatus),
   ]);
   const env: Record<string, string> = {};
+  let hlae = provisionedHLAE;
+  if (hlae) {
+    try {
+      const status = installBundledHLAEPatch(hlae, hlaeSpec.version, resourcePath('hlae-patch'));
+      logLine(`[tools] HLAE ${hlaeSpec.version} FragForge hook: ${status}\n`);
+    } catch (err) {
+      logLine(`[tools] HLAE patch failed; capture stays unconfigured: ${String(err)}\n`);
+      hlae = '';
+    }
+  }
   if (hlae) env.ZV_HLAE_PATH = hlae;
   if (ffmpeg) {
     env.ZV_FFMPEG_PATH = ffmpeg;

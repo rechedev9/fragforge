@@ -28,6 +28,12 @@ leaves that feature unconfigured until the next launch. The window lands on
 `/matches` (the app shell/dashboard, not a single flow), since Studio has both
 the demo-upload path and the Twitch stream-clips path.
 
+HLAE 2.190.2 receives the capture-tested FragForge Source 2 hook bundled under
+`resources/hlae-patch`. Studio verifies its SHA-256 before and after installing
+it, preserves the official hook, and never applies it to a different HLAE
+version. The exact AdvancedFX source patch, license, and third-party notices
+ship beside the DLL.
+
 Capture still needs CS2 + HLAE installed on the machine (Windows + GPU); the app
 only removes the setup friction, not that requirement. Job data (demos,
 artifacts) is written under the per-user app data dir, not Program Files.

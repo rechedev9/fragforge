@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { Wordmark } from '@/components/brand/wordmark';
-import { SectionEyebrow } from '@/components/brand/section-eyebrow';
+import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { DemoDropzone } from '@/components/upload/demo-dropzone';
@@ -26,18 +26,21 @@ const PIPELINE_STEPS = [
   {
     n: '01',
     accent: 'text-primary',
+    badge: 'border-primary/35 bg-primary/10',
     title: 'ANÁLISIS AUTOMÁTICO',
     copy: 'Parseamos la demo y puntuamos cada ronda: clutches, aces, multi-kills.',
   },
   {
     n: '02',
     accent: 'text-primary',
+    badge: 'border-primary/35 bg-primary/10',
     title: 'ELIGES LAS JUGADAS',
     copy: 'Filmstrip con las mejores jugadas detectadas. Marca las que quieres en el reel.',
   },
   {
     n: '03',
-    accent: 'text-destructive',
+    accent: 'text-primary',
+    badge: 'border-primary/35 bg-primary/10',
     title: 'RENDER EN TU RIG',
     copy: 'Captura y edición en tu propio PC. 9:16 para Shorts o 16:9 para largo.',
   },
@@ -130,14 +133,16 @@ export default function UploadPage() {
   let cardContent: ReactNode;
   if (stage === 'scanning' || stage === 'parsing') {
     cardContent = (
-      <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
-        <Loader2 className="size-8 animate-spin text-primary" />
-        <div className="flex flex-col gap-1">
-          <p className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
+      <div role="status" aria-live="polite" className="flex min-h-[260px] flex-col items-center justify-center gap-5 px-4 py-12 text-center">
+        <span className="grid size-14 place-items-center border border-primary/35 bg-primary/10 text-primary shadow-[0_0_24px_color-mix(in_oklch,var(--primary)_14%,transparent)]">
+          <Loader2 className="size-6 animate-spin" />
+        </span>
+        <div className="flex flex-col gap-2">
+          <p className="font-[family-name:var(--font-display)] text-xl font-bold uppercase tracking-tight text-foreground">
             {stage === 'scanning' ? 'Escaneando el roster…' : 'Forjando highlights…'}
           </p>
           {fileName ? (
-            <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
+            <p className="inline-flex items-center justify-center gap-2 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
               <FileVideo className="size-4" />
               {fileName}
             </p>
@@ -154,19 +159,21 @@ export default function UploadPage() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden">
-      {/* Faint cyan glow. */}
+    <main className="relative min-h-screen overflow-x-hidden">
+      {/* Ambient light keeps the standalone upload entry visually connected to
+          the Studio shell without competing with the working surface. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-primary/10 blur-[160px]"
+        className="pointer-events-none absolute -top-52 left-1/2 h-[40rem] w-[48rem] -translate-x-1/2 rounded-full bg-primary/[0.09] blur-[180px]"
       />
+      <div aria-hidden className="pointer-events-none absolute top-[38rem] -right-40 size-[28rem] rounded-full bg-stream/[0.035] blur-[150px]" />
 
-      <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col px-6">
-        <header className="flex h-16 items-center justify-between">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[960px] flex-col px-4 sm:px-6 lg:px-8">
+        <header className="flex min-h-16 items-center justify-between border-b border-border/60 py-3">
           <Link href={homeHref} aria-label="Inicio de FragForge">
             <Wordmark />
           </Link>
-          <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
+          <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
             <Link href={homeHref}>
               <ArrowLeft className="size-4" />
               Volver
@@ -174,50 +181,59 @@ export default function UploadPage() {
           </Button>
         </header>
 
-        <div className="flex flex-1 flex-col justify-center py-12">
-          <div className="mb-8 max-w-xl">
-            <SectionEyebrow number={2} label="SUBIR DEMO" className="mb-2.5" />
-            <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold leading-none tracking-tight sm:text-[34px]">
-              {stage === 'picking' ? '¿A QUIÉN QUIERES CLIPEAR?' : 'ANALIZA CUALQUIER DEMO'}
-            </h1>
-            <p className="mt-3 text-sm text-muted-foreground">
-              {stage === 'picking' ? (
+        <div className="flex flex-1 flex-col py-8 sm:py-10">
+          <StudioPageHeader
+            number={2}
+            label="SUBIR DEMO"
+            title={stage === 'picking' ? '¿A QUIÉN QUIERES CLIPEAR?' : 'ANALIZA CUALQUIER DEMO'}
+            description={
+              stage === 'picking' ? (
                 <>Elige a un jugador de la demo y forjaremos sus mejores jugadas en un reel.</>
               ) : (
                 <>
                   Suelta un .dem — tuyo o de cualquiera — y forja sus mejores
                   jugadas en un reel. Sin login.
                 </>
-              )}
-            </p>
-          </div>
+              )
+            }
+          />
 
-          {stage === 'idle' ? (
-            <div className="flex flex-col gap-3">
-              <DemoDropzone onFile={onFile} />
-              {error ? <p className="text-sm text-destructive">{error}</p> : null}
-              <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                {PIPELINE_STEPS.map((step) => (
-                  <div key={step.n} className="border border-primary/15 bg-card/75 p-5">
-                    <div className={`font-[family-name:var(--font-mono)] text-xl ${step.accent}`}>
-                      {step.n}
-                    </div>
-                    <div className="mt-2 font-[family-name:var(--font-display)] text-[15px] font-bold text-foreground">
-                      {step.title}
-                    </div>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      {step.copy}
-                    </p>
-                  </div>
-                ))}
+          <div className="mt-7 sm:mt-8">
+            {stage === 'idle' ? (
+              <div className="flex flex-col gap-3">
+                <DemoDropzone onFile={onFile} />
+                {error ? (
+                  <p role="alert" className="border border-destructive/30 bg-destructive/[0.08] px-4 py-3 text-sm text-destructive">
+                    {error}
+                  </p>
+                ) : null}
+                <ol aria-label="Cómo funciona" className="mt-2 grid gap-3 md:grid-cols-3">
+                  {PIPELINE_STEPS.map((step) => (
+                    <li key={step.n} className="studio-panel flex min-h-[132px] items-start gap-3.5 p-4 sm:p-5">
+                      <span
+                        className={`grid size-9 shrink-0 place-items-center border font-[family-name:var(--font-mono)] text-sm ${step.accent} ${step.badge}`}
+                      >
+                        {step.n}
+                      </span>
+                      <div className="min-w-0">
+                        <h2 className="font-[family-name:var(--font-display)] text-sm font-bold leading-5 text-foreground">
+                          {step.title}
+                        </h2>
+                        <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
+                          {step.copy}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
               </div>
-            </div>
-          ) : (
-            <Card className="overflow-hidden p-6 sm:p-8">{cardContent}</Card>
-          )}
+            ) : (
+              <Card className="studio-panel-raised overflow-hidden p-4 sm:p-6">{cardContent}</Card>
+            )}
+          </div>
         </div>
 
-        <footer className="flex h-16 items-center font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.2em] text-muted-foreground/70">
+        <footer className="flex min-h-16 items-center border-t border-border/60 py-4 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.18em] text-muted-foreground/80">
           TÚ PONES EL PC Y LA GPU · NOSOTROS EL RESTO
         </footer>
       </div>

@@ -6,7 +6,7 @@
 /*
  * FragForge — piel "NEON HUD" (FragForge Anime, dirección 1a).
  * Fondo azul noche, primario cian #22d9ee, magenta #ff2d78 reservado para
- * REC/stream/likes/destructivo, violeta #8c5aff en charts. La app va forzada
+ * REC/stream/likes y rojo para errores/destructivo. La app va forzada
  * a oscuro (<html class="dark">), así que el bloque `.dark` es la fuente de
  * verdad y `:root` lo replica para que los tokens resuelvan sin la clase.
  */
@@ -35,13 +35,21 @@
   --secondary: oklch(0.267 0.033 259.6); /* navy #1c2636 */
   --secondary-foreground: oklch(0.983 0.011 226);
   --muted: oklch(0.229 0.03 259); /* navy #141d2b */
-  --muted-foreground: oklch(0.707 0.038 249.7); /* #8fa3b8 */
+  --muted-foreground: oklch(0.75 0.035 249.7); /* steel blue legible */
   --accent: oklch(0.27 0.052 262); /* navy cian-tintado #182640 */
   --accent-foreground: oklch(0.983 0.011 226);
-  --destructive: oklch(0.657 0.241 6.9); /* magenta #ff2d78 */
-  --destructive-foreground: oklch(0.956 0.025 352.5); /* #ffeaf2 */
-  --border: oklch(0.811 0.135 207.6 / 15%); /* hairline cian */
-  --input: oklch(0.811 0.135 207.6 / 20%);
+  --destructive: oklch(0.68 0.205 22); /* danger red #ff5a66 */
+  --destructive-foreground: oklch(0.985 0.01 22);
+  --brand-accent: oklch(0.657 0.241 6.9); /* wordmark micro-accent */
+  --stream: oklch(0.657 0.241 6.9); /* magenta #ff2d78 */
+  --stream-foreground: oklch(0.17 0.035 6.9);
+  --success: oklch(0.82 0.135 166); /* mint ready state */
+  --warning: oklch(0.82 0.16 78); /* amber expiry/warning */
+  --surface: oklch(0.164 0.026 263.5);
+  --surface-raised: oklch(0.205 0.038 262.5);
+  --border-strong: oklch(0.811 0.135 207.6 / 34%);
+  --border: oklch(0.811 0.135 207.6 / 20%); /* hairline cian */
+  --input: oklch(0.811 0.135 207.6 / 34%);
   --ring: oklch(0.811 0.135 207.6);
 
   --chart-1: oklch(0.811 0.135 207.6); /* cian #22d9ee */
@@ -72,13 +80,21 @@
   --secondary: oklch(0.267 0.033 259.6);
   --secondary-foreground: oklch(0.983 0.011 226);
   --muted: oklch(0.229 0.03 259);
-  --muted-foreground: oklch(0.707 0.038 249.7);
+  --muted-foreground: oklch(0.75 0.035 249.7);
   --accent: oklch(0.27 0.052 262);
   --accent-foreground: oklch(0.983 0.011 226);
-  --destructive: oklch(0.657 0.241 6.9);
-  --destructive-foreground: oklch(0.956 0.025 352.5);
-  --border: oklch(0.811 0.135 207.6 / 15%);
-  --input: oklch(0.811 0.135 207.6 / 20%);
+  --destructive: oklch(0.68 0.205 22);
+  --destructive-foreground: oklch(0.985 0.01 22);
+  --brand-accent: oklch(0.657 0.241 6.9);
+  --stream: oklch(0.657 0.241 6.9);
+  --stream-foreground: oklch(0.17 0.035 6.9);
+  --success: oklch(0.82 0.135 166);
+  --warning: oklch(0.82 0.16 78);
+  --surface: oklch(0.164 0.026 263.5);
+  --surface-raised: oklch(0.205 0.038 262.5);
+  --border-strong: oklch(0.811 0.135 207.6 / 34%);
+  --border: oklch(0.811 0.135 207.6 / 20%);
+  --input: oklch(0.811 0.135 207.6 / 34%);
   --ring: oklch(0.811 0.135 207.6);
 
   --chart-1: oklch(0.811 0.135 207.6);
@@ -119,6 +135,14 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-brand-accent: var(--brand-accent);
+  --color-stream: var(--stream);
+  --color-stream-foreground: var(--stream-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border-strong: var(--border-strong);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -161,6 +185,8 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -184,9 +210,11 @@
  */
 .neon-grid {
   background-image:
-    linear-gradient(color-mix(in oklch, var(--primary) 4%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in oklch, var(--primary) 4%, transparent) 1px, transparent 1px);
-  background-size: 48px 48px;
+    linear-gradient(color-mix(in oklch, var(--primary) 2.4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--primary) 2.4%, transparent) 1px, transparent 1px),
+    radial-gradient(900px 560px at 42% -12%, color-mix(in oklch, var(--primary) 5%, transparent), transparent 72%);
+  background-repeat: repeat, repeat, no-repeat;
+  background-size: 48px 48px, 48px 48px, 100% 100%;
 }
 
 /*
@@ -201,7 +229,7 @@
   pointer-events: none;
   background-image: repeating-linear-gradient(
     0deg,
-    rgba(255, 255, 255, 0.015) 0 1px,
+    rgba(255, 255, 255, 0.008) 0 1px,
     transparent 1px 4px
   );
 }
@@ -210,7 +238,7 @@
  * .neon-brackets — corner brackets del HUD en las esquinas superior-izquierda
  * e inferior-derecha. Requiere `position: relative` (o cualquier posicionado)
  * en el elemento. El color viene de `--neon-bracket-color` (cian por
- * defecto vía fallback; pon `[--neon-bracket-color:var(--destructive)]` para
+ * defecto vía fallback; pon `[--neon-bracket-color:var(--stream)]` para
  * la variante magenta de la ruta stream/REC). El fallback vive en el punto de
  * uso (::before/::after) en vez de en `.neon-brackets` mismo: globals.css no
  * está dentro de un `@layer`, así que cualquier declaración de
@@ -249,12 +277,67 @@
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
 }
 
+/* A clipped CTA cannot paint an outer ring beyond its polygon. The two-tone
+ * inset stays visible on both cyan-filled and dark-outline variants. */
+.neon-notch:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -4px;
+  box-shadow:
+    inset 0 0 0 2px var(--background),
+    inset 0 0 0 4px var(--ring);
+}
+
+@media (forced-colors: active) {
+  .neon-notch:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -4px;
+    box-shadow: none;
+  }
+}
+
 /*
  * .neon-glow — glow cian ambiental para elementos activos/CTA (botón primario,
  * nav activa, tile seleccionado). Aplícalo en el elemento, no globalmente.
  */
 .neon-glow {
-  box-shadow: 0 0 26px color-mix(in oklch, var(--primary) 35%, transparent);
+  box-shadow: 0 0 22px color-mix(in oklch, var(--primary) 22%, transparent);
+}
+
+@layer components {
+  /* Shared studio surfaces. The grid belongs to the canvas; content panels are
+   * deliberately more opaque so copy and controls remain crisp at 200% zoom.
+   * Keeping these in the components layer lets state utilities override them. */
+  .studio-panel {
+    position: relative;
+    border: 1px solid var(--border);
+    background:
+      linear-gradient(135deg, color-mix(in oklch, var(--primary) 3%, transparent), transparent 46%),
+      color-mix(in oklch, var(--surface) 94%, transparent);
+    box-shadow: 0 18px 48px oklch(0.04 0.02 260 / 0.28);
+  }
+
+  .studio-panel-raised {
+    border-color: var(--border-strong);
+    background:
+      linear-gradient(135deg, color-mix(in oklch, var(--primary) 5%, transparent), transparent 50%),
+      color-mix(in oklch, var(--surface-raised) 92%, transparent);
+  }
+
+  .studio-panel-interactive {
+    transition: border-color 160ms ease-out, background-color 160ms ease-out, transform 160ms ease-out;
+  }
+
+  .studio-panel-interactive:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+  }
+
+  @media (forced-colors: active) {
+    .studio-panel,
+    .studio-panel-raised {
+      border: 1px solid CanvasText;
+    }
+  }
 }
 
 /* .neon-pulse — pulso del punto REC (magenta) y del paso activo del pipeline. */

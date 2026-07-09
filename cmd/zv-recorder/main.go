@@ -7,6 +7,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"log"
 	"os"
 	"os/exec"
@@ -149,6 +153,11 @@ func run() error {
 		_ = writeResult(plan.OutputDir, result)
 		return err
 	}
+	if err := ensureDefaultAvatar(absCS2Exe); err != nil {
+		result.Error = err.Error()
+		_ = writeResult(plan.OutputDir, result)
+		return err
+	}
 	if err := ensureHLAEFFmpegConfig(absHLAEExe); err != nil {
 		result.Error = err.Error()
 		_ = writeResult(plan.OutputDir, result)
@@ -219,6 +228,11 @@ func run() error {
 	result.Artifacts = recording.CollectArtifacts(postCtx, plan, ffprobePath)
 	result.Artifacts = append(result.Artifacts, recording.MuxSegmentClips(postCtx, plan, result.Artifacts, ffmpegPath, ffprobePath)...)
 	result.Warnings = recording.ValidateArtifacts(plan, result.Artifacts)
+	if err := validateCaptureResult(result, absCS2Exe); err != nil {
+		result.Error = err.Error()
+		_ = writeResult(plan.OutputDir, result)
+		return err
+	}
 	return writeResult(plan.OutputDir, result)
 }
 
@@ -308,6 +322,43 @@ func validateExecutables(hlaeExe, cs2Exe string) error {
 			return fmt.Errorf("cs2.exe is already running; close it before recording")
 		}
 	}
+	return nil
+}
+
+func ensureDefaultAvatar(cs2Exe string) error {
+	gameDir := filepath.Clean(filepath.Join(filepath.Dir(cs2Exe), "..", ".."))
+	avatarPath := filepath.Join(gameDir, "csgo", "avatars", "default.png")
+	if _, err := os.Stat(avatarPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect default CS2 avatar: %w", err)
+	}
+
+	avatarDir := filepath.Dir(avatarPath)
+	if err := os.MkdirAll(avatarDir, 0o755); err != nil {
+		return fmt.Errorf("create default CS2 avatar directory: %w", err)
+	}
+
+	file, err := os.CreateTemp(avatarDir, "default-*.png")
+	if err != nil {
+		return fmt.Errorf("create default CS2 avatar: %w", err)
+	}
+	tempPath := file.Name()
+	defer os.Remove(tempPath)
+
+	img := image.NewNRGBA(image.Rect(0, 0, 32, 32))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.NRGBA{R: 64, G: 72, B: 88, A: 255}}, image.Point{}, draw.Src)
+	if err := png.Encode(file, img); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("encode default CS2 avatar: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close default CS2 avatar: %w", err)
+	}
+	if err := os.Rename(tempPath, avatarPath); err != nil {
+		return fmt.Errorf("install default CS2 avatar: %w", err)
+	}
+	log.Printf("installed missing CS2 default avatar at %s", avatarPath)
 	return nil
 }
 
@@ -451,6 +502,18 @@ func steamRootFromCS2Path(cs2Exe string) string {
 	}
 }
 
+func cs2ConsoleLogPath(cs2Exe string) string {
+	gameDir := filepath.Dir(filepath.Dir(filepath.Dir(cs2Exe)))
+	return filepath.Join(gameDir, "csgo", "console.log")
+}
+
+func validateCaptureResult(result recording.RecordingResult, cs2Exe string) error {
+	if err := recording.ValidateUploadResult(result); err != nil {
+		return fmt.Errorf("%w; check HLAE capture output and CS2 console log %q", err, cs2ConsoleLogPath(cs2Exe))
+	}
+	return nil
+}
+
 func ensureHLAEFFmpegConfig(hlaeExe string) error {
 	dir := filepath.Join(filepath.Dir(hlaeExe), "ffmpeg")
 	if _, err := os.Stat(dir); err != nil {
@@ -486,27 +549,45 @@ func locateHookDLL(hlaeExe string) (string, error) {
 }
 
 func waitForWindowsProcessRunAndExit(ctx context.Context, image string) error {
+	return waitForWindowsProcessRunAndExitWith(
+		ctx,
+		image,
+		60*time.Second,
+		500*time.Millisecond,
+		tasklistWindowTitle,
+		terminateWindowsProcess,
+	)
+}
+
+func waitForWindowsProcessRunAndExitWith(
+	ctx context.Context,
+	image string,
+	firstWait time.Duration,
+	pollInterval time.Duration,
+	status func(string) (bool, string, error),
+	terminate func(string) error,
+) error {
 	seen := false
-	firstDeadline := time.NewTimer(60 * time.Second)
+	firstDeadline := time.NewTimer(firstWait)
 	defer firstDeadline.Stop()
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return stopProcessAfterWaitFailure(image, ctx.Err(), seen, terminate)
 		case <-firstDeadline.C:
 			if !seen {
-				return fmt.Errorf("%s did not appear within 60 seconds", image)
+				return fmt.Errorf("%s did not appear within %s", image, firstWait)
 			}
 		case <-ticker.C:
-			running, title, err := tasklistWindowTitle(image)
+			running, title, err := status(image)
 			if err != nil {
-				return err
+				return stopProcessAfterWaitFailure(image, err, seen, terminate)
 			}
 			if isHookErrorWindowTitle(title) {
-				return &hookIncompatibleError{windowTitle: title}
+				return stopProcessAfterWaitFailure(image, &hookIncompatibleError{windowTitle: title}, true, terminate)
 			}
 			if running {
 				seen = true
@@ -517,6 +598,36 @@ func waitForWindowsProcessRunAndExit(ctx context.Context, image string) error {
 			}
 		}
 	}
+}
+
+func stopProcessAfterWaitFailure(image string, cause error, processMayBeRunning bool, terminate func(string) error) error {
+	if !processMayBeRunning {
+		return cause
+	}
+	if err := terminate(image); err != nil {
+		return fmt.Errorf("%w; stop %s after capture failure: %v", cause, image, err)
+	}
+	return cause
+}
+
+func terminateWindowsProcess(image string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	// #nosec G204 -- taskkill is fixed and image is the recorder-owned CS2 executable name.
+	out, err := exec.Command("taskkill", "/IM", image, "/T", "/F").CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	running, stateErr := processRunning(image)
+	if stateErr == nil && !running {
+		return nil
+	}
+	detail := strings.TrimSpace(string(out))
+	if detail == "" {
+		return fmt.Errorf("taskkill %s: %w", image, err)
+	}
+	return fmt.Errorf("taskkill %s: %w: %s", image, err, detail)
 }
 
 func processRunning(image string) (bool, error) {

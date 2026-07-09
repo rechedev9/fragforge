@@ -1,7 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import {
+  CircleCheck,
+  RefreshCw,
+  Settings2,
+  TriangleAlert,
+  WifiOff,
+  type LucideIcon,
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import type { CaptureReadiness as CaptureReadinessData, CaptureStatus } from '@/lib/api/types';
 import {
@@ -15,11 +22,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-const STATUS_META: Record<CaptureStatus, { label: string; text: string; hint: string }> = {
-  ready: { label: 'Lista', text: 'text-primary', hint: 'HLAE + CS2 detectado en este PC' },
-  warning: { label: 'Revisa rutas', text: 'text-amber-400', hint: 'Una herramienta de captura está configurada pero falta en disco.' },
-  unconfigured: { label: 'Configurar', text: 'text-destructive', hint: 'No se encontró HLAE + CS2 en este PC.' },
-  offline: { label: 'Sin conexión', text: 'text-muted-foreground', hint: 'Arranca tu orquestador local (zv serve).' },
+const STATUS_META: Record<CaptureStatus, { label: string; text: string; hint: string; icon: LucideIcon }> = {
+  ready: { label: 'Lista', text: 'text-success', hint: 'HLAE + CS2 detectados en este PC', icon: CircleCheck },
+  warning: { label: 'Revisa rutas', text: 'text-warning', hint: 'Una herramienta configurada no está disponible.', icon: TriangleAlert },
+  unconfigured: { label: 'Configurar', text: 'text-destructive', hint: 'No se encontró HLAE + CS2 en este PC.', icon: Settings2 },
+  offline: { label: 'Sin conexión', text: 'text-muted-foreground', hint: 'Arranca el servicio local de FragForge.', icon: WifiOff },
 };
 
 /** The three record tools, with a friendly name and a typical Windows path. */
@@ -56,6 +63,7 @@ export function CaptureReadiness() {
 
   const status: CaptureStatus = data?.status ?? 'offline';
   const meta = STATUS_META[status];
+  const StatusIcon = meta.icon;
   const toolState = new Map((data?.tools ?? []).map((t) => [t.name, t]));
 
   return (
@@ -63,16 +71,23 @@ export function CaptureReadiness() {
       <DialogTrigger asChild>
         <button
           type="button"
-          className="neon-brackets relative w-full border border-primary/25 bg-card/80 px-3.5 py-3 text-left transition-colors hover:bg-card group-data-[collapsible=icon]:hidden"
+          aria-label={`Captura: ${meta.label}`}
+          title={`Captura: ${meta.label}`}
+          className="studio-panel studio-panel-interactive neon-brackets relative w-full px-3.5 py-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar group-data-[collapsible=icon]:grid group-data-[collapsible=icon]:size-10 group-data-[collapsible=icon]:place-items-center group-data-[collapsible=icon]:p-0"
         >
-          <div className="flex items-center justify-between font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.18em]">
-            <span className="text-sidebar-foreground/60">Captura</span>
-            <span className={cn('inline-flex items-center gap-1.5', meta.text)}>
-              <span className="size-1.5 rounded-full bg-current shadow-[0_0_7px_currentColor]" />
-              {meta.label}
-            </span>
+          <div className="group-data-[collapsible=icon]:hidden">
+            <div className="flex items-center justify-between gap-3 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.16em]">
+              <span className="text-sidebar-foreground/75">Captura</span>
+              <span className={cn('inline-flex items-center gap-1.5', meta.text)}>
+                <StatusIcon className="size-3.5" aria-hidden />
+                {meta.label}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-[1.45] text-sidebar-foreground/75">{meta.hint}</p>
           </div>
-          <p className="mt-1.5 text-[10.5px] leading-snug text-sidebar-foreground/60">{meta.hint}</p>
+          <span className={cn('hidden group-data-[collapsible=icon]:block', meta.text)}>
+            <StatusIcon className="size-4" aria-hidden />
+          </span>
         </button>
       </DialogTrigger>
 
@@ -97,15 +112,15 @@ export function CaptureReadiness() {
               badge = { label: 'No encontrada', cls: 'bg-destructive/10 text-destructive' };
             }
             return (
-              <div key={tool.name} className="border border-border bg-card p-3">
+              <div key={tool.name} className="studio-panel p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-foreground">{tool.label}</span>
+                  <span className="text-[15px] font-medium text-foreground">{tool.label}</span>
                   <span className={cn('shrink-0 px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold uppercase tracking-wider', badge.cls)}>
                     {badge.label}
                   </span>
                 </div>
                 {found ? (
-                  <p className="mt-1 text-xs text-muted-foreground">Lista para usar.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Lista para usar.</p>
                 ) : (
                   <>
                     <p className="mt-1 text-xs text-muted-foreground">

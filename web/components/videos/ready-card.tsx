@@ -7,6 +7,7 @@ import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { formatCountdown } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
+import { PipelineSteps } from '@/components/brand/pipeline-steps';
 import {
   Dialog,
   DialogContent,
@@ -83,8 +84,11 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
 
   return (
     <>
-      <div data-slot="card" className="neon-brackets relative border border-primary/40 bg-card/80">
-        <div className="group relative aspect-video w-full overflow-hidden bg-muted">
+      <article
+        data-slot="card"
+        className="studio-panel studio-panel-raised studio-panel-interactive neon-brackets flex h-full flex-col"
+      >
+        <div className="group relative aspect-video w-full overflow-hidden border-b border-border bg-muted">
           {video.thumbnailUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- proxied reel cover, dynamic same-origin URL
             <img src={video.thumbnailUrl} alt="" className="size-full object-cover" />
@@ -93,26 +97,26 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
           )}
 
           {formatBadge ? (
-            <span className="absolute top-2 right-2 bg-background/80 px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.12em] text-primary/80">
+            <span className="absolute top-2.5 right-2.5 border border-primary/30 bg-background/90 px-2 py-1 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.12em] text-primary">
               {formatBadge}
             </span>
           ) : null}
 
           {video.published ? (
-            <div className="absolute top-2 left-2">
-              <Badge>
+            <div className="absolute top-2.5 left-2.5">
+              <Badge className="border-success/35 bg-success/15 text-success">
                 <Globe /> Publicado
               </Badge>
             </div>
           ) : null}
 
-          {/* hover overlay actions */}
-          <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background/70 opacity-0 backdrop-blur-[1px] transition-opacity duration-200 group-hover:opacity-100">
+          {/* Hover on precise pointers; always visible and actionable on touch. */}
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 bg-background/78 opacity-0 backdrop-blur-[1px] transition-opacity duration-200 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
             <button
               type="button"
               onClick={() => video.downloadUrl && setPlayerOpen(true)}
               disabled={!video.downloadUrl}
-              className="inline-flex items-center gap-1.5 border border-primary/40 bg-background/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-40"
+              className="inline-flex min-h-10 items-center gap-1.5 border border-primary/45 bg-background/85 px-4 text-xs font-semibold text-foreground outline-none transition-colors hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-40"
             >
               <Eye className="size-3.5" /> Ver
             </button>
@@ -120,7 +124,7 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
               <button
                 type="button"
                 onClick={handleShare}
-                className="inline-flex items-center gap-1.5 border border-primary/40 bg-background/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-primary/10"
+                className="inline-flex min-h-10 items-center gap-1.5 border border-primary/45 bg-background/85 px-4 text-xs font-semibold text-foreground outline-none transition-colors hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <Share2 className="size-3.5" /> Compartir
               </button>
@@ -128,27 +132,36 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 p-4">
+        <div className="flex flex-1 flex-col gap-4 p-4">
           <div className="min-w-0">
-            <p className="truncate font-[family-name:var(--font-display)] text-[14.5px] font-bold text-foreground">
+            <p className="truncate font-[family-name:var(--font-display)] text-base font-bold text-foreground">
               {video.title}
             </p>
-            <p className="mt-1 flex items-center gap-1.5 font-[family-name:var(--font-mono)] text-[9.5px] uppercase tracking-[0.16em] text-primary">
-              <span className="size-1.5 rounded-full bg-primary shadow-[0_0_7px_var(--primary)]" />
-              LISTO
+            <p className="mt-1.5 truncate font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.1em] text-muted-foreground">
+              {meta}
             </p>
           </div>
 
-          {video.availableForSec !== undefined ? (
-            <span className="inline-flex w-fit items-center gap-1.5 font-[family-name:var(--font-mono)] text-[10.5px] text-muted-foreground">
-              <Clock className="size-3.5" />
-              caduca en {formatCountdown(video.availableForSec)}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex min-h-7 items-center gap-1.5 border border-success/35 bg-success/10 px-2.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-success">
+              <span className="size-1.5 rounded-full bg-success shadow-[0_0_7px_var(--success)]" />
+              LISTO
             </span>
-          ) : null}
+            {video.availableForSec !== undefined ? (
+              <span className="inline-flex min-h-7 items-center gap-1.5 border border-warning/25 bg-warning/[0.06] px-2 font-[family-name:var(--font-mono)] text-[10px] text-warning">
+                <Clock className="size-3.5" />
+                caduca en {formatCountdown(video.availableForSec)}
+              </span>
+            ) : null}
+          </div>
 
-          <div className="flex items-center gap-2">
+          <div className="border-y border-border/70 py-3">
+            <PipelineSteps status={video.status} className="gap-x-2 text-[10px]" />
+          </div>
+
+          <div className="mt-auto grid grid-cols-[minmax(0,1fr)_minmax(0,0.78fr)_auto] items-center gap-2 border-t border-border/70 pt-4">
             {video.published ? (
-              <span className="neon-notch neon-glow flex flex-1 items-center justify-center gap-1.5 bg-primary py-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground">
+              <span className="flex min-h-10 items-center justify-center gap-1.5 border border-success/35 bg-success/10 px-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-success">
                 <Globe className="size-3.5" /> PUBLICADO
               </span>
             ) : (
@@ -156,7 +169,7 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
                 type="button"
                 onClick={publish}
                 disabled={publishing}
-                className="neon-notch flex-1 bg-primary py-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                className="neon-notch min-h-10 bg-primary px-3 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
               >
                 {publishing ? 'PUBLICANDO…' : 'PUBLICAR'}
               </button>
@@ -165,14 +178,14 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
               type="button"
               onClick={handleDownload}
               disabled={!video.downloadUrl}
-              className="flex flex-1 items-center justify-center gap-1.5 border border-primary/40 py-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary/90 transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-40"
+              className="flex min-h-10 items-center justify-center gap-1.5 border border-primary/40 px-3 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary transition-colors hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-40"
             >
               <Download className="size-3.5" /> MP4
             </button>
             <DeleteVideoButton video={video} onDeleted={() => onChange?.(video)} />
           </div>
         </div>
-      </div>
+      </article>
 
       <Dialog open={playerOpen} onOpenChange={setPlayerOpen}>
         <DialogContent className="max-w-md">

@@ -2,6 +2,8 @@ import { Fragment } from 'react';
 import { cn } from '@/lib/utils';
 import type { VideoStatus } from '@/lib/api/types';
 
+type PipelineStatus = Exclude<VideoStatus, 'failed'>;
+
 export type PipelineStepsProps = {
   status: VideoStatus;
   className?: string;
@@ -13,9 +15,10 @@ const STEPS = ['COLA', 'CAPTURA', 'EDICIÓN', 'LISTO'] as const;
 /**
  * Index of the stage a status sits at:
  * queued→COLA, recording→CAPTURA, composing→EDICIÓN, ready→LISTO.
- * `failed` keeps the bar but marks the active stage as errored.
+ * A generic failed status is intentionally not mapped because it carries no
+ * reliable failed-stage data.
  */
-function activeIndex(status: VideoStatus): number {
+function activeIndex(status: PipelineStatus): number {
   switch (status) {
     case 'queued':
       return 0;
@@ -25,8 +28,6 @@ function activeIndex(status: VideoStatus): number {
       return 2;
     case 'ready':
       return 3;
-    case 'failed':
-      return 2;
   }
 }
 
@@ -34,12 +35,13 @@ function activeIndex(status: VideoStatus): number {
  * PipelineSteps — the hero of the product story, NEON HUD style: a mono
  * COLA ▸ CAPTURA ▸ EDICIÓN ▸ LISTO line. The active step glows (magenta while
  * capturing — the REC color — cyan otherwise, per the skin's color rules);
- * done steps are dim, future steps dimmer. `failed` paints the active step
- * magenta. Honors prefers-reduced-motion (pulse disabled in CSS).
+ * done steps are dim and future steps dimmer. Generic failures render no
+ * tracker rather than inventing a failed stage. Honors prefers-reduced-motion.
  */
 export function PipelineSteps({ status, className }: PipelineStepsProps) {
+  if (status === 'failed') return null;
+
   const active = activeIndex(status);
-  const failed = status === 'failed';
   const done = status === 'ready';
 
   return (
@@ -52,7 +54,7 @@ export function PipelineSteps({ status, className }: PipelineStepsProps) {
       {STEPS.map((label, i) => {
         const isDone = i < active || (done && i === active);
         const isActive = i === active && !done;
-        const isMagenta = failed || i === 1; // failed step or CAPTURA (the REC stage)
+        const isMagenta = i === 1; // CAPTURA is the REC stage.
 
         return (
           <Fragment key={label}>
@@ -65,9 +67,9 @@ export function PipelineSteps({ status, className }: PipelineStepsProps) {
               className={cn(
                 isActive &&
                   (isMagenta
-                    ? 'text-destructive [text-shadow:0_0_10px_color-mix(in_oklch,var(--destructive)_60%,transparent)]'
+                    ? 'text-stream [text-shadow:0_0_10px_color-mix(in_oklch,var(--stream)_60%,transparent)]'
                     : 'text-primary [text-shadow:0_0_10px_color-mix(in_oklch,var(--primary)_60%,transparent)]'),
-                isActive && !failed && 'neon-pulse',
+                isActive && 'neon-pulse',
                 !isActive && isDone && (done && i === active ? 'text-primary' : 'text-muted-foreground'),
                 !isActive && !isDone && 'text-muted-foreground/60',
               )}

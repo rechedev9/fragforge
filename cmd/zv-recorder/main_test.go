@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rechedev9/fragforge/internal/recording"
 )
@@ -25,6 +30,46 @@ func TestCS2LaunchCommandLineUsesWindowedMode(t *testing.T) {
 	}
 	if strings.Index(got, "-windowed") > strings.Index(got, "-w 1920") {
 		t.Fatalf("cs2LaunchCommandLine() = %q, want -windowed before resolution flags", got)
+	}
+}
+
+func TestEnsureDefaultAvatarCreatesValidPNGAndPreservesExistingFile(t *testing.T) {
+	root := t.TempDir()
+	cs2Exe := filepath.Join(root, "game", "bin", "win64", "cs2.exe")
+	avatarPath := filepath.Join(root, "game", "csgo", "avatars", "default.png")
+
+	if err := ensureDefaultAvatar(cs2Exe); err != nil {
+		t.Fatalf("ensureDefaultAvatar() error = %v", err)
+	}
+	file, err := os.Open(avatarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := png.DecodeConfig(file)
+	closeErr := file.Close()
+	if err != nil {
+		t.Fatalf("decode generated avatar: %v", err)
+	}
+	if closeErr != nil {
+		t.Fatalf("close generated avatar: %v", closeErr)
+	}
+	if config.Width != 32 || config.Height != 32 {
+		t.Fatalf("generated avatar dimensions = %dx%d, want 32x32", config.Width, config.Height)
+	}
+
+	existing := []byte("existing avatar")
+	if err := os.WriteFile(avatarPath, existing, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureDefaultAvatar(cs2Exe); err != nil {
+		t.Fatalf("ensureDefaultAvatar() with existing file error = %v", err)
+	}
+	got, err := os.ReadFile(avatarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(existing) {
+		t.Fatalf("existing avatar = %q, want preserved %q", got, existing)
 	}
 }
 
@@ -183,6 +228,74 @@ func TestParseTasklistVerboseCSV(t *testing.T) {
 				t.Errorf("title = %q, want %q", gotTitle, tt.wantTitle)
 			}
 		})
+	}
+}
+
+func TestWaitForWindowsProcessRunAndExitStopsCS2OnHookError(t *testing.T) {
+	var stopped string
+	status := func(image string) (bool, string, error) {
+		return true, "Error - AfxHookSource2", nil
+	}
+	terminate := func(image string) error {
+		stopped = image
+		return nil
+	}
+
+	err := waitForWindowsProcessRunAndExitWith(
+		context.Background(),
+		"cs2.exe",
+		time.Second,
+		time.Millisecond,
+		status,
+		terminate,
+	)
+	var hookErr *hookIncompatibleError
+	if !errors.As(err, &hookErr) {
+		t.Fatalf("error = %v, want hookIncompatibleError", err)
+	}
+	if stopped != "cs2.exe" {
+		t.Fatalf("terminated image = %q, want cs2.exe", stopped)
+	}
+}
+
+func TestWaitForWindowsProcessRunAndExitReportsCleanupFailure(t *testing.T) {
+	wantCleanupErr := errors.New("access denied")
+	status := func(image string) (bool, string, error) {
+		return true, "Error - AfxHookSource2", nil
+	}
+	terminate := func(image string) error {
+		return wantCleanupErr
+	}
+
+	err := waitForWindowsProcessRunAndExitWith(
+		context.Background(),
+		"cs2.exe",
+		time.Second,
+		time.Millisecond,
+		status,
+		terminate,
+	)
+	var hookErr *hookIncompatibleError
+	if !errors.As(err, &hookErr) {
+		t.Fatalf("error = %v, want hookIncompatibleError", err)
+	}
+	for _, want := range []string{"stop cs2.exe", "access denied"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err, want)
+		}
+	}
+}
+
+func TestValidateCaptureResultIncludesConsoleLog(t *testing.T) {
+	cs2 := filepath.FromSlash("C:/Steam/game/bin/win64/cs2.exe")
+	err := validateCaptureResult(recording.RecordingResult{}, cs2)
+	if err == nil {
+		t.Fatal("validateCaptureResult() error = nil, want missing clips error")
+	}
+	for _, want := range []string{"recording result has no segment clips", strconv.Quote(filepath.FromSlash("C:/Steam/game/csgo/console.log"))} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("validateCaptureResult() error = %q, want %q", err, want)
+		}
 	}
 }
 

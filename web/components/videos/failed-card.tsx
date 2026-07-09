@@ -28,26 +28,34 @@ export function FailedCard({ video, onChange }: { video: Video; onChange: () => 
   }
 
   return (
-    <div className="flex flex-row items-center gap-4 border border-destructive/40 bg-card/80 py-4 pr-5 pl-4">
-      <div className="grid size-10 shrink-0 place-items-center border border-destructive/40 bg-destructive/10">
-        <AlertTriangle className="size-5 text-destructive" />
+    <div className="studio-panel neon-brackets flex flex-col gap-4 border-destructive/45 px-4 py-4 [--neon-bracket-color:var(--destructive)] sm:flex-row sm:items-center sm:px-5">
+      <div className="grid size-12 shrink-0 place-items-center border border-destructive/45 bg-destructive/10">
+        <AlertTriangle className="size-5 text-destructive" aria-hidden />
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="truncate font-[family-name:var(--font-display)] text-[14.5px] font-bold text-foreground">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex min-h-7 items-center border border-destructive/35 bg-destructive/10 px-2.5 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.14em] text-destructive">
+            ERROR DE PIPELINE
+          </span>
+          <p className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.1em] text-muted-foreground">
+            {video.map}
+            {video.score ? ` · ${video.score}` : ''}
+          </p>
+        </div>
+        <p className="mt-2 truncate font-[family-name:var(--font-display)] text-base font-bold text-foreground">
           {video.title}
         </p>
-        <p className="font-[family-name:var(--font-mono)] text-sm tabular-nums text-muted-foreground">
-          {video.map}
-          {video.score ? ` · ${video.score}` : ''}
-        </p>
-        <p className="mt-1 line-clamp-2 text-sm text-destructive">
+        <p className="mt-1 line-clamp-2 text-sm leading-5 text-destructive">
           {video.failureReason ?? 'El reel falló en tu equipo.'}
+        </p>
+        <p className="mt-3 border-t border-destructive/20 pt-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Reintenta para retomar desde la etapa que falló
         </p>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
-        <Button variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
+      <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
+        <Button className="flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
           <RotateCcw className="size-4" />
           {retrying ? 'Reintentando…' : 'Reintentar'}
         </Button>

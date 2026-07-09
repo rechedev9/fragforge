@@ -53,7 +53,9 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 	}
 	for _, want := range []string{
 		`mirv.events.clientFrameStageNotify.on`,
+		`if (!mirv.isPlayingDemo()) return;`,
 		`mirv.getDemoTick()`,
+		`if (tick === undefined || tick < 0) return;`,
 		`tick >= item.tick`,
 		`fired[item.key] = true`,
 		`cl_demo_predict 0`,
@@ -73,7 +75,6 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 		"\"target\": 21766",
 		"\"target\": 31426",
 		"mirv.exec(`demo_gototick ${s.target}`)",
-		`if (tick <= 0) return;`,
 		`demoui`,
 		`mirv_streams record fps 60`,
 		`mirv_streams record screen enabled 1`,
