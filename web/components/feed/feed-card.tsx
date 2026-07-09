@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 export type FeedCardProps = {
@@ -32,39 +33,50 @@ export function FeedCard({ item }: FeedCardProps) {
   const initials = item.author.slice(0, 2).toUpperCase();
 
   return (
-    <figure className="group border border-primary/14 bg-card/80">
+    <figure className="studio-panel studio-panel-interactive group overflow-hidden">
       <div className="relative aspect-video overflow-hidden bg-muted">
         {/* eslint-disable-next-line @next/next/no-img-element -- remote seed thumbnail */}
         <img
           src={item.thumbnailUrl}
           alt=""
-          className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
+          loading="lazy"
+          decoding="async"
+          className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.035]"
         />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/75 via-transparent to-background/10" />
+        <span className="pointer-events-none absolute left-3 top-3 border border-primary/35 bg-background/80 px-2.5 py-1 font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.12em] text-foreground backdrop-blur-sm">
+          {item.map}
+        </span>
 
-        {/* click-to-play overlay */}
         <button
           type="button"
           onClick={() => setPlayerOpen(true)}
           aria-label={`Reproducir ${item.title}`}
-          className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 focus-visible:opacity-100 group-hover:opacity-100"
+          className="absolute inset-0 flex items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
-          <span className="flex size-11 items-center justify-center rounded-full border border-white/40 bg-background/50 text-foreground">
-            <Play className="ml-0.5 size-4 fill-current" aria-hidden />
+          <span className="flex size-12 items-center justify-center rounded-full border border-white/45 bg-background/65 text-foreground shadow-lg backdrop-blur-sm transition-all group-hover:scale-105 group-hover:border-primary group-hover:text-primary">
+            <Play className="ml-0.5 size-5 fill-current" aria-hidden />
           </span>
         </button>
       </div>
 
-      <div className="flex flex-col gap-1.5 p-3.5">
-        <h3 className="line-clamp-2 font-[family-name:var(--font-display)] text-sm font-bold leading-snug text-foreground">
-          {item.title}
-        </h3>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <Avatar className="size-5 rounded-none">
+      <figcaption className="flex flex-col gap-4 p-4">
+        <div className="min-w-0">
+          <h3 className="line-clamp-2 font-[family-name:var(--font-display)] text-lg font-bold leading-snug text-foreground">
+            {item.title}
+          </h3>
+          <p className="mt-1 font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.1em] text-muted-foreground">
+            {timeAgo(item.createdAt)}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-border/65 pt-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Avatar className="size-8 rounded-none border border-border-strong">
               <AvatarImage src={item.authorAvatarUrl} alt={item.author} />
-              <AvatarFallback className="rounded-none text-[0.55rem]">{initials}</AvatarFallback>
+              <AvatarFallback className="rounded-none text-xs">{initials}</AvatarFallback>
             </Avatar>
-            <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70">
+            <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-xs tracking-[0.08em] text-muted-foreground">
               @{item.author}
             </span>
           </div>
@@ -73,13 +85,13 @@ export function FeedCard({ item }: FeedCardProps) {
             onClick={() => setLiked((v) => !v)}
             aria-pressed={liked}
             aria-label={liked ? 'Quitar me gusta' : 'Me gusta'}
-            className="inline-flex shrink-0 items-center gap-1 font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-destructive"
+            className="inline-flex h-11 shrink-0 items-center gap-2 border border-stream/35 bg-stream/[0.06] px-3 font-[family-name:var(--font-mono)] text-xs tabular-nums text-stream outline-none transition-colors hover:border-stream/65 hover:bg-stream/10 focus-visible:ring-2 focus-visible:ring-stream focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
+            <Heart className={cn('size-4', liked && 'fill-current')} aria-hidden />
             {likeCount.toLocaleString()}
           </button>
         </div>
-      </div>
+      </figcaption>
 
       <Dialog open={playerOpen} onOpenChange={setPlayerOpen}>
         <DialogContent className="max-w-md">

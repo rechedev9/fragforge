@@ -17,8 +17,8 @@ const HeroThree = dynamic(() => import('@/components/login/hero-three'), {
 });
 
 /** The four HUD corner brackets of a highlighted route card. */
-function CardCorners({ color }: { color: 'primary' | 'destructive' }) {
-  const b = color === 'primary' ? 'border-primary' : 'border-destructive';
+function CardCorners({ color }: { color: 'primary' | 'stream' }) {
+  const b = color === 'primary' ? 'border-primary' : 'border-stream';
   return (
     <>
       <span aria-hidden className={`absolute -top-px -left-px size-4 border-t-2 border-l-2 ${b}`} />
@@ -82,7 +82,7 @@ export default function LoginPage() {
         className="pointer-events-none absolute inset-0 z-[1]"
         style={{
           background:
-            'radial-gradient(900px 500px at 50% -10%, color-mix(in oklch, var(--primary) 10%, transparent), transparent 65%), radial-gradient(700px 400px at 85% 105%, color-mix(in oklch, var(--destructive) 9%, transparent), transparent 60%)',
+            'radial-gradient(900px 500px at 50% -10%, color-mix(in oklch, var(--primary) 10%, transparent), transparent 65%), radial-gradient(700px 400px at 85% 105%, color-mix(in oklch, var(--stream) 9%, transparent), transparent 60%)',
         }}
       />
 
@@ -144,10 +144,10 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <div className="relative flex-1 border border-destructive/40 bg-destructive/10 p-7 pb-6">
-            <CardCorners color="destructive" />
+          <div className="relative flex-1 border border-stream/40 bg-stream/10 p-7 pb-6">
+            <CardCorners color="stream" />
             <div className="flex items-center justify-between font-[family-name:var(--font-mono)]">
-              <span className="text-xs tracking-[0.24em] text-destructive">02 / STREAM</span>
+              <span className="text-xs tracking-[0.24em] text-stream">02 / STREAM</span>
               <span className="text-[10px] tracking-[0.14em] text-muted-foreground/70">9:16 · 16:9</span>
             </div>
             <h2 className="mt-4 font-[family-name:var(--font-display)] text-[28px] font-bold leading-none text-foreground">
@@ -160,7 +160,7 @@ export default function LoginPage() {
             <div className="mt-5">
               <Link
                 href="/streams"
-                className="neon-notch inline-flex h-11 items-center border-[1.5px] border-destructive px-6 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-destructive transition-colors hover:bg-destructive/15"
+                className="neon-notch inline-flex h-11 items-center border-[1.5px] border-stream px-6 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-stream transition-colors hover:bg-stream/15"
               >
                 PEGAR ENLACE
               </Link>

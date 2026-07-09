@@ -312,9 +312,9 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         <section className="flex flex-col gap-4">
           <SectionEyebrow label="MÚSICA (OPCIONAL)" />
           {songTitle ? (
-            <div className="flex items-center justify-between gap-3 border border-destructive/30 bg-card px-5 py-4">
+            <div className="flex items-center justify-between gap-3 border border-stream/30 bg-card px-5 py-4">
               <div className="flex min-w-0 items-center gap-3">
-                <Music className="size-5 shrink-0 text-destructive" />
+                <Music className="size-5 shrink-0 text-stream" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">{songTitle}</p>
                   <p className="text-xs text-muted-foreground">Música añadida</p>

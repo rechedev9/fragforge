@@ -65,7 +65,7 @@ export function PipelineSteps({ status, className }: PipelineStepsProps) {
               className={cn(
                 isActive &&
                   (isMagenta
-                    ? 'text-destructive [text-shadow:0_0_10px_color-mix(in_oklch,var(--destructive)_60%,transparent)]'
+                    ? 'text-stream [text-shadow:0_0_10px_color-mix(in_oklch,var(--stream)_60%,transparent)]'
                     : 'text-primary [text-shadow:0_0_10px_color-mix(in_oklch,var(--primary)_60%,transparent)]'),
                 isActive && !failed && 'neon-pulse',
                 !isActive && isDone && (done && i === active ? 'text-primary' : 'text-muted-foreground'),

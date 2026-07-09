@@ -6,8 +6,11 @@ import {
   Captions,
   Download,
   Film,
+  Link2,
   Loader2,
+  MonitorPlay,
   Plus,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Twitch,
@@ -28,6 +31,7 @@ import { api } from '@/lib/api';
 import type { Song } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
+import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -326,8 +330,8 @@ export default function StreamsPage() {
     );
   } else if (stage === 'acquiring') {
     stageContent = (
-      <div className="flex flex-col items-center justify-center gap-4 border border-destructive/30 bg-card/80 p-6 py-14 text-center sm:p-8">
-        <Loader2 className="size-8 animate-spin text-destructive" />
+      <div role="status" aria-live="polite" className="studio-panel flex max-w-4xl flex-col items-center justify-center gap-4 p-6 py-14 text-center sm:p-8">
+        <Loader2 className="size-8 animate-spin text-stream" />
         <div className="flex flex-col gap-1">
           <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
             Descargando {job?.title || 'el clip'}…
@@ -338,7 +342,7 @@ export default function StreamsPage() {
     );
   } else if (stage === 'failed') {
     stageContent = (
-      <div className="flex flex-col items-center justify-center gap-4 border border-destructive/30 bg-card/80 p-6 py-14 text-center sm:p-8">
+      <div role="alert" className="studio-panel flex max-w-4xl flex-col items-center justify-center gap-4 border-destructive/40 p-6 py-14 text-center sm:p-8">
         <AlertTriangle className="size-8 text-destructive" />
         <div className="flex flex-col gap-1">
           <p className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-foreground">
@@ -375,16 +379,18 @@ export default function StreamsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-7">
-      <header className="flex flex-col gap-2.5">
-        <SectionEyebrow number={3} label="CLIPS DE STREAM" accent="magenta" />
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold leading-none tracking-tight text-foreground sm:text-[34px]">
-          DE STREAM A SHORT
-        </h1>
-        <p className="max-w-xl text-sm text-muted-foreground">
+    <div className="flex flex-col gap-8">
+      <StudioPageHeader
+        number={3}
+        label="CLIPS DE STREAM"
+        accent="magenta"
+        title="DE STREAM A SHORT"
+        description={
+          <p>
           Pega un clip de Twitch o YouTube — o sube un MP4 — y córtalo en vertical con tu facecam.
-        </p>
-      </header>
+          </p>
+        }
+      />
 
       {stageContent}
     </div>
@@ -413,78 +419,99 @@ function SourceCard({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="neon-brackets [--neon-bracket-color:var(--destructive)] relative max-w-2xl border border-destructive/30 bg-[color-mix(in_oklch,var(--destructive)_6%,var(--card))] p-5 sm:p-6">
-      <SectionEyebrow label="FUENTE" accent="magenta" />
+    <div className="studio-panel studio-panel-raised neon-brackets [--neon-bracket-color:var(--stream)] relative max-w-5xl p-5 sm:p-7">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-stretch">
+        <div>
+          <SectionEyebrow label="FUENTE" accent="magenta" />
+          <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+            Importa el vídeo completo. En el siguiente paso eliges encuadre, rangos, música y efectos.
+          </p>
 
-      <div className="mt-4 flex flex-col gap-5">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="stream-title">Título (opcional)</Label>
-          <Input
-            id="stream-title"
-            placeholder="Clutch 1v5 en pistola"
-            value={title}
-            disabled={submitting}
-            onChange={(e) => onTitleChange(e.target.value)}
-            className="rounded-none"
-          />
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="stream-url">URL de clip o VOD de Twitch</Label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <div className="relative flex-1">
-              <Twitch className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <div className="mt-6 flex flex-col gap-5">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="stream-title" className="text-[13px]">Título (opcional)</Label>
               <Input
-                id="stream-url"
-                placeholder="https://clips.twitch.tv/…"
-                value={sourceUrl}
+                id="stream-title"
+                placeholder="Clutch 1v5 en pistola"
+                value={title}
                 disabled={submitting}
-                onChange={(e) => onSourceUrlChange(e.target.value)}
-                className="rounded-none pl-9"
+                onChange={(e) => onTitleChange(e.target.value)}
               />
             </div>
-            <button
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="stream-url" className="text-[13px]">URL de clip o VOD de Twitch o YouTube</Label>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <div className="relative flex-1">
+                  <Link2 className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="stream-url"
+                    placeholder="https://clips.twitch.tv/…"
+                    value={sourceUrl}
+                    disabled={submitting}
+                    onChange={(e) => onSourceUrlChange(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  onClick={onSubmitUrl}
+                  disabled={submitting}
+                  className="bg-stream text-stream-foreground shadow-stream/15 hover:bg-stream/90"
+                >
+                  {submitting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                  TRAER CLIP
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3.5 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.18em] text-muted-foreground">
+              <div className="h-px flex-1 bg-border" />
+              O USA UN ARCHIVO LOCAL
+              <div className="h-px flex-1 bg-border" />
+            </div>
+
+            <Button
               type="button"
-              onClick={onSubmitUrl}
+              variant="outline"
               disabled={submitting}
-              className="neon-notch inline-flex items-center justify-center gap-1.5 bg-destructive px-5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-[#1a0410] transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full border-dashed border-stream/35 hover:border-stream/60 hover:bg-stream/8"
             >
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              TRAER CLIP
-            </button>
+              <UploadCloud className="size-4" />
+              SUBIR UN MP4
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="video/mp4,.mp4"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (file) onSubmitFile(file);
+              }}
+            />
+
+            {error ? <p role="alert" className="text-sm leading-6 text-destructive">{error}</p> : null}
           </div>
         </div>
 
-        <div className="flex items-center gap-3.5 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.2em] text-muted-foreground">
-          <div className="h-px flex-1 bg-white/10" />
-          O
-          <div className="h-px flex-1 bg-white/10" />
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            disabled={submitting}
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center justify-center gap-2 border border-dashed border-white/20 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-semibold text-muted-foreground transition-colors hover:border-destructive/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          >
-            <UploadCloud className="size-4" />
-            SUBIR UN MP4
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="video/mp4,.mp4"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = '';
-              if (file) onSubmitFile(file);
-            }}
-          />
-        </div>
-
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        <aside className="flex min-h-64 flex-col justify-between border border-stream/20 bg-background/35 p-5">
+          <div>
+            <div className="flex items-center justify-between gap-3 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              <span>Salida</span>
+              <span className="text-stream">9:16 · 1080p</span>
+            </div>
+            <div className="mx-auto mt-5 grid aspect-[9/16] h-36 place-items-center border border-stream/30 bg-[linear-gradient(180deg,color-mix(in_oklch,var(--stream)_10%,transparent),transparent)]">
+              <MonitorPlay className="size-7 text-stream" aria-hidden />
+            </div>
+          </div>
+          <div className="mt-6 space-y-3 text-sm leading-5 text-muted-foreground">
+            <p className="flex gap-2.5"><Twitch className="mt-0.5 size-4 shrink-0 text-stream" aria-hidden /> Twitch y YouTube compatibles</p>
+            <p className="flex gap-2.5"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden /> Procesado en este PC</p>
+          </div>
+        </aside>
       </div>
     </div>
   );
@@ -534,7 +561,7 @@ function StreamEditor({
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
       <div className="flex flex-col gap-[18px]">
-        <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
+        <div className="studio-panel p-5 sm:p-6">
           <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <SectionEyebrow label="LAYOUT" />
@@ -555,7 +582,7 @@ function StreamEditor({
                     aria-pressed={selected}
                     className={cn(
                       'flex items-center gap-3 border p-3 text-left transition-colors disabled:pointer-events-none disabled:opacity-50',
-                      selected ? 'border-[1.5px] border-destructive bg-destructive/[0.07]' : 'border-white/14 hover:border-white/25',
+                      selected ? 'border-[1.5px] border-stream bg-stream/[0.07]' : 'border-white/14 hover:border-white/25',
                     )}
                   >
                     <LayoutGlyph variant={v.value} selected={selected} />
@@ -600,11 +627,11 @@ function StreamEditor({
           </div>
         </div>
 
-        <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
+        <div className="studio-panel p-5 sm:p-6">
           <ClipEditor clips={plan.clips} onChange={setClips} disabled={busy} />
         </div>
 
-        <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
+        <div className="studio-panel p-5 sm:p-6">
           <div className="flex flex-col gap-4">
             <SectionEyebrow label="SUBTÍTULOS" />
             <div className="flex flex-wrap items-center gap-3">
@@ -624,7 +651,7 @@ function StreamEditor({
                   value={plan.captions?.language ?? 'auto'}
                   disabled={busy}
                   onChange={(e) => setLanguage(e.target.value)}
-                  className="h-9 rounded-none border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50"
+                  className="h-11 rounded-none border border-input bg-surface/80 px-3.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
                 >
                   <option value="auto">Detección automática</option>
                   <option value="es">Español</option>
@@ -687,7 +714,7 @@ function StreamEditor({
  * proportion, a stacked triptych, or a solid full-frame block), matching the
  * mockup's mini icon next to each layout option. Purely decorative. */
 function LayoutGlyph({ variant, selected }: { variant: StreamVariant; selected: boolean }) {
-  const tone = selected ? 'bg-destructive' : 'bg-white/25';
+  const tone = selected ? 'bg-stream' : 'bg-white/25';
   const dim = 'bg-white/12';
 
   let regions: ReactNode;
@@ -739,7 +766,7 @@ function ClipEditor({
           type="button"
           onClick={addClip}
           disabled={disabled}
-          className="inline-flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.14em] text-destructive transition-opacity hover:opacity-80 disabled:pointer-events-none disabled:opacity-40"
+          className="inline-flex min-h-10 items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.14em] text-stream transition-opacity hover:opacity-80 disabled:pointer-events-none disabled:opacity-40"
         >
           <Plus className="size-3.5" />
           AÑADIR
@@ -750,7 +777,7 @@ function ClipEditor({
         {clips.map((clip, i) => {
           const invalid = !(clip.end_seconds > clip.start_seconds);
           return (
-            <div key={clip.id} className="flex flex-col gap-2 border border-white/10 bg-card/40 p-3">
+            <div key={clip.id} className="flex flex-col gap-2 border border-border bg-background/30 p-4">
               <div className="flex flex-wrap items-end gap-2">
                 <div className="flex flex-col gap-1">
                   <Label htmlFor={`${clip.id}-start`} className="text-xs text-muted-foreground">
@@ -831,7 +858,7 @@ function RenderResults({
   if (!renderState) return null;
 
   return (
-    <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
+    <div className="studio-panel p-5 sm:p-6">
       <div className="flex flex-col gap-4">
         <SectionEyebrow label="SHORTS RENDERIZADOS" count={renderState.videos.length} />
 
@@ -934,7 +961,7 @@ function MusicAndEffectsCard({
   const grade = plan.effects?.grade ?? false;
 
   return (
-    <div className="border border-primary/14 bg-card/75 p-5 sm:p-[22px]">
+    <div className="studio-panel p-5 sm:p-6">
       <div className="flex flex-col gap-4">
         <SectionEyebrow label="MÚSICA Y EFECTOS" />
 

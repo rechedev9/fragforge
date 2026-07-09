@@ -6,12 +6,13 @@ export type FeedGridProps = {
   items: FeedItem[];
 };
 
-/** A uniform 16:9-thumbnail grid of community reels, per the NEON HUD mockup
- * (a fixed grid, not a masonry — every card gets the same thumbnail height
- * regardless of the underlying render's aspect ratio). */
+/** A responsive, uniform 16:9-thumbnail grid of community reels. */
 export function FeedGrid({ items }: FeedGridProps) {
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+    <div
+      className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3"
+      aria-label="Reels de la comunidad"
+    >
       {items.map((item) => (
         <FeedCard key={item.id} item={item} />
       ))}
@@ -22,13 +23,22 @@ export function FeedGrid({ items }: FeedGridProps) {
 /** Loading placeholder mirroring the grid layout. */
 export function FeedGridSkeleton() {
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+    <div
+      className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3"
+      aria-label="Cargando reels"
+    >
       {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="border border-primary/14 bg-card/80">
+        <div key={i} className="studio-panel overflow-hidden">
           <Skeleton className="aspect-video w-full rounded-none" />
-          <div className="flex flex-col gap-2 p-3.5">
-            <Skeleton className="h-4 w-3/4 rounded-none" />
-            <Skeleton className="h-3 w-1/3 rounded-none" />
+          <div className="flex flex-col gap-4 p-4">
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-5 w-3/4 rounded-none" />
+              <Skeleton className="h-3 w-1/3 rounded-none" />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <Skeleton className="h-8 w-28 rounded-none" />
+              <Skeleton className="h-11 w-20 rounded-none" />
+            </div>
           </div>
         </div>
       ))}

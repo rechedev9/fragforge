@@ -53,28 +53,42 @@ export function DemoDropzone({ onFile }: DemoDropzoneProps) {
           accept(e.dataTransfer.files?.[0]);
         }}
         className={cn(
-          'relative flex cursor-pointer flex-col items-center justify-center border-[1.5px] border-dashed px-6 py-16 text-center transition-colors',
-          'focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/40',
-          dragging ? 'border-primary bg-primary/10' : 'border-primary/40 bg-card/55 hover:border-primary/70',
+          'studio-panel studio-panel-raised neon-brackets group relative isolate flex min-h-[268px] cursor-pointer flex-col items-center justify-center overflow-hidden px-6 py-10 text-center transition-[border-color,box-shadow,transform] duration-200 sm:min-h-[300px] sm:px-10 sm:py-12',
+          'focus-within:border-primary focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background',
+          dragging
+            ? 'border-primary ring-2 ring-primary/60 shadow-[0_0_32px_color-mix(in_oklch,var(--primary)_18%,transparent)]'
+            : 'hover:border-primary/60 hover:-translate-y-px',
         )}
       >
-        {/* The four HUD corner brackets. */}
-        <span aria-hidden className="absolute -top-0.5 -left-0.5 size-[18px] border-t-[2.5px] border-l-[2.5px] border-primary" />
-        <span aria-hidden className="absolute -top-0.5 -right-0.5 size-[18px] border-t-[2.5px] border-r-[2.5px] border-primary" />
-        <span aria-hidden className="absolute -bottom-0.5 -left-0.5 size-[18px] border-b-[2.5px] border-l-[2.5px] border-primary" />
-        <span aria-hidden className="absolute -bottom-0.5 -right-0.5 size-[18px] border-b-[2.5px] border-r-[2.5px] border-primary" />
+        <span
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute inset-2 border border-dashed transition-colors duration-200',
+            dragging ? 'border-primary/90 bg-primary/[0.045]' : 'border-primary/30 group-hover:border-primary/60',
+          )}
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-[18%] top-0 h-32 bg-primary/[0.08] opacity-70 blur-[70px] transition-opacity duration-200 group-hover:opacity-100"
+        />
 
-        <span className="flex size-16 items-center justify-center rounded-full border border-primary/40 text-primary [box-shadow:0_0_24px_color-mix(in_oklch,var(--primary)_25%,transparent),inset_0_0_14px_color-mix(in_oklch,var(--primary)_15%,transparent)]">
-          <UploadCloud className="size-7" />
+        <span className="relative z-10 mb-5 inline-flex items-center gap-2 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.2em] text-primary/85">
+          <span className="size-1.5 bg-primary shadow-[0_0_8px_currentColor]" />
+          Demo de CS2
         </span>
-        <span className="mt-5 font-[family-name:var(--font-display)] text-2xl font-bold text-foreground">
+        <span className="relative z-10 flex size-14 items-center justify-center rounded-full border border-primary/45 bg-background/35 text-primary transition-transform duration-200 [box-shadow:0_0_24px_color-mix(in_oklch,var(--primary)_20%,transparent),inset_0_0_14px_color-mix(in_oklch,var(--primary)_12%,transparent)] group-hover:scale-105 sm:size-16">
+          <UploadCloud className="size-6 sm:size-7" />
+        </span>
+        <span className="relative z-10 mt-4 font-[family-name:var(--font-display)] text-xl font-bold tracking-tight text-foreground sm:text-2xl">
           SUELTA UN .DEM AQUÍ
         </span>
-        <span className="mt-2 text-sm text-muted-foreground">
-          o <span className="text-primary underline decoration-primary/50 underline-offset-4">explora tus archivos</span> — tuyo o de
-          cualquiera
+        <span className="relative z-10 mt-2 max-w-lg text-[15px] leading-6 text-muted-foreground">
+          Arrastra una demo tuya o de cualquier jugador
         </span>
-        <span className="mt-4 font-[family-name:var(--font-mono)] text-[10.5px] tracking-[0.2em] text-muted-foreground/70">
+        <span className="relative z-10 mt-4 inline-flex min-h-10 items-center justify-center border border-primary/40 bg-primary/[0.08] px-5 font-[family-name:var(--font-display)] text-sm font-semibold uppercase tracking-[0.05em] text-primary transition-colors group-hover:border-primary/70 group-hover:bg-primary/[0.12]">
+          explora tus archivos
+        </span>
+        <span className="relative z-10 mt-4 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.16em] text-muted-foreground/80">
           SIN LOGIN · EL .DEM NUNCA SALE DE TU PC
         </span>
 
@@ -94,7 +108,11 @@ export function DemoDropzone({ onFile }: DemoDropzoneProps) {
         />
       </label>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="border border-destructive/30 bg-destructive/[0.08] px-4 py-3 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

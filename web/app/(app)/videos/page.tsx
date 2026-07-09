@@ -1,12 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import { Film } from 'lucide-react';
-import type { Video, VideoStatus } from '@/lib/api/types';
+import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { startPollLoop } from '@/lib/poll-loop';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
-import { PipelineSteps } from '@/components/brand/pipeline-steps';
+import { StudioEmptyState } from '@/components/studio/empty-state';
+import { StudioPageHeader } from '@/components/studio/page-header';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RenderingCard } from '@/components/videos/rendering-card';
 import { ReadyCard } from '@/components/videos/ready-card';
@@ -22,19 +25,6 @@ const IDLE_POLL_MS = 10000;
 
 function hasActiveReel(list: Video[] | undefined): boolean {
   return !!list && list.some((v) => v.status !== 'ready' && v.status !== 'failed');
-}
-
-/**
- * The busiest pipeline stage across the whole library, for the page-level
- * footer: capturing beats composing beats queued beats ready, so the footer
- * always points at wherever the real bottleneck is right now instead of
- * fabricating a per-item percentage the API does not report.
- */
-function busiestStatus(videos: Video[]): VideoStatus {
-  if (videos.some((v) => v.status === 'recording')) return 'recording';
-  if (videos.some((v) => v.status === 'composing')) return 'composing';
-  if (videos.some((v) => v.status === 'queued')) return 'queued';
-  return 'ready';
 }
 
 function matchesFormat(video: Video, filter: VideoFormatFilter): boolean {
@@ -102,19 +92,18 @@ export default function VideosPage() {
   }
 
   return (
-    <div className="flex flex-col gap-10">
-      <header className="flex flex-col gap-2.5">
-        <SectionEyebrow number={4} label="BIBLIOTECA" />
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6">
-          <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold leading-none tracking-tight text-foreground sm:text-[34px]">
-            TUS REELS
-          </h1>
-          {videos !== null && videos.length > 0 ? <VideoFilters filter={filter} onFilterChange={setFilter} /> : null}
-        </div>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Renderizan en tu propio rig. Publica los que valgan la pena.
-        </p>
-      </header>
+    <div className="flex flex-col gap-8">
+      <StudioPageHeader
+        number={4}
+        label="BIBLIOTECA"
+        title="TUS REELS"
+        description="Sigue cada captura desde la cola hasta el MP4 y publica solo lo que merece salir del rig."
+        actions={
+          videos !== null && videos.length > 0 ? (
+            <VideoFilters filter={filter} onFilterChange={setFilter} />
+          ) : undefined
+        }
+      />
 
       {content}
     </div>
@@ -141,6 +130,36 @@ function LibrarySections({
 }) {
   const failed = videos.filter((v) => v.status === 'failed');
   const active = videos.filter((v) => v.status !== 'failed');
+  let activeContent: ReactNode = null;
+  if (active.length > 0) {
+    activeContent = (
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,250px),300px))] justify-start gap-5">
+        {active.map((v) =>
+          v.status === 'ready' ? (
+            <ReadyCard key={v.id} video={v} onChange={onChange} />
+          ) : (
+            <RenderingCard key={v.id} video={v} />
+          ),
+        )}
+      </div>
+    );
+  } else if (failed.length === 0 && allVideos.length > 0) {
+    activeContent = (
+      <div className="studio-panel flex max-w-xl items-center gap-4 px-5 py-4" role="status">
+        <span className="grid size-10 shrink-0 place-items-center border border-border-strong bg-background/45 text-primary">
+          <Film className="size-4" aria-hidden />
+        </span>
+        <div>
+          <p className="font-[family-name:var(--font-display)] text-sm font-bold uppercase text-foreground">
+            No hay reels en este formato
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Cambia el filtro para volver a ver el resto de la biblioteca.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -155,37 +174,20 @@ function LibrarySections({
         </section>
       ) : null}
 
-      {active.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {active.map((v) =>
-            v.status === 'ready' ? (
-              <ReadyCard key={v.id} video={v} onChange={onChange} />
-            ) : (
-              <RenderingCard key={v.id} video={v} />
-            ),
-          )}
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Todavía no hay reels terminados. Los renders aterrizan aquí al salir del pipeline.
-        </p>
-      )}
-
-      <div className="mt-auto flex items-center justify-center pt-6">
-        <PipelineSteps status={busiestStatus(allVideos)} className="gap-x-3 text-[11.5px]" />
-      </div>
+      {activeContent}
     </>
   );
 }
 
 function LibrarySkeleton() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,250px),300px))] justify-start gap-5">
       {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="space-y-3">
+        <div key={i} className="studio-panel space-y-4 p-4">
           <Skeleton className="aspect-video w-full rounded-none" />
           <Skeleton className="h-4 w-2/3 rounded-none" />
-          <Skeleton className="h-3 w-1/3 rounded-none" />
+          <Skeleton className="h-3 w-1/2 rounded-none" />
+          <Skeleton className="h-9 w-full rounded-none" />
         </div>
       ))}
     </div>
@@ -194,24 +196,18 @@ function LibrarySkeleton() {
 
 function EmptyState() {
   return (
-    <div className="border border-dashed border-border bg-card/40 px-6 py-16 text-center">
-      <div className="mx-auto grid size-14 place-items-center border border-border bg-secondary/60">
-        <Film className="size-6 text-muted-foreground" />
-      </div>
-      <h3 className="mt-4 font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
-        Todavía no hay nada en la biblioteca
-      </h3>
-      <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-        Encuentra una jugada en una de tus partidas y la capturaremos en un reel en tu rig.
-      </p>
-      <div className="mt-6 flex justify-center">
-        <a
-          href="/matches"
-          className="neon-notch inline-flex h-9 items-center bg-primary px-4 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
-        >
-          BUSCAR JUGADAS
-        </a>
-      </div>
-    </div>
+    <StudioEmptyState
+      icon={Film}
+      title="Todavía no hay reels"
+      description="Elige una jugada y FragForge seguirá la captura, la edición y el render desde esta biblioteca."
+      compact
+      className="max-w-2xl"
+      actions={
+        <Button asChild>
+          <Link href="/matches">BUSCAR JUGADAS</Link>
+        </Button>
+      }
+      note="CAPTURA Y EDICIÓN EN TU RIG"
+    />
   );
 }

@@ -1,19 +1,22 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Compass } from 'lucide-react';
+import Link from 'next/link';
+import { Compass, Film, UploadCloud } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { FeedItem } from '@/lib/api/types';
-import { SectionEyebrow } from '@/components/brand/section-eyebrow';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { FeedGrid, FeedGridSkeleton } from '@/components/feed/feed-grid';
+import { StudioEmptyState } from '@/components/studio/empty-state';
+import { STUDIO_FILTER_CHIP_CLASS } from '@/components/studio/filter-chip';
+import { StudioPageHeader } from '@/components/studio/page-header';
+import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 /** RECIENTES sorts by publish time; TOP SEMANA sorts the last 7 days by likes
  * (falling back to the full list when nothing falls in that window, so a
  * short-lived seed/mock dataset never renders an empty grid). */
 type FeedSort = 'recent' | 'top-week';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
 function sortFeed(items: FeedItem[], sort: FeedSort): FeedItem[] {
   if (sort === 'recent') {
     return [...items].sort((a, b) => b.createdAt - a.createdAt);
@@ -44,64 +47,81 @@ export default function FeedPage() {
   if (items === null) {
     content = <FeedGridSkeleton />;
   } else if (items.length === 0) {
-    content = <EmptyState />;
+    content = <FeedEmptyState />;
   } else {
     content = <FeedGrid items={visible} />;
   }
 
   return (
-    <div className="flex flex-col gap-7">
-      <header className="flex flex-col gap-2.5">
-        <SectionEyebrow number={5} label="FEED" />
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6">
-          <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold leading-none tracking-tight text-foreground sm:text-[34px]">
-            LA COMUNIDAD FORJA
-          </h1>
-          {items !== null && items.length > 0 ? (
-            <ToggleGroup
-              type="single"
-              value={sort}
-              onValueChange={(v) => v && setSort(v as FeedSort)}
-              className="w-fit gap-2"
-              aria-label="Ordenar feed"
-            >
-              <ToggleGroupItem
-                value="recent"
-                aria-label="Más recientes"
-                className="h-auto rounded-none border border-primary/25 bg-transparent px-3.5 py-1.5 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.14em] text-muted-foreground first:rounded-none last:rounded-none hover:bg-primary/10 hover:text-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+    <div className="flex flex-col gap-8 sm:gap-10">
+      <StudioPageHeader
+        number={5}
+        label="FEED"
+        title="LA COMUNIDAD FORJA"
+        description="Reels forjados en los rigs de la comunidad. Mira uno, deja un like."
+        actions={
+          items !== null && items.length > 0 ? (
+            <div className="w-full overflow-x-auto pb-1 lg:w-auto lg:pb-0">
+              <ToggleGroup
+                type="single"
+                value={sort}
+                onValueChange={(value) => value && setSort(value as FeedSort)}
+                className="w-max gap-2"
+                aria-label="Ordenar feed"
               >
-                RECIENTES
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="top-week"
-                aria-label="Top de la semana"
-                className="h-auto rounded-none border border-primary/25 bg-transparent px-3.5 py-1.5 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.14em] text-muted-foreground first:rounded-none last:rounded-none hover:bg-primary/10 hover:text-foreground data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-              >
-                TOP SEMANA
-              </ToggleGroupItem>
-            </ToggleGroup>
-          ) : null}
-        </div>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Reels forjados en los rigs de la comunidad. Mira uno, deja un like.
-        </p>
-      </header>
+                <ToggleGroupItem
+                  value="recent"
+                  aria-label="Más recientes"
+                  className={STUDIO_FILTER_CHIP_CLASS}
+                >
+                  RECIENTES
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="top-week"
+                  aria-label="Top de la semana"
+                  className={STUDIO_FILTER_CHIP_CLASS}
+                >
+                  TOP SEMANA
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+          ) : null
+        }
+      />
 
       {content}
     </div>
   );
 }
 
-function EmptyState() {
+function FeedEmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 border border-dashed border-border bg-card/40 py-24 text-center">
-      <span className="flex size-12 items-center justify-center border border-border bg-accent text-muted-foreground">
-        <Compass className="size-5" aria-hidden />
-      </span>
-      <p className="text-base font-semibold text-foreground">Todavía no hay nada publicado</p>
-      <p className="max-w-sm text-sm text-muted-foreground">
-        Sé el primero en publicar un highlight — tus reels aparecerán aquí para todos.
-      </p>
-    </div>
+    <StudioEmptyState
+      icon={Compass}
+      title="Todavía no hay nada publicado"
+      description="Sé el primero en publicar un highlight — tus reels aparecerán aquí para todos."
+      accent="magenta"
+      compact
+      actions={
+        <>
+          <Button asChild className="font-[family-name:var(--font-display)] tracking-[0.06em]">
+            <Link href="/videos">
+              <Film aria-hidden />
+              PUBLICAR UN REEL
+            </Link>
+          </Button>
+          <Button
+            asChild
+            variant="outline"
+            className="font-[family-name:var(--font-display)] tracking-[0.06em]"
+          >
+            <Link href="/upload">
+              <UploadCloud aria-hidden />
+              CREAR UN REEL
+            </Link>
+          </Button>
+        </>
+      }
+    />
   );
 }

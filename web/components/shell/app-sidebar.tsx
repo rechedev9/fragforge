@@ -2,7 +2,19 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, LogIn, ChevronsUpDown, Plus } from 'lucide-react';
+import {
+  Aperture,
+  ChevronsUpDown,
+  Clapperboard,
+  Compass,
+  Crosshair,
+  Film,
+  LogIn,
+  LogOut,
+  Plus,
+  UploadCloud,
+  type LucideIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Sidebar,
@@ -36,16 +48,17 @@ type NavItem = {
   number: string;
   label: string;
   href: string;
-  /** Active accent: the stream route lights magenta, everything else cyan. */
-  accent: 'cyan' | 'magenta';
+  icon: LucideIcon;
+  /** Stream remains a category signal, never the global selection colour. */
+  stream?: boolean;
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { number: '01', label: 'Partidas', href: '/matches', accent: 'cyan' },
-  { number: '02', label: 'Subir demo', href: '/upload', accent: 'cyan' },
-  { number: '03', label: 'Clips de stream', href: '/streams', accent: 'magenta' },
-  { number: '04', label: 'Biblioteca', href: '/videos', accent: 'cyan' },
-  { number: '05', label: 'Feed', href: '/feed', accent: 'cyan' },
+  { number: '01', label: 'Partidas', href: '/matches', icon: Crosshair },
+  { number: '02', label: 'Subir demo', href: '/upload', icon: UploadCloud },
+  { number: '03', label: 'Clips de stream', href: '/streams', icon: Clapperboard, stream: true },
+  { number: '04', label: 'Biblioteca', href: '/videos', icon: Film },
+  { number: '05', label: 'Feed', href: '/feed', icon: Compass },
 ];
 
 /** A nav href is active for its exact page and any nested route under it. */
@@ -56,7 +69,7 @@ function isActiveHref(pathname: string, href: string): boolean {
 /**
  * The persistent left sidebar shell, NEON HUD style: wordmark + katakana up
  * top, the numbered 01-05 nav (active item gets the inset accent bar; the
- * stream route activates in magenta, the rest in cyan), and a footer with the
+ * active destination always uses cyan), and a footer with the
  * CAPTURA readiness card plus, in cloud mode, the slots meter and user menu.
  */
 export function AppSidebar() {
@@ -64,51 +77,52 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="p-0 px-6 pt-6 group-data-[collapsible=icon]:px-2">
-        <Link href="/matches" className="inline-flex group-data-[collapsible=icon]:justify-center">
+      <SidebarHeader className="p-0 px-6 pt-7 group-data-[collapsible=icon]:px-2">
+        <Link href="/matches" className="inline-flex min-h-10 items-center group-data-[collapsible=icon]:justify-center">
           <Wordmark className="group-data-[collapsible=icon]:hidden" />
+          <Aperture className="hidden size-5 text-primary group-data-[collapsible=icon]:block" aria-hidden />
         </Link>
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup className="p-0 pt-9">
-          <SidebarMenu className="gap-0.5">
-            {NAV_ITEMS.map((item) => {
+        <SidebarGroup className="p-0 pt-8">
+          <SidebarMenu className="gap-1">
+            {NAV_ITEMS.map((item, index) => {
               const active = isActiveHref(pathname, item.href);
-              const magenta = item.accent === 'magenta';
-              let numberTone: string;
-              if (!active) {
-                numberTone = 'text-sidebar-foreground/60';
-              } else if (magenta) {
-                numberTone = 'text-destructive';
-              } else {
-                numberTone = 'text-primary';
-              }
+              const Icon = item.icon;
               return (
-                <SidebarMenuItem key={item.href}>
+                <SidebarMenuItem
+                  key={item.href}
+                  className={cn(index === 3 && 'mt-4 border-t border-sidebar-border pt-4')}
+                >
                   <SidebarMenuButton
                     asChild
                     isActive={active}
                     tooltip={item.label}
                     className={cn(
-                      'h-auto gap-3 rounded-none px-6 py-[11px] font-[family-name:var(--font-display)] text-[13px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground',
+                      'h-12 gap-3 rounded-none px-6 font-[family-name:var(--font-display)] text-[13px] font-semibold uppercase tracking-[0.06em] text-sidebar-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-2.5!',
                       // Neutralize the shadcn active defaults so the HUD
                       // gradient + inset bar below are what actually shows.
                       'data-[active=true]:bg-transparent data-[active=true]:font-semibold',
                       active &&
-                        (magenta
-                          ? 'bg-gradient-to-r from-destructive/10 to-transparent shadow-[inset_2px_0_0_var(--destructive)] data-[active=true]:text-destructive'
-                          : 'bg-gradient-to-r from-primary/10 to-transparent shadow-[inset_2px_0_0_var(--primary)] data-[active=true]:text-primary'),
+                        'bg-gradient-to-r from-primary/12 to-transparent shadow-[inset_3px_0_0_var(--primary)] data-[active=true]:text-primary',
                     )}
                   >
-                    <Link href={item.href}>
+                    <Link href={item.href} aria-current={active ? 'page' : undefined}>
+                      <Icon className="size-4 shrink-0 group-data-[collapsible=icon]:size-[18px]" aria-hidden />
                       <span
                         aria-hidden
-                        className={cn('font-[family-name:var(--font-mono)] text-[10px]', numberTone)}
+                        className={cn(
+                          'font-[family-name:var(--font-mono)] text-[11px] text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden',
+                          active && 'text-primary',
+                        )}
                       >
                         {item.number}
                       </span>
-                      <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
+                      <span className="flex min-w-0 flex-1 items-center gap-2 group-data-[collapsible=icon]:hidden">
+                        <span className="truncate">{item.label}</span>
+                        {item.stream ? <span className="size-1.5 shrink-0 rounded-full bg-stream" aria-hidden /> : null}
+                      </span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -118,7 +132,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="gap-2 px-4 pb-6">
+      <SidebarFooter className="gap-3 px-4 pb-5 group-data-[collapsible=icon]:px-1">
         <CaptureReadiness />
         {/* Slots quota and Steam sign-in are cloud-only; local studio runs on
             this PC, so the footer shows just capture readiness. */}
@@ -138,7 +152,7 @@ function SlotsMeter() {
   const pct = slots.total > 0 ? Math.min(100, (slots.used / slots.total) * 100) : 0;
 
   return (
-    <div className="border border-sidebar-border bg-sidebar-accent/40 p-2.5 group-data-[collapsible=icon]:hidden">
+    <div className="border border-sidebar-border bg-sidebar-accent/40 p-3 group-data-[collapsible=icon]:hidden">
       <div className="flex items-center justify-between">
         <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/60">
           Slots
@@ -152,7 +166,7 @@ function SlotsMeter() {
         variant="ghost"
         size="sm"
         onClick={() => toast('Más slots de render, muy pronto.', { description: 'De momento cada cuenta renderiza un reel a la vez.' })}
-        className="mt-2 h-7 w-full justify-start gap-1.5 px-1.5 text-xs uppercase tracking-[0.08em] text-sidebar-foreground/80 hover:text-sidebar-foreground"
+        className="mt-2 w-full justify-start gap-1.5 px-2 text-xs uppercase tracking-[0.08em] text-sidebar-foreground/80 hover:text-sidebar-foreground"
       >
         <Plus className="size-3.5" />
         Conseguir más
@@ -199,7 +213,7 @@ function UserMenu() {
           variant="ghost"
           className="h-auto w-full justify-start gap-2 px-1.5 py-1.5 text-left group-data-[collapsible=icon]:justify-center"
         >
-          <Avatar className="size-7 rounded-none">
+          <Avatar className="size-8 rounded-none">
             <AvatarImage src={user.avatarUrl} alt={user.personaName} />
             <AvatarFallback className="rounded-none text-xs">{initials}</AvatarFallback>
           </Avatar>

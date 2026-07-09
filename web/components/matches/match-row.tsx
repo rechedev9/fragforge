@@ -33,62 +33,64 @@ export function MatchRow({ match, featured = false }: MatchRowProps) {
     .join(' · ');
 
   return (
-    <div
+    <article
       className={cn(
-        'flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4 transition-colors sm:flex-nowrap',
+        'flex items-stretch gap-4 px-4 py-4 transition-colors sm:gap-5 sm:px-5',
         featured
-          ? 'neon-brackets relative border border-primary/45 bg-primary/[0.06]'
-          : 'border border-primary/10 bg-card/75 hover:border-primary/25',
+          ? 'studio-panel studio-panel-raised neon-brackets'
+          : 'studio-panel studio-panel-interactive bg-card/80',
       )}
     >
-      <ScoreBar win={win} className="h-11 w-[3px] self-center" />
+      <ScoreBar win={win} className="w-1 shrink-0" />
 
-      <div className="w-[150px] min-w-0 shrink-0">
-        <div className="truncate font-[family-name:var(--font-display)] text-lg font-bold uppercase leading-tight text-foreground">
-          {match.map}
+      <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-4 xl:grid-cols-[minmax(160px,1.1fr)_90px_minmax(320px,1.7fr)_auto] xl:gap-x-8">
+        <div className="min-w-0">
+          <h2 className="truncate font-[family-name:var(--font-display)] text-xl font-bold uppercase leading-tight text-foreground">
+            {match.map}
+          </h2>
+          <p className="mt-1 truncate font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.1em] text-muted-foreground">
+            {meta}
+          </p>
         </div>
-        <div className="mt-0.5 truncate font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground/70">
-          {meta}
+
+        <div className="shrink-0 text-right font-[family-name:var(--font-mono)] text-lg tabular-nums xl:text-left">
+          {ours !== null && theirs !== null ? (
+            <>
+              <span className={win ? 'text-primary' : 'text-muted-foreground'}>{ours}</span>
+              <span className="text-muted-foreground"> : </span>
+              <span className="text-muted-foreground">{theirs}</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">{match.score}</span>
+          )}
+        </div>
+
+        <div className="col-span-2 grid grid-cols-5 gap-3 border-y border-border/55 py-3 sm:gap-5 xl:col-span-1 xl:border-0 xl:py-0">
+          <StatMono label="K" value={stats.kills} />
+          <StatMono label="D" value={stats.deaths} />
+          <StatMono label="A" value={stats.assists} />
+          <StatMono label="MVP" value={stats.mvps} />
+          <StatMono label="K/D" value={formatKd(stats.kd)} accent />
+        </div>
+
+        <div className="col-span-2 flex min-w-0 justify-end xl:col-span-1">
+          {featured ? (
+            <Link
+              href={`/matches/${match.id}`}
+              className="neon-notch neon-glow inline-flex h-11 w-full items-center justify-center bg-primary px-5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-auto"
+            >
+              FORJAR REEL
+            </Link>
+          ) : (
+            <Link
+              href={`/matches/${match.id}`}
+              className="inline-flex h-11 w-full items-center justify-center border border-border-strong bg-background/45 px-4 font-[family-name:var(--font-mono)] text-xs tracking-[0.14em] text-muted-foreground transition-colors hover:border-primary/55 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-auto"
+            >
+              VER PARTIDA ▸
+            </Link>
+          )}
         </div>
       </div>
-
-      <div className="w-[90px] shrink-0 font-[family-name:var(--font-mono)] text-[17px] tabular-nums">
-        {ours !== null && theirs !== null ? (
-          <>
-            <span className={win ? 'text-primary' : 'text-muted-foreground'}>{ours}</span>
-            <span className="text-muted-foreground/70"> : </span>
-            <span className="text-muted-foreground">{theirs}</span>
-          </>
-        ) : (
-          <span className="text-muted-foreground">{match.score}</span>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
-        <StatMono label="K" value={stats.kills} />
-        <StatMono label="D" value={stats.deaths} />
-        <StatMono label="A" value={stats.assists} />
-        <StatMono label="MVP" value={stats.mvps} />
-        <StatMono label="K/D" value={formatKd(stats.kd)} accent />
-      </div>
-
-      <div className="ml-auto shrink-0">
-        {featured ? (
-          <Link
-            href={`/matches/${match.id}`}
-            className="neon-notch neon-glow inline-flex items-center bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            FORJAR REEL
-          </Link>
-        ) : (
-          <Link
-            href={`/matches/${match.id}`}
-            className="inline-flex items-center px-2 py-2 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.16em] text-muted-foreground/70 transition-colors hover:text-primary"
-          >
-            VER ▸
-          </Link>
-        )}
-      </div>
-    </div>
+    </article>
   );
 }

@@ -26,7 +26,7 @@ export function SectionEyebrow({ label, number, count, accent = 'cyan', classNam
       <span
         className={cn(
           'font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.3em]',
-          accent === 'magenta' ? 'text-destructive' : 'text-primary',
+          accent === 'magenta' ? 'text-stream' : 'text-primary',
         )}
       >
         {number !== undefined ? `// ${String(number).padStart(2, '0')} — ` : null}
