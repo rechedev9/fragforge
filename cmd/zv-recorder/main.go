@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -19,9 +21,16 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
+	err := run()
+	if err == nil {
+		return
 	}
+	var hookErr *hookIncompatibleError
+	if errors.As(err, &hookErr) {
+		log.Print(err)
+		os.Exit(exitHookIncompatible)
+	}
+	log.Fatal(err)
 }
 
 func run() error {
@@ -492,9 +501,12 @@ func waitForWindowsProcessRunAndExit(ctx context.Context, image string) error {
 				return fmt.Errorf("%s did not appear within 60 seconds", image)
 			}
 		case <-ticker.C:
-			running, err := processRunning(image)
+			running, title, err := tasklistWindowTitle(image)
 			if err != nil {
 				return err
+			}
+			if isHookErrorWindowTitle(title) {
+				return &hookIncompatibleError{windowTitle: title}
 			}
 			if running {
 				seen = true
@@ -518,6 +530,82 @@ func processRunning(image string) (bool, error) {
 	}
 	text := strings.TrimSpace(string(out))
 	return strings.Contains(strings.ToLower(text), strings.ToLower(image)), nil
+}
+
+// exitHookIncompatible is the process exit code used when HLAE's injected
+// hook crashes with a native "Error - Afx*" dialog instead of capturing.
+// Keep this in sync with the zv-recorder case in cmd/zv/obs_record.go's
+// shortStageClass, which maps this code to the "capture_incompatible"
+// observability class.
+const exitHookIncompatible = 6
+
+// hookErrorWindowTitlePattern matches the native MessageBox titles
+// advancedfx's hook modules (AfxHookSource2, AfxHookSource, ...) use when a
+// memory signature scan fails to resolve an address in the current game
+// binary — almost always caused by a CS2 update landing after the installed
+// HLAE build was released.
+var hookErrorWindowTitlePattern = regexp.MustCompile(`^Error - Afx`)
+
+// isHookErrorWindowTitle reports whether title is a native HLAE hook crash
+// dialog, e.g. "Error - AfxHookSource2".
+func isHookErrorWindowTitle(title string) bool {
+	return hookErrorWindowTitlePattern.MatchString(title)
+}
+
+// hookIncompatibleError reports that HLAE's injected hook crashed with a
+// native error dialog instead of capturing. In practice this means the
+// installed HLAE/AfxHookSource2 build does not match the currently installed
+// CS2 version.
+type hookIncompatibleError struct {
+	windowTitle string
+}
+
+func (e *hookIncompatibleError) Error() string {
+	return fmt.Sprintf(
+		"HLAE hook crashed with a native error dialog (%q) instead of capturing: "+
+			"the installed HLAE/AfxHookSource2 build is likely incompatible with the current CS2 version "+
+			"(CS2 updates regularly break AfxHookSource2's signature scan until advancedfx ships a new build); "+
+			"check https://github.com/advancedfx/advancedfx/releases for a newer HLAE build",
+		e.windowTitle,
+	)
+}
+
+// tasklistWindowTitle reports whether image is currently running and its
+// current main window title (which is the dialog title when a modal error
+// box has replaced the game window), by shelling out to `tasklist /V`. It
+// mirrors processRunning's contract but also extracts the "Window Title"
+// verbose column.
+func tasklistWindowTitle(image string) (running bool, title string, err error) {
+	// #nosec G204 -- tasklist executable is fixed and image is derived from a local executable path.
+	out, err := exec.Command("tasklist", "/V", "/FI", "IMAGENAME eq "+image, "/FO", "CSV", "/NH").Output()
+	if err != nil {
+		return false, "", err
+	}
+	running, title = parseTasklistVerboseCSV(string(out), image)
+	return running, title, nil
+}
+
+// parseTasklistVerboseCSV extracts the running state and window title for
+// image from `tasklist /V /FO CSV /NH` output. Isolated from the exec call so
+// it is testable against captured sample output. tasklist prints an
+// "INFO: No tasks..." line (not valid multi-field CSV) when nothing matches;
+// that line simply fails the image-name comparison and is skipped.
+func parseTasklistVerboseCSV(out, image string) (running bool, title string) {
+	r := csv.NewReader(strings.NewReader(out))
+	for {
+		record, err := r.Read()
+		if err != nil {
+			return running, title
+		}
+		if len(record) == 0 || !strings.EqualFold(record[0], image) {
+			continue
+		}
+		running = true
+		if len(record) >= 9 {
+			title = record[8]
+		}
+		return running, title
+	}
 }
 
 func writeResult(outDir string, result recording.RecordingResult) error {

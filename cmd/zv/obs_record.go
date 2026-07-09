@@ -40,6 +40,11 @@ func shortStageClass(binary string, code int) (stage, class string) {
 			return obs.StageParse, "parse_failed"
 		}
 	case "zv-recorder":
+		// Exit code 6 is cmd/zv-recorder's exitHookIncompatible; keep the two
+		// integers in sync (separate `main` packages can't share the constant).
+		if code == 6 {
+			return obs.StageRecord, "capture_incompatible"
+		}
 		return obs.StageRecord, "record_failed"
 	case "zv-rhythm":
 		return obs.StageRender, "rhythm_failed"

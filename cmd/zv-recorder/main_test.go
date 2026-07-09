@@ -105,6 +105,87 @@ func TestForceWindowedVideoConfigPatchesAndRestores(t *testing.T) {
 	}
 }
 
+func TestIsHookErrorWindowTitle(t *testing.T) {
+	tests := []struct {
+		name  string
+		title string
+		want  bool
+	}{
+		{"afxhooksource2 dialog", "Error - AfxHookSource2", true},
+		{"afxhooksource dialog", "Error - AfxHookSource", true},
+		{"afxhookgold dialog", "Error - AfxHookGold", true},
+		{"game window", "Counter-Strike 2", false},
+		{"empty", "", false},
+		{"na placeholder", "N/A", false},
+		{"errors plural prefix", "Errors - Afx", false},
+		{"lowercase is case sensitive", "error - afxhooksource2", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isHookErrorWindowTitle(tt.title); got != tt.want {
+				t.Errorf("isHookErrorWindowTitle(%q) = %v, want %v", tt.title, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseTasklistVerboseCSV(t *testing.T) {
+	tests := []struct {
+		name        string
+		out         string
+		image       string
+		wantRunning bool
+		wantTitle   string
+	}{
+		{
+			name:        "running with normal title",
+			out:         `"cs2.exe","12345","Console","1","2,345,678 K","Running","DESKTOP\user","0:01:23","Counter-Strike 2"` + "\n",
+			image:       "cs2.exe",
+			wantRunning: true,
+			wantTitle:   "Counter-Strike 2",
+		},
+		{
+			name:        "running with hook-crash dialog title",
+			out:         `"cs2.exe","12345","Console","1","2,345,678 K","Running","DESKTOP\user","0:01:23","Error - AfxHookSource2"` + "\n",
+			image:       "cs2.exe",
+			wantRunning: true,
+			wantTitle:   "Error - AfxHookSource2",
+		},
+		{
+			name:        "no matching tasks line",
+			out:         "INFO: No tasks are running which match the specified criteria.\n",
+			image:       "cs2.exe",
+			wantRunning: false,
+			wantTitle:   "",
+		},
+		{
+			name:        "empty output",
+			out:         "",
+			image:       "cs2.exe",
+			wantRunning: false,
+			wantTitle:   "",
+		},
+		{
+			name:        "case-insensitive image match",
+			out:         `"CS2.EXE","12345","Console","1","2,345,678 K","Running","DESKTOP\user","0:01:23","Counter-Strike 2"` + "\n",
+			image:       "cs2.exe",
+			wantRunning: true,
+			wantTitle:   "Counter-Strike 2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRunning, gotTitle := parseTasklistVerboseCSV(tt.out, tt.image)
+			if gotRunning != tt.wantRunning {
+				t.Errorf("running = %v, want %v", gotRunning, tt.wantRunning)
+			}
+			if gotTitle != tt.wantTitle {
+				t.Errorf("title = %q, want %q", gotTitle, tt.wantTitle)
+			}
+		})
+	}
+}
+
 func TestSteamRootFromCS2Path(t *testing.T) {
 	cs2 := filepath.FromSlash("D:/SteamLibrary/steamapps/common/Counter-Strike Global Offensive/game/bin/win64/cs2.exe")
 	if got, want := steamRootFromCS2Path(cs2), filepath.FromSlash("D:/SteamLibrary"); got != want {
