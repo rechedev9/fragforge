@@ -25,11 +25,9 @@ type skillCheckResult struct {
 }
 
 type workflowDoc struct {
-	Path              string
-	Required          []string
-	RequiredSkills    bool
-	RequiredWorkflows bool
-	Body              string
+	Path     string
+	Required []string
+	Body     string
 }
 
 type workflowCheckResult struct {

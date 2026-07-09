@@ -5,9 +5,7 @@ import { defineConfig } from '@playwright/test';
  *   npx playwright test -c e2e/screenshots.config.ts
  *
  * Boots its own Next dev server on port 3200 (NEVER 3000/3100) with
- * NEXT_PUBLIC_API_BASE forced empty so web/lib/api picks the in-memory mock
- * regardless of web/.env.local, and cloud (default) mode so `/` and `/connect`
- * render instead of redirecting.
+ * NEXT_PUBLIC_API_BASE forced empty regardless of web/.env.local.
  */
 export default defineConfig({
   testDir: '.',
@@ -32,7 +30,6 @@ export default defineConfig({
     env: {
       ...(process.env as Record<string, string>),
       NEXT_PUBLIC_API_BASE: '',
-      NEXT_PUBLIC_FRAGFORGE_MODE: 'cloud',
     },
   },
 });

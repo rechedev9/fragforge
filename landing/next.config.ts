@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // The VPS deploy (deploy/vps) runs the landing from the standalone server
-  // bundle, same as web/; dev and `next start` are unaffected.
+  // Standalone build for whatever static/Node host serves the landing page
+  // (deployment target undecided since the VPS deploy was removed); dev and
+  // `next start` are unaffected.
   output: "standalone",
 };
 

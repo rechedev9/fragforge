@@ -28,9 +28,6 @@ func TestLoadConfigAllowsParserOnlyMode(t *testing.T) {
 	if cfg.HTTPAddr != "127.0.0.1:8080" {
 		t.Fatalf("HTTPAddr = %q, want loopback default", cfg.HTTPAddr)
 	}
-	if cfg.QueueMode != queueModeRedis {
-		t.Fatalf("QueueMode = %q, want %q", cfg.QueueMode, queueModeRedis)
-	}
 }
 
 func TestLoadConfigRejectsLANBindWithoutMutationToken(t *testing.T) {
@@ -56,44 +53,6 @@ func TestLoadConfigAllowsLANBindWithMutationToken(t *testing.T) {
 	}
 	if cfg.MutationToken != "local-token" {
 		t.Fatalf("MutationToken = %q, want local-token", cfg.MutationToken)
-	}
-}
-
-func TestLoadConfigAllowsInlineQueueMode(t *testing.T) {
-	clearConfigEnv(t)
-	t.Setenv("ZV_DATABASE_URL", "postgres://example")
-	t.Setenv("ZV_QUEUE_MODE", queueModeInline)
-
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig error = %v", err)
-	}
-	if cfg.QueueMode != queueModeInline {
-		t.Fatalf("QueueMode = %q, want %q", cfg.QueueMode, queueModeInline)
-	}
-}
-
-func TestLoadConfigMemoryDatabaseUsesInlineQueue(t *testing.T) {
-	clearConfigEnv(t)
-	t.Setenv("ZV_DATABASE_URL", databaseURLMemory)
-
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig error = %v", err)
-	}
-	if cfg.QueueMode != queueModeInline {
-		t.Fatalf("QueueMode = %q, want %q", cfg.QueueMode, queueModeInline)
-	}
-}
-
-func TestLoadConfigRejectsInvalidQueueMode(t *testing.T) {
-	clearConfigEnv(t)
-	t.Setenv("ZV_DATABASE_URL", "postgres://example")
-	t.Setenv("ZV_QUEUE_MODE", "memory")
-
-	_, err := loadConfig()
-	if err == nil {
-		t.Fatal("loadConfig error = nil, want invalid queue mode error")
 	}
 }
 
@@ -184,8 +143,6 @@ func clearConfigEnv(t *testing.T) {
 	for _, key := range []string{
 		"ZV_HTTP_ADDR",
 		"ZV_DATABASE_URL",
-		"ZV_REDIS_ADDR",
-		"ZV_QUEUE_MODE",
 		"ZV_DATA_DIR",
 		"ZV_WORKER_CONCURRENCY",
 		"ZV_MEDIA_WORK_DIR",

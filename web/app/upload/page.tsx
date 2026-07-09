@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, FileVideo, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { isLocalMode } from '@/lib/mode';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { Wordmark } from '@/components/brand/wordmark';
@@ -15,7 +14,7 @@ import { Card } from '@/components/ui/card';
 import { DemoDropzone } from '@/components/upload/demo-dropzone';
 import { PlayerPicker } from '@/components/upload/player-picker';
 
-type Stage = 'idle' | 'scanning' | 'picking' | 'parsing' | 'waiting-for-pc';
+type Stage = 'idle' | 'scanning' | 'picking' | 'parsing';
 
 /** True when an API error means the local analysis service is unreachable. */
 function isServiceUnavailable(err: unknown): boolean {
@@ -48,21 +47,17 @@ const PIPELINE_STEPS = [
  * Upload flow (/upload) — the no-login entry. Drop any .dem (yours or someone
  * else's), we scan its roster, let you pick whose POV to clip, then parse that
  * player into a match and route into the same highlight → render pipeline as
- * Steam matches. Renders on the root layout (no sidebar): the user isn't
- * necessarily signed in here.
+ * other matches. Renders on the root layout (no sidebar).
  */
 export default function UploadPage() {
   const router = useRouter();
-  // "Home" depends on the data plane: the local studio lands on the dashboard
-  // (there is no login screen), the cloud on the marketing/login landing.
-  const homeHref = isLocalMode() ? '/matches' : '/';
+  const homeHref = '/matches';
   const [stage, setStage] = useState<Stage>('idle');
   const [fileName, setFileName] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [players, setPlayers] = useState<DemoPlayer[]>([]);
   const [match, setMatch] = useState<RosterMatch | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const reset = useCallback((message: string) => {
     setError(message);
@@ -77,7 +72,6 @@ export default function UploadPage() {
     async (file: File) => {
       setError(null);
       setFileName(file.name);
-      setPendingFile(file);
       setStage('scanning');
       try {
         const scan = await api.scanDemo(file);
@@ -96,12 +90,6 @@ export default function UploadPage() {
         setMatch(scan.match ?? null);
         setStage('picking');
       } catch (err) {
-        if (err instanceof Error && err.message === 'PC_OFFLINE') {
-          // Keep fileName/pendingFile so Retry can re-run the same file once
-          // the user's PC comes back online; do not clear them via reset.
-          setStage('waiting-for-pc');
-          return;
-        }
         reset(
           isServiceUnavailable(err)
             ? 'El servicio de análisis está offline. Arráncalo y vuelve a intentarlo.'
@@ -129,13 +117,6 @@ export default function UploadPage() {
         const match = await api.parseDemo({ jobId, steamId });
         router.push('/matches/' + match.id);
       } catch (err) {
-        if (err instanceof Error && err.message === 'PC_OFFLINE') {
-          // The PC dropped mid-parse (cloud loopback died). Route to the same
-          // waiting-for-pc state as runScan; fileName/pendingFile are still set
-          // from the scan, so Retry re-runs the whole file once the PC is back.
-          setStage('waiting-for-pc');
-          return;
-        }
         reset(
           isServiceUnavailable(err)
             ? 'El servicio de análisis está offline. Arráncalo y vuelve a intentarlo.'
@@ -167,44 +148,14 @@ export default function UploadPage() {
   } else if (stage === 'picking') {
     cardContent = <PlayerPicker players={players} onPick={onPick} match={match ?? undefined} />;
   } else {
-    cardContent = (
-      <div className="flex flex-col items-center justify-center gap-4 py-14 text-center">
-        <div className="flex flex-col gap-1">
-          <p className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
-            Tu PC está offline
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Abre FragForge Agent en tu PC para analizar esta demo y reintenta.
-          </p>
-          <p className="text-sm text-muted-foreground">
-            ¿Primera vez?{' '}
-            <Link href="/connect?step=pair" className="font-medium text-primary hover:underline">
-              Empareja este PC
-            </Link>{' '}
-            — sin login.
-          </p>
-          {fileName ? (
-            <p className="inline-flex items-center justify-center gap-1.5 font-[family-name:var(--font-mono)] text-sm text-muted-foreground">
-              <FileVideo className="size-4" />
-              {fileName}
-            </p>
-          ) : null}
-        </div>
-        <Button
-          className="neon-notch font-[family-name:var(--font-display)] font-bold tracking-[0.06em]"
-          onClick={() => {
-            if (pendingFile) void runScan(pendingFile);
-          }}
-        >
-          REINTENTAR
-        </Button>
-      </div>
-    );
+    // stage === 'idle': not rendered (the dropzone shows instead), so this
+    // branch only exists to keep cardContent exhaustively assigned.
+    cardContent = null;
   }
 
   return (
     <main className="relative min-h-screen overflow-hidden">
-      {/* Faint cyan glow, matching the onboarding screen. */}
+      {/* Faint cyan glow. */}
       <div
         aria-hidden
         className="pointer-events-none absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-primary/10 blur-[160px]"

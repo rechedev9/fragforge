@@ -14,8 +14,6 @@ import (
 type config struct {
 	HTTPAddr          string
 	DatabaseURL       string
-	RedisAddr         string
-	QueueMode         string
 	DataDir           string
 	WorkerConcurrency int
 	MediaWorkDir      string
@@ -47,16 +45,7 @@ const (
 	// databaseURLSQLite selects the on-disk SQLite job repository. Accepts the
 	// bare value "sqlite" (stores <DataDir>/jobs.db) or "sqlite:<path>".
 	databaseURLSQLite = "sqlite"
-	queueModeRedis    = "redis"
-	queueModeInline   = "inline"
 )
-
-// isLocalDatabase reports whether the database URL selects a single-machine
-// backend (in-memory or SQLite) rather than Postgres. Local backends run the
-// queue inline, since there is no Redis alongside them.
-func isLocalDatabase(url string) bool {
-	return url == databaseURLMemory || url == databaseURLSQLite || strings.HasPrefix(url, databaseURLSQLite+":")
-}
 
 // sqlitePath resolves the SQLite file path from the database URL, defaulting to
 // <dataDir>/jobs.db when only "sqlite" (no explicit path) is given.
@@ -72,8 +61,6 @@ func loadConfig() (config, error) {
 	c := config{
 		HTTPAddr:         envOr("ZV_HTTP_ADDR", "127.0.0.1:8080"),
 		DatabaseURL:      os.Getenv("ZV_DATABASE_URL"),
-		RedisAddr:        envOr("ZV_REDIS_ADDR", "localhost:6379"),
-		QueueMode:        envOr("ZV_QUEUE_MODE", queueModeRedis),
 		DataDir:          envOr("ZV_DATA_DIR", "./data"),
 		MediaWorkDir:     os.Getenv("ZV_MEDIA_WORK_DIR"),
 		RecorderPath:     os.Getenv("ZV_RECORDER_PATH"),
@@ -100,12 +87,6 @@ func loadConfig() (config, error) {
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
-	}
-	if isLocalDatabase(c.DatabaseURL) && c.QueueMode == queueModeRedis {
-		c.QueueMode = queueModeInline
-	}
-	if c.QueueMode != queueModeRedis && c.QueueMode != queueModeInline {
-		return c, fmt.Errorf("ZV_QUEUE_MODE must be %q or %q", queueModeRedis, queueModeInline)
 	}
 	if !httpapi.IsLoopbackAddr(c.HTTPAddr) && c.MutationToken == "" {
 		return c, fmt.Errorf("ZV_MUTATION_TOKEN is required when ZV_HTTP_ADDR is not loopback")

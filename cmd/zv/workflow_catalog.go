@@ -29,9 +29,8 @@ func workflowCatalog() []workflowInfo {
 
 // buildWorkflowCatalog lists the delegated single-binary workflows. The
 // primary product flow is the composite built-in `zv short` (parse -> record
-// -> render -> publish pack in one command), documented in
-// docs/workflows/zv-short.md; it chains these stage workflows instead of
-// appearing as a catalog entry of its own.
+// -> render -> publish pack in one command); it chains these stage workflows
+// instead of appearing as a catalog entry of its own.
 func buildWorkflowCatalog() []workflowInfo {
 	return withWorkflowRunCommands([]workflowInfo{
 		{

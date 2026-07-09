@@ -3,6 +3,7 @@ package job
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,14 @@ import (
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/rules"
 )
+
+// ErrNotFound is returned by Get when no job has the requested id.
+var ErrNotFound = errors.New("job not found")
+
+// ErrConflict is returned when an operation is rejected because the job is not
+// in a state that allows it (e.g. a parse request for a job that was never
+// scanned). It maps to HTTP 409 at the API boundary.
+var ErrConflict = errors.New("job state conflict")
 
 // Status is the lifecycle state of a Job.
 type Status int

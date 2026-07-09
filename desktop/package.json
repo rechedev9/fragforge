@@ -4,15 +4,23 @@
   "private": true,
   "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
   "author": "FragForge",
-  "main": "main.js",
+  "main": "dist/main.js",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src",
+    "test:unit": "node --test \"src/**/*.test.ts\"",
     "assemble": "node scripts/assemble.mjs",
-    "start": "electron .",
-    "dist": "npm run assemble && electron-builder --win nsis"
+    "start": "npm run build && electron .",
+    "dist": "npm run build && npm run assemble && electron-builder --win nsis"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "electron": "^43.0.0",
-    "electron-builder": "^26.0.0"
+    "electron-builder": "^26.0.0",
+    "oxlint": "^1.72.0",
+    "oxlint-tsgolint": "^0.24.0",
+    "typescript": "^5.7.0"
   },
   "build": {
     "appId": "com.fragforge.studio",
@@ -21,9 +29,8 @@
       "output": "dist-installer"
     },
     "files": [
-      "main.js",
-      "loading.html",
-      "pair.html"
+      "dist/**/*",
+      "loading.html"
     ],
     "extraResources": [
       {

@@ -9,11 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hibiken/asynq"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/rechedev9/fragforge/internal/httpapi"
-	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/obs"
 	"github.com/rechedev9/fragforge/internal/storage"
 	"github.com/rechedev9/fragforge/internal/streamclips"
@@ -74,41 +70,14 @@ func main() {
 		streamRepo = sqliteStreamRepo
 		log.Printf("jobs: using sqlite repository at %s", path)
 	default:
-		poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
-		if err != nil {
-			log.Fatalf("postgres config: %v", err)
-		}
-		// The pool is shared by the Asynq workers (each in-flight task can hold a
-		// connection) and the HTTP server. Size it for worker concurrency plus
-		// request headroom so tasks and requests do not block acquiring a connection,
-		// and keep a couple of warm connections to avoid cold-start latency.
-		const httpConnHeadroom = 8
-		if want := int32(cfg.WorkerConcurrency + httpConnHeadroom); want > poolCfg.MaxConns {
-			poolCfg.MaxConns = want
-		}
-		poolCfg.MinConns = 2
-
-		pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
-		if err != nil {
-			log.Fatalf("postgres: %v", err)
-		}
-		defer pool.Close()
-
-		pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
-		err = pool.Ping(pingCtx)
-		cancelPing()
-		if err != nil {
-			log.Fatalf("postgres ping: %v", err)
-		}
-		repo = job.NewRepository(pool)
-		streamRepo = streamclips.NewRepository(pool)
+		log.Fatalf("unsupported ZV_DATABASE_URL %q: fragforge desktop only supports %q or %q", cfg.DatabaseURL, databaseURLMemory, databaseURLSQLite)
 	}
 
 	// Reconcile jobs stranded in a transient in-flight status by a previous
 	// process that crashed or was quit mid-stage. Do it after the repo is ready
 	// and before serving traffic, so the UI never shows a forever-"recording"
-	// card for a job whose worker died. Covers the memory, sqlite, and Postgres
-	// repos alike (all implement ListByStatus/UpdateStatus).
+	// card for a job whose worker died. Covers the memory and sqlite repos
+	// alike (both implement ListByStatus/UpdateStatus).
 	if n, err := sweepInterruptedJobs(ctx, repo, obs.Default()); err != nil {
 		log.Printf("startup: sweep interrupted jobs failed: %v", err)
 	} else if n > 0 {
@@ -190,40 +159,15 @@ func main() {
 	}
 
 	var queue httpapi.Enqueuer
-	var asynqSrv *asynq.Server
-	var inline *inlineQueue
-	if cfg.QueueMode == queueModeInline {
-		inline = newInlineQueue(taskHandlers, cfg.WorkerConcurrency)
-		queue = inline
-		// Wire the chaining queue before processing starts so the record worker
-		// never handles a task with a half-set enqueuer.
-		if recordWorker != nil {
-			recordWorker.UseEnqueuer(queue)
-		}
-		inline.Start(ctx)
-		log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
-	} else {
-		redisOpt := asynq.RedisClientOpt{Addr: cfg.RedisAddr}
-		client := asynq.NewClient(redisOpt)
-		defer client.Close()
-		queue = client
-		// Wire the chaining queue before the asynq server starts consuming.
-		if recordWorker != nil {
-			recordWorker.UseEnqueuer(queue)
-		}
-
-		asynqSrv = asynq.NewServer(redisOpt, asynq.Config{Concurrency: cfg.WorkerConcurrency})
-		mux := asynq.NewServeMux()
-		for taskType, handler := range taskHandlers {
-			mux.HandleFunc(taskType, handler)
-		}
-		go func() {
-			log.Printf("asynq: starting worker (concurrency=%d)", cfg.WorkerConcurrency)
-			if err := asynqSrv.Run(mux); err != nil {
-				log.Printf("asynq: %v", err)
-			}
-		}()
+	inline := newInlineQueue(taskHandlers, cfg.WorkerConcurrency)
+	queue = inline
+	// Wire the chaining queue before processing starts so the record worker
+	// never handles a task with a half-set enqueuer.
+	if recordWorker != nil {
+		recordWorker.UseEnqueuer(queue)
 	}
+	inline.Start(ctx)
+	log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
 
 	// Defense-in-depth gating only kicks in on an exposed (non-loopback) bind;
 	// the loopback default stays unauthenticated and unthrottled for the local
@@ -264,11 +208,6 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
-	if asynqSrv != nil {
-		asynqSrv.Shutdown()
-	}
-	if inline != nil {
-		inline.Shutdown(shutdownCtx)
-	}
+	inline.Shutdown(shutdownCtx)
 	log.Print("shutdown: done")
 }

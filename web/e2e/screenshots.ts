@@ -7,9 +7,9 @@ import * as path from 'node:path';
  * F0 visual-judge capture harness. Single command:
  *   npx playwright test -c e2e/screenshots.config.ts
  *
- * Captures every app surface (mock API, cloud mode, port 3200) as fullPage
- * PNGs under e2e/screenshots/ (gitignored). Every capture waits on a
- * screen-specific content selector, never on networkidle alone.
+ * Captures every app surface (mock API, port 3200) as fullPage PNGs under
+ * e2e/screenshots/ (gitignored). Every capture waits on a screen-specific
+ * content selector, never on networkidle alone.
  *
  * PNGs are staged in a temp dir OUTSIDE the project during the run and copied
  * into e2e/screenshots/ only after the last test: writing files under web/
@@ -47,25 +47,10 @@ async function shoot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(stageDir, name), fullPage: true, animations: 'disabled' });
 }
 
-test('home (/)', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'FORJA TU HIGHLIGHT' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'SOLTAR UN .DEM' })).toBeVisible();
-  // Let the three.js hero reel reach a steady frame before capturing.
-  await page.waitForTimeout(2000);
-  await shoot(page, 'home.png');
-});
-
 test('upload (/upload)', async ({ page }) => {
   await page.goto('/upload');
   await expect(page.getByRole('heading', { name: 'ANALIZA CUALQUIER DEMO' })).toBeVisible();
   await shoot(page, 'upload.png');
-});
-
-test('connect (/connect)', async ({ page }) => {
-  await page.goto('/connect');
-  await expect(page.getByRole('heading', { name: 'Vincula tu historial' })).toBeVisible();
-  await shoot(page, 'connect.png');
 });
 
 test('matches (/matches)', async ({ page }) => {

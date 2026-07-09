@@ -1,12 +1,11 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, SteamUser, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch, CaptureProgress } from './types';
+import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch, CaptureProgress } from './types';
 import { SERVICE_UNAVAILABLE_CODE } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
-import { dataPlane, type DataPlane, type Loopback, type PcStatus } from './dataplane';
-import { isLocalMode } from '@/lib/mode';
+import { dataPlane, type DataPlane } from './dataplane';
 import { playsSelectionLabel } from '@/lib/format';
 
 /** Segment ids joined into the stable local id for a reel (not an artifact path). */
@@ -150,17 +149,15 @@ function videoFromIntent(intent: ReelIntent): Video {
 }
 
 /**
- * RealApiClient drives the whole upload→parse→record→render pipeline against one
- * orchestrator, reached over a mode-selected data plane (see lib/api/dataplane):
- * local mode proxies through the same-origin /api/demos/* routes; cloud mode
- * talks straight to the paired agent's loopback with a Bearer token read from
- * /api/pc/status. The orchestrator is the source of truth: the client persists
- * only lightweight reel INTENTS (reel-store) and derives each reel's live status
- * by reconciling against it on every poll (reel-reconcile), driving record→render
- * idempotently. A hard reload re-reads server state and resumes exactly where it
- * left off. Everything outside the upload→reel path (steam, library seeds, feed)
- * delegates to a MockApiClient. Selected by index.ts when NEXT_PUBLIC_API_BASE is
- * set or in local mode.
+ * RealApiClient drives the whole upload→parse→record→render pipeline against
+ * the local orchestrator bundled with the desktop app, reached through the
+ * same-origin /api/demos/* proxy routes (see lib/api/dataplane). The
+ * orchestrator is the source of truth: the client persists only lightweight
+ * reel INTENTS (reel-store) and derives each reel's live status by
+ * reconciling against it on every poll (reel-reconcile), driving
+ * record→render idempotently. A hard reload re-reads server state and
+ * resumes exactly where it left off. Everything outside the upload→reel path
+ * (library seeds, feed) delegates to a MockApiClient.
  */
 export class RealApiClient implements ApiClient {
   private readonly fallback = new MockApiClient();
@@ -170,16 +167,8 @@ export class RealApiClient implements ApiClient {
   private readonly intents = new Map<string, ReelIntent>();
   /** Reels with a record/render POST in flight, so a tick never double-drives. */
   private readonly driving = new Set<string>();
-  /** Cloud-mode loopback endpoint (port + token), resolved once from /api/pc/status. */
-  private loopback: Loopback | null = null;
-  /** Memoized data plane for the resolved loopback (or the constant local proxy). */
-  private dpCache: DataPlane | null = null;
-  /** Cloud-mode DOM object URLs for each ready reel's mp4/cover (Bearer-fetched). */
-  private readonly media = new Map<string, { video?: string; cover?: string }>();
   /** Server-reported artifact names for each reel (the file names the editor wrote). */
   private readonly artifactNames = new Map<string, { video: string; cover: string }>();
-  /** Reels with a loadMedia fetch in flight, so a tick never double-fetches media. */
-  private readonly mediaLoading = new Set<string>();
 
   constructor() {
     // Rehydrate the reels the user asked for so the Library survives a hard reload
@@ -190,95 +179,24 @@ export class RealApiClient implements ApiClient {
     }
   }
 
-  /**
-   * The active data plane: same-origin proxy (local) or cloud loopback. Memoized
-   * so a poll tick's dozen requests reuse one built plane instead of rebuilding
-   * its closures each call; invalidateLoopback drops the cache when the loopback
-   * changes (401, offline). Local mode's plane is constant, so it caches once.
-   */
-  private async dp(): Promise<DataPlane> {
-    if (this.dpCache) return this.dpCache;
-    const lb = isLocalMode() ? null : await this.ensureLoopback();
-    this.dpCache = dataPlane(lb);
-    return this.dpCache;
-  }
-
-  /** Drops the cached loopback and its data plane so the next call re-resolves. */
-  private invalidateLoopback(): void {
-    this.loopback = null;
-    this.dpCache = null;
+  /** The local same-origin proxy data plane (the only transport this app has). */
+  private dp(): DataPlane {
+    return dataPlane();
   }
 
   /**
-   * Resolves and caches the cloud loopback endpoint from /api/pc/status. A user
-   * with no paired agent (or one that has not reported a loopback yet) has
-   * nothing on their PC to reach, so this reports PC_OFFLINE and lets the upload
-   * flow show the actionable "open FragForge Agent" state.
-   */
-  private async ensureLoopback(): Promise<Loopback> {
-    if (this.loopback) return this.loopback;
-    const status = await this.fetchPcStatus();
-    if (!status.loopback) throw new Error('PC_OFFLINE');
-    this.loopback = status.loopback;
-    return this.loopback;
-  }
-
-  private async fetchPcStatus(): Promise<PcStatus> {
-    const res = await fetch('/api/pc/status', { cache: 'no-store' });
-    if (!res.ok) return { paired: false, online: false, loopback: null };
-    return (await res.json()) as PcStatus;
-  }
-
-  /**
-   * Issues one data-plane request. `build` receives the resolved DataPlane and
-   * returns a URL plus optional init; send() merges the transport's auth headers
-   * and, on a cloud 401 (a rotated/stale token), drops the cached loopback so the
-   * next call re-resolves it from /api/pc/status. In cloud mode a fetch rejection
-   * means the loopback died mid-flight (PC slept, agent quit): translate it to
-   * PC_OFFLINE (and drop the cached loopback) so callers offer Retry instead of a
-   * raw network error. Local mode keeps propagating so the 503 service_unavailable
-   * contract is untouched.
+   * Issues one data-plane request. `build` receives the DataPlane and returns
+   * a URL plus optional init; send() merges the transport's headers on top.
    */
   private async send(build: (dp: DataPlane) => { url: string; init?: RequestInit }): Promise<Response> {
-    const dp = await this.dp();
+    const dp = this.dp();
     const { url, init } = build(dp);
     const headers = { ...dp.headers, ...((init?.headers as Record<string, string> | undefined) ?? {}) };
-    let res: Response;
-    try {
-      res = await fetch(url, { ...init, headers });
-    } catch (err) {
-      if (!isLocalMode()) {
-        this.invalidateLoopback();
-        throw new Error('PC_OFFLINE');
-      }
-      throw err;
-    }
-    if (res.status === 401 && !isLocalMode()) this.invalidateLoopback();
-    return res;
-  }
-
-  /** Loopback liveness for cloud mode; local mode has no separate probe. */
-  private async probeHealthz(dp: DataPlane): Promise<boolean> {
-    if (!dp.healthzUrl) return true;
-    try {
-      const res = await fetch(dp.healthzUrl, { headers: dp.headers, cache: 'no-store' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    return fetch(url, { ...init, headers });
   }
 
   async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
-    const dp = await this.dp();
-    // Cloud mode is a public-HTTPS -> loopback hop: probe the agent's /healthz
-    // before uploading so an offline PC surfaces as PC_OFFLINE (an actionable
-    // "open FragForge Agent" state) instead of a failed upload mid-stream. Local
-    // mode has no probe and always passes.
-    if (!(await this.probeHealthz(dp))) {
-      this.invalidateLoopback();
-      throw new Error('PC_OFFLINE');
-    }
-
+    const dp = this.dp();
     const form = new FormData();
     form.append(dp.scanField, file);
     const scanned = await readJson<unknown>(
@@ -370,24 +288,10 @@ export class RealApiClient implements ApiClient {
     return planToPlays(matchId, plan);
   }
 
-  /**
-   * Polls /status until it reaches `want`; throws on `failed` or timeout. In
-   * cloud mode a loopback that drops mid-poll (PC slept, agent quit) throws from
-   * the fetch; that is translated to PC_OFFLINE so the flow offers Retry instead
-   * of a raw network error.
-   */
+  /** Polls /status until it reaches `want`; throws on `failed` or timeout. */
   private async waitForStatus(jobId: string, want: string, maxAttempts = 240): Promise<void> {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      let status: string | null;
-      try {
-        status = await this.fetchStatus(jobId);
-      } catch (err) {
-        if (!isLocalMode()) {
-          this.invalidateLoopback();
-          throw new Error('PC_OFFLINE');
-        }
-        throw err;
-      }
+      const status = await this.fetchStatus(jobId);
       if (status === want) return;
       if (status === 'failed') throw new Error(`job ${jobId} failed`);
       await sleep(800);
@@ -438,14 +342,10 @@ export class RealApiClient implements ApiClient {
 
   async listVideos(): Promise<Video[]> {
     await this.reconcile();
-    const reels = Array.from(this.reels.values())
+    // The Library shows only the user's own real reels, persisted on this PC.
+    return Array.from(this.reels.values())
       .sort((a, b) => b.createdAt - a.createdAt)
       .map((v) => ({ ...v }));
-    // Local studio shows only the user's own real reels (persisted on this PC).
-    // Cloud/preview additionally shows demo seed videos for the design surface.
-    if (isLocalMode()) return reels;
-    const seeds = await this.fallback.listVideos();
-    return [...reels, ...seeds];
   }
 
   async getVideo(id: string): Promise<Video | null> {
@@ -513,7 +413,6 @@ export class RealApiClient implements ApiClient {
       // Orchestrator offline: the artifacts stay on disk, but the reel still
       // leaves the library. A future render of the same job overwrites them.
     }
-    this.revokeMedia(id);
     this.artifactNames.delete(id);
     this.intents.delete(id);
     this.reels.delete(id);
@@ -539,8 +438,8 @@ export class RealApiClient implements ApiClient {
       this.fetchStatusFull(intent.jobId),
       this.fetchRenderStatus(intent.jobId, variantOf(intent)),
     ]);
-    // Capture the server's real artifact names so applyView/loadMedia address
-    // the reel by the editor's file names instead of guessing from segment ids.
+    // Capture the server's real artifact names so applyView addresses the reel
+    // by the editor's file names instead of guessing from segment ids.
     if (render.videoName && render.coverName) {
       this.artifactNames.set(intent.videoId, { video: render.videoName, cover: render.coverName });
     }
@@ -576,81 +475,13 @@ export class RealApiClient implements ApiClient {
     // next tick resolves them - the same not-yet-ready handling as before.
     const names = this.artifactNames.get(intent.videoId);
     if (view.status === 'ready' && names) {
+      // Same-origin proxy URLs the browser can hand straight to <video>/<img>.
       const variant = variantOf(intent);
-      if (isLocalMode()) {
-        // Same-origin proxy URLs the browser can hand straight to <video>/<img>.
-        const dp = dataPlane(null);
-        next.downloadUrl = dp.videoUrl(intent.jobId, variant, names.video);
-        next.thumbnailUrl = dp.coverUrl(intent.jobId, variant, names.cover);
-      } else {
-        // Cloud: the bytes sit behind the Bearer-gated loopback, which a bare
-        // <video>/<img> src cannot authenticate to. Serve DOM object URLs
-        // fetched with the token; loadMedia fills them on a later tick, and the
-        // card shows its placeholder cover until then. Surface whatever is cached
-        // (possibly a partial entry when one of the two fetches failed) and kick
-        // loadMedia to fill the rest until both pieces are present.
-        const cached = this.media.get(intent.videoId);
-        next.downloadUrl = cached?.video;
-        next.thumbnailUrl = cached?.cover;
-        if (!cached || !cached.video || !cached.cover) void this.loadMedia(intent);
-      }
+      const dp = dataPlane();
+      next.downloadUrl = dp.videoUrl(intent.jobId, variant, names.video);
+      next.thumbnailUrl = dp.coverUrl(intent.jobId, variant, names.cover);
     }
     this.reels.set(intent.videoId, next);
-  }
-
-  /**
-   * Cloud mode only: fetches a ready reel's mp4 and cover through the
-   * authenticated loopback and caches DOM object URLs, then surfaces them on the
-   * live reel. Self-healing: when only one of the two fetches succeeded, the
-   * partial entry is cached and a later tick re-fetches only the missing piece and
-   * merges it, so a transient cover (or video) failure does not strand the reel
-   * without media until reload. An in-flight guard keeps concurrent ticks from
-   * double-fetching the same piece and orphaning object URLs.
-   */
-  private async loadMedia(intent: ReelIntent): Promise<void> {
-    const cached = this.media.get(intent.videoId);
-    if (cached?.video && cached?.cover) return; // already fully loaded
-    if (this.mediaLoading.has(intent.videoId)) return;
-    const names = this.artifactNames.get(intent.videoId);
-    if (!names) return; // names not resolved yet; a later tick retries once ready
-    this.mediaLoading.add(intent.videoId);
-    try {
-      const variant = variantOf(intent);
-      // Reuse the already-fetched piece verbatim (no re-fetch, so no URL to
-      // orphan) and fetch only what is still missing.
-      const [video, cover] = await Promise.all([
-        cached?.video ? Promise.resolve(cached.video) : this.objectUrl((dp) => dp.videoUrl(intent.jobId, variant, names.video)),
-        cached?.cover ? Promise.resolve(cached.cover) : this.objectUrl((dp) => dp.coverUrl(intent.jobId, variant, names.cover)),
-      ]);
-      if (!video && !cover) return; // nothing fetched (offline / not ready yet): retry next tick
-      this.media.set(intent.videoId, { video, cover });
-      const reel = this.reels.get(intent.videoId);
-      if (reel && reel.status === 'ready') {
-        this.reels.set(intent.videoId, { ...reel, downloadUrl: video, thumbnailUrl: cover });
-      }
-    } finally {
-      this.mediaLoading.delete(intent.videoId);
-    }
-  }
-
-  /** Fetches one loopback artifact and wraps it in a DOM object URL, or undefined. */
-  private async objectUrl(build: (dp: DataPlane) => string): Promise<string | undefined> {
-    try {
-      const res = await this.send((dp) => ({ url: build(dp) }));
-      if (!res.ok) return undefined;
-      return URL.createObjectURL(await res.blob());
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** Releases any object URLs held for a reel (cloud mode). */
-  private revokeMedia(videoId: string): void {
-    const held = this.media.get(videoId);
-    if (!held) return;
-    if (held.video) URL.revokeObjectURL(held.video);
-    if (held.cover) URL.revokeObjectURL(held.cover);
-    this.media.delete(videoId);
   }
 
   /** Issues the single pipeline POST for `action`, guarded so it fires at most once. */
@@ -722,9 +553,7 @@ export class RealApiClient implements ApiClient {
 
   /**
    * Reads job status + failure reason (+ live capture progress while recording);
-   * null when the job is unknown (404). Cloud and local share this path: both hit
-   * GET /api/jobs/{id} (loopback or same-origin proxy), so the progress the
-   * orchestrator reports flows to the card the same way in either mode.
+   * null when the job is unknown (404).
    */
   private async fetchStatusFull(
     jobId: string,
@@ -772,86 +601,8 @@ export class RealApiClient implements ApiClient {
     return { status, failureReason: data.failure_reason, videoName: data.videos?.[0], coverName: data.covers?.[0] };
   }
 
-  // --- everything below delegates to the mock fallback (out of scope here) ---
-
-  /** Real Steam session from the signed cookie (/api/auth/session). */
-  async getSession(): Promise<Session> {
-    const signedOut: Session = { user: null, slots: { used: 0, total: 50 }, pcPaired: false, matchHistoryLinked: false };
-    try {
-      const res = await fetch('/api/auth/session', { cache: 'no-store' });
-      const data = (await res.json()) as { user: SteamUser | null; matchHistoryLinked?: boolean };
-      if (!data.user) return signedOut;
-      return {
-        user: data.user,
-        slots: { used: 0, total: 50 },
-        pcPaired: true, // BYO: the signed-in user's own machine hosts capture
-        matchHistoryLinked: Boolean(data.matchHistoryLinked),
-      };
-    } catch {
-      return signedOut;
-    }
-  }
-
-  /** Real Steam OpenID: full-page redirect to Steam; the browser navigates away. */
-  async signInWithSteam(): Promise<Session> {
-    if (typeof window !== 'undefined') {
-      window.location.assign('/api/auth/steam/login');
-      await new Promise<never>(() => {}); // navigation in progress; never resolves
-    }
-    return this.getSession();
-  }
-
-  async signOut(): Promise<void> {
-    try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-    } catch {
-      // best-effort; the cookie also expires on its own.
-    }
-  }
-
-  /** Links real CS2 match history via the Steam Web API (needs STEAM_WEB_API_KEY). */
-  async linkMatchHistory(input: { authCode: string; knownCode: string }): Promise<{ ok: boolean; matchesFound: number }> {
-    const res = await fetch('/api/auth/match-history', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      ok?: boolean;
-      matchesFound?: number;
-      error?: string;
-      code?: string;
-    };
-    if (!res.ok) {
-      // Propagate the backend's stable `code` on the thrown error so the UI can
-      // branch deterministically (no message string-sniffing). Additive only —
-      // the ApiClient signature is unchanged.
-      const err = new Error(data.error || 'failed to link match history') as Error & { code?: string };
-      err.code = data.code;
-      throw err;
-    }
-    return { ok: Boolean(data.ok), matchesFound: Number(data.matchesFound) || 0 };
-  }
-
-  /** Mints a one-time pairing code for the desktop agent (POST /api/pc/pair). */
-  async pairPc(): Promise<{ pairingCode: string }> {
-    // Cloud-only: pairing hands work to a remote agent via Supabase. Local studio
-    // runs capture on this same machine, so there is nothing to pair.
-    if (isLocalMode()) return { pairingCode: '' };
-    return readJson<{ pairingCode: string }>(await fetch('/api/pc/pair', { method: 'POST' }));
-  }
-
-  /**
-   * Reports whether the signed-in user has a redeemed agent (GET /api/pc/status).
-   * Stays false right after pairPc until the desktop agent redeems the code and
-   * heartbeats, since the pending pairing row is excluded server-side.
-   */
-  async getPcStatus(): Promise<{ paired: boolean }> {
-    // Local studio is the machine itself; report paired without hitting the
-    // cloud-only /api/pc/status route (which needs Supabase).
-    if (isLocalMode()) return { paired: true };
-    return { paired: (await this.fetchPcStatus()).paired };
-  }
+  // --- everything below is outside the upload→reel path: capture readiness is
+  // real, the rest delegates to (or stubs out) the mock fallback ---
 
   /**
    * Reads capture readiness from the local orchestrator (/api/capabilities): is
@@ -886,10 +637,9 @@ export class RealApiClient implements ApiClient {
     }
   }
   listMatches(): Promise<Match[]> {
-    // Local studio has no cloud match library; the mock seeds are a design-only
-    // surface. A local match is opened by job id from the upload flow, not listed.
-    if (isLocalMode()) return Promise.resolve([]);
-    return this.fallback.listMatches();
+    // The desktop app has no match library: a match is opened by job id from
+    // the upload flow, not listed.
+    return Promise.resolve([]);
   }
   /** @deprecated Superseded by scanDemo + parseDemo. */
   uploadDemo(input: { fileName: string }): Promise<Match> {
@@ -937,9 +687,8 @@ export class RealApiClient implements ApiClient {
   }
 
   listFeed(): Promise<FeedItem[]> {
-    // The community feed is a cloud surface; local studio shows no seeded feed.
-    if (isLocalMode()) return Promise.resolve([]);
-    return this.fallback.listFeed();
+    // The community feed was a cloud surface; the desktop app shows no feed.
+    return Promise.resolve([]);
   }
 }
 

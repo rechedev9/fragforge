@@ -3,6 +3,7 @@ package streamclips
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// ErrNotFound is returned when no stream job has the requested id.
+var ErrNotFound = errors.New("stream job not found")
 
 const (
 	VariantStreamerVerticalStack = "streamer-vertical-stack"

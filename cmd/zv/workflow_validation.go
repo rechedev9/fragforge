@@ -23,21 +23,6 @@ func checkWorkflows() ([]skillInfo, []workflowInfo, []workflowDoc, int, []skillI
 		return nil, nil, nil, 0, nil, err
 	}
 	issues = append(issues, docIssues...)
-	issues = append(issues, validateWorkflowDocCoverage(workflows, docs)...)
-	issues = append(issues, validateWorkflowDocExecutableDirectCommands(workflows, docs)...)
-	issues = append(issues, validateWorkflowDocRequiredWorkflowRuns(workflows, docs)...)
-	issues = append(issues, validateWorkflowDocExecutableWorkflowRuns(workflows, docs)...)
-	issues = append(issues, validateWorkflowDocRunCommandOrder(workflows, docs)...)
-	issues = append(issues, validateWorkflowDocRunCommandUniqueness(docs)...)
-	issues = append(issues, validateWorkflowDocShowCoverage(workflows, docs)...)
-	issues = append(issues, validateWorkflowDocShowCommandOrder(workflows, docs)...)
-	issues = append(issues, validateWorkflowDocShowCommandUniqueness(docs)...)
-	issues = append(issues, validateWorkflowDocListAndCheckCommandUniqueness(docs)...)
-	issues = append(issues, validateProjectDocCheckCommandUniqueness(docs)...)
-	issues = append(issues, validateSkillDocCoverage(skills, docs)...)
-	issues = append(issues, validateSkillDocShowCommandOrder(skills, docs)...)
-	issues = append(issues, validateSkillDocShowCommandUniqueness(docs)...)
-	issues = append(issues, validateSkillDocListAndCheckCommandUniqueness(docs)...)
 	buildIssues, err := checkCommandBuildTargets()
 	if err != nil {
 		return nil, nil, nil, 0, nil, err

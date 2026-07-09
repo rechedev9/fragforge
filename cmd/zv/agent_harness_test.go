@@ -158,7 +158,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 		"== shell syntax ==",
 		"== Codex sees AGENTS.md ==",
 		"== FragForge workflow contract ==",
-		"OK: 6 skills, 15 workflows, 15 workflow docs, and 19 agent prompt wrappers checked",
+		"OK: 6 skills, 15 workflows, 11 workflow docs, and 19 agent prompt wrappers checked",
 		"OK: Codex harness is wired",
 	} {
 		if !strings.Contains(body, want) {
@@ -677,9 +677,6 @@ func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
 		filepath.Join(root, "README.md"),
-		filepath.Join(root, "docs", "README.md"),
-		filepath.Join(root, "docs", "toolchain.md"),
-		filepath.Join(root, "docs", "workflows", "catalog.md"),
 	}
 	legacyCommands := legacyWorkflowCommands()
 	for _, path := range paths {
@@ -712,64 +709,5 @@ func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
 		if !strings.Contains(string(readme), want) {
 			t.Fatalf("README.md does not contain unified workflow command %q", want)
 		}
-	}
-	catalog, err := os.ReadFile(filepath.Join(root, "docs", "workflows", "catalog.md"))
-	if err != nil {
-		t.Fatalf("read docs/workflows/catalog.md: %v", err)
-	}
-	body := string(catalog)
-	for _, want := range []string{
-		"./bin/zv demo parse",
-		"./bin/zv demo players",
-		"./bin/zv compose final",
-		"./bin/zv shorts render",
-		"./bin/zv analysis tactical-data",
-		"./bin/zv analysis view",
-		"./bin/zv serve",
-		"./bin/zv pipeline",
-		"./bin/zv check",
-		"./bin/zv check --format json",
-		"./bin/zv skills check",
-		"./bin/zv skills list --format json",
-		"./bin/zv skills show",
-		"./bin/zv skills check --format json",
-		"./bin/zv workflows list",
-		"./bin/zv workflows list --format json",
-		"./bin/zv workflows show",
-		"./bin/zv workflows show demo-parse --format json",
-		"./bin/zv workflows run demo-parse",
-		"./bin/zv workflows run demo-players",
-		"./bin/zv workflows run compose-final",
-		"./bin/zv workflows run analysis-tactical-data",
-		"./bin/zv workflows run analysis-viewer",
-		"./bin/zv workflows run project-check",
-		"./bin/zv workflows check",
-		"./bin/zv workflows check --format json",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("docs/workflows/catalog.md does not contain unified workflow command %q", want)
-		}
-	}
-	skills, err := loadSkills()
-	if err != nil {
-		t.Fatalf("load skills: %v", err)
-	}
-	if len(skills) == 0 {
-		t.Fatalf("no repo-local skills found")
-	}
-	for _, skill := range skills {
-		if !strings.Contains(body, skill.Name) {
-			t.Fatalf("docs/workflows/catalog.md does not document repo skill %q", skill.Name)
-		}
-	}
-	toolchain, err := os.ReadFile(filepath.Join(root, "docs", "toolchain.md"))
-	if err != nil {
-		t.Fatalf("read docs/toolchain.md: %v", err)
-	}
-	if !strings.Contains(string(toolchain), `.\\bin\\zv.exe record`) && !strings.Contains(string(toolchain), `.\bin\zv.exe record`) {
-		t.Fatalf("docs/toolchain.md does not document unified capture command")
-	}
-	if !strings.Contains(string(toolchain), `zv check`) {
-		t.Fatalf("docs/toolchain.md does not document the project check command")
 	}
 }

@@ -4,6 +4,9 @@ Deterministic CS2 demo-to-video pipeline. Drop a `.dem`, describe the clip you
 want, and get an upload-ready vertical Short: always 1080x1920 at 60fps, with
 viral-style editing by default.
 
+FragForge ships as a Windows desktop installer.
+Download it from the [`landing/`](./landing) site - there is no hosted service to sign up for.
+
 It parses demos into kill plans, records gameplay with HLAE/CS2, and
 post-processes clips with FFmpeg, Lua effects, overlays, and publishing
 metadata. Everything runs locally on Windows.
@@ -60,7 +63,6 @@ It starts the orchestrator (memory mode, HLAE/CS2 auto-detected) and the web UI
 in local mode, then opens `http://localhost:3000/upload`.
 The flow is: upload a demo -> pick a player -> pick specific kills -> create the
 reel, at which point HLAE + CS2 open to capture and the edit is applied.
-See [`docs/local-studio.md`](./docs/local-studio.md) for details.
 
 ## Render preset
 
@@ -77,15 +79,13 @@ List them any time with `zv presets` (`--format json` for automation).
 |--------|--------------|
 | `viral-60-clean` (default) | Clean HUD-less POV with kill notices, viral hook text, punch-ins, kill counter, and milestone labels. |
 
-The editing choices behind the viral presets (hook text in the first 1-2s,
+The editing choices behind the viral presets: hook text in the first 1-2s,
 punch-ins on kills, slow-mo only on the final kill, beat-synced drops,
-loop-friendly endings, never cropping the killfeed) are documented in
-[`docs/research/11-viral-cs2-vertical-editing.md`](./docs/research/11-viral-cs2-vertical-editing.md).
+loop-friendly endings, never cropping the killfeed.
 
 ## Quick start
 
-Requires Go 1.26+, FFmpeg, and (for recording) CS2 plus HLAE. The orchestrator
-additionally needs Docker for local Postgres and Redis.
+Requires Go 1.26+, FFmpeg, and (for recording) CS2 plus HLAE.
 
 ```powershell
 # Build all binaries into .\bin
@@ -103,11 +103,7 @@ Unix-like shells can use `make build` / `make test` instead.
 ### Orchestrator (HTTP API + workers)
 
 ```bash
-make up          # Postgres + Redis via Docker, wait ~10s for healthchecks
-make migrate-up  # requires ZV_DATABASE_URL exported
-
-export ZV_DATABASE_URL="postgres://zackvideo:zackvideo@localhost:5432/zackvideo?sslmode=disable"
-export ZV_REDIS_ADDR="localhost:6379"
+export ZV_DATABASE_URL=memory   # in-memory job repo + inline queue, no external services needed
 export ZV_DATA_DIR="./data"
 
 ./bin/zv serve
@@ -244,15 +240,6 @@ run. Never commit generated video/audio/image artifacts to git.
 - `internal/storage`, `internal/job`, `internal/tasks` — persistence and job
   state.
 - `effects/` — editable Lua effect scripts.
-- `services/cs2-market` — separate Python prototype for CS2 item market
-  research (see its own CLI: `cs2market init-db`, `ingest`, `score`,
-  `export-shorts`).
-
-Docs worth reading before architectural changes: [`docs/toolchain.md`](./docs/toolchain.md),
-[`docs/architecture/00-overview.md`](./docs/architecture/00-overview.md),
-[`docs/architecture/01-components.md`](./docs/architecture/01-components.md),
-[`docs/architecture/02-data-flow.md`](./docs/architecture/02-data-flow.md), and
-[`docs/specs/`](./docs/specs/) for the specs that produced this code.
 
 ## Tests
 
@@ -261,6 +248,6 @@ make test            # also runs `zv check` to keep the CLI contract aligned
 scripts/go-gate.sh   # main verification gate (fmt, vet, build, tests)
 ```
 
-Repository and worker integration tests skip automatically when Postgres or
+Worker integration tests that need a real demo skip automatically when
 `TEST_DEMO_PATH` is unavailable. Tests never launch HLAE/CS2 or long FFmpeg
 renders.

@@ -80,20 +80,19 @@ npm run typecheck  # tsc --noEmit
 web/
   app/                 # routes (App Router)
     layout.tsx         # root layout: fonts, <html class="dark">, GrainOverlay, Toaster
-    page.tsx           # / — Steam auth (no sidebar)
-    connect/page.tsx   # /connect — link history + pair PC (no sidebar)
-    (app)/layout.tsx   # authenticated shell (left Sidebar + container)
+    page.tsx           # / — redirects to /matches (no sidebar)
+    upload/page.tsx    # /upload — drop a .dem, no login (no sidebar)
+    (app)/layout.tsx   # app shell (left Sidebar + container)
     (app)/matches/     # /matches and /matches/[id]
     (app)/videos/      # /videos (Library)
     (app)/feed/        # /feed
   components/
     ui/                # shadcn/ui primitives (button, card, sidebar, dialog, ...)
     brand/             # PipelineSteps, ScoreBar, StatMono, RecDot, Filmstrip, GrainOverlay, Wordmark
-    shell/             # app-sidebar (left nav + slots meter + user menu)
-    matches/ clips/ videos/ feed/ login/ connect/   # per-screen pieces
+    shell/             # app-sidebar (left nav + capture readiness)
+    matches/ clips/ videos/ feed/   # per-screen pieces
   lib/
-    api/               # types, ApiClient interface, MockApiClient, fixtures
-    session.tsx        # SessionProvider + useSession
+    api/               # types, ApiClient interface, RealApiClient, MockApiClient, fixtures
     format.ts          # cn(), timeAgo, formatCountdown, productStatusLabel, ...
   design.md            # v2 design contract (read this before visual changes)
 ```

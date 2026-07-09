@@ -36,7 +36,7 @@ The clip "look" lives in editable Lua scripts under `effects/`, evaluated by a s
 Two ways to run the pipeline:
 
 - CLI (`zv short`, or the granular stage commands) runs the whole chain in-process on the local machine.
-- Orchestrator (`zv serve`) exposes an HTTP API and runs parser/media work on Asynq workers backed by Redis, with job state in Postgres.
+- Orchestrator (`zv serve`) exposes an HTTP API and runs parser/media work on an in-process inline queue, with job state in SQLite (or in memory for tests).
 
 The orchestrator drives a job state machine: `queued -> parsing -> parsed -> recording -> recorded -> composing -> composed -> done` (or `failed`).
 Each worker is idempotent: it checks whether the durable artifact already exists and skips the external media command if so, which makes manual retries safe.
@@ -59,20 +59,9 @@ Module boundaries (keep `cmd/` entrypoints thin):
 - `effects/` - editable Lua effect scripts.
 - `overlays/` - HyperFrames overlay experiments and generated overlay projects.
 - `web/` - standalone Next.js (App Router) frontend: the no-login `/upload` flow, match/clip/video views, and a typed API client; it reaches the orchestrator only through same-origin `/api/demos/*` proxy routes (see "Web frontend" below).
-- `services/cs2-market` - separate Python prototype for CS2 item market research, with its own CLI (`cs2market init-db`, `ingest`, `score`, `export-shorts`).
 - `data/` - generated/local media artifacts; treat as output unless the task is explicitly about test fixtures or artifact cleanup.
 
-Note: `docs/architecture/*` describes the full design vision (object storage, a separate music mixer and encoder, a fuller web frontend than `web/` ships today).
-The current foundation runs locally and concatenates segments into `final.mp4`; treat the README as the source of truth for what exists today.
-
-Docs worth reading before architectural changes:
-
-- `README.md`
-- `docs/toolchain.md`
-- `docs/architecture/00-overview.md`
-- `docs/architecture/01-components.md`
-- `docs/architecture/02-data-flow.md`
-- `docs/specs/` for the specs that produced this code.
+The current foundation runs locally and concatenates segments into `final.mp4`; treat `README.md` as the source of truth for what exists today.
 
 ## Render preset
 
@@ -80,7 +69,7 @@ There is a single supported preset, `viral-60-clean`, defined in `internal/edito
 It outputs 1080x1920 at 60fps: clean HUD-less POV with kill notices, viral hook text, kill punch-ins, a kill counter, and milestone labels.
 The loadout catalog (`internal/renderplan`), the HTTP API (`/api/presets`, `/api/loadouts`, render-variant validation), the workbench UI, and the render worker all derive from that registry, and unknown preset names are rejected with the valid list.
 List presets with `zv presets` (`--format json` for automation).
-The editing rationale (hook text in the first 1-2s, punch-ins on kills, slow-mo only on the final kill, beat-synced drops, loop-friendly endings, never cropping the killfeed) is documented in `docs/research/11-viral-cs2-vertical-editing.md`.
+The editing rationale: hook text in the first 1-2s, punch-ins on kills, slow-mo only on the final kill, beat-synced drops, loop-friendly endings, never cropping the killfeed.
 
 ## Web frontend (web/)
 
@@ -109,18 +98,9 @@ Real `.dem` files are never committed, so the fixture stays local.
 
 ## Deployment
 
-The hosted control plane runs on the user's Hetzner VPS (gr-prod), deployed 2026-07-08; there is no CI deploy.
-Deploying means: merge to `main`, then on gr-prod `cd /root/projects/fragforge && git pull && cd deploy/vps && docker compose up -d --build`.
-
-- Public URL: `https://fragforge.167-233-55-246.sslip.io` (sslip.io subdomain; TLS terminated by FragBot's Caddy at `/opt/fragbot/deploy/Caddyfile`, which proxies to `fragforge-web:3000`).
-- The Caddy container shares the bot's network namespace, so the web container joins the external `fragbot_default` network with alias `fragforge-web` via a VPS-local `docker-compose.override.yml` (not in git).
-  After Caddyfile changes, `docker restart fragbot-caddy-1`; `caddy reload` inside the container does not reliably pick up changes.
-- Secrets live only in `/root/projects/fragforge/deploy/vps/.env` on the VPS.
-  `FRAGFORGE_WEB_PASSWORD` stays empty: the Basic Auth gate would break agent pair/heartbeat; Steam login plus per-agent tokens are the auth.
-- Supabase control-plane DB: project `fragforge-cloud` (ref `wbpjuilfrnzdxfluulnr`, org rechedev9, free tier - it auto-pauses when idle; restore from the dashboard or the Management API).
-  The Supabase CLI is installed and authenticated on gr-prod.
-- Migration note: Supabase no longer allows `delete from storage.*` in SQL; bucket removal (0002) must go through the Storage API (`POST /storage/v1/bucket/{id}/empty`, then `DELETE /storage/v1/bucket/{id}`).
-- Desktop agents on any PC with HLAE+CS2 pair against the public URL: run `zv-agent` with `FRAGFORGE_CLOUD_URL` and `FRAGFORGE_WEB_ORIGIN` both set to it.
+There is no hosted deployment.
+FragForge ships as a Windows desktop `.exe` (Electron, `desktop/`) downloaded from the `landing/` site.
+"Deploying" a new version means building the installer (see `desktop/`'s own build docs) and publishing it - there is no server component to deploy.
 
 ### Local Studio (web UI + local HLAE/CS2 capture)
 
@@ -131,35 +111,7 @@ The web proxies the entire `/api/demos/*` pipeline to a local orchestrator (`zv 
 .\scripts\local-studio.ps1   # starts zv serve (memory mode, capture auto-detected) + the web in local mode, opens /upload
 ```
 
-One flag selects the data plane, `NEXT_PUBLIC_FRAGFORGE_MODE` (default `cloud`):
-
-- `local`: the web talks only to the local orchestrator; scan/status/roster proxy to it (`web/app/api/demos/_local.ts`), and the rest of the pipeline (parse/plan/record/renders/capabilities) already does.
-  A single orchestrator job UUID flows through scan -> parse -> record -> render, so the record button captures with the job that scan created.
-- `cloud`: after Steam login and pairing through Supabase (control plane only: identity, pairing, agent liveness), the browser talks directly to the paired desktop agent's local loopback proxy for the entire data plane (upload, scan, roster, parse, plan, record, render); no `.dem` or rendered media ever reaches Supabase or the hosted web.
-  See `docs/superpowers/specs/2026-07-08-local-first-cloud-data-plane.md`.
-
-Unlike the Docker stack below, this is a native Windows run, so capture works.
-See [`docs/local-studio.md`](docs/local-studio.md) for prerequisites and what the flag switches.
-
-### Local Docker stack
-
-A two-container stack runs the web UI and the orchestrator together for a local deployment:
-
-```bash
-docker compose -f docker-compose.app.yml up --build
-# web UI:        http://localhost:3000   (the no-login /upload analyze flow)
-# orchestrator:  http://127.0.0.1:8080   (loopback-only, e.g. curl /api/capabilities)
-```
-
-Files: `Dockerfile` (orchestrator, multi-stage Go build into a distroless static image), `web/Dockerfile` (Next.js standalone; `NEXT_PUBLIC_API_BASE=/api` baked at build), and `docker-compose.app.yml` (wires the two).
-This is separate from the dev `docker-compose.yml`, which only provides Postgres+Redis for `make up`.
-
-Scope and constraints:
-
-- It does NOT do gameplay capture. HLAE + CS2 are Windows + GPU and cannot run in a Linux container, so the orchestrator runs in memory mode (in-memory job repo + inline queue, no Postgres/Redis) and serves the analyze flow only (upload -> scan roster -> scoreboard -> pick player -> match/highlights).
-- Because capture is unconfigured, the sidebar "Capture" card correctly reads "Set up capture" and a created reel surfaces a clear "recording is not configured" failure. Real capture (and rendering captured footage) still needs a host orchestrator with `ZV_RECORDER_PATH`/`ZV_HLAE_PATH`/`ZV_CS2_PATH` set (see Common commands and the HLAE path under Operational rules).
-- The orchestrator binds `0.0.0.0:8080` inside its container; a non-loopback bind requires `ZV_MUTATION_TOKEN` (defaults to `fragforge-local`, override via the `ZV_MUTATION_TOKEN` env). The web container reaches it at `ORCHESTRATOR_URL=http://orchestrator:8080` and sends the same token as `ORCHESTRATOR_TOKEN`; the `/api/demos/*` proxy carries the token on reads and writes.
-- Demo blobs and artifacts persist in the `appdata` volume; jobs live in memory and reset on orchestrator restart. For the persistent Postgres/Redis mode instead, use the dev `docker-compose.yml` plus the orchestrator env in Common commands.
+This is a native Windows run, so capture works. Prerequisites: Go toolchain, Node, CS2 + HLAE installed, and the binaries built via `.\scripts\build.ps1`.
 
 ## Common commands
 
@@ -197,25 +149,14 @@ scripts/go-gate.sh --race --security --build  # full gate for risky PRs
 scripts/go-format-changed.sh                # format all changed Go files (or pass explicit paths)
 ```
 
-Orchestrator (HTTP API + workers), needs Docker for local Postgres and Redis:
+Orchestrator (HTTP API + workers) runs fully in-process with `ZV_DATABASE_URL=memory`: it uses an in-memory job repository and an inline queue, no external services needed:
 
 ```bash
-make up                                      # Postgres + Redis via Docker
-make migrate-up                              # needs ZV_DATABASE_URL exported
-export ZV_DATABASE_URL="postgres://zackvideo:zackvideo@localhost:5432/zackvideo?sslmode=disable"
-export ZV_REDIS_ADDR="localhost:6379"
-export ZV_DATA_DIR="./data"
-zv serve
+ZV_DATABASE_URL=memory ZV_DATA_DIR=./data ./bin/zv serve   # in-memory job repo + inline queue
 ```
 
 `zv serve` binds `127.0.0.1:8080` by default; a non-loopback bind requires `ZV_MUTATION_TOKEN`.
 It also exposes `GET /healthz` (liveness) and `GET /metrics` (Prometheus text), both unauthenticated so a Prometheus server can scrape them.
-
-For local development without Docker, run the orchestrator fully in-process with `ZV_DATABASE_URL=memory`: it uses an in-memory job repository and auto-switches the queue to inline mode, so no Postgres and no Redis are needed.
-
-```bash
-ZV_DATABASE_URL=memory ZV_DATA_DIR=./data ./bin/zv serve   # in-memory job repo + inline queue, no Postgres/Redis
-```
 
 This is enough for the parse and roster-scan stages (the parser worker is always registered); the record, compose, and render workers only start when their tool paths are set (`ZV_RECORDER_PATH`, `ZV_HLAE_PATH`, `ZV_CS2_PATH`, `ZV_EDITOR_PATH`, `ZV_FFMPEG_PATH`).
 This is the orchestrator the web frontend talks to during local upload/parse work.
@@ -234,7 +175,7 @@ If an optional tool is missing (`goimports`, `staticcheck`, `govulncheck`, `gose
 
 ## Observability and error tracking
 
-Pipeline failures are recorded locally by `internal/obs` so they can be inspected without standing up Postgres, Redis, or a real Prometheus server.
+Pipeline failures are recorded locally by `internal/obs` so they can be inspected without standing up a real Prometheus server.
 The recorder writes two artifacts under `$ZV_DATA_DIR/obs` (default `data/obs`):
 
 - `journal.jsonl` - one JSON line per error: time, stage, class, message, demo, target, exit code.

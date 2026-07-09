@@ -1,7 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Chakra_Petch, Share_Tech_Mono } from 'next/font/google';
-import { SessionProvider } from '@/lib/session';
 import { GrainOverlay } from '@/components/brand/grain-overlay';
 import { Toaster } from '@/components/ui/sonner';
 
@@ -32,7 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // :root and the whole app would silently fall back to system fonts).
     <html lang="es" className={`dark ${fontVars}`}>
       <body className="neon-grid bg-background text-foreground antialiased">
-        <SessionProvider>{children}</SessionProvider>
+        {children}
         <GrainOverlay />
         <Toaster />
       </body>

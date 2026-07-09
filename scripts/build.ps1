@@ -12,7 +12,6 @@ $commands = @(
     "zv-analysis-viewer",
     "zv-pipeline",
     "zv-tactical-data",
-    "zv-agent",
     "zv-tui"
 )
 

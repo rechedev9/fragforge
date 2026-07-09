@@ -31,7 +31,6 @@ Usage:
   zv pipeline [zv-pipeline flags]
 
 Legacy pass-throughs:
-  zv agent [zv-agent args]
   zv parser [zv-parser args]
   zv editor [zv-editor args]
   zv recorder [zv-recorder args]

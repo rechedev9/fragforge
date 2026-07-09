@@ -1,2 +1,0 @@
--- PostgreSQL enum values cannot be removed safely without rebuilding the type
--- and rewriting dependent columns. Keep this migration as a documented no-op.

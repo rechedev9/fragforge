@@ -3,15 +3,15 @@
 # One command to run the whole product on the user's own Windows + GPU PC: the
 # orchestrator (parse + HLAE/CS2 capture + render) and the web UI, wired so the
 # browser flow (upload -> pick player -> pick kills -> create reel) actually
-# drives local capture. This is the "local mode" counterpart to the hosted cloud
-# deployment: no Supabase, no paired agent, everything on this machine.
+# drives local capture. Everything runs on this machine: no Supabase, no
+# paired agent, no hosted control plane.
 #
 # What it does:
 #   1. Starts `zv serve` in memory mode (in-memory jobs + inline queue, no
 #      Postgres/Redis). The orchestrator auto-detects HLAE, CS2, and zv-recorder
 #      on startup, so capture works without setting any tool-path env vars.
-#   2. Starts the Next.js web UI in local mode (NEXT_PUBLIC_FRAGFORGE_MODE=local),
-#      whose /api/demos/* routes proxy the full pipeline to the local orchestrator.
+#   2. Starts the Next.js web UI, whose /api/demos/* routes proxy the full
+#      pipeline to the local orchestrator.
 #   3. Opens the browser at the upload page.
 #
 # Ctrl+C stops the web UI and then the orchestrator.
@@ -75,10 +75,8 @@ try {
     if (-not $healthy) { throw "orchestrator did not become healthy at $orchestratorUrl" }
     Write-Host "[local-studio] orchestrator healthy at $orchestratorUrl"
 
-    # Local mode: the /api/demos/* routes proxy the whole pipeline to the local
-    # orchestrator. These vars are read by the Next.js server (ORCHESTRATOR_URL)
-    # and inlined into the client bundle (NEXT_PUBLIC_FRAGFORGE_MODE).
-    $env:NEXT_PUBLIC_FRAGFORGE_MODE = "local"
+    # The /api/demos/* routes proxy the whole pipeline to the local
+    # orchestrator; ORCHESTRATOR_URL is read server-side by the Next.js server.
     $env:ORCHESTRATOR_URL = $orchestratorUrl
 
     Write-Host "[local-studio] opening $webUrl/upload"

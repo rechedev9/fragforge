@@ -1138,25 +1138,6 @@ func writeSkillBody(t *testing.T, root, name, body string) {
 	}
 }
 
-func replaceSkillShowFixture(t *testing.T, path, textReplacement, jsonReplacement string) {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	body := string(b)
-	for old, replacement := range map[string]string{
-		"./bin/zv skills show alpha":               textReplacement,
-		"./bin/zv skills show alpha --format json": jsonReplacement,
-	} {
-		if !strings.Contains(body, old) {
-			t.Fatalf("%s fixture does not contain expected skill show line %q", path, old)
-		}
-		body = strings.Replace(body, old, replacement, 1)
-	}
-	writeFile(t, path, body)
-}
-
 func writeWorkflowDocs(t *testing.T, root string) {
 	t.Helper()
 	catalogDoc := strings.Join([]string{

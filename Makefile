@@ -1,4 +1,4 @@
-.PHONY: build test check skills-check workflows-check up down migrate-up migrate-media-up migrate-down fmt vet
+.PHONY: build test check skills-check workflows-check fmt vet
 
 build:
 	go build -o bin/zv ./cmd/zv
@@ -12,7 +12,6 @@ build:
 	go build -o bin/zv-analysis-viewer ./cmd/zv-analysis-viewer
 	go build -o bin/zv-pipeline ./cmd/zv-pipeline
 	go build -o bin/zv-tactical-data ./cmd/zv-tactical-data
-	go build -o bin/zv-agent ./cmd/zv-agent
 	go build -o bin/zv-tui ./cmd/zv-tui
 
 test:
@@ -27,23 +26,6 @@ skills-check:
 
 workflows-check:
 	go run ./cmd/zv workflows check
-
-up:
-	docker compose up -d
-
-down:
-	docker compose down
-
-migrate-up:
-	@psql "$$ZV_DATABASE_URL" -f migrations/001_jobs.up.sql
-	@psql "$$ZV_DATABASE_URL" -f migrations/002_job_status_media.up.sql
-
-migrate-media-up:
-	@psql "$$ZV_DATABASE_URL" -f migrations/002_job_status_media.up.sql
-
-migrate-down:
-	@psql "$$ZV_DATABASE_URL" -f migrations/002_job_status_media.down.sql
-	@psql "$$ZV_DATABASE_URL" -f migrations/001_jobs.down.sql
 
 fmt:
 	gofmt -w .
