@@ -78,7 +78,11 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-0 px-6 pt-7 group-data-[collapsible=icon]:px-2">
-        <Link href="/matches" className="inline-flex min-h-10 items-center group-data-[collapsible=icon]:justify-center">
+        <Link
+          href="/matches"
+          aria-label="Ir a Partidas"
+          className="inline-flex min-h-10 items-center group-data-[collapsible=icon]:justify-center"
+        >
           <Wordmark className="group-data-[collapsible=icon]:hidden" />
           <Aperture className="hidden size-5 text-primary group-data-[collapsible=icon]:block" aria-hidden />
         </Link>
@@ -108,7 +112,11 @@ export function AppSidebar() {
                         'bg-gradient-to-r from-primary/12 to-transparent shadow-[inset_3px_0_0_var(--primary)] data-[active=true]:text-primary',
                     )}
                   >
-                    <Link href={item.href} aria-current={active ? 'page' : undefined}>
+                    <Link
+                      href={item.href}
+                      aria-label={item.label}
+                      aria-current={active ? 'page' : undefined}
+                    >
                       <Icon className="size-4 shrink-0 group-data-[collapsible=icon]:size-[18px]" aria-hidden />
                       <span
                         aria-hidden

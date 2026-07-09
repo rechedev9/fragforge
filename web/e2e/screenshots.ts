@@ -87,6 +87,8 @@ test('match detail (/matches/[id])', async ({ page }) => {
 test('streams (/streams)', async ({ page }) => {
   await page.goto('/streams');
   await expect(page.getByRole('heading', { name: 'DE STREAM A SHORT' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Disponible en Studio local' })).toBeVisible();
+  await expect(page.getByLabel('URL de clip o VOD de Twitch o YouTube')).toHaveCount(0);
   await shoot(page, 'streams.png');
 });
 
@@ -168,6 +170,24 @@ test('deterministic checks: lang + fonts (/matches)', async ({ page }) => {
   expect(statFont).toContain('Share Tech Mono');
 });
 
+test('notched primary CTA has a contrasting inset focus treatment', async ({ page }) => {
+  await page.goto('/');
+  const button = page.getByRole('button', { name: 'Continuar con Steam' });
+  for (let step = 0; step < 8; step += 1) {
+    if (await button.evaluate((element) => element === document.activeElement)) break;
+    await page.keyboard.press('Tab');
+  }
+  await expect(button).toBeFocused();
+
+  const focusStyle = await button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { boxShadow: style.boxShadow, outlineOffset: style.outlineOffset };
+  });
+
+  expect(focusStyle.outlineOffset).toBe('-4px');
+  expect(focusStyle.boxShadow.match(/inset/g)).toHaveLength(2);
+});
+
 test.describe('mobile 390x844', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -183,5 +203,21 @@ test.describe('mobile 390x844', () => {
     await expect(page.getByRole('heading', { name: /JUGADAS DETECTADAS/ })).toBeVisible();
     await expect(page.getByText('POR DEFECTO')).toBeVisible();
     await shoot(page, 'mobile-match-detail.png');
+  });
+});
+
+test.describe('touch 390x844', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('ready reel preview is visible and opens without hover', async ({ page }) => {
+    await page.goto('/videos');
+    await expect(page.getByText(READY_VIDEO_TITLE).first()).toBeVisible();
+
+    const preview = page.getByRole('button', { name: 'Ver', exact: true }).first();
+    await expect(preview).toBeVisible();
+    await preview.tap();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: READY_VIDEO_TITLE })).toBeVisible();
   });
 });

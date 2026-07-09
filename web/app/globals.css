@@ -213,7 +213,8 @@
     linear-gradient(color-mix(in oklch, var(--primary) 2.4%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in oklch, var(--primary) 2.4%, transparent) 1px, transparent 1px),
     radial-gradient(900px 560px at 42% -12%, color-mix(in oklch, var(--primary) 5%, transparent), transparent 72%);
-  background-size: 48px 48px;
+  background-repeat: repeat, repeat, no-repeat;
+  background-size: 48px 48px, 48px 48px, 100% 100%;
 }
 
 /*
@@ -276,10 +277,22 @@
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
 }
 
-/* A clipped CTA cannot paint an outer ring beyond its polygon. Keep an inset
- * focus edge as the reliable keyboard indicator for explicitly notched CTAs. */
+/* A clipped CTA cannot paint an outer ring beyond its polygon. The two-tone
+ * inset stays visible on both cyan-filled and dark-outline variants. */
 .neon-notch:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -4px;
+  box-shadow:
+    inset 0 0 0 2px var(--background),
+    inset 0 0 0 4px var(--ring);
+}
+
+@media (forced-colors: active) {
+  .neon-notch:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -4px;
+    box-shadow: none;
+  }
 }
 
 /*

@@ -154,19 +154,19 @@ export default function LoginPage() {
               CLIPS DE STREAM
             </h2>
             <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-              Pega un clip de Twitch o YouTube — o sube un MP4 — y córtalo en
-              Shorts con tu facecam encima.
+              Pega un clip de Twitch o YouTube — o sube un MP4 — desde
+              FragForge Studio local y córtalo en Shorts con tu facecam encima.
             </p>
             <div className="mt-5">
               <Link
                 href="/streams"
                 className="neon-notch inline-flex h-11 items-center border-[1.5px] border-stream px-6 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-stream transition-colors hover:bg-stream/15"
               >
-                PEGAR ENLACE
+                VER DISPONIBILIDAD
               </Link>
             </div>
             <p className="mt-4 font-[family-name:var(--font-mono)] text-[10.5px] tracking-[0.16em] text-muted-foreground/70">
-              TWITCH · YOUTUBE · MP4
+              STUDIO LOCAL · TWITCH · YOUTUBE · MP4
             </p>
           </div>
         </div>

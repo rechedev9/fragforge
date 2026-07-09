@@ -71,29 +71,23 @@ export function CaptureReadiness() {
       <DialogTrigger asChild>
         <button
           type="button"
-          className="studio-panel studio-panel-interactive neon-brackets relative w-full px-3.5 py-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar group-data-[collapsible=icon]:hidden"
-        >
-          <div className="flex items-center justify-between gap-3 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.16em]">
-            <span className="text-sidebar-foreground/75">Captura</span>
-            <span className={cn('inline-flex items-center gap-1.5', meta.text)}>
-              <StatusIcon className="size-3.5" aria-hidden />
-              {meta.label}
-            </span>
-          </div>
-          <p className="mt-2 text-xs leading-[1.45] text-sidebar-foreground/75">{meta.hint}</p>
-        </button>
-      </DialogTrigger>
-      <DialogTrigger asChild>
-        <button
-          type="button"
           aria-label={`Captura: ${meta.label}`}
           title={`Captura: ${meta.label}`}
-          className={cn(
-            'hidden size-10 place-items-center border border-sidebar-border bg-sidebar-accent/60 outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:grid',
-            meta.text,
-          )}
+          className="studio-panel studio-panel-interactive neon-brackets relative w-full px-3.5 py-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar group-data-[collapsible=icon]:grid group-data-[collapsible=icon]:size-10 group-data-[collapsible=icon]:place-items-center group-data-[collapsible=icon]:p-0"
         >
-          <StatusIcon className="size-4" aria-hidden />
+          <div className="group-data-[collapsible=icon]:hidden">
+            <div className="flex items-center justify-between gap-3 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.16em]">
+              <span className="text-sidebar-foreground/75">Captura</span>
+              <span className={cn('inline-flex items-center gap-1.5', meta.text)}>
+                <StatusIcon className="size-3.5" aria-hidden />
+                {meta.label}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-[1.45] text-sidebar-foreground/75">{meta.hint}</p>
+          </div>
+          <span className={cn('hidden group-data-[collapsible=icon]:block', meta.text)}>
+            <StatusIcon className="size-4" aria-hidden />
+          </span>
         </button>
       </DialogTrigger>
 

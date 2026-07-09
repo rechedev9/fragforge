@@ -110,13 +110,13 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
             </div>
           ) : null}
 
-          {/* hover overlay actions */}
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 bg-background/78 opacity-0 backdrop-blur-[1px] transition-opacity duration-200 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100">
+          {/* Hover on precise pointers; always visible and actionable on touch. */}
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 bg-background/78 opacity-0 backdrop-blur-[1px] transition-opacity duration-200 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
             <button
               type="button"
               onClick={() => video.downloadUrl && setPlayerOpen(true)}
               disabled={!video.downloadUrl}
-              className="inline-flex min-h-10 items-center gap-1.5 border border-primary/45 bg-background/85 px-4 text-xs font-semibold text-foreground transition-colors hover:bg-primary/15 disabled:pointer-events-none disabled:opacity-40"
+              className="inline-flex min-h-10 items-center gap-1.5 border border-primary/45 bg-background/85 px-4 text-xs font-semibold text-foreground outline-none transition-colors hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-40"
             >
               <Eye className="size-3.5" /> Ver
             </button>
@@ -124,7 +124,7 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
               <button
                 type="button"
                 onClick={handleShare}
-                className="inline-flex min-h-10 items-center gap-1.5 border border-primary/45 bg-background/85 px-4 text-xs font-semibold text-foreground transition-colors hover:bg-primary/15"
+                className="inline-flex min-h-10 items-center gap-1.5 border border-primary/45 bg-background/85 px-4 text-xs font-semibold text-foreground outline-none transition-colors hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <Share2 className="size-3.5" /> Compartir
               </button>

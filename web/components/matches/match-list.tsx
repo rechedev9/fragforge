@@ -22,10 +22,10 @@ export function MatchList({ matches }: MatchListProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3" aria-label="Partidas disponibles">
+    <section className="flex flex-col gap-3" aria-label="Partidas disponibles">
       {matches.map((match, index) => (
         <MatchRow key={match.id} match={match} featured={index === 0} />
       ))}
-    </div>
+    </section>
   );
 }

@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Captions,
+  CloudOff,
   Download,
   Film,
   Link2,
@@ -28,9 +30,11 @@ import {
   type StreamVariant,
 } from '@/lib/api/streams';
 import { api } from '@/lib/api';
+import { isLocalMode } from '@/lib/mode';
 import type { Song } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
+import { StudioEmptyState } from '@/components/studio/empty-state';
 import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -135,6 +139,40 @@ function planFingerprint(plan: StreamEditPlan): string {
  * stream-jobs pipeline (acquire/probe → edit plan → render).
  */
 export default function StreamsPage() {
+  if (!isLocalMode()) {
+    return <CloudStreamsUnavailable />;
+  }
+  return <LocalStreamsPage />;
+}
+
+function CloudStreamsUnavailable() {
+  return (
+    <div className="flex flex-col gap-8">
+      <StudioPageHeader
+        number={3}
+        label="CLIPS DE STREAM"
+        accent="magenta"
+        title="DE STREAM A SHORT"
+        description="Este flujo procesa vídeo pesado en el PC y todavía no está conectado al agente emparejado en cloud."
+      />
+      <StudioEmptyState
+        icon={CloudOff}
+        title="Disponible en Studio local"
+        description="Abre FragForge Studio en el PC para importar Twitch, YouTube o MP4 sin subir el vídeo a nuestros servidores. Mientras tanto, el flujo de demos sí funciona con tu agente emparejado."
+        accent="magenta"
+        compact
+        actions={
+          <Button asChild>
+            <Link href="/upload">ANALIZAR UNA DEMO</Link>
+          </Button>
+        }
+        note="LOS CLIPS DE STREAM NO SE ENVÍAN AL CONTROL PLANE"
+      />
+    </div>
+  );
+}
+
+function LocalStreamsPage() {
   const [stage, setStage] = useState<Stage>('idle');
   const [job, setJob] = useState<StreamJob | null>(null);
   const [plan, setPlan] = useState<StreamEditPlan | null>(null);

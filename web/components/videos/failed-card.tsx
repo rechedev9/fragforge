@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
-import { PipelineSteps } from '@/components/brand/pipeline-steps';
 import { Button } from '@/components/ui/button';
 import { DeleteVideoButton } from '@/components/videos/delete-video-button';
 
@@ -50,9 +49,9 @@ export function FailedCard({ video, onChange }: { video: Video; onChange: () => 
         <p className="mt-1 line-clamp-2 text-sm leading-5 text-destructive">
           {video.failureReason ?? 'El reel falló en tu equipo.'}
         </p>
-        <div className="mt-3 border-t border-destructive/20 pt-3">
-          <PipelineSteps status={video.status} className="gap-x-2 text-[10px]" />
-        </div>
+        <p className="mt-3 border-t border-destructive/20 pt-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Reintenta para retomar desde la etapa que falló
+        </p>
       </div>
 
       <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
