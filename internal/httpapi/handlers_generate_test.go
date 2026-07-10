@@ -94,6 +94,28 @@ func TestStartGenerateEnqueuesRecordAndWritesIntent(t *testing.T) {
 	}
 }
 
+func TestStartGenerateVerticalKillfeedRequestsPortraitSafeCapture(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean","edit":{"format":"short-9x16"}}`)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	var payload tasks.RecordDemoPayload
+	if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal record payload: %v", err)
+	}
+	if payload.HUDMode != "deathnotices" || !payload.PortraitSafeKillfeed {
+		t.Fatalf("record payload = %#v, want portrait-safe deathnotices", payload)
+	}
+}
+
 func TestStartGenerateRoundTripsBookendText(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()

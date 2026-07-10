@@ -78,3 +78,47 @@ func TestValidateRejectsInvalidCRF(t *testing.T) {
 		t.Fatal("Validate error = nil, want error")
 	}
 }
+
+func TestNewPlanDeathnoticesPortraitDefaults(t *testing.T) {
+	kp := killplan.NewPlan()
+	kp.Demo.Tickrate = 64
+	kp.Target.SteamID64 = "76561198148986856"
+	kp.Segments = []killplan.Segment{{ID: "seg-001", TickStart: 100, TickEnd: 200}}
+	stream := DefaultStreamConfig()
+	stream.HUDMode = HUDModeDeathnotices
+	stream.PortraitSafeKillfeed = true
+
+	plan, err := NewPlanFromKillPlan(kp, "x.dem", "out", stream)
+	if err != nil {
+		t.Fatalf("NewPlanFromKillPlan error = %v", err)
+	}
+	if got, want := plan.Stream.DeathnoticeSafeZoneX, defaultDeathnoticeSafeZoneX; got != want {
+		t.Fatalf("DeathnoticeSafeZoneX = %.2f, want %.2f", got, want)
+	}
+	if got, want := plan.Stream.DeathnoticeSafeZoneY, defaultDeathnoticeSafeZoneY; got != want {
+		t.Fatalf("DeathnoticeSafeZoneY = %.2f, want %.2f", got, want)
+	}
+	if got, want := plan.Stream.DeathnoticeLifetime, defaultDeathnoticeLifetimeSeconds; got != want {
+		t.Fatalf("DeathnoticeLifetime = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestValidateRejectsInvalidDeathnoticeLayout(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*RecordingPlan)
+	}{
+		{name: "safe zone", mutate: func(p *RecordingPlan) { p.Stream.DeathnoticeSafeZoneX = 1.1 }},
+		{name: "safe zone y", mutate: func(p *RecordingPlan) { p.Stream.DeathnoticeSafeZoneY = 1.1 }},
+		{name: "lifetime", mutate: func(p *RecordingPlan) { p.Stream.DeathnoticeLifetime = 10.1 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := testPlan()
+			tt.mutate(&p)
+			if err := p.Validate(); err == nil {
+				t.Fatal("Validate error = nil, want error")
+			}
+		})
+	}
+}

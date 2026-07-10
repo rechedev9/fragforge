@@ -190,8 +190,16 @@ func buildSchedule(plan RecordingPlan) ([]scheduledCommand, []seekStep) {
 	if pad <= 0 {
 		pad = 200
 	}
+	shutdownTick := lastEnd + max(8, pad/2)
+	for i, cmd := range hudCleanupCommands(plan.Stream.HUDMode) {
+		commands = append(commands, scheduledCommand{
+			Tick: shutdownTick - 4,
+			Key:  fmt.Sprintf("hud-cleanup-%02d", i+1),
+			Cmd:  cmd,
+		})
+	}
 	commands = append(commands,
-		scheduledCommand{Tick: lastEnd + pad/2, Key: "shutdown", Cmd: "disconnect; quit"},
+		scheduledCommand{Tick: shutdownTick, Key: "shutdown", Cmd: "disconnect; quit"},
 	)
 	return commands, seeks
 }
@@ -272,7 +280,7 @@ func streamSetupCommands(plan RecordingPlan) []string {
 			"mirv_streams record screen settings "+settingName,
 		)
 	}
-	return append(commands, hudSetupCommands(plan.Stream.HUDMode)...)
+	return append(commands, hudSetupCommands(plan)...)
 }
 
 func ffmpegSettingName(crf int) string {
@@ -287,21 +295,33 @@ func ffmpegSettingsCommand(name string, crf int) string {
 	)
 }
 
-func hudSetupCommands(mode HUDMode) []string {
-	switch mode {
+func hudSetupCommands(plan RecordingPlan) []string {
+	switch plan.Stream.HUDMode {
 	case HUDModeClean:
 		return []string{
 			"spec_show_xray 0; cl_drawhud 0",
 		}
 	case HUDModeDeathnotices:
-		return []string{
+		commands := []string{
 			"spec_show_xray 0",
 			"cl_spec_show_bindings 0",
 			"cl_drawhud 1",
 			"cl_draw_only_deathnotices 1",
 			"cl_show_observer_crosshair 2",
 			"crosshair 1",
+			"mirv_deathmsg clear",
+			"mirv_deathmsg filter clear",
+			fmt.Sprintf("mirv_deathmsg filter add attackerMatch=!x%s block=1 lastRule=1", plan.TargetSteamID64),
+			"mirv_deathmsg localPlayer -1",
+			fmt.Sprintf("mirv_deathmsg lifetime %s", formatFloat(plan.Stream.DeathnoticeLifetime)),
 		}
+		if plan.Stream.PortraitSafeKillfeed {
+			commands = append(commands,
+				fmt.Sprintf("safezonex %s", formatFloat(plan.Stream.DeathnoticeSafeZoneX)),
+				fmt.Sprintf("safezoney %s", formatFloat(plan.Stream.DeathnoticeSafeZoneY)),
+			)
+		}
+		return commands
 	default:
 		return []string{
 			"spec_show_xray 0",
@@ -311,6 +331,20 @@ func hudSetupCommands(mode HUDMode) []string {
 			"cl_show_observer_crosshair 2",
 			"crosshair 1",
 		}
+	}
+}
+
+func hudCleanupCommands(mode HUDMode) []string {
+	if mode != HUDModeDeathnotices {
+		return nil
+	}
+	return []string{
+		"mirv_deathmsg clear",
+		"mirv_deathmsg filter clear",
+		"mirv_deathmsg localPlayer default",
+		"mirv_deathmsg lifetime default",
+		"safezonex 1",
+		"safezoney 1",
 	}
 }
 

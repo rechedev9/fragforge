@@ -52,7 +52,7 @@ func TestNewScanRosterTaskRoundtrip(t *testing.T) {
 
 func TestNewRecordDemoTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	tk, err := NewRecordDemoTask(id, "", nil)
+	tk, err := NewRecordDemoTask(id, "", nil, false)
 	if err != nil {
 		t.Fatalf("NewRecordDemoTask error = %v", err)
 	}
@@ -75,7 +75,7 @@ func TestNewRecordDemoTaskRoundtrip(t *testing.T) {
 func TestNewRecordDemoTaskRoundtripWithSegmentIDs(t *testing.T) {
 	id := uuid.New()
 	want := []string{"seg-001", "seg-002"}
-	tk, err := NewRecordDemoTask(id, "clean", want)
+	tk, err := NewRecordDemoTask(id, "clean", want, true)
 	if err != nil {
 		t.Fatalf("NewRecordDemoTask error = %v", err)
 	}
@@ -91,6 +91,9 @@ func TestNewRecordDemoTaskRoundtripWithSegmentIDs(t *testing.T) {
 	}
 	if payload.HUDMode != "clean" {
 		t.Errorf("HUDMode = %q, want clean", payload.HUDMode)
+	}
+	if !payload.PortraitSafeKillfeed {
+		t.Error("PortraitSafeKillfeed = false, want true")
 	}
 	if len(payload.SegmentIDs) != len(want) {
 		t.Fatalf("SegmentIDs = %v, want %v", payload.SegmentIDs, want)

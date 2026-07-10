@@ -271,7 +271,7 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 	}
 	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecording)
 
-	if err := w.record(ctx, j, payload.HUDMode, payload.SegmentIDs); err != nil {
+	if err := w.record(ctx, j, payload.HUDMode, payload.SegmentIDs, payload.PortraitSafeKillfeed); err != nil {
 		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeRecordDemo, err)
 		return err
 	}
@@ -361,7 +361,7 @@ func (w *RecordWorker) writeQueuedRenderState(id uuid.UUID, variant string) erro
 	return w.storage.Put(key, bytes.NewReader(b))
 }
 
-func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, segmentIDs []string) error {
+func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, segmentIDs []string, portraitSafeKillfeed bool) error {
 	if j.KillPlan == nil {
 		return fmt.Errorf("job %s has no kill plan", j.ID)
 	}
@@ -445,7 +445,7 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		newSegmentClipWatcher(w.storage, j.ID, filepath.Join(outDir, "segments")).watch(watchCtx, segmentWatchInterval)
 	}()
 
-	_, runErr := w.runner.Run(ctx, cfg.RecorderPath,
+	recorderArgs := []string{
 		"--killplan", killPlanPath,
 		"--demo", demoPath,
 		"--out", outDir,
@@ -453,7 +453,11 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		"--cs2", cfg.CS2Path,
 		"--hud", cfg.HUDMode,
 		"--timeout", cfg.Timeout,
-	)
+	}
+	if portraitSafeKillfeed && cfg.HUDMode == string(recording.HUDModeDeathnotices) {
+		recorderArgs = append(recorderArgs, "--portrait-safe-killfeed")
+	}
+	_, runErr := w.runner.Run(ctx, cfg.RecorderPath, recorderArgs...)
 	stopWatch()
 	<-watchDone
 

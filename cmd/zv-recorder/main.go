@@ -39,17 +39,18 @@ func main() {
 
 func run() error {
 	var (
-		killPlanPath = flag.String("killplan", "", "path to kill plan JSON")
-		demoPath     = flag.String("demo", "", "path to .dem file")
-		outDir       = flag.String("out", "", "recording output directory")
-		hlaeExe      = flag.String("hlae", "", "path to HLAE.exe")
-		cs2Exe       = flag.String("cs2", "", "path to cs2.exe")
-		hudMode      = flag.String("hud", string(recording.HUDModeGameplay), "HUD mode: gameplay, clean, or deathnotices")
-		fps          = flag.Int("fps", 0, "recording FPS; defaults to recorder preset")
-		videoCRF     = flag.Int("video-crf", 0, "HLAE stream CRF; defaults to recorder preset")
-		dryRun       = flag.Bool("dry-run", false, "generate plan and script without launching HLAE")
-		fake         = flag.Bool("fake", false, "generate placeholder segment clips instead of launching HLAE/CS2 (e2e/CI)")
-		timeout      = flag.Duration("timeout", 15*time.Minute, "maximum duration to wait for CS2")
+		killPlanPath         = flag.String("killplan", "", "path to kill plan JSON")
+		demoPath             = flag.String("demo", "", "path to .dem file")
+		outDir               = flag.String("out", "", "recording output directory")
+		hlaeExe              = flag.String("hlae", "", "path to HLAE.exe")
+		cs2Exe               = flag.String("cs2", "", "path to cs2.exe")
+		hudMode              = flag.String("hud", string(recording.HUDModeGameplay), "HUD mode: gameplay, clean, or deathnotices")
+		portraitSafeKillfeed = flag.Bool("portrait-safe-killfeed", false, "move filtered death notices into the 9:16 center-crop safe area")
+		fps                  = flag.Int("fps", 0, "recording FPS; defaults to recorder preset")
+		videoCRF             = flag.Int("video-crf", 0, "HLAE stream CRF; defaults to recorder preset")
+		dryRun               = flag.Bool("dry-run", false, "generate plan and script without launching HLAE")
+		fake                 = flag.Bool("fake", false, "generate placeholder segment clips instead of launching HLAE/CS2 (e2e/CI)")
+		timeout              = flag.Duration("timeout", 15*time.Minute, "maximum duration to wait for CS2")
 	)
 	flag.Parse()
 
@@ -96,6 +97,7 @@ func run() error {
 	}
 	stream := recording.DefaultStreamConfig()
 	stream.HUDMode = recording.HUDMode(*hudMode)
+	stream.PortraitSafeKillfeed = *portraitSafeKillfeed
 	if *fps > 0 {
 		stream.FPS = *fps
 	}

@@ -177,6 +177,9 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 		if preset.HUDMode != "" {
 			recorderArgs = append(recorderArgs, "--hud", preset.HUDMode)
 		}
+		if preset.HUDMode == "deathnotices" {
+			recorderArgs = append(recorderArgs, "--portrait-safe-killfeed")
+		}
 		plan.stages = append(plan.stages,
 			shortStage{
 				label:  "recording segments with HLAE/CS2",

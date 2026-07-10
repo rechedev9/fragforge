@@ -118,12 +118,15 @@ func TestRecordWorkerStoresOutputsAndMarksRecorded(t *testing.T) {
 
 func TestRecordWorkerHUDFromPayloadOverridesDefault(t *testing.T) {
 	cases := []struct {
-		name    string
-		hud     string
-		wantHUD string
+		name                 string
+		hud                  string
+		portraitSafeKillfeed bool
+		wantHUD              string
+		wantPortraitFlag     bool
 	}{
 		{name: "preset clean overrides default", hud: "clean", wantHUD: "clean"},
 		{name: "empty payload keeps worker default", hud: "", wantHUD: "deathnotices"},
+		{name: "vertical killfeed configures portrait safe capture", hud: "deathnotices", portraitSafeKillfeed: true, wantHUD: "deathnotices", wantPortraitFlag: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,7 +151,7 @@ func TestRecordWorkerHUDFromPayloadOverridesDefault(t *testing.T) {
 			w := NewRecordWorker(repo, store, RecordWorkerConfig{WorkDir: t.TempDir(), RecorderPath: "zv-recorder", HLAEPath: "HLAE.exe", CS2Path: "cs2.exe"})
 			w.runner = runner
 
-			task, err := tasks.NewRecordDemoTask(id, tc.hud, nil)
+			task, err := tasks.NewRecordDemoTask(id, tc.hud, nil, tc.portraitSafeKillfeed)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -157,6 +160,9 @@ func TestRecordWorkerHUDFromPayloadOverridesDefault(t *testing.T) {
 			}
 			if got := argValue(runner.calls[0].args, "--hud"); got != tc.wantHUD {
 				t.Fatalf("--hud = %q, want %q", got, tc.wantHUD)
+			}
+			if got := hasArg(runner.calls[0].args, "--portrait-safe-killfeed"); got != tc.wantPortraitFlag {
+				t.Fatalf("--portrait-safe-killfeed present = %v, want %v", got, tc.wantPortraitFlag)
 			}
 		})
 	}
@@ -963,7 +969,7 @@ func recordTask(t *testing.T, id uuid.UUID) *asynq.Task {
 
 func recordTaskFor(t *testing.T, id uuid.UUID, segmentIDs []string) *asynq.Task {
 	t.Helper()
-	task, err := tasks.NewRecordDemoTask(id, "", segmentIDs)
+	task, err := tasks.NewRecordDemoTask(id, "", segmentIDs, false)
 	if err != nil {
 		t.Fatal(err)
 	}

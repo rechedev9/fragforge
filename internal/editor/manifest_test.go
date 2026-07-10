@@ -913,6 +913,50 @@ func TestBuildManifestKillfeedOverlayRequiresKillfeedSourcePreset(t *testing.T) 
 	}
 }
 
+func TestBuildManifestKeepsPortraitSafeDeathnoticesNative(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	result.Plan.Stream.HUDMode = recording.HUDModeDeathnotices
+	result.Plan.Stream.PortraitSafeKillfeed = true
+	opts := testManifestOptions(dir, nil)
+	opts.KillfeedOverlay = true
+
+	manifest := BuildManifest(result, opts)
+	if len(manifest.Warnings) != 0 {
+		t.Fatalf("warnings = %v", manifest.Warnings)
+	}
+	short := manifest.Shorts[0]
+	if short.KillfeedOverlay {
+		t.Fatal("KillfeedOverlay = true, want native portrait-safe notices")
+	}
+	for _, effect := range short.Effects {
+		if effect.Type == EffectKillfeed {
+			t.Fatalf("unexpected frozen killfeed effect %#v", effect)
+		}
+	}
+	if command := strings.Join(short.FFmpegCommand, " "); strings.Contains(command, "kfsrc") {
+		t.Fatalf("command contains legacy killfeed crop branch: %s", command)
+	}
+}
+
+func TestBuildManifestLandscapeNeverDuplicatesNativeKillfeed(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.OutputFormat = OutputFormatLandscape16x9
+	opts.KillfeedOverlay = true
+
+	manifest := BuildManifest(result, opts)
+	if manifest.Shorts[0].KillfeedOverlay {
+		t.Fatal("KillfeedOverlay = true, want native landscape HUD")
+	}
+	for _, effect := range manifest.Shorts[0].Effects {
+		if effect.Type == EffectKillfeed {
+			t.Fatalf("unexpected landscape killfeed effect %#v", effect)
+		}
+	}
+}
+
 func TestBuildManifestCompiledTailTrimsParts(t *testing.T) {
 	dir := t.TempDir()
 	result := testRecordingResult(dir)

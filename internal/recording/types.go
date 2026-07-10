@@ -12,6 +12,12 @@ import (
 
 const steamID64AccountIDBase uint64 = 76561197960265728
 
+const (
+	defaultDeathnoticeSafeZoneX       = 0.28
+	defaultDeathnoticeSafeZoneY       = 0.82
+	defaultDeathnoticeLifetimeSeconds = 1.6
+)
+
 // StreamMode names the HLAE output strategy.
 type StreamMode string
 
@@ -41,12 +47,16 @@ const (
 
 // StreamConfig describes how HLAE should emit raw recordings.
 type StreamConfig struct {
-	Mode    StreamMode `json:"mode"`
-	HUDMode HUDMode    `json:"hud_mode,omitempty"`
-	FPS     int        `json:"fps"`
-	Width   int        `json:"width"`
-	Height  int        `json:"height"`
-	CRF     int        `json:"crf,omitempty"`
+	Mode                 StreamMode `json:"mode"`
+	HUDMode              HUDMode    `json:"hud_mode,omitempty"`
+	FPS                  int        `json:"fps"`
+	Width                int        `json:"width"`
+	Height               int        `json:"height"`
+	CRF                  int        `json:"crf,omitempty"`
+	PortraitSafeKillfeed bool       `json:"portrait_safe_killfeed,omitempty"`
+	DeathnoticeSafeZoneX float64    `json:"deathnotice_safe_zone_x,omitempty"`
+	DeathnoticeSafeZoneY float64    `json:"deathnotice_safe_zone_y,omitempty"`
+	DeathnoticeLifetime  float64    `json:"deathnotice_lifetime_seconds,omitempty"`
 }
 
 // RuntimeConfig captures HLAE runtime toggles that affect timing.
@@ -197,6 +207,20 @@ func (p RecordingPlan) Validate() error {
 	if p.Stream.CRF < 1 || p.Stream.CRF > 51 {
 		return fmt.Errorf("stream crf must be between 1 and 51")
 	}
+	if p.Stream.DeathnoticeSafeZoneX < 0 || p.Stream.DeathnoticeSafeZoneX > 1 {
+		return fmt.Errorf("stream deathnotice_safe_zone_x must be between 0 and 1")
+	}
+	if p.Stream.DeathnoticeSafeZoneY < 0 || p.Stream.DeathnoticeSafeZoneY > 1 {
+		return fmt.Errorf("stream deathnotice_safe_zone_y must be between 0 and 1")
+	}
+	if p.Stream.DeathnoticeLifetime < 0 || p.Stream.DeathnoticeLifetime > 10 {
+		return fmt.Errorf("stream deathnotice_lifetime_seconds must be between 0 and 10")
+	}
+	if p.Stream.HUDMode == HUDModeDeathnotices {
+		if _, err := AccountIDFromSteamID64(p.TargetSteamID64); err != nil {
+			return fmt.Errorf("deathnotices target_steamid64: %w", err)
+		}
+	}
 	seen := map[string]bool{}
 	for i, s := range p.Segments {
 		if s.ID == "" {
@@ -235,6 +259,17 @@ func normalizeStreamConfig(stream StreamConfig) StreamConfig {
 	}
 	if stream.CRF == 0 {
 		stream.CRF = defaults.CRF
+	}
+	if stream.HUDMode == HUDModeDeathnotices {
+		if stream.PortraitSafeKillfeed && stream.DeathnoticeSafeZoneX == 0 {
+			stream.DeathnoticeSafeZoneX = defaultDeathnoticeSafeZoneX
+		}
+		if stream.PortraitSafeKillfeed && stream.DeathnoticeSafeZoneY == 0 {
+			stream.DeathnoticeSafeZoneY = defaultDeathnoticeSafeZoneY
+		}
+		if stream.DeathnoticeLifetime == 0 {
+			stream.DeathnoticeLifetime = defaultDeathnoticeLifetimeSeconds
+		}
 	}
 	return stream
 }

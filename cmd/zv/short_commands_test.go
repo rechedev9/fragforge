@@ -71,7 +71,7 @@ func TestRunShortChainsAllStages(t *testing.T) {
 	wantArgs := [][]string{
 		{"--list-presets"},
 		{"parse", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", filepath.Join(outDir, "killplan.json")},
-		{"--killplan", filepath.Join(outDir, "killplan.json"), "--demo", "inferno.dem", "--out", filepath.Join(outDir, "recording"), "--hlae", `C:\HLAE-2.190.1\HLAE.exe`, "--cs2", `C:\cs2.exe`, "--hud", "deathnotices"},
+		{"--killplan", filepath.Join(outDir, "killplan.json"), "--demo", "inferno.dem", "--out", filepath.Join(outDir, "recording"), "--hlae", `C:\HLAE-2.190.1\HLAE.exe`, "--cs2", `C:\cs2.exe`, "--hud", "deathnotices", "--portrait-safe-killfeed"},
 		{"--recording-result", filepath.Join(outDir, "recording", "recording-result.json"), "--out", filepath.Join(outDir, "shorts"), "--preset", "viral-60-clean", "--killplan", filepath.Join(outDir, "killplan.json"), "--compile-segments"},
 	}
 	wantBinaries := []string{"zv-editor", "zv-parser", "zv-recorder", "zv-editor"}
@@ -245,6 +245,9 @@ func TestRunShortCleanPresetRecordsDeathnoticesHUD(t *testing.T) {
 	if !strings.Contains(recorderArgs, "--hud deathnotices") {
 		t.Fatalf("recorder args = %q, missing --hud deathnotices", recorderArgs)
 	}
+	if !strings.Contains(recorderArgs, "--portrait-safe-killfeed") {
+		t.Fatalf("recorder args = %q, missing --portrait-safe-killfeed", recorderArgs)
+	}
 	renderArgs := strings.Join(runner.calls[3].Args, " ")
 	if !strings.Contains(renderArgs, "--preset viral-60-clean") {
 		t.Fatalf("render args = %q, missing --preset viral-60-clean", renderArgs)
@@ -271,6 +274,9 @@ func TestRunShortDefaultPresetRecordsDeathnoticesHUD(t *testing.T) {
 	recorderArgs := strings.Join(runner.calls[2].Args, " ")
 	if !strings.Contains(recorderArgs, "--hud deathnotices") {
 		t.Fatalf("recorder args = %q, missing --hud deathnotices", recorderArgs)
+	}
+	if !strings.Contains(recorderArgs, "--portrait-safe-killfeed") {
+		t.Fatalf("recorder args = %q, missing --portrait-safe-killfeed", recorderArgs)
 	}
 }
 

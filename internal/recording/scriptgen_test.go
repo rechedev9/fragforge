@@ -177,6 +177,7 @@ func TestGenerateHLAEJavaScriptCleanHUDMode(t *testing.T) {
 func TestGenerateHLAEJavaScriptDeathnoticesHUDMode(t *testing.T) {
 	p := testPlan()
 	p.Stream.HUDMode = HUDModeDeathnotices
+	p.Stream.PortraitSafeKillfeed = true
 	js, err := GenerateHLAEJavaScript(p)
 	if err != nil {
 		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
@@ -186,6 +187,17 @@ func TestGenerateHLAEJavaScriptDeathnoticesHUDMode(t *testing.T) {
 		`cl_draw_only_deathnotices 1`,
 		`cl_show_observer_crosshair 2`,
 		`crosshair 1`,
+		`mirv_deathmsg clear`,
+		`mirv_deathmsg filter clear`,
+		`mirv_deathmsg filter add attackerMatch=!x76561198148986856 block=1 lastRule=1`,
+		`mirv_deathmsg localPlayer -1`,
+		`mirv_deathmsg lifetime 1.6`,
+		`safezonex 0.28`,
+		`safezoney 0.82`,
+		`mirv_deathmsg localPlayer default`,
+		`mirv_deathmsg lifetime default`,
+		`safezonex 1`,
+		`safezoney 1`,
 	} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("generated JS missing %q\n%s", want, js)
@@ -193,6 +205,25 @@ func TestGenerateHLAEJavaScriptDeathnoticesHUDMode(t *testing.T) {
 	}
 	if strings.Contains(js, `cl_drawhud 0`) || strings.Contains(js, `cl_draw_only_deathnotices 0`) {
 		t.Fatalf("deathnotices mode should keep death notices visible:\n%s", js)
+	}
+}
+
+func TestGenerateHLAEJavaScriptLandscapeDeathnoticesKeepNativeSafeZone(t *testing.T) {
+	p := testPlan()
+	p.Stream.HUDMode = HUDModeDeathnotices
+
+	js, err := GenerateHLAEJavaScript(p)
+	if err != nil {
+		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
+	}
+	if strings.Contains(js, `safezonex 0.28`) {
+		t.Fatalf("landscape deathnotices moved into portrait safe zone:\n%s", js)
+	}
+	if strings.Contains(js, `safezoney 0.82`) {
+		t.Fatalf("landscape deathnotices moved into portrait safe zone:\n%s", js)
+	}
+	if !strings.Contains(js, `mirv_deathmsg filter add attackerMatch=!x76561198148986856 block=1 lastRule=1`) {
+		t.Fatalf("landscape deathnotices missing target filter:\n%s", js)
 	}
 }
 

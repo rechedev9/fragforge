@@ -83,9 +83,14 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 	if err != nil {
 		return Manifest{Warnings: warnings}, err
 	}
-	// The killfeed overlay only makes sense when the capture actually shows a
-	// killfeed; a clean-pov capture has nothing to crop.
-	killfeedOverlay := opts.KillfeedOverlay && renderPreset.KillfeedSource
+	// Legacy vertical deathnotice captures leave the killfeed outside the
+	// center crop, so they still need the historical crop-and-overlay path.
+	// New portrait-safe captures move the native CS2 notices into the 9:16
+	// frame during recording, where keeping them live is sharper and avoids
+	// stacked frozen badges. Landscape output already retains the native
+	// top-right HUD and must never duplicate it.
+	nativePortraitKillfeed := result.Plan.Stream.HUDMode == recording.HUDModeDeathnotices && result.Plan.Stream.PortraitSafeKillfeed
+	killfeedOverlay := opts.KillfeedOverlay && renderPreset.KillfeedSource && outputFormat == OutputFormatShort9x16 && !nativePortraitKillfeed
 	hqFilters := opts.HQFilters || renderPreset.HQFilters
 	audioNormalize := opts.AudioNormalize || renderPreset.AudioNormalize
 	qualityChecks := opts.QualityChecks || renderPreset.QualityChecks

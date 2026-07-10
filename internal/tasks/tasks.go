@@ -81,9 +81,10 @@ type ScanRosterPayload struct {
 // a reel records only the user-selected clip instead of the whole demo; empty
 // records every segment (the CLI all-kills default).
 type RecordDemoPayload struct {
-	JobID      uuid.UUID `json:"job_id"`
-	HUDMode    string    `json:"hud_mode,omitempty"`
-	SegmentIDs []string  `json:"segment_ids,omitempty"`
+	JobID                uuid.UUID `json:"job_id"`
+	HUDMode              string    `json:"hud_mode,omitempty"`
+	SegmentIDs           []string  `json:"segment_ids,omitempty"`
+	PortraitSafeKillfeed bool      `json:"portrait_safe_killfeed,omitempty"`
 }
 
 // ComposeFinalPayload carries the job id for the composition worker.
@@ -153,13 +154,18 @@ func NewScanRosterTask(id uuid.UUID) (*asynq.Task, error) {
 // capture to those kill-plan segments (the caller validates the ids against the
 // job's kill plan); empty records every segment. Because the ids are part of the
 // payload, asynq dedup treats a task for one segment as distinct from another.
-func NewRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string) (*asynq.Task, error) {
+func NewRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portraitSafeKillfeed bool) (*asynq.Task, error) {
 	switch hudMode {
 	case "", "gameplay", "clean", "deathnotices":
 	default:
 		return nil, fmt.Errorf("invalid hud mode %q", hudMode)
 	}
-	payload, err := json.Marshal(RecordDemoPayload{JobID: id, HUDMode: hudMode, SegmentIDs: segmentIDs})
+	payload, err := json.Marshal(RecordDemoPayload{
+		JobID:                id,
+		HUDMode:              hudMode,
+		SegmentIDs:           segmentIDs,
+		PortraitSafeKillfeed: portraitSafeKillfeed,
+	})
 	if err != nil {
 		return nil, err
 	}

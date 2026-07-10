@@ -374,8 +374,10 @@ func commandBoolFlags(commandName string) []string {
 	switch commandName {
 	case `"demo parse"`:
 		return []string{"--verbose"}
-	case `"short"`, `"record"`, `"compose final"`:
+	case `"short"`, `"compose final"`:
 		return []string{"--dry-run"}
+	case `"record"`:
+		return []string{"--dry-run", "--portrait-safe-killfeed"}
 	case `"shorts render"`:
 		return []string{
 			"--audio-normalize",
