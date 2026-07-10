@@ -23,7 +23,7 @@ import HeroForge from "@/components/hero-forge";
 import Reveal from "@/components/reveal";
 
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v1.0.2/FragForge.Studio.Setup.1.0.2.exe";
+  "https://github.com/rechedev9/fragforge/releases/download/v1.0.3/FragForge.Studio.Setup.1.0.3.exe";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
 function Corners() {
