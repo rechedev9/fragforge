@@ -28,6 +28,11 @@ const (
 
 var clipIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
+// Twitch-compatible streamer names keep the value safe to embed directly in
+// FFmpeg's drawtext filter while covering the handles the banner is designed
+// for. Twitch usernames are at most 25 ASCII letters, digits, or underscores.
+var streamerNickPattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,25}$`)
+
 type Status string
 
 func ParseStatus(value string) (Status, error) {
@@ -81,15 +86,22 @@ type ClipRange struct {
 }
 
 type EditPlan struct {
-	SchemaVersion string       `json:"schema_version"`
-	Variant       string       `json:"variant"`
-	FaceCrop      CropRect     `json:"face_crop"`
-	GameplayCrop  CropRect     `json:"gameplay_crop"`
-	Clips         []ClipRange  `json:"clips"`
-	Captions      CaptionsPlan `json:"captions,omitzero"`
-	Music         MusicPlan    `json:"music,omitzero"`
-	Effects       EffectsPlan  `json:"effects,omitzero"`
-	UpdatedAt     time.Time    `json:"updated_at"`
+	SchemaVersion  string             `json:"schema_version"`
+	Variant        string             `json:"variant"`
+	FaceCrop       CropRect           `json:"face_crop"`
+	GameplayCrop   CropRect           `json:"gameplay_crop"`
+	Clips          []ClipRange        `json:"clips"`
+	StreamerBanner StreamerBannerPlan `json:"streamer_banner,omitzero"`
+	Captions       CaptionsPlan       `json:"captions,omitzero"`
+	Music          MusicPlan          `json:"music,omitzero"`
+	Effects        EffectsPlan        `json:"effects,omitzero"`
+	UpdatedAt      time.Time          `json:"updated_at"`
+}
+
+// StreamerBannerPlan adds an optional branded separator to the rendered
+// vertical clip. An empty Nick keeps the render visually unchanged.
+type StreamerBannerPlan struct {
+	Nick string `json:"nick,omitempty"`
 }
 
 // CaptionsPlan opts a stream render into a burned-in karaoke caption pass.
@@ -251,6 +263,9 @@ func (p EditPlan) Validate() error {
 	if p.Music.Volume < 0 || p.Music.Volume > 1 {
 		return fmt.Errorf("music volume must be between 0 and 1")
 	}
+	if p.StreamerBanner.Nick != "" && !streamerNickPattern.MatchString(p.StreamerBanner.Nick) {
+		return fmt.Errorf("streamer banner nick must use 1-25 letters, numbers, or underscores")
+	}
 	return nil
 }
 
@@ -290,6 +305,7 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 	for i := range plan.Clips {
 		plan.Clips[i].ID = strings.TrimSpace(plan.Clips[i].ID)
 	}
+	plan.StreamerBanner.Nick = strings.TrimSpace(plan.StreamerBanner.Nick)
 	plan.Music.Key = strings.TrimSpace(plan.Music.Key)
 	if plan.Music.Key == "" {
 		plan.Music.Volume = 0

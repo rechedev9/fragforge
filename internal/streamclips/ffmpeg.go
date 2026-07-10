@@ -2,7 +2,11 @@ package streamclips
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -10,6 +14,9 @@ const (
 	defaultVideoCRF   = 18
 	defaultAACBitrate = "192k"
 	defaultPreset     = "slow"
+	bannerHeight      = 96
+	bannerColor       = "0x9146ff"
+	bannerAccentColor = "0x5b1ba9"
 
 	// gradeFilter is the light contrast/saturation lift EffectsPlan.Grade
 	// applies — the same restrained look FragForge's viral presets use.
@@ -24,6 +31,7 @@ type FFmpegInputs struct {
 	SourcePath     string
 	OutputPath     string
 	MusicPath      string // resolved track file; empty renders without music
+	BannerFontPath string // resolved bold font file; required when the banner has a nick
 	SourceHasAudio bool
 }
 
@@ -39,8 +47,11 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 	if !ok {
 		return nil, unknownVariantError(plan.Variant)
 	}
+	if plan.StreamerBanner.Nick != "" && in.BannerFontPath == "" {
+		return nil, fmt.Errorf("streamer banner font path is required")
+	}
 	duration := clip.EndSeconds - clip.StartSeconds
-	filter := buildFilterGraph(layout, plan)
+	filter := buildFilterGraph(layout, plan, in.BannerFontPath)
 
 	args := []string{
 		"-y",
@@ -87,10 +98,13 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 // buildFilterGraph renders the split/scale/stack filtergraph for a facecam
 // layout, or a single crop/scale chain for a full-frame (no facecam) layout,
 // with the optional grade inserted before the fps/format tail.
-func buildFilterGraph(layout LayoutVariant, plan EditPlan) string {
+func buildFilterGraph(layout LayoutVariant, plan EditPlan, bannerFontPath string) string {
 	tail := ""
+	if plan.StreamerBanner.Nick != "" {
+		tail = streamerBannerFilter(layout, plan.StreamerBanner.Nick, bannerFontPath) + ","
+	}
 	if plan.Effects.Grade {
-		tail = gradeFilter + ","
+		tail += gradeFilter + ","
 	}
 	tail += fmt.Sprintf("fps=%d,format=yuv420p[v]", outputFPS)
 
@@ -113,6 +127,79 @@ func buildFilterGraph(layout LayoutVariant, plan EditPlan) string {
 		layout.OutputWidth, layout.GameOutputHeight, layout.OutputWidth, layout.GameOutputHeight,
 		tail,
 	)
+}
+
+// streamerBannerFilter draws a full-width branded strip over the facecam /
+// gameplay seam without changing either band's geometry. Full-frame layouts
+// have no seam, so the same strip sits one fifth of the way down the frame.
+func streamerBannerFilter(layout LayoutVariant, nick, fontPath string) string {
+	centerY := layout.FaceOutputHeight
+	if layout.FullFrame {
+		centerY = layout.GameOutputHeight / 5
+	}
+	top := centerY - bannerHeight/2
+	iconTop := top + 27
+
+	return fmt.Sprintf(
+		"drawbox=x=0:y=%d:w=%d:h=%d:color=%s:t=fill,"+
+			"drawbox=x=0:y=%d:w=116:h=%d:color=%s:t=fill,"+
+			"drawbox=x=34:y=%d:w=48:h=36:color=white:t=fill,"+
+			"drawbox=x=41:y=%d:w=34:h=22:color=%s:t=fill,"+
+			"drawbox=x=43:y=%d:w=11:h=9:color=white:t=fill,"+
+			"drawbox=x=50:y=%d:w=5:h=12:color=white:t=fill,"+
+			"drawbox=x=64:y=%d:w=5:h=12:color=white:t=fill,"+
+			"drawtext=fontfile='%s':text='%s':fontcolor=white:fontsize=52:borderw=1:bordercolor=%s:"+
+			"shadowcolor=black@0.35:shadowx=2:shadowy=2:x=140:y=%d+(%d-text_h)/2",
+		top, layout.OutputWidth, bannerHeight, bannerColor,
+		top, bannerHeight, bannerAccentColor,
+		iconTop,
+		iconTop+7, bannerAccentColor,
+		iconTop+34,
+		iconTop+11,
+		iconTop+11,
+		ffmpegFilterPath(fontPath), nick, bannerAccentColor, top, bannerHeight,
+	)
+}
+
+// FindBannerFont returns the first supported bold system font available on
+// the current host. An explicit font file avoids drawtext's dependency on a
+// working Fontconfig installation, which is commonly absent on Windows.
+func FindBannerFont() string {
+	var candidates []string
+	switch runtime.GOOS {
+	case "windows":
+		windowsDir := os.Getenv("WINDIR")
+		if windowsDir == "" {
+			windowsDir = `C:\Windows`
+		}
+		candidates = []string{
+			filepath.Join(windowsDir, "Fonts", "arialbd.ttf"),
+			filepath.Join(windowsDir, "Fonts", "segoeuib.ttf"),
+		}
+	case "darwin":
+		candidates = []string{
+			"/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+			"/System/Library/Fonts/Supplemental/Arial.ttf",
+		}
+	default:
+		candidates = []string{
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+			"/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+		}
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func ffmpegFilterPath(value string) string {
+	value = filepath.ToSlash(value)
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, ":", `\:`)
+	return strings.ReplaceAll(value, "'", `\'`)
 }
 
 func cropFilter(c CropRect) string {

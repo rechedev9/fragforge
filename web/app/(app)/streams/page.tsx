@@ -43,6 +43,7 @@ type Stage = 'idle' | 'submitting' | 'acquiring' | 'editing' | 'rendering' | 're
 
 const FULL_FRAME: NormalizedRect = { x: 0, y: 0, width: 1, height: 1 };
 const DEFAULT_FACE_CROP: NormalizedRect = { x: 0.62, y: 0.03, width: 0.34, height: 0.3 };
+const STREAMER_NICK_RE = /^[A-Za-z0-9_]{0,25}$/;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -121,6 +122,7 @@ function planFingerprint(plan: StreamEditPlan): string {
     face: rect(plan.face_crop),
     game: rect(plan.gameplay_crop),
     clips: plan.clips.map((c) => [c.id, c.start_seconds, c.end_seconds, c.title ?? '']),
+    streamerNick: plan.streamer_banner?.nick?.trim() ?? '',
     captions: [plan.captions?.enabled ?? false, plan.captions?.language ?? 'auto'],
     music: [plan.music?.key ?? '', plan.music?.volume ?? 0],
     grade: plan.effects?.grade ?? false,
@@ -292,6 +294,10 @@ function LocalStreamsPage() {
     if (!job || !plan) return;
     if (!clipsAreValid(plan.clips)) {
       setError('Cada clip necesita un fin posterior a su inicio.');
+      return;
+    }
+    if (!STREAMER_NICK_RE.test(plan.streamer_banner?.nick?.trim() ?? '')) {
+      setError('El nick debe tener hasta 25 letras, números o guiones bajos.');
       return;
     }
     setError(null);
@@ -551,6 +557,7 @@ function StreamEditor({
 
   const setVariant = (variant: StreamVariant) => onPlanChange({ ...plan, variant });
   const setFaceCrop = (rect: NormalizedRect) => onPlanChange({ ...plan, face_crop: rect });
+  const setStreamerNick = (nick: string) => onPlanChange({ ...plan, streamer_banner: { nick } });
   const setClips = (clips: StreamClipRange[]) => onPlanChange({ ...plan, clips });
   const setCaptionsEnabled = (enabled: boolean) =>
     onPlanChange({ ...plan, captions: { enabled, language: plan.captions?.language ?? 'auto' } });
@@ -628,6 +635,29 @@ function StreamEditor({
                 No hace falta recorte de facecam — este layout renderiza el gameplay a pantalla completa.
               </p>
             )}
+
+            <div className="flex flex-col gap-2 border-t border-border pt-4">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="streamer-nick">Banner del streamer (opcional)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Añade una franja morada con el nick sobre la unión entre facecam y gameplay.
+                </p>
+              </div>
+              <Input
+                id="streamer-nick"
+                value={plan.streamer_banner?.nick ?? ''}
+                disabled={busy}
+                maxLength={25}
+                pattern="[A-Za-z0-9_]{1,25}"
+                aria-invalid={!STREAMER_NICK_RE.test(plan.streamer_banner?.nick?.trim() ?? '')}
+                onChange={(e) => setStreamerNick(e.target.value)}
+                placeholder="zacketizorcs2"
+                className="max-w-sm rounded-none"
+              />
+              {!STREAMER_NICK_RE.test(plan.streamer_banner?.nick?.trim() ?? '') ? (
+                <p className="text-xs text-destructive">Usa solo letras, números o guiones bajos (máximo 25).</p>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -705,7 +735,13 @@ function StreamEditor({
         <span className="font-[family-name:var(--font-mono)] text-[10.5px] tracking-[0.28em] text-muted-foreground">
           PREVIEW · 9:16
         </span>
-        <StreamPreview videoSrc={videoSrc} variant={plan.variant} faceCrop={plan.face_crop} gameplayCrop={plan.gameplay_crop} />
+        <StreamPreview
+          videoSrc={videoSrc}
+          variant={plan.variant}
+          faceCrop={plan.face_crop}
+          gameplayCrop={plan.gameplay_crop}
+          streamerNick={plan.streamer_banner?.nick?.trim()}
+        />
         <p className="text-[11.5px] leading-relaxed text-muted-foreground/80">
           Layout aproximado. El render real conserva el HUD del juego completo.
         </p>

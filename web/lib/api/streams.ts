@@ -37,12 +37,16 @@ export type StreamMusic = { key?: string; volume?: number };
 /** Light post effects; grade is the mild viral contrast/saturation lift. */
 export type StreamEffects = { grade?: boolean };
 
+/** Optional branded strip rendered over the facecam/gameplay seam. */
+export type StreamerBanner = { nick?: string };
+
 export type StreamEditPlan = {
   schema_version: number;
   variant: StreamVariant;
   face_crop?: NormalizedRect;
   gameplay_crop?: NormalizedRect;
   clips: StreamClipRange[];
+  streamer_banner?: StreamerBanner;
   captions?: StreamCaptions;
   music?: StreamMusic;
   effects?: StreamEffects;

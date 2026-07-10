@@ -763,6 +763,13 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if plan.Captions.Enabled && !cfg.captionsConfigured() {
 		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL)")
 	}
+	bannerFontPath := ""
+	if plan.StreamerBanner.Nick != "" {
+		bannerFontPath = streamclips.FindBannerFont()
+		if bannerFontPath == "" {
+			return fmt.Errorf("render streamer banner: no supported bold system font found")
+		}
+	}
 
 	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendering, ""); err != nil {
 		return fmt.Errorf("mark stream rendering: %w", err)
@@ -803,6 +810,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 			SourcePath:     sourcePath,
 			OutputPath:     outPath,
 			MusicPath:      musicPath,
+			BannerFontPath: bannerFontPath,
 			SourceHasAudio: j.Probe.AudioCodec != "",
 		}, plan, clip)
 		if err != nil {

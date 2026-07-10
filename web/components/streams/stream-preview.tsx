@@ -1,3 +1,4 @@
+import { Twitch } from 'lucide-react';
 import type { NormalizedRect, StreamVariant } from '@/lib/api/streams';
 
 const FULL_FRAME: NormalizedRect = { x: 0, y: 0, width: 1, height: 1 };
@@ -45,18 +46,21 @@ export function StreamPreview({
   variant,
   faceCrop,
   gameplayCrop,
+  streamerNick,
 }: {
   videoSrc: string;
   variant: StreamVariant;
   faceCrop?: NormalizedRect;
   gameplayCrop?: NormalizedRect;
+  streamerNick?: string;
 }) {
   const gameplay = gameplayCrop ?? FULL_FRAME;
   const showFace = variant !== 'streamer-fullframe-nocam';
-  const facePct = variant === 'streamer-vertical-stack-40-60' ? 40 : 50;
+  const facePct = variant === 'streamer-vertical-stack-40-60' ? 40 : (520 / 1920) * 100;
+  const bannerCenterPct = showFace ? facePct : 20;
 
   return (
-    <div className="mx-auto aspect-[9/16] w-full max-w-[220px] overflow-hidden rounded-xl border border-border bg-black shadow-lg">
+    <div className="relative mx-auto aspect-[9/16] w-full max-w-[220px] overflow-hidden rounded-xl border border-border bg-black shadow-lg">
       <div className="flex h-full w-full flex-col">
         {showFace ? (
           <div style={{ height: `${facePct}%` }} className="w-full">
@@ -67,6 +71,19 @@ export function StreamPreview({
           <CroppedFrame videoSrc={videoSrc} rect={gameplay} className="h-full w-full" />
         </div>
       </div>
+      {streamerNick ? (
+        <div
+          className="absolute left-0 flex h-[5%] w-full -translate-y-1/2 items-center bg-[#9146ff] text-white shadow-sm"
+          style={{ top: `${bannerCenterPct}%` }}
+        >
+          <span className="flex h-full w-[11%] shrink-0 items-center justify-center bg-[#5b1ba9]">
+            <Twitch className="h-[62%] w-[62%]" strokeWidth={2.6} aria-hidden />
+          </span>
+          <span className="truncate px-[3%] font-[family-name:var(--font-display)] text-[clamp(7px,3.2vw,12px)] font-black leading-none tracking-[0.02em]">
+            {streamerNick}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

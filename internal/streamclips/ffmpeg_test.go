@@ -50,6 +50,48 @@ func TestBuildFFmpegArgsCreatesVerticalStackCommand(t *testing.T) {
 	if got := args[len(args)-1]; got != "out.mp4" {
 		t.Fatalf("last arg = %q, want output path", got)
 	}
+	if strings.Contains(joined, "drawtext=") {
+		t.Fatalf("empty streamer nick must not add a banner: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsDrawsStreamerBannerAcrossStackSeam(t *testing.T) {
+	plan := DefaultEditPlan()
+	plan.StreamerBanner = StreamerBannerPlan{Nick: "zacketizorcs2"}
+	plan.Clips = []ClipRange{{ID: "clip-001", StartSeconds: 0, EndSeconds: 5}}
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:     "source.mp4",
+		OutputPath:     "out.mp4",
+		BannerFontPath: `C:\Windows\Fonts\arialbd.ttf`,
+	}, plan, plan.Clips[0])
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"vstack=inputs=2,drawbox=x=0:y=720:w=1080:h=96:color=0x9146ff:t=fill",
+		"drawbox=x=0:y=720:w=116:h=96:color=0x5b1ba9:t=fill",
+		`fontfile='C\:/Windows/Fonts/arialbd.ttf'`,
+		"text='zacketizorcs2'",
+		"fontsize=52",
+		"fps=60",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q: %s", want, joined)
+		}
+	}
+}
+
+func TestBuildFFmpegArgsRejectsBannerWithoutFont(t *testing.T) {
+	plan := DefaultEditPlan()
+	plan.StreamerBanner = StreamerBannerPlan{Nick: "zacketizorcs2"}
+	plan.Clips = []ClipRange{{ID: "clip-001", StartSeconds: 0, EndSeconds: 5}}
+
+	_, err := BuildFFmpegArgs(FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"}, plan, plan.Clips[0])
+	if err == nil || !strings.Contains(err.Error(), "font path is required") {
+		t.Fatalf("BuildFFmpegArgs error = %v, want banner font error", err)
+	}
 }
 
 func TestBuildFFmpegArgsLegacyVariantUnchanged(t *testing.T) {
@@ -193,6 +235,25 @@ func TestEditPlanValidationRejectsBadMusic(t *testing.T) {
 	plan.Music = MusicPlan{Key: "concrete-teeth", Volume: 1.5}
 	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "music volume") {
 		t.Fatalf("Validate error = %v, want music volume error", err)
+	}
+}
+
+func TestEditPlanNormalizesAndValidatesStreamerBannerNick(t *testing.T) {
+	plan := DefaultEditPlan()
+	plan.StreamerBanner = StreamerBannerPlan{Nick: "  zacketizorcs2  "}
+	plan = NormalizeEditPlan(plan)
+	if plan.StreamerBanner.Nick != "zacketizorcs2" {
+		t.Fatalf("normalized nick = %q, want %q", plan.StreamerBanner.Nick, "zacketizorcs2")
+	}
+	if err := plan.Validate(); err != nil {
+		t.Fatalf("Validate error = %v", err)
+	}
+
+	for _, nick := range []string{"nick with spaces", "@streamer", strings.Repeat("a", 26)} {
+		plan.StreamerBanner.Nick = nick
+		if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "streamer banner nick") {
+			t.Fatalf("Validate nick %q error = %v, want streamer banner nick error", nick, err)
+		}
 	}
 }
 
