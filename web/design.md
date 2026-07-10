@@ -15,8 +15,8 @@ The visual identity is:
 
 - blue-black canvas and layered navy surfaces;
 - cyan for primary action, selection, navigation, and keyboard focus;
-- magenta for the wordmark micro-accent and stream-specific signals such as
-  REC, facecam, music, and likes;
+- vermilion for the wordmark micro-accent; magenta remains reserved for
+  stream-specific signals such as REC, facecam, music, and likes;
 - mint for ready/success, amber for warnings/expiry, red for failures and
   destructive actions;
 - angular geometry, thin borders, restrained corner cuts, and minimal glow;

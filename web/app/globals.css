@@ -40,7 +40,7 @@
   --accent-foreground: oklch(0.983 0.011 226);
   --destructive: oklch(0.68 0.205 22); /* danger red #ff5a66 */
   --destructive-foreground: oklch(0.985 0.01 22);
-  --brand-accent: oklch(0.657 0.241 6.9); /* wordmark micro-accent */
+  --brand-accent: oklch(0.68 0.225 25); /* vermilion wordmark micro-accent */
   --stream: oklch(0.657 0.241 6.9); /* magenta #ff2d78 */
   --stream-foreground: oklch(0.17 0.035 6.9);
   --success: oklch(0.82 0.135 166); /* mint ready state */
@@ -85,7 +85,7 @@
   --accent-foreground: oklch(0.983 0.011 226);
   --destructive: oklch(0.68 0.205 22);
   --destructive-foreground: oklch(0.985 0.01 22);
-  --brand-accent: oklch(0.657 0.241 6.9);
+  --brand-accent: oklch(0.68 0.225 25);
   --stream: oklch(0.657 0.241 6.9);
   --stream-foreground: oklch(0.17 0.035 6.9);
   --success: oklch(0.82 0.135 166);
