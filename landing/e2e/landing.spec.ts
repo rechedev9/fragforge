@@ -1,9 +1,9 @@
 import { test, expect, type Page, request } from "@playwright/test";
 
-// Canonical download asset for the live GitHub Release v1.0.4. The primary CTA
+// Canonical download asset for the live GitHub Release v1.0.5. The primary CTA
 // must point at exactly this URL, and the URL must actually resolve.
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v1.0.4/FragForge.Studio.Setup.1.0.4.exe";
+  "https://github.com/rechedev9/fragforge/releases/download/v1.0.5/FragForge.Studio.Setup.1.0.5.exe";
 const SOCIAL_TITLE = "Your CS2 frags, ready to post | FragForge";
 const SOCIAL_DESCRIPTION =
   "Drop a CS2 demo. Pick your kills. Get a polished vertical Short — locally, free, and ready to upload.";
