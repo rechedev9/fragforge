@@ -120,6 +120,10 @@ address requires `ZV_MUTATION_TOKEN`. Optional environment variables:
 | `ZV_WORKER_CONCURRENCY` | Asynq worker concurrency (default 2). |
 | `ZV_MEDIA_WORK_DIR` | Keep media workdirs for debugging (deleted after each task when unset). |
 | `ZV_CODEX_PATH`, `ZV_CODEX_MODEL`, `ZV_AGENT_TIMEOUT` | Optional local editorial assistant (`codex exec`, read-only sandbox) for caption/title suggestions. |
+| `GROQ_API_KEY` or `ZV_GROQ_API_KEY`, `ZV_GROQ_MODEL` | Optional Groq cloud transcription for stream captions. |
+| `ZV_GROQ_CORRECTION_MODEL` | Optional Groq contextual correction model override (default `llama-3.3-70b-versatile`). |
+
+Groq contextual correction is best-effort and preserves every word cue's original timing.
 
 ### Smoke tests
 

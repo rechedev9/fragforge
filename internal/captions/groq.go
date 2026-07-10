@@ -45,10 +45,11 @@ const defaultGroqModel = "whisper-large-v3"
 // word timestamps offset back into clip time. When detection fails (no
 // ffmpeg, unparseable output) it falls back to the whole-clip request.
 type GroqTranscriber struct {
-	APIKey   string
-	Model    string // defaults to "whisper-large-v3"
-	Language string // ISO-639-1, or "auto"/"" to let Groq auto-detect
-	BaseURL  string // defaults to "https://api.groq.com/openai/v1"
+	APIKey          string
+	Model           string // defaults to "whisper-large-v3"
+	CorrectionModel string // empty disables contextual transcript correction
+	Language        string // ISO-639-1, or "auto"/"" to let Groq auto-detect
+	BaseURL         string // defaults to "https://api.groq.com/openai/v1"
 
 	// FFmpegPath is the ffmpeg binary used for audio extraction. Defaults to
 	// "ffmpeg" (resolved on PATH).
@@ -92,16 +93,22 @@ func (g GroqTranscriber) Transcribe(ctx context.Context, mediaPath, workDir stri
 		return nil, fmt.Errorf("captions: extracting audio for groq transcription: %w", err)
 	}
 
-	if cues, ok := g.transcribeBySpeechSpan(ctx, ffmpegPath, audioPath); ok {
-		return cues, nil
+	var cues []WordCue
+	if spanCues, ok := g.transcribeBySpeechSpan(ctx, ffmpegPath, audioPath); ok {
+		cues = spanCues
+	} else {
+		// Whole-clip fallback: span detection unavailable, found nothing usable,
+		// or a span request failed (in which case this surfaces the API error).
+		data, err := g.transcribeAudio(ctx, audioPath, g.Language)
+		if err != nil {
+			return nil, err
+		}
+		cues, err = ParseGroqJSON(data)
+		if err != nil {
+			return nil, err
+		}
 	}
-	// Whole-clip fallback: span detection unavailable, found nothing usable,
-	// or a span request failed (in which case this surfaces the API error).
-	data, err := g.transcribeAudio(ctx, audioPath, g.Language)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGroqJSON(data)
+	return g.correctCues(ctx, cues), nil
 }
 
 // transcribeBySpeechSpan segments audioPath into speech regions and
@@ -432,6 +439,7 @@ func (g GroqTranscriber) transcribeAudio(ctx context.Context, audioPath, languag
 		{"timestamp_granularities[]", "word"},
 		{"timestamp_granularities[]", "segment"},
 		{"temperature", "0"},
+		{"prompt", groqTranscriptionPrompt(language)},
 	}
 	// Omit the language field entirely for "auto"/empty so Groq auto-detects,
 	// rather than sending a literal "auto" the API would reject.
@@ -474,6 +482,19 @@ func (g GroqTranscriber) transcribeAudio(ctx context.Context, audioPath, languag
 		return nil, groqTranscribeError(resp.StatusCode, respBody)
 	}
 	return respBody, nil
+}
+
+const groqCS2Vocabulary = "CS2, Counter-Strike 2, AWP, AK-47, M4A1-S, M4A4, Deagle, Molotov, smoke, flashbang, HE, CT, T, clutch, ace, Heaven, connector, short, long"
+
+func groqTranscriptionPrompt(language string) string {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "es":
+		return "Transcribe en el idioma hablado con ortografía, tildes, mayúsculas y puntuación correctas. Vocabulario de CS2: " + groqCS2Vocabulary + "."
+	case "en":
+		return "Transcribe in the spoken language with correct spelling, capitalization, and punctuation. CS2 vocabulary: " + groqCS2Vocabulary + "."
+	default:
+		return "CS2 gameplay vocabulary: " + groqCS2Vocabulary + "."
+	}
 }
 
 // groqErrorBody mirrors the subset of Groq/OpenAI's error envelope
@@ -638,5 +659,22 @@ func cuesFromTranscript(transcript groqTranscript) []WordCue {
 			EndSeconds:   w.End,
 		})
 	}
-	return filterHallucinatedWords(transcript, cues)
+	return normalizeGroqCueTimings(filterHallucinatedWords(transcript, cues))
+}
+
+// normalizeGroqCueTimings removes the mild adjacent timestamp overlaps Groq's
+// verbose_json responses can contain without weakening validation for other
+// caption sources.
+func normalizeGroqCueTimings(cues []WordCue) []WordCue {
+	normalized := cues[:0]
+	for _, cue := range cues {
+		if n := len(normalized); n > 0 && cue.StartSeconds < normalized[n-1].EndSeconds {
+			cue.StartSeconds = normalized[n-1].EndSeconds
+			if cue.EndSeconds <= cue.StartSeconds {
+				continue
+			}
+		}
+		normalized = append(normalized, cue)
+	}
+	return normalized
 }

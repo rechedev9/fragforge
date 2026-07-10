@@ -387,6 +387,13 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 			wantCaptioning: true,
 		},
 		{
+			name:           "correction model without api key does not enable groq",
+			cfg:            StreamRenderWorkerConfig{GroqCorrectionModel: "llama-test"},
+			wantWhisper:    false,
+			wantGroq:       false,
+			wantCaptioning: false,
+		},
+		{
 			name:           "both configured",
 			cfg:            StreamRenderWorkerConfig{GroqAPIKey: "gsk_test", WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
 			wantWhisper:    true,

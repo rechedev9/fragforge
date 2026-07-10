@@ -206,9 +206,10 @@ type StreamRenderWorkerConfig struct {
 	// be set for it to run.
 	WhisperPath      string
 	WhisperModelPath string
-	// GroqAPIKey and GroqModel configure the Groq cloud captions
-	// transcription pass (internal/captions.GroqTranscriber). GroqModel is
-	// optional and defaults inside GroqTranscriber when empty.
+	// GroqAPIKey, GroqModel, and GroqCorrectionModel configure the Groq cloud
+	// captions pass (internal/captions.GroqTranscriber). GroqModel is optional
+	// and defaults inside GroqTranscriber when empty. GroqCorrectionModel is
+	// optional; an empty value disables contextual correction.
 	//
 	// A render honours EditPlan.Captions.Enabled only when at least one
 	// backend is configured; the HTTP layer rejects a render start with
@@ -216,8 +217,9 @@ type StreamRenderWorkerConfig struct {
 	// requireCaptionsEnabled), but the worker still checks defensively since
 	// it may run a redriven task from before the config changed. When both
 	// are configured, Groq is preferred (see NewStreamRenderWorker).
-	GroqAPIKey string
-	GroqModel  string
+	GroqAPIKey          string
+	GroqModel           string
+	GroqCorrectionModel string
 }
 
 // RecordWorker handles the "record:demo" Asynq task.
@@ -725,10 +727,11 @@ func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, c
 	w.transcribe = func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error) {
 		if w.cfg.groqConfigured() {
 			g := captions.GroqTranscriber{
-				APIKey:     w.cfg.GroqAPIKey,
-				Model:      w.cfg.GroqModel,
-				Language:   language,
-				FFmpegPath: w.cfg.FFmpegPath,
+				APIKey:          w.cfg.GroqAPIKey,
+				Model:           w.cfg.GroqModel,
+				CorrectionModel: w.cfg.GroqCorrectionModel,
+				Language:        language,
+				FFmpegPath:      w.cfg.FFmpegPath,
 			}
 			return g.Transcribe(ctx, mediaPath, workDir)
 		}

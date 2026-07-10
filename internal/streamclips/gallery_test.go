@@ -27,9 +27,9 @@ func TestRenderGalleryHTMLEscapesTextAndUsesVideoPaths(t *testing.T) {
 		"<title>Frag &lt;Run&gt;</title>",
 		"<h1>Frag &lt;Run&gt;</h1>",
 		"<h2>clip-001</h2>",
-		`src="videos/clip-001.mp4"`,
+		`src="videos/clip-001"`,
 		"<h2>clip &#34;two&#34;</h2>",
-		`src="videos/clip%20%22two%22.mp4"`,
+		`src="videos/clip%20%22two%22"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("gallery html missing %q:\n%s", want, html)

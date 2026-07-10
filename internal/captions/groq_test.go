@@ -45,6 +45,70 @@ func TestParseGroqJSON(t *testing.T) {
 	}
 }
 
+func TestParseGroqJSON_NormalizesOverlappingWordTimestamps(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     string
+		want     []WordCue
+		buildASS bool
+	}{
+		{
+			name: "mild overlap renders captions",
+			data: `{"words":[
+				{"word":"No","start":0.10,"end":0.35},
+				{"word":"sabes","start":0.35,"end":0.72},
+				{"word":"lo","start":0.72,"end":0.88},
+				{"word":"que","start":0.88,"end":1.08},
+				{"word":"haces.","start":1.08,"end":1.48},
+				{"word":"¿Sabes","start":1.46,"end":1.82}
+			]}`,
+			want: []WordCue{
+				{Word: "No", StartSeconds: 0.10, EndSeconds: 0.35},
+				{Word: "sabes", StartSeconds: 0.35, EndSeconds: 0.72},
+				{Word: "lo", StartSeconds: 0.72, EndSeconds: 0.88},
+				{Word: "que", StartSeconds: 0.88, EndSeconds: 1.08},
+				{Word: "haces.", StartSeconds: 1.08, EndSeconds: 1.48},
+				{Word: "¿Sabes", StartSeconds: 1.48, EndSeconds: 1.82},
+			},
+			buildASS: true,
+		},
+		{
+			name: "fully covered cue is dropped",
+			data: `{"words":[
+				{"word":"uno","start":0.50,"end":1.50},
+				{"word":"cubierto","start":0.80,"end":1.20},
+				{"word":"tres","start":1.10,"end":1.80}
+			]}`,
+			want: []WordCue{
+				{Word: "uno", StartSeconds: 0.50, EndSeconds: 1.50},
+				{Word: "tres", StartSeconds: 1.50, EndSeconds: 1.80},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseGroqJSON([]byte(tt.data))
+			if err != nil {
+				t.Fatalf("ParseGroqJSON returned error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d cues (%+v), want %d (%+v)", len(got), got, len(tt.want), tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("cue %d: got %+v, want %+v", i, got[i], tt.want[i])
+				}
+			}
+			if tt.buildASS {
+				if _, err := BuildASS(got, DefaultStyle()); err != nil {
+					t.Fatalf("BuildASS returned error for parsed Groq cues: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestParseGroqJSON_Errors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -80,7 +144,7 @@ func TestGroqTranscriber_Transcribe(t *testing.T) {
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
 			t.Fatalf("ParseMultipartForm: %v", err)
 		}
-		for _, key := range []string{"model", "response_format", "temperature", "language"} {
+		for _, key := range []string{"model", "response_format", "temperature", "language", "prompt"} {
 			gotFields[key] = r.FormValue(key)
 		}
 		gotFields["timestamp_granularities[]"] = r.FormValue("timestamp_granularities[]")
@@ -137,10 +201,14 @@ func TestGroqTranscriber_Transcribe(t *testing.T) {
 	if gotFields["language"] != "es" {
 		t.Errorf("language field = %q, want es", gotFields["language"])
 	}
+	if !strings.Contains(gotFields["prompt"], "ortografía") || !strings.Contains(gotFields["prompt"], "AWP") {
+		t.Errorf("Spanish prompt = %q, want orthography guidance and CS2 vocabulary", gotFields["prompt"])
+	}
 }
 
 func TestGroqTranscriber_Transcribe_OmitsAutoLanguage(t *testing.T) {
 	var sawLanguageField bool
+	var gotPrompt string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
 			t.Fatalf("ParseMultipartForm: %v", err)
@@ -148,6 +216,7 @@ func TestGroqTranscriber_Transcribe_OmitsAutoLanguage(t *testing.T) {
 		if _, ok := r.MultipartForm.Value["language"]; ok {
 			sawLanguageField = true
 		}
+		gotPrompt = r.FormValue("prompt")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(sampleGroqJSON))
 	}))
@@ -170,6 +239,34 @@ func TestGroqTranscriber_Transcribe_OmitsAutoLanguage(t *testing.T) {
 	}
 	if sawLanguageField {
 		t.Fatal("request included a language field for \"auto\", want it omitted")
+	}
+	if !strings.Contains(gotPrompt, "CS2") || strings.Contains(strings.ToLower(gotPrompt), "spanish") || strings.Contains(strings.ToLower(gotPrompt), "english") {
+		t.Fatalf("auto prompt = %q, want neutral CS2 context without a forced language", gotPrompt)
+	}
+}
+
+func TestGroqTranscriber_Transcribe_UsesEnglishPrompt(t *testing.T) {
+	var gotPrompt string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			t.Fatalf("ParseMultipartForm: %v", err)
+		}
+		gotPrompt = r.FormValue("prompt")
+		_, _ = w.Write([]byte(sampleGroqJSON))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcriber := GroqTranscriber{APIKey: "key", Language: "en", BaseURL: server.URL, extractAudio: fakeExtractAudio}
+	if _, err := transcriber.Transcribe(context.Background(), mediaPath, dir); err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if !strings.Contains(gotPrompt, "spelling") || !strings.Contains(gotPrompt, "Counter-Strike 2") {
+		t.Fatalf("English prompt = %q, want spelling guidance and CS2 vocabulary", gotPrompt)
 	}
 }
 
@@ -365,8 +462,13 @@ func TestParseSilenceDetect(t *testing.T) {
 // every utterance after the first. With span detection, each speech region is
 // transcribed separately and its words come back offset into clip time.
 func TestGroqTranscriber_TranscribeSpansOffsetsWords(t *testing.T) {
-	var requests int
+	var requests, correctionRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat/completions" {
+			correctionRequests++
+			writeGroqCorrectionResponse(t, w, []indexedCorrection{{Index: 0, Token: "Hay"}, {Index: 1, Token: "uno"}, {Index: 2, Token: "Smoke"}})
+			return
+		}
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		switch requests {
@@ -389,9 +491,10 @@ func TestGroqTranscriber_TranscribeSpansOffsetsWords(t *testing.T) {
 
 	var chunkStarts []float64
 	transcriber := GroqTranscriber{
-		APIKey:       "secret-key",
-		BaseURL:      server.URL,
-		extractAudio: fakeExtractAudio,
+		APIKey:          "secret-key",
+		BaseURL:         server.URL,
+		CorrectionModel: "llama-test",
+		extractAudio:    fakeExtractAudio,
 		detectSpeech: func(_ context.Context, _, _ string) ([]speechSpan, error) {
 			return []speechSpan{{Start: 0, End: 1.2}, {Start: 9.1, End: 11.6}, {Start: 22.4, End: 27.6}}, nil
 		},
@@ -408,13 +511,16 @@ func TestGroqTranscriber_TranscribeSpansOffsetsWords(t *testing.T) {
 	if requests != 3 {
 		t.Fatalf("groq requests = %d, want 3 (one per span)", requests)
 	}
+	if correctionRequests != 1 {
+		t.Fatalf("correction requests = %d, want 1 for the assembled clip", correctionRequests)
+	}
 	if len(chunkStarts) != 3 || chunkStarts[1] != 9.1 {
 		t.Fatalf("chunk starts = %v, want the three span starts", chunkStarts)
 	}
 	want := []WordCue{
 		{Word: "Hay", StartSeconds: 0.1, EndSeconds: 0.4},
 		{Word: "uno", StartSeconds: 0.5, EndSeconds: 0.8},
-		{Word: "smoke", StartSeconds: 23.4, EndSeconds: 23.9},
+		{Word: "Smoke", StartSeconds: 23.4, EndSeconds: 23.9},
 	}
 	if len(cues) != len(want) {
 		t.Fatalf("cues = %+v, want %+v", cues, want)

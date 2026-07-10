@@ -42,23 +42,44 @@ func NewLocal(root string) (*Local, error) {
 	return &Local{root: abs}, nil
 }
 
-// Put writes r's contents to the file at key inside the storage root.
+// Put atomically replaces the file at key with r's contents. Readers see either
+// the previous complete artifact or the new complete artifact, never a partial
+// write.
 func (l *Local) Put(key string, r io.Reader) error {
 	path, err := l.resolve(key)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return err
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("storage: create artifact directory: %w", err)
 	}
-	// #nosec G304 -- path is resolved under Local.root by resolve.
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	temp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("storage: create temporary artifact: %w", err)
 	}
-	defer f.Close()
-	_, err = io.Copy(f, r)
-	return err
+	tempPath := temp.Name()
+	keepTemp := true
+	defer func() {
+		if keepTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if _, err := io.Copy(temp, r); err != nil {
+		return fmt.Errorf("storage: copy temporary artifact: %w", errors.Join(err, temp.Close()))
+	}
+	if err := temp.Sync(); err != nil {
+		return fmt.Errorf("storage: sync temporary artifact: %w", errors.Join(err, temp.Close()))
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("storage: close temporary artifact: %w", err)
+	}
+	if err := replaceLocalFile(tempPath, path); err != nil {
+		return fmt.Errorf("storage: replace artifact: %w", err)
+	}
+	keepTemp = false
+	return nil
 }
 
 // Open returns a ReadCloser for the file at key.
@@ -68,7 +89,7 @@ func (l *Local) Open(key string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	// #nosec G304 -- path is resolved under Local.root by resolve.
-	return os.Open(path)
+	return openLocalFile(path)
 }
 
 // List returns the base file names present directly under the directory at key,

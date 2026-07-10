@@ -12,36 +12,38 @@ import (
 )
 
 type config struct {
-	HTTPAddr          string
-	DatabaseURL       string
-	DataDir           string
-	WorkerConcurrency int
-	MediaWorkDir      string
-	RecorderPath      string
-	ComposerPath      string
-	EditorPath        string
-	HLAEPath          string
-	CS2Path           string
-	RecordHUD         string
-	FFmpegPath        string
-	FFprobePath       string
-	MusicDir          string
-	RecordTimeout     string
-	ComposeTimeout    string
-	RenderTimeout     string
-	MutationToken     string
-	CodexPath         string
-	CodexModel        string
-	AgentTimeout      string
-	YtdlpPath         string
-	WhisperPath       string
-	WhisperModelPath  string
-	GroqAPIKey        string
-	GroqModel         string
+	HTTPAddr            string
+	DatabaseURL         string
+	DataDir             string
+	WorkerConcurrency   int
+	MediaWorkDir        string
+	RecorderPath        string
+	ComposerPath        string
+	EditorPath          string
+	HLAEPath            string
+	CS2Path             string
+	RecordHUD           string
+	FFmpegPath          string
+	FFprobePath         string
+	MusicDir            string
+	RecordTimeout       string
+	ComposeTimeout      string
+	RenderTimeout       string
+	MutationToken       string
+	CodexPath           string
+	CodexModel          string
+	AgentTimeout        string
+	YtdlpPath           string
+	WhisperPath         string
+	WhisperModelPath    string
+	GroqAPIKey          string
+	GroqModel           string
+	GroqCorrectionModel string
 }
 
 const (
-	databaseURLMemory = "memory"
+	databaseURLMemory          = "memory"
+	defaultGroqCorrectionModel = "llama-3.3-70b-versatile"
 	// databaseURLSQLite selects the on-disk SQLite job repository. Accepts the
 	// bare value "sqlite" (stores <DataDir>/jobs.db) or "sqlite:<path>".
 	databaseURLSQLite = "sqlite"
@@ -82,8 +84,9 @@ func loadConfig() (config, error) {
 		// ZV_GROQ_API_KEY is an explicit override for when a user-level
 		// GROQ_API_KEY is set for something unrelated. Neither is auto-detected
 		// (an API key cannot be probed on PATH or disk).
-		GroqAPIKey: firstNonEmpty(os.Getenv("ZV_GROQ_API_KEY"), os.Getenv("GROQ_API_KEY")),
-		GroqModel:  os.Getenv("ZV_GROQ_MODEL"),
+		GroqAPIKey:          firstNonEmpty(os.Getenv("ZV_GROQ_API_KEY"), os.Getenv("GROQ_API_KEY")),
+		GroqModel:           os.Getenv("ZV_GROQ_MODEL"),
+		GroqCorrectionModel: envOr("ZV_GROQ_CORRECTION_MODEL", defaultGroqCorrectionModel),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
