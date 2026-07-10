@@ -498,6 +498,64 @@ test.describe('stream clips — edits, music, and downloads', () => {
     expect(saved.effects?.grade).toBe(true);
   });
 
+  test('moves and animates the streamer banner without losing nested settings', async ({ page }) => {
+    const flow = await mockRenderFlow(page);
+
+    await page.goto('/streams');
+    await page.locator(URL_INPUT).fill(CLIP_URL);
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
+    await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible({ timeout: 15_000 });
+
+    const nick = page.getByLabel('Banner del streamer (opcional)');
+    const position = page.getByLabel('Posición vertical del banner', { exact: true });
+    await nick.fill('Zack');
+
+    const preview = page.locator('[data-streamer-banner]');
+    const previewBox = await preview.boundingBox();
+    if (!previewBox) throw new Error('streamer banner preview is not visible');
+    const previewHeight = await preview.evaluate((element) => element.parentElement?.clientHeight ?? 0);
+    expect(previewHeight).toBeGreaterThan(0);
+    await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2 + 70);
+    await page.mouse.up();
+    await expect.poll(async () => Number(await position.inputValue())).toBeCloseTo(0.4 + 70 / previewHeight, 3);
+
+    const slide = page.getByRole('button', { name: 'Deslizamiento: desactivado' });
+    await slide.click();
+    await expect(page.getByRole('button', { name: 'Deslizamiento: activado' })).toHaveAttribute('aria-pressed', 'true');
+
+    await nick.fill('Zack_25');
+    await expect(position).not.toHaveValue('0.4');
+    await expect(page.getByRole('button', { name: 'Deslizamiento: activado' })).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByRole('button', { name: 'CREAR SHORTS' }).click();
+    const download = page.getByRole('link', { name: 'Descargar Clutch' });
+    await expect(download).toBeVisible({ timeout: 15_000 });
+
+    const saved = flow.putBodies().at(-1) as {
+      streamer_banner?: { nick?: string; position_y?: number; slide_enabled?: boolean };
+    };
+    expect(saved.streamer_banner?.nick).toBe('Zack_25');
+    expect(saved.streamer_banner?.position_y).toBeGreaterThan(0.5);
+    expect(saved.streamer_banner?.slide_enabled).toBe(true);
+
+    await position.fill('0.75');
+    await expect(page.getByText(/renderizaron antes de tus últimos cambios/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Descargar Clutch (desactualizado)' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Restablecer posición' }).click();
+    await expect(position).toHaveValue('0.4');
+    await page.getByRole('button', { name: 'CREAR SHORTS' }).click();
+    await expect(download).toBeVisible({ timeout: 15_000 });
+    const resetSaved = flow.putBodies().at(-1) as { streamer_banner?: { position_y?: number } };
+    expect(resetSaved.streamer_banner?.position_y).toBeUndefined();
+
+    await page.getByRole('button', { name: 'Deslizamiento: activado' }).click();
+    await expect(page.getByText(/renderizaron antes de tus últimos cambios/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Descargar Clutch (desactualizado)' })).toBeDisabled();
+  });
+
   test('previews the selected music and resets playback when the selection changes or clears', async ({ page }) => {
     await mockMediaPlayback(page);
     await mockRenderFlow(page);

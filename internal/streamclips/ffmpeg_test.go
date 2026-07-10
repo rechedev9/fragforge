@@ -1,6 +1,8 @@
 package streamclips
 
 import (
+	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -55,9 +57,13 @@ func TestBuildFFmpegArgsCreatesVerticalStackCommand(t *testing.T) {
 	}
 }
 
-func TestBuildFFmpegArgsDrawsStreamerBannerAcrossStackSeam(t *testing.T) {
+func TestBuildFFmpegArgsOldStreamerBannerPlanStaysStaticAtStackSeam(t *testing.T) {
+	var banner StreamerBannerPlan
+	if err := json.Unmarshal([]byte(`{"nick":"zacketizorcs2"}`), &banner); err != nil {
+		t.Fatalf("Unmarshal old streamer banner plan: %v", err)
+	}
 	plan := DefaultEditPlan()
-	plan.StreamerBanner = StreamerBannerPlan{Nick: "zacketizorcs2"}
+	plan.StreamerBanner = banner
 	plan.Clips = []ClipRange{{ID: "clip-001", StartSeconds: 0, EndSeconds: 5}}
 
 	args, err := BuildFFmpegArgs(FFmpegInputs{
@@ -70,15 +76,145 @@ func TestBuildFFmpegArgsDrawsStreamerBannerAcrossStackSeam(t *testing.T) {
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"vstack=inputs=2,drawbox=x=0:y=720:w=1080:h=96:color=0x9146ff:t=fill",
-		"drawbox=x=0:y=720:w=116:h=96:color=0x5b1ba9:t=fill",
+		"vstack=inputs=2[content]",
+		"color=c=0x9146ff:s=1080x96:r=60:d=5.000",
+		"drawbox=x=0:y=0:w=116:h=96:color=0x5b1ba9:t=fill",
 		`fontfile='C\:/Windows/Fonts/arialbd.ttf'`,
 		"text='zacketizorcs2'",
 		"fontsize=52",
+		"overlay=x='0':y=720:eval=frame:eof_action=pass:shortest=0",
 		"fps=60",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %s", want, joined)
+		}
+	}
+}
+
+func TestBuildFFmpegArgsPositionsStaticStreamerBanner(t *testing.T) {
+	positionY := 0.5
+	plan := DefaultEditPlan()
+	plan.StreamerBanner = StreamerBannerPlan{Nick: "zacketizorcs2", PositionY: &positionY}
+	clip := ClipRange{ID: "clip-001", StartSeconds: 0, EndSeconds: 5}
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:     "source.mp4",
+		OutputPath:     "out.mp4",
+		BannerFontPath: "font.ttf",
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "overlay=x='0':y=912:eval=frame") {
+		t.Fatalf("args missing static banner at top pixel 912: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsDefaultsFullFrameBannerToTwentyPercent(t *testing.T) {
+	plan := EditPlan{
+		Variant:        VariantStreamerFullframeNoCam,
+		GameplayCrop:   CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+		StreamerBanner: StreamerBannerPlan{Nick: "zacketizorcs2"},
+	}
+	clip := ClipRange{ID: "clip-001", StartSeconds: 0, EndSeconds: 5}
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:     "source.mp4",
+		OutputPath:     "out.mp4",
+		BannerFontPath: "font.ttf",
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "overlay=x='0':y=336:eval=frame") {
+		t.Fatalf("args missing full-frame banner centered at 20%%: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsAnimatesStreamerBanner(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration float64
+		wantX    string
+	}{
+		{
+			name:     "normal clip uses fixed phase",
+			duration: 5,
+			wantX:    `overlay=x='if(lt(t\,0.350000)\,-w*(1-t/0.350000)\,if(lt(t\,4.650000)\,0\,-w*(t-4.650000)/0.350000))'`,
+		},
+		{
+			name:     "short clip uses half duration",
+			duration: 0.6,
+			wantX:    `overlay=x='if(lt(t\,0.300000)\,-w*(1-t/0.300000)\,if(lt(t\,0.300000)\,0\,-w*(t-0.300000)/0.300000))'`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := DefaultEditPlan()
+			plan.StreamerBanner = StreamerBannerPlan{Nick: "zacketizorcs2", SlideEnabled: true}
+			clip := ClipRange{ID: "clip-001", StartSeconds: 0, EndSeconds: tt.duration}
+
+			args, err := BuildFFmpegArgs(FFmpegInputs{
+				SourcePath:     "source.mp4",
+				OutputPath:     "out.mp4",
+				BannerFontPath: "font.ttf",
+			}, plan, clip)
+			if err != nil {
+				t.Fatalf("BuildFFmpegArgs error = %v", err)
+			}
+			joined := strings.Join(args, " ")
+			if !strings.Contains(joined, tt.wantX) {
+				t.Fatalf("args missing animation expression %q: %s", tt.wantX, joined)
+			}
+		})
+	}
+}
+
+func TestEditPlanValidatesStreamerBannerPosition(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   float64
+		wantErr bool
+	}{
+		{name: "lower boundary", value: 0.025},
+		{name: "upper boundary", value: 0.975},
+		{name: "below boundary", value: 0.024999, wantErr: true},
+		{name: "above boundary", value: 0.975001, wantErr: true},
+		{name: "nan", value: math.NaN(), wantErr: true},
+		{name: "positive infinity", value: math.Inf(1), wantErr: true},
+		{name: "negative infinity", value: math.Inf(-1), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := DefaultEditPlan()
+			plan.StreamerBanner.PositionY = &tt.value
+			err := plan.Validate()
+			if tt.wantErr && (err == nil || !strings.Contains(err.Error(), "position_y")) {
+				t.Fatalf("Validate error = %v, want position_y error", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Validate error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestBuildFFmpegArgsEmptyNickIgnoresBannerRenderingFields(t *testing.T) {
+	positionY := 0.75
+	plan := DefaultEditPlan()
+	plan.StreamerBanner = StreamerBannerPlan{PositionY: &positionY, SlideEnabled: true}
+	clip := ClipRange{ID: "clip-001", StartSeconds: 0, EndSeconds: 5}
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, unwanted := range []string{"color=c=0x9146ff", "drawtext=", "overlay="} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("empty streamer nick must not add %q: %s", unwanted, joined)
 		}
 	}
 }

@@ -41,6 +41,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { FacecamPicker } from '@/components/streams/facecam-picker';
 import { StreamPreview } from '@/components/streams/stream-preview';
+import {
+  STREAMER_BANNER_MAX_POSITION,
+  STREAMER_BANNER_MIN_POSITION,
+  clampStreamerBannerPosition,
+  resolveStreamerBannerPosition,
+} from '@/lib/stream-preview';
 
 type Stage = 'idle' | 'submitting' | 'acquiring' | 'editing' | 'rendering' | 'rendered' | 'failed';
 
@@ -127,6 +133,8 @@ function planFingerprint(plan: StreamEditPlan): string {
     game: rect(plan.gameplay_crop),
     clips: plan.clips.map((c) => [c.id, c.start_seconds, c.end_seconds, c.title ?? '']),
     streamerNick: plan.streamer_banner?.nick?.trim() ?? '',
+    streamerPosition: plan.streamer_banner?.position_y ?? null,
+    streamerSlide: plan.streamer_banner?.slide_enabled ?? false,
     captions: [plan.captions?.enabled ?? false, plan.captions?.language ?? 'auto'],
     music: [plan.music?.key ?? '', plan.music?.volume ?? 0],
     grade: plan.effects?.grade ?? false,
@@ -561,7 +569,20 @@ function StreamEditor({
 
   const setVariant = (variant: StreamVariant) => onPlanChange({ ...plan, variant });
   const setFaceCrop = (rect: NormalizedRect) => onPlanChange({ ...plan, face_crop: rect });
-  const setStreamerNick = (nick: string) => onPlanChange({ ...plan, streamer_banner: { nick } });
+  const bannerPosition = resolveStreamerBannerPosition(plan.variant, plan.streamer_banner?.position_y);
+  const setStreamerNick = (nick: string) =>
+    onPlanChange({ ...plan, streamer_banner: { ...plan.streamer_banner, nick } });
+  const setStreamerPosition = (position: number) =>
+    onPlanChange({
+      ...plan,
+      streamer_banner: { ...plan.streamer_banner, position_y: clampStreamerBannerPosition(position) },
+    });
+  const resetStreamerPosition = () => {
+    const { position_y: _position, ...banner } = plan.streamer_banner ?? {};
+    onPlanChange({ ...plan, streamer_banner: banner });
+  };
+  const setStreamerSlide = (slideEnabled: boolean) =>
+    onPlanChange({ ...plan, streamer_banner: { ...plan.streamer_banner, slide_enabled: slideEnabled } });
   const setClips = (clips: StreamClipRange[]) => onPlanChange({ ...plan, clips });
   const setCaptionsEnabled = (enabled: boolean) =>
     onPlanChange({ ...plan, captions: { enabled, language: plan.captions?.language ?? 'auto' } });
@@ -661,6 +682,57 @@ function StreamEditor({
               {!STREAMER_NICK_RE.test(plan.streamer_banner?.nick?.trim() ?? '') ? (
                 <p className="text-xs text-destructive">Usa solo letras, números o guiones bajos (máximo 25).</p>
               ) : null}
+              <div className="mt-2 flex max-w-xl flex-col gap-3 border-l-2 border-stream/35 pl-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor="streamer-banner-position">Posición vertical del banner</Label>
+                  <span className="font-[family-name:var(--font-mono)] text-[11px] text-stream">
+                    {Math.round(bannerPosition * 100)}%
+                  </span>
+                </div>
+                <input
+                  id="streamer-banner-position"
+                  type="range"
+                  min={STREAMER_BANNER_MIN_POSITION}
+                  max={STREAMER_BANNER_MAX_POSITION}
+                  step="0.001"
+                  value={bannerPosition}
+                  disabled={busy}
+                  aria-label="Posición vertical del banner"
+                  aria-valuetext={`${Math.round(bannerPosition * 100)}% desde arriba`}
+                  onChange={(event) => setStreamerPosition(Number(event.target.value))}
+                  className="w-full accent-[#9146ff] disabled:opacity-50"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant={plan.streamer_banner?.slide_enabled ? 'default' : 'outline'}
+                    size="sm"
+                    disabled={busy}
+                    aria-pressed={plan.streamer_banner?.slide_enabled ?? false}
+                    onClick={() => setStreamerSlide(!(plan.streamer_banner?.slide_enabled ?? false))}
+                    className="rounded-none"
+                  >
+                    {plan.streamer_banner?.slide_enabled
+                      ? 'Deslizamiento: activado'
+                      : 'Deslizamiento: desactivado'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy || plan.streamer_banner?.position_y === undefined}
+                    onClick={resetStreamerPosition}
+                    className="rounded-none"
+                  >
+                    Restablecer posición
+                  </Button>
+                </div>
+                {plan.streamer_banner?.slide_enabled ? (
+                  <p className="text-xs text-muted-foreground">
+                    La vista previa repite una entrada desde la izquierda, una pausa y la salida hacia la izquierda.
+                  </p>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
@@ -729,7 +801,7 @@ function StreamEditor({
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
             {stage === 'rendering' ? 'RENDERIZANDO…' : 'CREAR SHORTS'}
           </button>
-          <Button variant="ghost" onClick={onStartOver} disabled={stage === 'rendering'}>
+          <Button variant="ghost" onClick={onStartOver} disabled={busy}>
             Empezar de nuevo
           </Button>
         </div>
@@ -749,6 +821,10 @@ function StreamEditor({
           faceCrop={plan.face_crop}
           gameplayCrop={plan.gameplay_crop}
           streamerNick={plan.streamer_banner?.nick?.trim()}
+          streamerPositionY={plan.streamer_banner?.position_y}
+          streamerSlideEnabled={plan.streamer_banner?.slide_enabled}
+          onStreamerPositionChange={setStreamerPosition}
+          disabled={busy}
         />
         <p className="text-[11.5px] leading-relaxed text-muted-foreground/80">
           La preview replica el encuadre vertical del render. El recorte puede dejar fuera parte del HUD lateral.

@@ -1,4 +1,4 @@
-import type { NormalizedRect } from './api/streams';
+import type { NormalizedRect, StreamVariant } from './api/streams';
 
 export type FrameSize = { width: number; height: number };
 
@@ -8,6 +8,29 @@ export type CropCoverGeometry = {
   leftPercent: number;
   topPercent: number;
 };
+
+export const STREAMER_BANNER_MIN_POSITION = 0.025;
+export const STREAMER_BANNER_MAX_POSITION = 0.975;
+
+const STREAMER_BANNER_DEFAULTS: Record<StreamVariant, number> = {
+  'streamer-vertical-stack-40-60': 0.4,
+  'streamer-vertical-stack': 520 / 1920,
+  'streamer-fullframe-nocam': 0.2,
+};
+
+export function clampStreamerBannerPosition(position: number): number {
+  return Math.min(STREAMER_BANNER_MAX_POSITION, Math.max(STREAMER_BANNER_MIN_POSITION, position));
+}
+
+export function defaultStreamerBannerPosition(variant: StreamVariant): number {
+  return STREAMER_BANNER_DEFAULTS[variant];
+}
+
+export function resolveStreamerBannerPosition(variant: StreamVariant, position?: number): number {
+  return position === undefined
+    ? defaultStreamerBannerPosition(variant)
+    : clampStreamerBannerPosition(position);
+}
 
 /**
  * Mirrors FFmpeg's crop -> scale(force_original_aspect_ratio=increase) ->

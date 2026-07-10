@@ -123,6 +123,44 @@ func TestStreamRenderE2E(t *testing.T) {
 		}
 	})
 
+	t.Run("moved banner slides in and out", func(t *testing.T) {
+		if streamclips.FindBannerFont() == "" {
+			t.Skip("supported bold system font not found, skipping real banner e2e")
+		}
+		id := uploadStreamSource(t, client, srv.URL, sourcePath)
+		positionY := 0.7
+		plan := streamclips.EditPlan{
+			Variant:      streamclips.VariantStreamer4060,
+			FaceCrop:     streamclips.CropRect{X: 0, Y: 0, Width: 0.25, Height: 0.25},
+			GameplayCrop: streamclips.CropRect{X: 0.25, Y: 0.25, Width: 0.75, Height: 0.75},
+			Clips:        []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0.5, EndSeconds: 3.5}},
+			StreamerBanner: streamclips.StreamerBannerPlan{
+				Nick:         "zacketizorcs2",
+				PositionY:    &positionY,
+				SlideEnabled: true,
+			},
+		}
+		putStreamEditPlan(t, client, srv.URL, id, plan)
+
+		clipID := startAndAwaitStreamRender(t, client, srv.URL, id, streamclips.VariantStreamer4060)
+		outPath := downloadStreamVideo(t, client, srv.URL, id, streamclips.VariantStreamer4060, clipID)
+
+		const bannerCenterY = 1344
+		earlyPixel := readPixel(t, extractFramePNG(t, ffmpegPath, outPath, 0.1), 540, bannerCenterY)
+		middlePixel := readPixel(t, extractFramePNG(t, ffmpegPath, outPath, 1.5), 540, bannerCenterY)
+		latePixel := readPixel(t, extractFramePNG(t, ffmpegPath, outPath, 2.9), 540, bannerCenterY)
+		t.Logf("animated banner pixels early=%+v middle=%+v late=%+v", earlyPixel, middlePixel, latePixel)
+		if !isPredominantlyBlue(earlyPixel) {
+			t.Fatalf("early banner-center pixel = %+v, want blue background during slide-in", earlyPixel)
+		}
+		if !isPredominantlyPurple(middlePixel) {
+			t.Fatalf("middle banner-center pixel = %+v, want purple banner during hold", middlePixel)
+		}
+		if !isPredominantlyBlue(latePixel) {
+			t.Fatalf("late banner-center pixel = %+v, want blue background during slide-out", latePixel)
+		}
+	})
+
 	t.Run("unknown variant returns 400 listing valid variants", func(t *testing.T) {
 		id := uploadStreamSource(t, client, srv.URL, sourcePath)
 
@@ -494,4 +532,8 @@ func isPredominantlyRed(c color.RGBA) bool {
 
 func isPredominantlyBlue(c color.RGBA) bool {
 	return c.B > 150 && c.R < 100 && c.G < 100
+}
+
+func isPredominantlyPurple(c color.RGBA) bool {
+	return c.R > 100 && c.G < 120 && c.B > 150
 }

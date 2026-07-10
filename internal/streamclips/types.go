@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -101,7 +102,9 @@ type EditPlan struct {
 // StreamerBannerPlan adds an optional branded separator to the rendered
 // vertical clip. An empty Nick keeps the render visually unchanged.
 type StreamerBannerPlan struct {
-	Nick string `json:"nick,omitempty"`
+	Nick         string   `json:"nick,omitempty"`
+	PositionY    *float64 `json:"position_y,omitempty"`
+	SlideEnabled bool     `json:"slide_enabled,omitempty"`
 }
 
 // CaptionsPlan opts a stream render into a burned-in karaoke caption pass.
@@ -265,6 +268,11 @@ func (p EditPlan) Validate() error {
 	}
 	if p.StreamerBanner.Nick != "" && !streamerNickPattern.MatchString(p.StreamerBanner.Nick) {
 		return fmt.Errorf("streamer banner nick must use 1-25 letters, numbers, or underscores")
+	}
+	if positionY := p.StreamerBanner.PositionY; positionY != nil {
+		if math.IsNaN(*positionY) || math.IsInf(*positionY, 0) || *positionY < 0.025 || *positionY > 0.975 {
+			return fmt.Errorf("streamer banner position_y must be finite and between 0.025 and 0.975")
+		}
 	}
 	return nil
 }
