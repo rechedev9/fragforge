@@ -396,11 +396,45 @@ test.describe('stream clips — edits, music, and downloads', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          songs: [{ id: 'concrete-teeth', title: 'Concrete Teeth', genre: 'phonk', audioUrl: '/api/songs/concrete-teeth/audio' }],
+          songs: [
+            { id: 'concrete-teeth', title: 'Concrete Teeth', genre: 'phonk', audioUrl: '/api/songs/concrete-teeth/audio' },
+            { id: 'night-shift', title: 'Night Shift', genre: 'trap', audioUrl: '/api/songs/night-shift/audio' },
+          ],
         }),
       }),
     );
     return { putBodies: () => putBodies };
+  }
+
+  async function mockMediaPlayback(page: import('@playwright/test').Page): Promise<void> {
+    await page.addInitScript(() => {
+      const currentTimes = new WeakMap<HTMLMediaElement, number>();
+      Object.defineProperties(HTMLMediaElement.prototype, {
+        currentTime: {
+          configurable: true,
+          get(this: HTMLMediaElement) {
+            return currentTimes.get(this) ?? 0;
+          },
+          set(this: HTMLMediaElement, value: number) {
+            currentTimes.set(this, value);
+          },
+        },
+        play: {
+          configurable: true,
+          value(this: HTMLMediaElement): Promise<void> {
+            this.dataset.playCalls = String(Number(this.dataset.playCalls ?? '0') + 1);
+            this.currentTime = 7;
+            return Promise.resolve();
+          },
+        },
+        pause: {
+          configurable: true,
+          value(this: HTMLMediaElement): void {
+            this.dataset.pauseCalls = String(Number(this.dataset.pauseCalls ?? '0') + 1);
+          },
+        },
+      });
+    });
   }
 
   test('editing after a render marks the Shorts stale and disables Download until re-render', async ({ page }) => {
@@ -437,6 +471,9 @@ test.describe('stream clips — edits, music, and downloads', () => {
     await page.getByRole('button', { name: 'TRAER CLIP' }).click();
     await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible({ timeout: 15_000 });
 
+    const streamerBanner = page.getByLabel('Banner del streamer (opcional)');
+    await expect(streamerBanner).toBeVisible();
+    await streamerBanner.fill('Zack_25');
     await page.getByLabel('Música de fondo').click();
     const songOption = page.getByRole('option', { name: 'Concrete Teeth · phonk' });
     await expect(songOption).toBeVisible();
@@ -450,10 +487,70 @@ test.describe('stream clips — edits, music, and downloads', () => {
     await page.getByRole('button', { name: 'CREAR SHORTS' }).click();
     await expect(page.getByRole('link', { name: 'Descargar Clutch' })).toBeVisible({ timeout: 15_000 });
 
-    const saved = flow.putBodies().at(-1) as { music?: { key?: string; volume?: number }; effects?: { grade?: boolean } };
+    const saved = flow.putBodies().at(-1) as {
+      streamer_banner?: { nick?: string };
+      music?: { key?: string; volume?: number };
+      effects?: { grade?: boolean };
+    };
+    expect(saved.streamer_banner?.nick).toBe('Zack_25');
     expect(saved.music?.key).toBe('concrete-teeth');
     expect(saved.music?.volume).toBe(0.4);
     expect(saved.effects?.grade).toBe(true);
+  });
+
+  test('previews the selected music and resets playback when the selection changes or clears', async ({ page }) => {
+    await mockMediaPlayback(page);
+    await mockRenderFlow(page);
+
+    await page.goto('/streams');
+    await page.locator(URL_INPUT).fill(CLIP_URL);
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
+    await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible({ timeout: 15_000 });
+
+    await page.getByLabel('Música de fondo').click();
+    await page.getByRole('option', { name: 'Concrete Teeth · phonk' }).click();
+
+    const preview = page.locator('audio[data-music-preview]');
+    await expect(preview).toHaveCount(1);
+    const playConcrete = page.getByRole('button', { name: 'Escuchar Concrete Teeth' });
+    await expect(playConcrete).toBeEnabled();
+    await playConcrete.click();
+    await expect(page.getByRole('button', { name: 'Pausar Concrete Teeth' })).toBeVisible();
+    await expect.poll(() => preview.evaluate((element) => element.dataset.playCalls)).toBe('1');
+
+    const pausesBeforeChange = await preview.evaluate((element) => Number(element.dataset.pauseCalls ?? '0'));
+    await page.getByLabel('Música de fondo').click();
+    await page.getByRole('option', { name: 'Night Shift · trap' }).click();
+    await expect(page.getByRole('button', { name: 'Escuchar Night Shift' })).toBeEnabled();
+    await expect
+      .poll(() =>
+        preview.evaluate((element) => {
+          if (!(element instanceof HTMLAudioElement)) throw new Error('expected an audio element');
+          return {
+            currentTime: element.currentTime,
+            pauseCalls: Number(element.dataset.pauseCalls ?? '0'),
+          };
+        }),
+      )
+      .toEqual({ currentTime: 0, pauseCalls: pausesBeforeChange + 1 });
+
+    await page.getByRole('button', { name: 'Escuchar Night Shift' }).click();
+    await expect(page.getByRole('button', { name: 'Pausar Night Shift' })).toBeVisible();
+    const pausesBeforeClear = await preview.evaluate((element) => Number(element.dataset.pauseCalls ?? '0'));
+    await page.getByLabel('Música de fondo').click();
+    await page.getByRole('option', { name: 'Ninguna' }).click();
+    await expect(page.getByRole('button', { name: 'Escuchar música seleccionada' })).toBeDisabled();
+    await expect
+      .poll(() =>
+        preview.evaluate((element) => {
+          if (!(element instanceof HTMLAudioElement)) throw new Error('expected an audio element');
+          return {
+            currentTime: element.currentTime,
+            pauseCalls: Number(element.dataset.pauseCalls ?? '0'),
+          };
+        }),
+      )
+      .toEqual({ currentTime: 0, pauseCalls: pausesBeforeClear + 1 });
   });
 });
 

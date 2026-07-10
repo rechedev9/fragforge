@@ -909,6 +909,9 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 		}
 		return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
 	}
+	sort.SliceStable(cues, func(i, j int) bool {
+		return cues[i].StartSeconds < cues[j].StartSeconds
+	})
 
 	assContent, err := captions.BuildASS(cues, captions.DefaultStyle())
 	if err != nil {

@@ -232,7 +232,10 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	})
 	w.runner = runner
 	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
-		return []captions.WordCue{{Word: "gg", StartSeconds: 0, EndSeconds: 0.5}}, nil
+		return []captions.WordCue{
+			{Word: "gg", StartSeconds: 0.75, EndSeconds: 1},
+			{Word: "nice", StartSeconds: 0, EndSeconds: 0.5},
+		}, nil
 	}
 
 	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
@@ -265,8 +268,12 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := store.files[captionKey]; !ok {
+	ass, ok := store.files[captionKey]
+	if !ok {
 		t.Fatal("storage missing .ass caption artifact")
+	}
+	if !strings.Contains(string(ass), `Dialogue: 0,0:00:00.00,0:00:01.00,Karaoke,,0,0,0,,{\k50}nice {\k25}gg`) {
+		t.Fatalf("caption artifact does not order cues chronologically: %s", ass)
 	}
 
 	resultKey, err := streamclips.RenderResultKey(id, streamclips.VariantStreamer4060)

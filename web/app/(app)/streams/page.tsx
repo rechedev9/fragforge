@@ -9,6 +9,8 @@ import {
   Link2,
   Loader2,
   MonitorPlay,
+  Pause,
+  Play,
   Plus,
   ShieldCheck,
   Sparkles,
@@ -986,6 +988,10 @@ function MusicAndEffectsCard({
   onGrade: (grade: boolean) => void;
 }) {
   const [songs, setSongs] = useState<Song[] | null>(null);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const previewRequest = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -1006,6 +1012,58 @@ function MusicAndEffectsCard({
   const volume = plan.music?.volume ?? 0.25;
   const grade = plan.effects?.grade ?? false;
   const selectedSong = songs?.find((song) => song.id === musicKey);
+
+  const stopAndResetPreview = useCallback(() => {
+    previewRequest.current += 1;
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    setPreviewPlaying(false);
+  }, []);
+
+  useEffect(() => {
+    stopAndResetPreview();
+    setPreviewError(null);
+  }, [musicKey, busy, stopAndResetPreview]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    return () => {
+      previewRequest.current += 1;
+      if (audio) {
+        audio.pause();
+        audio.currentTime = 0;
+      }
+    };
+  }, []);
+
+  const togglePreview = async (): Promise<void> => {
+    const audio = audioRef.current;
+    if (!audio || !selectedSong?.previewUrl || busy || songs === null) return;
+
+    if (previewPlaying) {
+      previewRequest.current += 1;
+      audio.pause();
+      setPreviewPlaying(false);
+      return;
+    }
+
+    const request = ++previewRequest.current;
+    setPreviewError(null);
+    try {
+      await audio.play();
+      if (previewRequest.current === request) setPreviewPlaying(true);
+    } catch {
+      if (previewRequest.current !== request) return;
+      audio.pause();
+      audio.currentTime = 0;
+      setPreviewPlaying(false);
+      setPreviewError('No se pudo reproducir la vista previa de esta canción.');
+    }
+  };
+
   let selectedMusicLabel = 'Ninguna';
   if (songs === null) {
     selectedMusicLabel = musicKey ? 'Cargando pista…' : 'Cargando pistas…';
@@ -1023,24 +1081,52 @@ function MusicAndEffectsCard({
             <Label htmlFor="stream-music" className="text-xs text-muted-foreground">
               Música de fondo
             </Label>
-            <Select
-              value={musicKey || NO_MUSIC_VALUE}
-              disabled={busy || songs === null}
-              onValueChange={(value) => onMusicKey(value === NO_MUSIC_VALUE ? '' : value)}
-            >
-              <SelectTrigger id="stream-music" className="w-72 max-w-[80vw] rounded-none">
-                <SelectValue>{selectedMusicLabel}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_MUSIC_VALUE}>Ninguna</SelectItem>
-                {(songs ?? []).map((song) => (
-                  <SelectItem key={song.id} value={song.id}>
-                    {song.title}
-                    {song.genre ? ` · ${song.genre}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              <Select
+                value={musicKey || NO_MUSIC_VALUE}
+                disabled={busy || songs === null}
+                onValueChange={(value) => onMusicKey(value === NO_MUSIC_VALUE ? '' : value)}
+              >
+                <SelectTrigger id="stream-music" className="w-72 max-w-[calc(80vw-2.5rem)] rounded-none">
+                  <SelectValue>{selectedMusicLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_MUSIC_VALUE}>Ninguna</SelectItem>
+                  {(songs ?? []).map((song) => (
+                    <SelectItem key={song.id} value={song.id}>
+                      {song.title}
+                      {song.genre ? ` · ${song.genre}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={busy || songs === null || !selectedSong?.previewUrl}
+                onClick={() => void togglePreview()}
+                aria-label={`${previewPlaying ? 'Pausar' : 'Escuchar'} ${selectedSong?.title ?? 'música seleccionada'}`}
+                className="shrink-0 rounded-none"
+              >
+                {previewPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
+              </Button>
+            </div>
+            <audio
+              ref={audioRef}
+              src={selectedSong?.previewUrl}
+              preload="none"
+              data-music-preview
+              className="hidden"
+              onPlay={() => setPreviewPlaying(true)}
+              onPause={() => setPreviewPlaying(false)}
+              onEnded={stopAndResetPreview}
+              onError={() => {
+                stopAndResetPreview();
+                setPreviewError('No se pudo reproducir la vista previa de esta canción.');
+              }}
+            />
+            {previewError ? <p role="alert" className="text-xs text-destructive">{previewError}</p> : null}
           </div>
 
           {musicKey ? (
