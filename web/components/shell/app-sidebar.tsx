@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Aperture,
   Clapperboard,
   Compass,
   Crosshair,
@@ -21,7 +20,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar';
-import { Wordmark } from '@/components/brand/wordmark';
+import { BrandMark, Wordmark } from '@/components/brand/wordmark';
 import { CaptureReadiness } from '@/components/shell/capture-readiness';
 import { cn } from '@/lib/utils';
 
@@ -49,10 +48,9 @@ function isActiveHref(pathname: string, href: string): boolean {
 }
 
 /**
- * The persistent left sidebar shell, NEON HUD style: wordmark + katakana up
- * top, the numbered 01-05 nav (active item gets the inset accent bar; the
- * active destination always uses cyan), and a footer with the
- * local CAPTURA readiness card.
+ * The persistent left sidebar shell: brand lockup up top, the numbered 01-05
+ * nav (active item gets the inset accent bar; the active destination always
+ * uses cyan), and a footer with the local CAPTURA readiness card.
  */
 export function AppSidebar() {
   const pathname = usePathname();
@@ -66,7 +64,7 @@ export function AppSidebar() {
           className="inline-flex min-h-10 items-center group-data-[collapsible=icon]:justify-center"
         >
           <Wordmark className="group-data-[collapsible=icon]:hidden" />
-          <Aperture className="hidden size-5 text-primary group-data-[collapsible=icon]:block" aria-hidden />
+          <BrandMark className="hidden size-7 group-data-[collapsible=icon]:block" />
         </Link>
       </SidebarHeader>
 
