@@ -1,0 +1,50 @@
+import type { NormalizedRect } from './api/streams';
+
+export type FrameSize = { width: number; height: number };
+
+export type CropCoverGeometry = {
+  widthPercent: number;
+  heightPercent: number;
+  leftPercent: number;
+  topPercent: number;
+};
+
+/**
+ * Mirrors FFmpeg's crop -> scale(force_original_aspect_ratio=increase) ->
+ * centered crop chain for one output band.
+ */
+export function calculateCropCoverGeometry(
+  rect: NormalizedRect,
+  source: FrameSize,
+  output: FrameSize,
+): CropCoverGeometry | null {
+  if (
+    source.width <= 0 ||
+    source.height <= 0 ||
+    output.width <= 0 ||
+    output.height <= 0 ||
+    rect.width <= 0 ||
+    rect.height <= 0
+  ) {
+    return null;
+  }
+
+  const cropWidth = source.width * rect.width;
+  const cropHeight = source.height * rect.height;
+  const scale = Math.max(output.width / cropWidth, output.height / cropHeight);
+  const scaledCropWidth = cropWidth * scale;
+  const scaledCropHeight = cropHeight * scale;
+
+  return {
+    widthPercent: (source.width * scale * 100) / output.width,
+    heightPercent: (source.height * scale * 100) / output.height,
+    leftPercent: (((output.width - scaledCropWidth) / 2 - source.width * rect.x * scale) * 100) / output.width,
+    topPercent: (((output.height - scaledCropHeight) / 2 - source.height * rect.y * scale) * 100) / output.height,
+  };
+}
+
+/** Selects the same stable, representative frame for every editor video. */
+export function representativeFrameTime(duration: number): number {
+  if (!Number.isFinite(duration) || duration <= 0) return 0;
+  return Math.max(0, Math.min(duration / 2, duration - 0.1));
+}

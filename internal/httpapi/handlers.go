@@ -602,11 +602,13 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 	// empty or absent body keeps the recorder's default HUD.
 	var hudMode string
 	var segmentIDs []string
+	var portraitSafeKillfeed bool
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 		var req struct {
-			Preset     string   `json:"preset"`
-			SegmentIDs []string `json:"segment_ids"`
+			Preset     string                 `json:"preset"`
+			SegmentIDs []string               `json:"segment_ids"`
+			Edit       renderplan.EditRequest `json:"edit"`
 		}
 		switch err := json.NewDecoder(r.Body).Decode(&req); {
 		case err == nil, errors.Is(err, io.EOF):
@@ -617,6 +619,12 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				hudMode = preset.HUDMode
+				edit := renderplan.NormalizeEditRequest(req.Edit)
+				if err := edit.Validate(); err != nil {
+					writeError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				portraitSafeKillfeed = preset.HUDMode == string(recording.HUDModeDeathnotices) && edit.Format == renderplan.FormatShort9x16
 			}
 			if !validateSegmentSelection(w, j, req.SegmentIDs) {
 				return
@@ -627,7 +635,7 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	task, err := tasks.NewRecordDemoTask(j.ID, hudMode, segmentIDs, false)
+	task, err := tasks.NewRecordDemoTask(j.ID, hudMode, segmentIDs, portraitSafeKillfeed)
 	if err != nil {
 		internalError(w, "build record task", err)
 		return

@@ -87,6 +87,125 @@ test.describe('stream clips — url submit to editor', () => {
     await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible();
   });
 
+  test('preview bands match FFmpeg crop geometry and share the picker midpoint', async ({ page }) => {
+    await mockCommonRoutes(page);
+    await page.addInitScript(() => {
+      const currentTimes = new WeakMap<HTMLMediaElement, number>();
+      Object.defineProperties(HTMLMediaElement.prototype, {
+        readyState: { configurable: true, get: () => 1 },
+        duration: { configurable: true, get: () => 42 },
+        currentTime: {
+          configurable: true,
+          get(this: HTMLMediaElement) {
+            return currentTimes.get(this) ?? 0;
+          },
+          set(this: HTMLMediaElement, value: number) {
+            currentTimes.set(this, value);
+          },
+        },
+      });
+      Object.defineProperties(HTMLVideoElement.prototype, {
+        videoWidth: { configurable: true, get: () => 1920 },
+        videoHeight: { configurable: true, get: () => 1080 },
+      });
+    });
+    await page.route('**/api/streams', (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify(READY_JOB) });
+    });
+    await page.route(`**/api/streams/${JOB_ID}`, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(READY_JOB) }),
+    );
+
+    await page.goto('/streams');
+    await page.locator(URL_INPUT).fill(CLIP_URL);
+    await page.getByRole('button', { name: 'TRAER CLIP' }).click();
+    await expect(page.getByText('LAYOUT', { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    const frames = page.locator('video[data-stream-frame]');
+    await expect(frames).toHaveCount(3);
+    // Cached metadata is already available and no loadedmetadata event fires:
+    // the picker ref must still seek instead of remaining on the first frame.
+    await expect
+      .poll(() =>
+        page.locator('video[data-stream-frame="picker"]').evaluate((element) => {
+          if (!(element instanceof HTMLVideoElement)) throw new Error('expected a video element');
+          return element.currentTime;
+        }),
+      )
+      .toBe(21);
+
+    await frames.evaluateAll((videos) => {
+      for (const element of videos) {
+        if (!(element instanceof HTMLVideoElement)) throw new Error('expected a video element');
+        let currentTime = 0;
+        Object.defineProperties(element, {
+          duration: { configurable: true, value: 42 },
+          videoWidth: { configurable: true, value: 1920 },
+          videoHeight: { configurable: true, value: 1080 },
+          currentTime: {
+            configurable: true,
+            get: () => currentTime,
+            set: (value: number) => {
+              currentTime = value;
+            },
+          },
+        });
+        element.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
+      }
+    });
+
+    await expect
+      .poll(() =>
+        frames.evaluateAll((videos) =>
+          videos.map((element) => {
+            if (!(element instanceof HTMLVideoElement)) throw new Error('expected a video element');
+            return { frame: element.dataset.streamFrame, currentTime: element.currentTime };
+          }),
+        ),
+      )
+      .toEqual([
+        { frame: 'picker', currentTime: 21 },
+        { frame: 'preview-facecam', currentTime: 21 },
+        { frame: 'preview-gameplay', currentTime: 21 },
+      ]);
+
+    const gameplayGeometry = await page.locator('video[data-stream-frame="preview-gameplay"]').evaluate((element) => {
+      if (!(element instanceof HTMLVideoElement)) throw new Error('expected a video element');
+      return {
+        width: Number.parseFloat(element.style.width),
+        height: Number.parseFloat(element.style.height),
+        left: Number.parseFloat(element.style.left),
+        top: Number.parseFloat(element.style.top),
+        objectFit: element.style.objectFit,
+      };
+    });
+    expect(gameplayGeometry.width).toBeCloseTo(189.629629, 2);
+    expect(gameplayGeometry.height).toBeCloseTo(100, 2);
+    expect(gameplayGeometry.left).toBeCloseTo(-44.814814, 2);
+    expect(gameplayGeometry.top).toBeCloseTo(0, 2);
+    expect(gameplayGeometry.objectFit).toBe('');
+
+    await expect(page.getByText('El recorte puede dejar fuera parte del HUD lateral.')).toBeVisible();
+    await page.getByRole('button', { name: /Stack Cam \/ juego \/ chat/i }).click();
+
+    const legacyBandHeights = await page.locator('[data-preview-band]').evaluateAll((bands) =>
+      bands.map((band) => Number.parseFloat(band.parentElement?.style.height ?? '0')),
+    );
+    expect(legacyBandHeights[0]).toBeCloseTo(520 * 100 / 1920, 4);
+    expect(legacyBandHeights[1]).toBeCloseTo(1400 * 100 / 1920, 4);
+
+    const legacyGameplay = await page.locator('video[data-stream-frame="preview-gameplay"]').evaluate((element) => {
+      if (!(element instanceof HTMLVideoElement)) throw new Error('expected a video element');
+      return {
+        width: Number.parseFloat(element.style.width),
+        height: Number.parseFloat(element.style.height),
+      };
+    });
+    const displayedAspect = (legacyGameplay.width * 1080) / (legacyGameplay.height * 1400);
+    expect(displayedAspect).toBeCloseTo(1920 / 1080, 4);
+  });
+
   test('rejects an obviously non-video URL client-side without calling the API', async ({ page }) => {
     // Regression for the reported bug: a ShareX .png upload URL pasted into the
     // clip field used to reach yt-dlp and fail with a raw SSL traceback. It must
@@ -318,7 +437,14 @@ test.describe('stream clips — edits, music, and downloads', () => {
     await page.getByRole('button', { name: 'TRAER CLIP' }).click();
     await expect(page.getByRole('button', { name: 'CREAR SHORTS' })).toBeVisible({ timeout: 15_000 });
 
-    await page.getByLabel('Música de fondo').selectOption('concrete-teeth');
+    await page.getByLabel('Música de fondo').click();
+    const songOption = page.getByRole('option', { name: 'Concrete Teeth · phonk' });
+    await expect(songOption).toBeVisible();
+    const songMenu = page.locator('[data-slot="select-content"]');
+    await expect(songMenu).toHaveClass(/bg-popover/);
+    await expect(songMenu).toHaveClass(/text-popover-foreground/);
+    await songOption.click();
+    await expect(page.getByLabel('Música de fondo')).toContainText('Concrete Teeth · phonk');
     await page.getByRole('radio', { name: 'Alto' }).click();
     await page.getByRole('button', { name: 'Gradación viral: desactivada' }).click();
     await page.getByRole('button', { name: 'CREAR SHORTS' }).click();

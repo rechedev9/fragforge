@@ -3,6 +3,7 @@ package workers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -391,7 +392,17 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		return fmt.Errorf("persist capture selection: %w", err)
 	}
 
-	ready, keys, err := recordingOutputsReady(w.storage, j.ID, requested)
+	cfg := w.cfg.withDefaults()
+	// A per-job preset HUD (e.g. "Clean POV") overrides the worker default.
+	if hudMode != "" {
+		cfg.HUDMode = hudMode
+	}
+	effectivePortraitSafeKillfeed := portraitSafeKillfeed && cfg.HUDMode == string(recording.HUDModeDeathnotices)
+	expectedStream, err := normalizedRecordingStream(recordPlan, cfg.HUDMode, effectivePortraitSafeKillfeed)
+	if err != nil {
+		return fmt.Errorf("build recording profile: %w", err)
+	}
+	ready, keys, err := recordingOutputsReady(w.storage, j.ID, requested, expectedStream)
 	if err != nil {
 		return err
 	}
@@ -400,13 +411,8 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		return nil
 	}
 
-	cfg := w.cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		return err
-	}
-	// A per-job preset HUD (e.g. "Clean POV") overrides the worker default.
-	if hudMode != "" {
-		cfg.HUDMode = hudMode
 	}
 
 	workDir, cleanup, err := prepareStageDir(cfg.WorkDir, j.ID, "record")
@@ -469,6 +475,16 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		}
 		return fmt.Errorf("read recording result: %w", err)
 	}
+	var resultErr error
+	if runErr == nil {
+		resultErr = recording.ValidateRunResult(result)
+		if resultErr == nil {
+			result.CaptureRevision = uuid.NewString()
+			if err := writeJSONFile(resultPath, result); err != nil {
+				return fmt.Errorf("write recording revision: %w", err)
+			}
+		}
+	}
 	keys, err = uploadRecordingOutputs(w.storage, j.ID, outDir, resultPath, result)
 	if err != nil {
 		return err
@@ -484,8 +500,11 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 	// survive either way.
 	if hasPrev {
 		durable := prev
-		if runErr == nil && result.Error == "" {
-			durable = mergeRecordingResults(prev, result, j.KillPlan)
+		if runErr == nil && resultErr == nil {
+			durable = result
+			if recordingProfilesCompatible(prev, result) {
+				durable = mergeRecordingResults(prev, result, j.KillPlan)
+			}
 		}
 		if err := putRecordingResult(w.storage, j.ID, durable); err != nil {
 			return fmt.Errorf("persist recording result: %w", err)
@@ -495,8 +514,8 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 	if runErr != nil {
 		return runErr
 	}
-	if err := recording.ValidateRunResult(result); err != nil {
-		return err
+	if resultErr != nil {
+		return resultErr
 	}
 	return nil
 }
@@ -1034,11 +1053,24 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 	if err != nil {
 		return err
 	}
+	if j.KillPlan == nil {
+		return fmt.Errorf("job %s has no kill plan", j.ID)
+	}
+	recordingResult, err := readStoredRecordingResult(w.storage, j.ID)
+	if err != nil {
+		return err
+	}
+	cfg := w.cfg.withDefaults()
+	musicPath := resolveMusicFile(cfg.MusicDir, musicKey)
+	inputFingerprint, err := renderInputFingerprint(recordingResult, j.KillPlan, variant, musicKey, musicPath, edit)
+	if err != nil {
+		return fmt.Errorf("fingerprint render inputs: %w", err)
+	}
 	previousState, _, err := w.readRenderVariantState(j.ID, variant)
 	if err != nil {
 		return fmt.Errorf("read render state: %w", err)
 	}
-	ready, keys, err := renderVariantOutputsReady(w.storage, j.ID, variant)
+	ready, keys, err := renderVariantOutputsReady(w.storage, j.ID, variant, inputFingerprint)
 	if err != nil {
 		return err
 	}
@@ -1058,11 +1090,6 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 		logWorkerSkip(j.ID, tasks.TypeRenderVariant, keys)
 		return nil
 	}
-	if j.KillPlan == nil {
-		return fmt.Errorf("job %s has no kill plan", j.ID)
-	}
-
-	cfg := w.cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		return err
 	}
@@ -1107,10 +1134,6 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 	}
 	defer cleanup()
 
-	recordingResult, err := readStoredRecordingResult(w.storage, j.ID)
-	if err != nil {
-		return err
-	}
 	localRecordingResult := filepath.Join(workDir, "recording-result.json")
 	if err := localizeSegmentClips(w.storage, j.ID, workDir, &recordingResult); err != nil {
 		return err
@@ -1158,7 +1181,7 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 		args = append(args, "--ffprobe", cfg.FFprobePath)
 	}
 	if musicKey != "" {
-		if musicPath := resolveMusicFile(cfg.MusicDir, musicKey); musicPath != "" {
+		if musicPath != "" {
 			args = append(args, "--music", musicPath)
 		} else {
 			// Requested music is unavailable; render without it rather than fail.
@@ -1177,13 +1200,14 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 		}
 		return fmt.Errorf("read render result: %w", err)
 	}
+	result.InputFingerprint = inputFingerprint
 	if cfg.FFprobePath != "" {
 		if err := probeRenderResult(runCtx, w.runner, cfg.FFprobePath, &result); err != nil {
 			result.Warnings = append(result.Warnings, "ffprobe quality metadata: "+err.Error())
 		}
-		if err := writeJSONFile(resultPath, result); err != nil {
-			return fmt.Errorf("write probed render result: %w", err)
-		}
+	}
+	if err := writeJSONFile(resultPath, result); err != nil {
+		return fmt.Errorf("write fingerprinted render result: %w", err)
 	}
 	keys, err = uploadRenderVariantOutputs(w.storage, j.ID, variant, outDir, publishDir, resultPath, result)
 	if err != nil {
@@ -1594,6 +1618,25 @@ func tryDecodeStoredRecordingResult(store storage.Storage, id uuid.UUID) (record
 	return result, true, nil
 }
 
+// normalizedRecordingStream resolves the exact stream profile the recorder CLI
+// will use for this task. NewPlanFromKillPlan owns default normalization (FPS,
+// dimensions, CRF, deathnotice safe zone and lifetime), so worker idempotency
+// changes automatically when any output-affecting recorder default changes.
+func normalizedRecordingStream(plan *killplan.Plan, hudMode string, portraitSafeKillfeed bool) (recording.StreamConfig, error) {
+	stream := recording.DefaultStreamConfig()
+	stream.HUDMode = recording.HUDMode(hudMode)
+	stream.PortraitSafeKillfeed = portraitSafeKillfeed
+	normalized, err := recording.NewPlanFromKillPlan(*plan, "profile.dem", "profile", stream)
+	if err != nil {
+		return recording.StreamConfig{}, err
+	}
+	return normalized.Stream, nil
+}
+
+func recordingProfilesCompatible(a, b recording.RecordingResult) bool {
+	return a.Plan.Stream == b.Plan.Stream
+}
+
 // mergeRecordingResults unions a freshly recorded result over a previously
 // stored one so the job-level recording result accumulates every segment any
 // reel has recorded. The new run wins for segments it covers; segments only in
@@ -1646,7 +1689,7 @@ func putRecordingResult(store storage.Storage, id uuid.UUID, result recording.Re
 // effective segment ids (whole-demo mode passes every plan segment), so a reel
 // scoped to one clip is never wrongly skipped against the job-level result.json,
 // which holds only the last run's segments until the accumulate step unions it.
-func recordingOutputsReady(store storage.Storage, id uuid.UUID, requested []string) (bool, []string, error) {
+func recordingOutputsReady(store storage.Storage, id uuid.UUID, requested []string, expectedStream recording.StreamConfig) (bool, []string, error) {
 	if len(requested) == 0 {
 		return false, nil, nil
 	}
@@ -1658,6 +1701,9 @@ func recordingOutputsReady(store storage.Storage, id uuid.UUID, requested []stri
 	result, err := decodeStoredRecordingResult(store, id)
 	if err != nil || result.Error != "" {
 		return false, nil, err
+	}
+	if result.Plan.Stream != expectedStream {
+		return false, nil, nil
 	}
 
 	recorded := make(map[string]bool)
@@ -1719,7 +1765,56 @@ func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []strin
 	return true, keys, nil
 }
 
-func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant string) (bool, []string, error) {
+type renderMusicInput struct {
+	Key       string `json:"key,omitempty"`
+	Available bool   `json:"available"`
+	SHA256    string `json:"sha256,omitempty"`
+}
+
+type renderFingerprintInput struct {
+	SchemaVersion string                    `json:"schema_version"`
+	Variant       string                    `json:"variant"`
+	Edit          renderplan.EditRequest    `json:"edit"`
+	Music         renderMusicInput          `json:"music"`
+	Recording     recording.RecordingResult `json:"recording"`
+	KillPlan      killplan.Plan             `json:"kill_plan"`
+}
+
+func renderInputFingerprint(result recording.RecordingResult, plan *killplan.Plan, variant, musicKey, musicPath string, edit renderplan.EditRequest) (string, error) {
+	music := renderMusicInput{Key: musicKey, Available: musicPath != ""}
+	if musicPath != "" {
+		f, err := os.Open(musicPath)
+		if err != nil {
+			return "", fmt.Errorf("open music: %w", err)
+		}
+		h := sha256.New()
+		_, copyErr := io.Copy(h, f)
+		closeErr := f.Close()
+		if copyErr != nil {
+			return "", fmt.Errorf("hash music: %w", copyErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close music: %w", closeErr)
+		}
+		music.SHA256 = fmt.Sprintf("%x", h.Sum(nil))
+	}
+	doc := renderFingerprintInput{
+		SchemaVersion: "1.0",
+		Variant:       variant,
+		Edit:          edit,
+		Music:         music,
+		Recording:     result,
+		KillPlan:      *plan,
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum), nil
+}
+
+func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant, expectedFingerprint string) (bool, []string, error) {
 	readyArtifacts, err := renderplan.NewRenderVariantReadyArtifacts(id, variant)
 	if err != nil {
 		return false, nil, err
@@ -1739,6 +1834,9 @@ func renderVariantOutputsReady(store storage.Storage, id uuid.UUID, variant stri
 		return false, nil, fmt.Errorf("decode render result: %w", err)
 	}
 	if result.Error != "" {
+		return false, nil, nil
+	}
+	if result.InputFingerprint == "" || result.InputFingerprint != expectedFingerprint {
 		return false, nil, nil
 	}
 	keys := []string{resultKey}

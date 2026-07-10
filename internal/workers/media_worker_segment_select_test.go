@@ -9,11 +9,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/recording"
+	"github.com/rechedev9/fragforge/internal/renderplan"
 	"github.com/rechedev9/fragforge/internal/rules"
 )
 
@@ -52,15 +54,15 @@ func planRecorderRunner(t *testing.T, seen *[]string) *fakeRunner {
 		if err := os.WriteFile(scriptPath, []byte("script"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		stream := recording.DefaultStreamConfig()
+		stream.HUDMode = recording.HUDMode(argValue(args, "--hud"))
+		stream.PortraitSafeKillfeed = hasArg(args, "--portrait-safe-killfeed")
+		recordingPlan, err := recording.NewPlanFromKillPlan(plan, "demo.dem", outDir, stream)
+		if err != nil {
+			t.Fatalf("build recording plan: %v", err)
+		}
 		result := recording.RecordingResult{
-			Plan: recording.RecordingPlan{
-				DemoPath:        "demo.dem",
-				OutputDir:       outDir,
-				TargetSteamID64: "76561197960265729",
-				TargetAccountID: 1,
-				Tickrate:        64,
-				Stream:          recording.DefaultStreamConfig(),
-			},
+			Plan:   recordingPlan,
 			Script: scriptPath,
 		}
 		for _, s := range plan.Segments {
@@ -74,11 +76,6 @@ func planRecorderRunner(t *testing.T, seen *[]string) *fakeRunner {
 			if err := os.WriteFile(segPath, []byte("clip"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			result.Plan.Segments = append(result.Plan.Segments, recording.RecordingSegment{
-				ID:        s.ID,
-				TickStart: s.TickStart,
-				TickEnd:   s.TickEnd,
-			})
 			result.Artifacts = append(result.Artifacts, recording.RecordingArtifact{
 				SegmentID: s.ID,
 				Role:      "segment",
@@ -215,6 +212,57 @@ func TestRecordWorkerSkipsWhenSelectedSegmentAlreadyRecorded(t *testing.T) {
 	}
 }
 
+func TestRecordWorkerInvalidatesAndDoesNotMergeAcrossCaptureProfiles(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	id := uuid.New()
+	plan := multiSegmentKillPlan("seg-001", "seg-002")
+	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusParsed, DemoPath: "demos/test.dem", Rules: rules.Default(), KillPlan: &plan}
+	_ = store.Put("demos/test.dem", bytes.NewReader([]byte("demo")))
+
+	var seen []string
+	w := newRecordWorkerForTest(repo, store, t)
+	w.runner = planRecorderRunner(t, &seen)
+
+	// The old profile records one segment with deathnotices outside the vertical
+	// safe zone. A later portrait-safe request must not reuse or merge that clip.
+	if err := w.HandleRecordDemo(context.Background(), recordTaskWithCaptureProfile(t, id, "deathnotices", []string{"seg-001"}, false)); err != nil {
+		t.Fatalf("unsafe record error = %v", err)
+	}
+	if err := w.HandleRecordDemo(context.Background(), recordTaskWithCaptureProfile(t, id, "deathnotices", []string{"seg-002"}, true)); err != nil {
+		t.Fatalf("portrait-safe record error = %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("recorder runs = %d, want 2 after portrait profile changed", len(seen))
+	}
+	result := storedRecordingResult(t, store, id)
+	if got := recording.SegmentIDs(result); len(got) != 1 || got[0] != "seg-002" {
+		t.Fatalf("segments after profile change = %v, want only [seg-002]", got)
+	}
+	if !result.Plan.Stream.PortraitSafeKillfeed {
+		t.Fatal("stored profile is not portrait-safe")
+	}
+
+	// Re-recording seg-001 under the new profile may now accumulate with seg-002;
+	// a fourth identical request proves the resulting profile remains idempotent.
+	portraitTask := func(segmentID string) *asynq.Task {
+		return recordTaskWithCaptureProfile(t, id, "deathnotices", []string{segmentID}, true)
+	}
+	if err := w.HandleRecordDemo(context.Background(), portraitTask("seg-001")); err != nil {
+		t.Fatalf("portrait-safe backfill error = %v", err)
+	}
+	if err := w.HandleRecordDemo(context.Background(), portraitTask("seg-001")); err != nil {
+		t.Fatalf("portrait-safe retry error = %v", err)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("recorder runs = %d, want 3 after identical retry skips", len(seen))
+	}
+	result = storedRecordingResult(t, store, id)
+	if got := recording.SegmentIDs(result); len(got) != 2 || got[0] != "seg-001" || got[1] != "seg-002" {
+		t.Fatalf("segments after compatible merge = %v, want [seg-001 seg-002]", got)
+	}
+}
+
 func TestRecordWorkerFailedReelPreservesPriorReelResult(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()
@@ -337,5 +385,82 @@ func TestRenderVariantOutputsReadyRequiresSegmentCoverage(t *testing.T) {
 	}
 	if !covered {
 		t.Fatal("compilation render should be treated as covered")
+	}
+}
+
+func TestRenderVariantOutputsReadyRequiresMatchingInputFingerprint(t *testing.T) {
+	store := newFakeStorage()
+	id := uuid.New()
+	plan := minimalKillPlan()
+	rec := recordingResultWithSegment("", "C:/stale/seg-001.mp4")
+	rec.CaptureRevision = "capture-1"
+	if err := putRecordingResult(store, id, rec); err != nil {
+		t.Fatal(err)
+	}
+	edit := renderplan.DefaultEditRequest()
+	fingerprint, err := renderInputFingerprint(rec, &plan, editor.PresetViral60Clean, "", "", edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putJSON(t, store, mustRenderVariantResultKey(t, id, editor.PresetViral60Clean), editor.Result{
+		Preset:           editor.PresetViral60Clean,
+		InputFingerprint: fingerprint,
+		Shorts:           []editor.ShortResult{{SegmentID: "seg-001"}},
+	})
+	_ = store.Put(mustRenderVariantPackManifestKey(t, id, editor.PresetViral60Clean), bytes.NewReader([]byte("pack")))
+	_ = store.Put(mustRenderVariantGalleryKey(t, id, editor.PresetViral60Clean), bytes.NewReader([]byte("gallery")))
+
+	ready, _, err := renderVariantOutputsReady(store, id, editor.PresetViral60Clean, fingerprint)
+	if err != nil || !ready {
+		t.Fatalf("matching inputs ready/error = %v/%v, want true/nil", ready, err)
+	}
+
+	recaptured := rec
+	recaptured.CaptureRevision = "capture-2"
+	changedCapture, err := renderInputFingerprint(recaptured, &plan, editor.PresetViral60Clean, "", "", edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedEdit := edit
+	changedEdit.Transition = renderplan.TransitionWhip
+	changedTreatment, err := renderInputFingerprint(rec, &plan, editor.PresetViral60Clean, "", "", changedEdit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	musicPath := filepath.Join(t.TempDir(), "phonk.wav")
+	if err := os.WriteFile(musicPath, []byte("music-v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changedMusic, err := renderInputFingerprint(rec, &plan, editor.PresetViral60Clean, "phonk", musicPath, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(musicPath, []byte("music-v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changedMusicContent, err := renderInputFingerprint(rec, &plan, editor.PresetViral60Clean, "phonk", musicPath, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedMusic == changedMusicContent {
+		t.Fatal("music content change did not change render fingerprint")
+	}
+
+	for name, candidate := range map[string]string{
+		"capture revision": changedCapture,
+		"edit treatment":   changedTreatment,
+		"music":            changedMusic,
+		"music content":    changedMusicContent,
+		"legacy empty":     "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			ready, _, err := renderVariantOutputsReady(store, id, editor.PresetViral60Clean, candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ready {
+				t.Fatal("stale render inputs were reused")
+			}
+		})
 	}
 }

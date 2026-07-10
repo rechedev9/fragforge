@@ -1,34 +1,78 @@
+'use client';
+
+import { useState } from 'react';
 import { Twitch } from 'lucide-react';
 import type { NormalizedRect, StreamVariant } from '@/lib/api/streams';
+import {
+  calculateCropCoverGeometry,
+  representativeFrameTime,
+  type FrameSize,
+} from '@/lib/stream-preview';
 
 const FULL_FRAME: NormalizedRect = { x: 0, y: 0, width: 1, height: 1 };
 
+const PREVIEW_LAYOUTS: Record<
+  StreamVariant,
+  { face?: FrameSize; gameplay: FrameSize }
+> = {
+  'streamer-vertical-stack-40-60': {
+    face: { width: 1080, height: 768 },
+    gameplay: { width: 1080, height: 1152 },
+  },
+  'streamer-vertical-stack': {
+    face: { width: 1080, height: 520 },
+    gameplay: { width: 1080, height: 1400 },
+  },
+  'streamer-fullframe-nocam': {
+    gameplay: { width: 1080, height: 1920 },
+  },
+};
+
 /**
- * Renders the portion of `videoSrc` inside `rect` (normalized 0..1 of the
- * source frame) scaled to fill its container. This is the standard CSS
- * "zoomed background" trick: the video is sized to 1/rect.width x 1/rect.height
- * of its wrapper and offset by -rect.x/-rect.y at that scale, so the crop
- * region exactly fills the overflow-hidden wrapper regardless of the wrapper's
- * own pixel size. It is a design-time approximation only (the real crop
- * happens in the FFmpeg render), which is enough for a live preview.
+ * Renders one output band with the same geometry as FFmpeg: crop the source
+ * rect, scale it proportionally until it covers the band, then center-crop the
+ * excess. The video element itself always keeps the source aspect ratio.
  */
-function CroppedFrame({ videoSrc, rect, className }: { videoSrc: string; rect: NormalizedRect; className?: string }) {
-  const scaleX = rect.width > 0 ? 1 / rect.width : 1;
-  const scaleY = rect.height > 0 ? 1 / rect.height : 1;
+function CroppedFrame({
+  videoSrc,
+  rect,
+  output,
+  band,
+  className,
+}: {
+  videoSrc: string;
+  rect: NormalizedRect;
+  output: FrameSize;
+  band: 'facecam' | 'gameplay';
+  className?: string;
+}) {
+  const [source, setSource] = useState<FrameSize | null>(null);
+  const geometry = source ? calculateCropCoverGeometry(rect, source, output) : null;
+
   return (
-    <div className={className} style={{ overflow: 'hidden', position: 'relative' }}>
+    <div className={className} style={{ overflow: 'hidden', position: 'relative' }} data-preview-band={band}>
       <video
         src={videoSrc}
         muted
         playsInline
-        preload="metadata"
+        preload="auto"
+        aria-hidden="true"
+        data-stream-frame={`preview-${band}`}
+        onLoadedMetadata={(event) => {
+          const video = event.currentTarget;
+          if (video.videoWidth > 0 && video.videoHeight > 0) {
+            setSource({ width: video.videoWidth, height: video.videoHeight });
+          }
+          video.currentTime = representativeFrameTime(video.duration);
+        }}
+        onSeeked={(event) => event.currentTarget.pause()}
         style={{
           position: 'absolute',
-          width: `${scaleX * 100}%`,
-          height: `${scaleY * 100}%`,
-          left: `${-rect.x * scaleX * 100}%`,
-          top: `${-rect.y * scaleY * 100}%`,
-          objectFit: 'fill',
+          width: geometry ? `${geometry.widthPercent}%` : '100%',
+          height: geometry ? `${geometry.heightPercent}%` : '100%',
+          left: geometry ? `${geometry.leftPercent}%` : '0',
+          top: geometry ? `${geometry.topPercent}%` : '0',
+          maxWidth: 'none',
         }}
       />
     </div>
@@ -36,10 +80,9 @@ function CroppedFrame({ videoSrc, rect, className }: { videoSrc: string; rect: N
 }
 
 /**
- * Live 9:16 preview mock: facecam on top (~40%) and gameplay below (~60%) for
- * the stack variants, or gameplay only for the no-facecam variant. Purely a
- * CSS approximation of the final render layout, driven by the same
- * face_crop/gameplay_crop the editor writes to the edit plan.
+ * Live 9:16 preview: facecam over gameplay for stack variants, or gameplay
+ * only for the no-facecam variant. Band sizes and crop geometry mirror the
+ * render variant registry in internal/streamclips.
  */
 export function StreamPreview({
   videoSrc,
@@ -55,20 +98,34 @@ export function StreamPreview({
   streamerNick?: string;
 }) {
   const gameplay = gameplayCrop ?? FULL_FRAME;
-  const showFace = variant !== 'streamer-fullframe-nocam';
-  const facePct = variant === 'streamer-vertical-stack-40-60' ? 40 : (520 / 1920) * 100;
-  const bannerCenterPct = showFace ? facePct : 20;
+  const layout = PREVIEW_LAYOUTS[variant];
+  const facePct = layout.face
+    ? (layout.face.height * 100) / (layout.face.height + layout.gameplay.height)
+    : 0;
+  const bannerCenterPct = layout.face ? facePct : 20;
 
   return (
     <div className="relative mx-auto aspect-[9/16] w-full max-w-[220px] overflow-hidden rounded-xl border border-border bg-black shadow-lg">
       <div className="flex h-full w-full flex-col">
-        {showFace ? (
+        {layout.face ? (
           <div style={{ height: `${facePct}%` }} className="w-full">
-            <CroppedFrame videoSrc={videoSrc} rect={faceCrop ?? FULL_FRAME} className="h-full w-full" />
+            <CroppedFrame
+              videoSrc={videoSrc}
+              rect={faceCrop ?? FULL_FRAME}
+              output={layout.face}
+              band="facecam"
+              className="h-full w-full"
+            />
           </div>
         ) : null}
-        <div style={{ height: showFace ? `${100 - facePct}%` : '100%' }} className="w-full">
-          <CroppedFrame videoSrc={videoSrc} rect={gameplay} className="h-full w-full" />
+        <div style={{ height: layout.face ? `${100 - facePct}%` : '100%' }} className="w-full">
+          <CroppedFrame
+            videoSrc={videoSrc}
+            rect={gameplay}
+            output={layout.gameplay}
+            band="gameplay"
+            className="h-full w-full"
+          />
         </div>
       </div>
       {streamerNick ? (

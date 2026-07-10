@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import type { NormalizedRect } from '@/lib/api/streams';
+import { representativeFrameTime } from '@/lib/stream-preview';
 import { cn } from '@/lib/utils';
 
 const MIN_SIZE = 0.08;
+const HAVE_METADATA = 1;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -20,6 +22,10 @@ function clampRect(rect: NormalizedRect): NormalizedRect {
 }
 
 type Drag = { kind: 'move' | 'resize'; startClientX: number; startClientY: number; startRect: NormalizedRect };
+
+function showRepresentativeFrame(video: HTMLVideoElement): void {
+  video.currentTime = representativeFrameTime(video.duration);
+}
 
 /**
  * Facecam picker: a paused <video> (the job's source proxy URL) with an
@@ -43,25 +49,14 @@ export function FacecamPicker({
   disabled?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const dragRef = useRef<Drag | null>(null);
 
-  // Seek to a representative frame (mid-clip) once metadata loads, then pause
-  // there so the picker shows a real frame instead of a black/first frame.
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const onLoaded = () => {
-      video.currentTime = video.duration ? Math.min(video.duration / 2, video.duration - 0.1) : 0;
-    };
-    const onSeeked = () => video.pause();
-    video.addEventListener('loadedmetadata', onLoaded);
-    video.addEventListener('seeked', onSeeked);
-    return () => {
-      video.removeEventListener('loadedmetadata', onLoaded);
-      video.removeEventListener('seeked', onSeeked);
-    };
-  }, [videoSrc]);
+  // A cached video can already have metadata by the time React attaches event
+  // handlers. The callback ref closes that race; onLoadedMetadata covers fresh
+  // loads and source changes.
+  const attachVideo = useCallback((video: HTMLVideoElement | null) => {
+    if (video && video.readyState >= HAVE_METADATA) showRepresentativeFrame(video);
+  }, []);
 
   const normalizedDelta = useCallback((clientX: number, clientY: number, drag: Drag) => {
     const el = containerRef.current;
@@ -111,11 +106,14 @@ export function FacecamPicker({
       onPointerCancel={endDrag}
     >
       <video
-        ref={videoRef}
+        ref={attachVideo}
         src={videoSrc}
         muted
         playsInline
         preload="auto"
+        data-stream-frame="picker"
+        onLoadedMetadata={(event) => showRepresentativeFrame(event.currentTarget)}
+        onSeeked={(event) => event.currentTarget.pause()}
         className="pointer-events-none absolute inset-0 h-full w-full object-contain"
       />
       <div

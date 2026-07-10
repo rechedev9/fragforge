@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -538,6 +539,13 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	if got, want := state.Status, renderplan.RenderVariantStatusReady; got != want {
 		t.Fatalf("render state = %q, want %q", got, want)
 	}
+	var storedResult editor.Result
+	if err := json.Unmarshal(store.files[mustRenderVariantResultKey(t, id, editor.PresetViral60Clean)], &storedResult); err != nil {
+		t.Fatal(err)
+	}
+	if storedResult.InputFingerprint == "" {
+		t.Fatal("stored render result is missing input fingerprint")
+	}
 }
 
 func TestCompileSegmentsArgs(t *testing.T) {
@@ -808,7 +816,18 @@ func TestRenderWorkerDefaultsToViral60WhenVariantEmpty(t *testing.T) {
 	plan := minimalKillPlan()
 	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
 	defaultVariant := editor.DefaultPreset().Name
-	putJSON(t, store, mustRenderVariantResultKey(t, id, defaultVariant), editor.Result{Preset: defaultVariant})
+	recordingResult := recordingResultWithSegment("", "C:/stale/seg-001.mp4")
+	recordingResult.CaptureRevision = "capture-1"
+	putJSON(t, store, recording.ResultArtifactKey(id), recordingResult)
+	fingerprint, err := renderInputFingerprint(recordingResult, &plan, defaultVariant, "", "", renderplan.DefaultEditRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	putJSON(t, store, mustRenderVariantResultKey(t, id, defaultVariant), editor.Result{
+		Preset:           defaultVariant,
+		InputFingerprint: fingerprint,
+		Shorts:           []editor.ShortResult{{SegmentID: "seg-001"}},
+	})
 	_ = store.Put(mustRenderVariantPackManifestKey(t, id, defaultVariant), bytes.NewReader([]byte("pack")))
 	_ = store.Put(mustRenderVariantGalleryKey(t, id, defaultVariant), bytes.NewReader([]byte("<html></html>")))
 
@@ -876,8 +895,16 @@ func TestRenderWorkerSkipsWhenVariantOutputsAlreadyExist(t *testing.T) {
 	id := uuid.New()
 	plan := minimalKillPlan()
 	repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+	recordingResult := recordingResultWithSegment("", "C:/stale/seg-001.mp4")
+	recordingResult.CaptureRevision = "capture-1"
+	putJSON(t, store, recording.ResultArtifactKey(id), recordingResult)
+	fingerprint, err := renderInputFingerprint(recordingResult, &plan, editor.PresetViral60Clean, "", "", renderplan.DefaultEditRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
 	putJSON(t, store, mustRenderVariantResultKey(t, id, editor.PresetViral60Clean), editor.Result{
-		Preset: editor.PresetViral60Clean,
+		Preset:           editor.PresetViral60Clean,
+		InputFingerprint: fingerprint,
 		Shorts: []editor.ShortResult{{
 			SegmentID: "seg-001",
 		}},
@@ -897,6 +924,86 @@ func TestRenderWorkerSkipsWhenVariantOutputsAlreadyExist(t *testing.T) {
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("runner calls = %d, want 0", len(runner.calls))
+	}
+}
+
+func TestRenderWorkerRerunsWhenCachedInputsChange(t *testing.T) {
+	tests := []struct {
+		name      string
+		mutate    func(*recording.RecordingResult, *renderplan.EditRequest)
+		musicKey  string
+		withMusic bool
+	}{
+		{
+			name: "capture revision",
+			mutate: func(result *recording.RecordingResult, _ *renderplan.EditRequest) {
+				result.CaptureRevision = "capture-2"
+			},
+		},
+		{
+			name: "edit treatment",
+			mutate: func(_ *recording.RecordingResult, edit *renderplan.EditRequest) {
+				edit.Transition = renderplan.TransitionWhip
+			},
+		},
+		{name: "music", musicKey: "phonk", withMusic: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			store := newFakeStorage()
+			id := uuid.New()
+			plan := minimalKillPlan()
+			repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+			rec := recordingResultWithSegment("", "C:/stale/seg-001.mp4")
+			rec.CaptureRevision = "capture-1"
+			cachedFingerprint, err := renderInputFingerprint(rec, &plan, editor.PresetViral60Clean, "", "", renderplan.DefaultEditRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			putJSON(t, store, mustRenderVariantResultKey(t, id, editor.PresetViral60Clean), editor.Result{
+				Preset:           editor.PresetViral60Clean,
+				InputFingerprint: cachedFingerprint,
+				Shorts:           []editor.ShortResult{{SegmentID: "seg-001"}},
+			})
+			_ = store.Put(mustRenderVariantPackManifestKey(t, id, editor.PresetViral60Clean), bytes.NewReader([]byte("pack")))
+			_ = store.Put(mustRenderVariantGalleryKey(t, id, editor.PresetViral60Clean), bytes.NewReader([]byte("gallery")))
+
+			edit := renderplan.DefaultEditRequest()
+			if tc.mutate != nil {
+				tc.mutate(&rec, &edit)
+			}
+			putJSON(t, store, recording.ResultArtifactKey(id), rec)
+			_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
+			musicDir := t.TempDir()
+			if tc.withMusic {
+				if err := os.WriteFile(filepath.Join(musicDir, tc.musicKey+".wav"), []byte("music"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wantErr := errors.New("rerender invoked")
+			runner := &fakeRunner{fn: func(context.Context, string, ...string) ([]byte, error) {
+				return nil, wantErr
+			}}
+			w := NewRenderWorker(repo, store, RenderWorkerConfig{
+				WorkDir:    t.TempDir(),
+				EditorPath: "zv-editor",
+				MusicDir:   musicDir,
+			})
+			w.runner = runner
+			task, err := tasks.NewRenderVariantTask(id, editor.PresetViral60Clean, tc.musicKey, edit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = w.HandleRenderVariant(context.Background(), task)
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("HandleRenderVariant error = %v, want rerender sentinel", err)
+			}
+			if len(runner.calls) != 1 {
+				t.Fatalf("runner calls = %d, want 1 for stale cache", len(runner.calls))
+			}
+		})
 	}
 }
 
@@ -937,20 +1044,15 @@ func minimalKillPlan() killplan.Plan {
 }
 
 func recordingResultWithSegment(scriptPath, segmentPath string) recording.RecordingResult {
+	plan := minimalKillPlan()
+	stream := recording.DefaultStreamConfig()
+	stream.HUDMode = recording.HUDModeDeathnotices
+	recordingPlan, err := recording.NewPlanFromKillPlan(plan, "demo.dem", "out", stream)
+	if err != nil {
+		panic(fmt.Sprintf("build test recording plan: %v", err))
+	}
 	return recording.RecordingResult{
-		Plan: recording.RecordingPlan{
-			DemoPath:        "demo.dem",
-			OutputDir:       "out",
-			TargetSteamID64: "76561197960265729",
-			TargetAccountID: 1,
-			Tickrate:        64,
-			Stream:          recording.DefaultStreamConfig(),
-			Segments: []recording.RecordingSegment{{
-				ID:        "seg-001",
-				TickStart: 64,
-				TickEnd:   128,
-			}},
-		},
+		Plan:   recordingPlan,
 		Script: scriptPath,
 		Artifacts: []recording.RecordingArtifact{{
 			SegmentID: "seg-001",
@@ -969,7 +1071,12 @@ func recordTask(t *testing.T, id uuid.UUID) *asynq.Task {
 
 func recordTaskFor(t *testing.T, id uuid.UUID, segmentIDs []string) *asynq.Task {
 	t.Helper()
-	task, err := tasks.NewRecordDemoTask(id, "", segmentIDs, false)
+	return recordTaskWithCaptureProfile(t, id, "", segmentIDs, false)
+}
+
+func recordTaskWithCaptureProfile(t *testing.T, id uuid.UUID, hudMode string, segmentIDs []string, portraitSafeKillfeed bool) *asynq.Task {
+	t.Helper()
+	task, err := tasks.NewRecordDemoTask(id, hudMode, segmentIDs, portraitSafeKillfeed)
 	if err != nil {
 		t.Fatal(err)
 	}

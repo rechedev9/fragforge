@@ -1091,33 +1091,53 @@ func TestStartRecordingEnqueuesRecordTaskWhenParsed(t *testing.T) {
 	}
 }
 
-func TestStartRecordingAppliesPresetHUD(t *testing.T) {
-	repo := newFakeRepo()
-	queue := &fakeQueue{}
-	plan := killplan.NewPlan()
-	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
-	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+func TestStartRecordingAppliesPresetCaptureHUD(t *testing.T) {
+	tests := []struct {
+		name                     string
+		preset                   string
+		format                   string
+		wantHUD                  string
+		wantPortraitSafeKillfeed bool
+	}{
+		{name: "kill feed vertical", preset: editor.PresetViral60Clean, format: renderplan.FormatShort9x16, wantHUD: "deathnotices", wantPortraitSafeKillfeed: true},
+		{name: "kill feed landscape", preset: editor.PresetViral60Clean, format: renderplan.FormatLandscape16x9, wantHUD: "deathnotices"},
+		{name: "clean POV", preset: editor.PresetCleanPOV60, format: renderplan.FormatShort9x16, wantHUD: "clean"},
+		{name: "full HUD", preset: editor.PresetFullHUD60, format: renderplan.FormatShort9x16, wantHUD: "gameplay"},
+	}
 
-	r := chi.NewRouter()
-	r.Post("/api/jobs/{id}/record", h.StartRecording)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", strings.NewReader(`{"preset":"clean-pov-60"}`))
-	rw := httptest.NewRecorder()
-	r.ServeHTTP(rw, req)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			queue := &fakeQueue{}
+			plan := killplan.NewPlan()
+			j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+			repo.jobs[j.ID] = j
+			h := NewHandlers(repo, newFakeStorage(), queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
-	if rw.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
-	}
-	if len(queue.enqueued) != 1 {
-		t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
-	}
-	var payload tasks.RecordDemoPayload
-	if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
-		t.Fatalf("unmarshal record payload: %v", err)
-	}
-	// clean-pov-60 records HUD-less, so its preset resolves to the "clean" HUD.
-	if payload.HUDMode != "clean" {
-		t.Fatalf("HUDMode = %q, want clean", payload.HUDMode)
+			r := chi.NewRouter()
+			r.Post("/api/jobs/{id}/record", h.StartRecording)
+			body := fmt.Sprintf(`{"preset":%q,"edit":{"format":%q}}`, tc.preset, tc.format)
+			req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/record", strings.NewReader(body))
+			rw := httptest.NewRecorder()
+			r.ServeHTTP(rw, req)
+
+			if rw.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+			}
+			if len(queue.enqueued) != 1 {
+				t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
+			}
+			var payload tasks.RecordDemoPayload
+			if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
+				t.Fatalf("unmarshal record payload: %v", err)
+			}
+			if payload.HUDMode != tc.wantHUD {
+				t.Fatalf("HUDMode = %q, want %q", payload.HUDMode, tc.wantHUD)
+			}
+			if payload.PortraitSafeKillfeed != tc.wantPortraitSafeKillfeed {
+				t.Fatalf("PortraitSafeKillfeed = %t, want %t", payload.PortraitSafeKillfeed, tc.wantPortraitSafeKillfeed)
+			}
+		})
 	}
 }
 

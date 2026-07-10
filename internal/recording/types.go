@@ -110,11 +110,12 @@ type RecordingArtifact struct {
 
 // RecordingResult is the file emitted by zv-recorder after a run.
 type RecordingResult struct {
-	Plan      RecordingPlan       `json:"plan"`
-	Script    string              `json:"script"`
-	Artifacts []RecordingArtifact `json:"artifacts"`
-	Warnings  []string            `json:"warnings,omitempty"`
-	Error     string              `json:"error,omitempty"`
+	Plan            RecordingPlan       `json:"plan"`
+	Script          string              `json:"script"`
+	Artifacts       []RecordingArtifact `json:"artifacts"`
+	CaptureRevision string              `json:"capture_revision,omitempty"`
+	Warnings        []string            `json:"warnings,omitempty"`
+	Error           string              `json:"error,omitempty"`
 }
 
 // DefaultStreamConfig returns the current V1 target recording format.

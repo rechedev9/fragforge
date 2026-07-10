@@ -94,6 +94,33 @@ function outroInput(page: Page) {
 }
 
 test.describe('create-reel bookend text', () => {
+  test('landscape format is sent with the record request', async ({ page }) => {
+    const jobStatus = { value: 'parsed' };
+    await gotoCreateReel(page, jobStatus);
+
+    const captured: { recordBody?: { edit?: { format?: string } } } = {};
+    await page.route('**/api/demos/*/record', (route) => {
+      captured.recordBody = JSON.parse(route.request().postData() ?? '{}');
+      jobStatus.value = 'recorded';
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    await page.route('**/api/demos/*/renders/*', async (route: Route) => {
+      if (route.request().method() === 'POST') {
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'queued' }) });
+      }
+      return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) });
+    });
+
+    await page.getByRole('button', { name: '16:9' }).click();
+    await page.getByRole('button', { name: 'FORJAR REEL' }).click();
+    await page.waitForURL(/\/videos/);
+
+    await expect.poll(() => captured.recordBody !== undefined, { timeout: 30_000 }).toBe(true);
+    const recordBody = captured.recordBody;
+    if (recordBody === undefined) throw new Error('record request was not captured');
+    expect(recordBody.edit?.format).toBe('landscape-16x9');
+  });
+
   test('toggling Intro reveals its text input, toggling off hides it again', async ({ page }) => {
     const jobStatus = { value: 'parsed' };
     await gotoCreateReel(page, jobStatus);

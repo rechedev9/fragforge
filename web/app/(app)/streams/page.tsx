@@ -35,6 +35,7 @@ import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { FacecamPicker } from '@/components/streams/facecam-picker';
 import { StreamPreview } from '@/components/streams/stream-preview';
@@ -44,6 +45,7 @@ type Stage = 'idle' | 'submitting' | 'acquiring' | 'editing' | 'rendering' | 're
 const FULL_FRAME: NormalizedRect = { x: 0, y: 0, width: 1, height: 1 };
 const DEFAULT_FACE_CROP: NormalizedRect = { x: 0.62, y: 0.03, width: 0.34, height: 0.3 };
 const STREAMER_NICK_RE = /^[A-Za-z0-9_]{0,25}$/;
+const NO_MUSIC_VALUE = '__none__';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -681,16 +683,20 @@ function StreamEditor({
                 {plan.captions?.enabled ? 'Subtítulos incrustados: activados' : 'Subtítulos incrustados: desactivados'}
               </Button>
               {plan.captions?.enabled ? (
-                <select
+                <Select
                   value={plan.captions?.language ?? 'auto'}
                   disabled={busy}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  className="h-11 rounded-none border border-input bg-surface/80 px-3.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+                  onValueChange={setLanguage}
                 >
-                  <option value="auto">Detección automática</option>
-                  <option value="es">Español</option>
-                  <option value="en">Inglés</option>
-                </select>
+                  <SelectTrigger aria-label="Idioma de subtítulos" className="w-52 rounded-none">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Detección automática</SelectItem>
+                    <SelectItem value="es">Español</SelectItem>
+                    <SelectItem value="en">Inglés</SelectItem>
+                  </SelectContent>
+                </Select>
               ) : null}
             </div>
           </div>
@@ -743,7 +749,7 @@ function StreamEditor({
           streamerNick={plan.streamer_banner?.nick?.trim()}
         />
         <p className="text-[11.5px] leading-relaxed text-muted-foreground/80">
-          Layout aproximado. El render real conserva el HUD del juego completo.
+          La preview replica el encuadre vertical del render. El recorte puede dejar fuera parte del HUD lateral.
         </p>
       </div>
     </div>
@@ -999,6 +1005,13 @@ function MusicAndEffectsCard({
   const musicKey = plan.music?.key ?? '';
   const volume = plan.music?.volume ?? 0.25;
   const grade = plan.effects?.grade ?? false;
+  const selectedSong = songs?.find((song) => song.id === musicKey);
+  let selectedMusicLabel = 'Ninguna';
+  if (songs === null) {
+    selectedMusicLabel = musicKey ? 'Cargando pista…' : 'Cargando pistas…';
+  } else if (selectedSong) {
+    selectedMusicLabel = `${selectedSong.title}${selectedSong.genre ? ` · ${selectedSong.genre}` : ''}`;
+  }
 
   return (
     <div className="studio-panel p-5 sm:p-6">
@@ -1010,21 +1023,24 @@ function MusicAndEffectsCard({
             <Label htmlFor="stream-music" className="text-xs text-muted-foreground">
               Música de fondo
             </Label>
-            <select
-              id="stream-music"
-              value={musicKey}
+            <Select
+              value={musicKey || NO_MUSIC_VALUE}
               disabled={busy || songs === null}
-              onChange={(e) => onMusicKey(e.target.value)}
-              className="h-9 min-w-52 rounded-none border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50"
+              onValueChange={(value) => onMusicKey(value === NO_MUSIC_VALUE ? '' : value)}
             >
-              <option value="">{songs === null ? 'Cargando pistas…' : 'Ninguna'}</option>
-              {(songs ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title}
-                  {s.genre ? ` · ${s.genre}` : ''}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="stream-music" className="w-72 max-w-[80vw] rounded-none">
+                <SelectValue>{selectedMusicLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_MUSIC_VALUE}>Ninguna</SelectItem>
+                {(songs ?? []).map((song) => (
+                  <SelectItem key={song.id} value={song.id}>
+                    {song.title}
+                    {song.genre ? ` · ${song.genre}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {musicKey ? (

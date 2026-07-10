@@ -292,6 +292,7 @@ type SmokeCue struct {
 
 type Result struct {
 	Preset            string        `json:"preset"`
+	InputFingerprint  string        `json:"input_fingerprint,omitempty"`
 	RecordingResult   string        `json:"recording_result"`
 	KillPlan          string        `json:"killplan,omitempty"`
 	OutputDir         string        `json:"output_dir"`

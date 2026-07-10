@@ -501,7 +501,11 @@ export class RealApiClient implements ApiClient {
               init: {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ preset: variant, segment_ids: intent.segmentIds }),
+                body: JSON.stringify({
+                  preset: variant,
+                  segment_ids: intent.segmentIds,
+                  edit: buildEditRequest(intent.editConfig),
+                }),
               },
             }))
           : await this.send((dp) => ({
