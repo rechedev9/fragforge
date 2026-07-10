@@ -4,6 +4,7 @@ import { test, expect, type Page, request } from "@playwright/test";
 // must point at exactly this URL, and the URL must actually resolve.
 const DOWNLOAD_URL =
   "https://github.com/rechedev9/fragforge/releases/download/v1.0.5/FragForge.Studio.Setup.1.0.5.exe";
+const RELEASE_VERSION = "v1.0.5";
 const SOCIAL_TITLE = "Your CS2 frags, ready to post | FragForge";
 const SOCIAL_DESCRIPTION =
   "Drop a CS2 demo. Pick your kills. Get a polished vertical Short — locally, free, and ready to upload.";
@@ -40,6 +41,13 @@ test.describe("landing page", () => {
       `Expected the download asset to resolve 200, got ${res.status()} (${res.url()})`,
     ).toBe(200);
     await ctx.dispose();
+  });
+
+  test("shows the current release version beside both download calls to action", async ({ page }) => {
+    await page.goto("/", { waitUntil: "load" });
+
+    await expect(page.getByText(RELEASE_VERSION, { exact: true })).toBeVisible();
+    await expect(page.getByText(`${RELEASE_VERSION} · 150 MB · Windows 10/11`)).toBeVisible();
   });
 
   test("has accessible section headings and the SmartScreen note", async ({

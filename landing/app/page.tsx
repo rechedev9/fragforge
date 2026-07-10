@@ -24,6 +24,7 @@ import Reveal from "@/components/reveal";
 
 const DOWNLOAD_URL =
   "https://github.com/rechedev9/fragforge/releases/download/v1.0.5/FragForge.Studio.Setup.1.0.5.exe";
+const RELEASE_VERSION = "v1.0.5";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
 function Corners() {
@@ -133,7 +134,7 @@ export default function Home() {
                 <span className="relative inline-flex size-2 bg-emerald-400" />
               </span>
               Capture pipeline online
-              <span className="text-cyan-300">v1.0.1</span>
+              <span className="text-cyan-300">{RELEASE_VERSION}</span>
             </div>
 
             <h1 className="max-w-[900px] text-balance text-5xl font-bold uppercase leading-[0.94] tracking-[-0.035em] text-white drop-shadow-2xl sm:text-7xl lg:text-[clamp(4.5rem,7vw,7rem)]">
@@ -385,7 +386,7 @@ export default function Home() {
               <Download className="size-5" />Download FragForge Studio
               <ArrowRight className="size-4 transition-transform duration-300 group-hover:translate-x-1" />
             </a>
-            <p className="mt-4 font-mono text-xs uppercase tracking-[0.18em] text-slate-400">v1.0.1 · 150 MB · Windows 10/11</p>
+            <p className="mt-4 font-mono text-xs uppercase tracking-[0.18em] text-slate-400">{RELEASE_VERSION} · 150 MB · Windows 10/11</p>
           </div>
         </Reveal>
       </section>
