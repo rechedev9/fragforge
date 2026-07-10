@@ -22,7 +22,7 @@ const SITE_DESCRIPTION =
   "FragForge Studio is a free Windows app that turns CS2 demo files into upload-ready 1080x1920 60fps vertical Shorts - captured with HLAE + CS2 and edited entirely on your own PC. No account, no uploads.";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://fragforge-landing.vercel.app"),
+  metadataBase: new URL("https://fragforge.gravityroom.app"),
   title: "FragForge Studio — Turn CS2 demos into viral Shorts",
   description: SITE_DESCRIPTION,
   applicationName: "FragForge Studio",
@@ -57,7 +57,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${chakraPetch.variable} ${shareTechMono.variable} neon-grid bg-background text-foreground antialiased`}
+        className={`${chakraPetch.variable} ${shareTechMono.variable} bg-[#050812] text-[#f2fbff] antialiased`}
       >
         {children}
       </body>

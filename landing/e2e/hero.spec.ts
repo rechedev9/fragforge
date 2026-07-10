@@ -19,6 +19,15 @@ test.describe("hero forge — desktop, motion allowed", () => {
 
     await page.goto("/", { waitUntil: "load" });
 
+    const heroArt = page.getByTestId("hero-art");
+    await expect(heroArt).toBeVisible();
+    const artSize = await heroArt.evaluate((el) => ({
+      width: (el as HTMLImageElement).naturalWidth,
+      height: (el as HTMLImageElement).naturalHeight,
+    }));
+    expect(artSize.width).toBeGreaterThan(1000);
+    expect(artSize.height).toBeGreaterThan(500);
+
     const canvas = page.locator("#hero canvas");
     await canvas.waitFor({ state: "attached", timeout: 15000 });
 
@@ -54,6 +63,7 @@ test.describe("hero forge — reduced motion", () => {
 
     await expect(page.locator("#hero canvas")).toHaveCount(0);
     await expect(page.getByTestId("hero-forge")).toBeVisible();
+    await expect(page.getByTestId("hero-art")).toBeVisible();
     await expect(page.locator("h1")).toBeVisible();
 
     expect(
@@ -82,5 +92,11 @@ test.describe("hero forge — mobile DPR cap", () => {
 
     expect(dpr).toBeGreaterThan(0);
     expect(dpr).toBeLessThanOrEqual(2);
+
+    const layout = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewport);
   });
 });

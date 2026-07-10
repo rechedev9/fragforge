@@ -58,6 +58,13 @@ test.describe("landing page", () => {
     await expect(
       page.getByText("Windows protected your PC", { exact: false }),
     ).toBeVisible();
+
+    await expect(
+      page.getByRole("heading", { name: /your best frags/i }),
+    ).toBeVisible();
+    await expect(page.getByText("ZERO CLOUD", { exact: true })).toBeVisible();
+    await expect(page.getByText("REAL CAPTURE", { exact: true })).toBeVisible();
+    await expect(page.getByText("POST READY", { exact: true })).toBeVisible();
   });
 
   test("loads with zero console/page errors after settling", async ({
