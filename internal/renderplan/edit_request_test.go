@@ -1,9 +1,21 @@
 package renderplan
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+func TestEditRequestSerializesAutomaticTextControls(t *testing.T) {
+	b, err := json.Marshal(EditRequest{HookText: true, KillCounter: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, `"hook_text":true`) || !strings.Contains(got, `"kill_counter":false`) {
+		t.Fatalf("EditRequest JSON = %s, want explicit automatic text booleans", got)
+	}
+}
 
 func TestNormalizeEditRequestDefaultsUnsetFields(t *testing.T) {
 	got := NormalizeEditRequest(EditRequest{Intro: true})

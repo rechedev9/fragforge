@@ -3,9 +3,19 @@ package streamclips
 import (
 	"encoding/json"
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rechedev9/fragforge/internal/mediafont"
 )
+
+func TestFindBannerFontPrefersEmbeddedMontserrat(t *testing.T) {
+	got := FindBannerFont()
+	if filepath.Base(got) != mediafont.FileName {
+		t.Fatalf("FindBannerFont = %q, want embedded %s", got, mediafont.FileName)
+	}
+}
 
 func TestEditPlanValidationRejectsOutOfBoundsCrop(t *testing.T) {
 	plan := DefaultEditPlan()

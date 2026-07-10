@@ -37,7 +37,7 @@ func TestBuildASS_ScriptInfoAndStyle(t *testing.T) {
 		t.Fatalf("got ASS body %q, want it to contain script info %q", got, wantScriptInfo)
 	}
 
-	wantStyle := "Style: Karaoke,Arial Black,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,460,1"
+	wantStyle := "Style: Karaoke,Montserrat ExtraBold,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,460,1"
 	if !strings.Contains(got, wantStyle) {
 		t.Fatalf("got ASS body %q, want it to contain style line %q", got, wantStyle)
 	}
@@ -177,30 +177,34 @@ func TestFormatASSTimestamp(t *testing.T) {
 
 func TestBurnFilter(t *testing.T) {
 	tests := []struct {
-		name    string
-		assPath string
-		want    string
+		name     string
+		assPath  string
+		fontsDir string
+		want     string
 	}{
 		{
-			name:    "windows path",
-			assPath: `C:\Users\reche\Documents\zackvideo\data\run\captions.ass`,
-			want:    `ass='C\:/Users/reche/Documents/zackvideo/data/run/captions.ass'`,
+			name:     "windows path",
+			assPath:  `C:\Users\reche\Documents\zackvideo\data\run\captions.ass`,
+			fontsDir: `C:\Users\reche\AppData\Local\FragForge\fonts\v7.222`,
+			want:     `ass='C\:/Users/reche/Documents/zackvideo/data/run/captions.ass':fontsdir='C\:/Users/reche/AppData/Local/FragForge/fonts/v7.222'`,
 		},
 		{
-			name:    "unix-style path quoted",
-			assPath: "/tmp/run/captions.ass",
-			want:    "ass='/tmp/run/captions.ass'",
+			name:     "unix-style path quoted",
+			assPath:  "/tmp/run/captions.ass",
+			fontsDir: "/tmp/run/fonts",
+			want:     "ass='/tmp/run/captions.ass':fontsdir='/tmp/run/fonts'",
 		},
 		{
-			name:    "embedded quote cannot break out",
-			assPath: `C:\run\o'clock.ass`,
-			want:    `ass='C\:/run/o'\''clock.ass'`,
+			name:     "embedded quote cannot break out",
+			assPath:  `C:\run\o'clock.ass`,
+			fontsDir: `C:\run\font's`,
+			want:     `ass='C\:/run/o'\''clock.ass':fontsdir='C\:/run/font'\''s'`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BurnFilter(tt.assPath)
+			got := BurnFilter(tt.assPath, tt.fontsDir)
 			if got != tt.want {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}

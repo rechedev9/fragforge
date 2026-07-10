@@ -411,6 +411,9 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 				t.Fatalf("%s = %q, want %q", check.key, got, check.want)
 			}
 		}
+		if !hasArg(args, "--hook=true") || !hasArg(args, "--kill-counter=false") {
+			t.Fatalf("editor args missing explicit automatic text values: %#v", args)
+		}
 		if !hasArg(args, "--intro") || !hasArg(args, "--outro") {
 			t.Fatalf("editor args missing intro/outro flags: %#v", args)
 		}
@@ -488,13 +491,15 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	w.runner = runner
 
 	task, err := tasks.NewRenderVariantTask(id, editor.PresetViral60Clean, "", renderplan.EditRequest{
-		Format:     renderplan.FormatLandscape16x9,
-		KillEffect: renderplan.KillEffectFreezeFlash,
-		Transition: renderplan.TransitionDip,
-		Intro:      true,
-		Outro:      true,
-		IntroText:  "Watch this ace",
-		OutroText:  "follow for more",
+		Format:      renderplan.FormatLandscape16x9,
+		KillEffect:  renderplan.KillEffectFreezeFlash,
+		Transition:  renderplan.TransitionDip,
+		Intro:       true,
+		Outro:       true,
+		IntroText:   "Watch this ace",
+		OutroText:   "follow for more",
+		HookText:    true,
+		KillCounter: false,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -531,6 +536,9 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	}
 	if doc.Edit.Format != renderplan.FormatLandscape16x9 || doc.LoadoutSnapshot.Output.AspectRatio != "16:9" || doc.LoadoutSnapshot.Output.Width != 1920 || doc.LoadoutSnapshot.Output.Height != 1080 {
 		t.Fatalf("edit document = %#v", doc)
+	}
+	if !doc.Edit.HookText || doc.Edit.KillCounter {
+		t.Fatalf("edit document automatic text = hook %v / counter %v, want true / false", doc.Edit.HookText, doc.Edit.KillCounter)
 	}
 	var state renderplan.RenderVariantState
 	if err := json.Unmarshal(store.files[mustRenderVariantStatusKey(t, id, editor.PresetViral60Clean)], &state); err != nil {

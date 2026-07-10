@@ -26,11 +26,13 @@ const (
 // one render. Workers snapshot it into the edit document so a render is
 // reproducible without knowing which screen launched it.
 type EditRequest struct {
-	Format     string `json:"format"`
-	KillEffect string `json:"killEffect"`
-	Transition string `json:"transition"`
-	Intro      bool   `json:"intro"`
-	Outro      bool   `json:"outro"`
+	Format      string `json:"format"`
+	KillEffect  string `json:"killEffect"`
+	Transition  string `json:"transition"`
+	Intro       bool   `json:"intro"`
+	Outro       bool   `json:"outro"`
+	HookText    bool   `json:"hook_text"`
+	KillCounter bool   `json:"kill_counter"`
 	// IntroText and OutroText customize the intro/outro overlay card text.
 	// Setting either does not enable its bookend; Intro/Outro remain the
 	// switch, so a render can carry custom text while the bookend stays off.

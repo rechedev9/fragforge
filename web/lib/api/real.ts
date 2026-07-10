@@ -111,6 +111,8 @@ type EditRequestBody = {
   transition: EditConfig['transition'];
   intro: boolean;
   outro: boolean;
+  hook_text: boolean;
+  kill_counter: boolean;
   intro_text?: string;
   outro_text?: string;
 };
@@ -122,6 +124,8 @@ function buildEditRequest(edit: EditConfig): EditRequestBody {
     transition: edit.transition,
     intro: edit.intro,
     outro: edit.outro,
+    hook_text: edit.hookText,
+    kill_counter: edit.killCounter,
   };
   const introText = edit.introText?.trim();
   if (edit.intro && introText) body.intro_text = introText;

@@ -126,7 +126,7 @@ func TestNewComposeFinalTaskRoundtrip(t *testing.T) {
 
 func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	edit := renderplan.EditRequest{Format: renderplan.FormatLandscape16x9, KillEffect: renderplan.KillEffectVelocity, Transition: renderplan.TransitionWhip, Intro: true}
+	edit := renderplan.EditRequest{Format: renderplan.FormatLandscape16x9, KillEffect: renderplan.KillEffectVelocity, Transition: renderplan.TransitionWhip, Intro: true, HookText: true, KillCounter: true}
 	tk, err := NewRenderVariantTask(id, testRenderVariant, "", edit)
 	if err != nil {
 		t.Fatalf("NewRenderVariantTask error = %v", err)
@@ -147,6 +147,9 @@ func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	}
 	if payload.Edit != edit {
 		t.Errorf("Edit = %#v, want %#v", payload.Edit, edit)
+	}
+	if !strings.Contains(string(tk.Payload()), `"hook_text":true`) || !strings.Contains(string(tk.Payload()), `"kill_counter":true`) {
+		t.Errorf("payload missing automatic text fields: %s", tk.Payload())
 	}
 }
 

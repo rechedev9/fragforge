@@ -47,6 +47,8 @@ export const DEFAULT_EDIT_CONFIG: EditConfig = {
   transition: 'flash',
   intro: false,
   outro: false,
+  hookText: false,
+  killCounter: false,
   introText: '',
   outroText: '',
 };
@@ -124,6 +126,8 @@ export function coerceEditConfig(value: unknown): EditConfig {
     transition: isTransition(raw.transition) ? raw.transition : DEFAULT_EDIT_CONFIG.transition,
     intro: raw.intro === true,
     outro: raw.outro === true,
+    hookText: raw.hookText === true,
+    killCounter: raw.killCounter === true,
     introText: coerceBookendText(raw.introText),
     outroText: coerceBookendText(raw.outroText),
   };

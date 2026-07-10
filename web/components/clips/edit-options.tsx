@@ -1,6 +1,6 @@
 'use client';
 
-import { PanelTop, Sparkles, Zap } from 'lucide-react';
+import { ListOrdered, PanelTop, Sparkles, Type, Zap } from 'lucide-react';
 import { BOOKEND_TEXT_MAX_LENGTH, type EditConfig } from '@/lib/api/types';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Input } from '@/components/ui/input';
@@ -73,6 +73,32 @@ export function EditOptions({ value, onChange, disabled = false }: EditOptionsPr
               {item.label}
             </ToggleGroupItem>
           ))}
+        </ToggleGroup>
+      </OptionBlock>
+
+      <OptionBlock label="TEXTO AUTOMÁTICO" className="md:col-span-2">
+        <ToggleGroup
+          type="multiple"
+          value={[value.hookText ? 'hook-text' : '', value.killCounter ? 'kill-counter' : ''].filter(Boolean)}
+          onValueChange={(items) =>
+            onChange({
+              ...value,
+              hookText: items.includes('hook-text'),
+              killCounter: items.includes('kill-counter'),
+            })
+          }
+          disabled={disabled}
+          variant="outline"
+          className="flex-wrap"
+        >
+          <ToggleGroupItem value="hook-text" aria-label="Título automático">
+            <Type className="size-4" />
+            Título automático
+          </ToggleGroupItem>
+          <ToggleGroupItem value="kill-counter" aria-label="Contador de kills">
+            <ListOrdered className="size-4" />
+            Contador de kills
+          </ToggleGroupItem>
         </ToggleGroup>
       </OptionBlock>
 

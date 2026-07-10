@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/rechedev9/fragforge/internal/mediafont"
 )
 
 // effectColorPattern matches the FFmpeg colour forms accepted from Lua presets:
@@ -528,12 +530,15 @@ func ffmpegColor(raw string) string {
 	}
 }
 
-// drawtextFontFile resolves the drawtext font path once per process. The font
-// location is invariant for a run, so the filesystem probe in
-// defaultDrawtextFontFile must not repeat for every drawtext clause and clip.
+// drawtextFontFile resolves the embedded media font once per process. If cache
+// materialization fails, defaultDrawtextFontFile retains the prior system-font
+// fallback without repeating filesystem probes for every drawtext clause.
 var drawtextFontFile = sync.OnceValue(defaultDrawtextFontFile)
 
 func defaultDrawtextFontFile() string {
+	if fontPath, err := mediafont.Materialize(); err == nil {
+		return fontPath
+	}
 	if runtime.GOOS != "windows" {
 		return ""
 	}
@@ -548,13 +553,15 @@ func defaultDrawtextFontFile() string {
 	return ""
 }
 
-// boldDrawtextFontFile resolves a bold/heavy font for viral-style titles,
-// once per process like drawtextFontFile. It degrades gracefully: if none of
-// the bold candidates exist it falls back to the regular drawtext font
-// rather than failing the render.
+// boldDrawtextFontFile resolves the same deterministic font for viral-style
+// titles. It degrades gracefully to the prior bold system candidates if the
+// embedded font cannot be materialized.
 var boldDrawtextFontFile = sync.OnceValue(defaultBoldDrawtextFontFile)
 
 func defaultBoldDrawtextFontFile() string {
+	if fontPath, err := mediafont.Materialize(); err == nil {
+		return fontPath
+	}
 	if runtime.GOOS != "windows" {
 		return drawtextFontFile()
 	}

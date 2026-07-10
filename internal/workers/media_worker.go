@@ -26,6 +26,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
+	"github.com/rechedev9/fragforge/internal/mediafont"
 	"github.com/rechedev9/fragforge/internal/recording"
 	"github.com/rechedev9/fragforge/internal/renderplan"
 	"github.com/rechedev9/fragforge/internal/storage"
@@ -786,7 +787,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if plan.StreamerBanner.Nick != "" {
 		bannerFontPath = streamclips.FindBannerFont()
 		if bannerFontPath == "" {
-			return fmt.Errorf("render streamer banner: no supported bold system font found")
+			return fmt.Errorf("render streamer banner: embedded font unavailable and no supported fallback font found")
 		}
 	}
 
@@ -912,6 +913,10 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 	sort.SliceStable(cues, func(i, j int) bool {
 		return cues[i].StartSeconds < cues[j].StartSeconds
 	})
+	fontPath, err := mediafont.Materialize()
+	if err != nil {
+		return "", "", fmt.Errorf("materialize caption font for clip %s: %w", clipID, err)
+	}
 
 	assContent, err := captions.BuildASS(cues, captions.DefaultStyle())
 	if err != nil {
@@ -936,7 +941,7 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 	args := []string{
 		"-y",
 		"-i", clipPath,
-		"-vf", captions.BurnFilter(assPath),
+		"-vf", captions.BurnFilter(assPath, filepath.Dir(fontPath)),
 		"-c:v", "libx264",
 		"-preset", defaultStreamCaptionPreset,
 		"-crf", strconv.Itoa(defaultStreamCaptionCRF),
@@ -1163,6 +1168,8 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 		"--output-format", edit.Format,
 		"--kill-effect", edit.KillEffect,
 		"--transition", edit.Transition,
+		"--hook=" + strconv.FormatBool(edit.HookText),
+		"--kill-counter=" + strconv.FormatBool(edit.KillCounter),
 	}
 	args = append(args, compileSegmentsArgs(recording.SegmentIDs(recordingResult))...)
 	if edit.Intro {

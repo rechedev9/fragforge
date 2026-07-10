@@ -92,8 +92,89 @@ function introInput(page: Page) {
 function outroInput(page: Page) {
   return page.getByLabel('Texto de cierre');
 }
+function hookTextToggle(page: Page) {
+  return page.getByRole('button', { name: 'Título automático' });
+}
+function killCounterToggle(page: Page) {
+  return page.getByRole('button', { name: 'Contador de kills' });
+}
 
 test.describe('create-reel bookend text', () => {
+  test('automatic text controls default off and serialize false', async ({ page }) => {
+    const jobStatus = { value: 'parsed' };
+    await gotoCreateReel(page, jobStatus);
+
+    await expect(hookTextToggle(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(killCounterToggle(page)).toHaveAttribute('aria-pressed', 'false');
+
+    const captured: {
+      recordBody?: { edit?: Record<string, unknown> };
+      renderBody?: { edit?: Record<string, unknown> };
+    } = {};
+    await page.route('**/api/demos/*/record', (route) => {
+      captured.recordBody = JSON.parse(route.request().postData() ?? '{}');
+      jobStatus.value = 'recorded';
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    await page.route('**/api/demos/*/renders/*', async (route: Route) => {
+      if (route.request().method() === 'POST') {
+        captured.renderBody = JSON.parse(route.request().postData() ?? '{}');
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'queued' }) });
+      }
+      return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) });
+    });
+
+    await page.getByRole('button', { name: 'FORJAR REEL' }).click();
+    await page.waitForURL(/\/videos/);
+
+    await expect.poll(() => captured.recordBody !== undefined, { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => captured.renderBody !== undefined, { timeout: 30_000 }).toBe(true);
+    expect(captured.recordBody?.edit?.hook_text).toBe(false);
+    expect(captured.recordBody?.edit?.kill_counter).toBe(false);
+    expect(captured.renderBody?.edit?.hook_text).toBe(false);
+    expect(captured.renderBody?.edit?.kill_counter).toBe(false);
+  });
+
+  test('automatic hook and kill counter toggle independently and serialize true', async ({ page }) => {
+    const jobStatus = { value: 'parsed' };
+    await gotoCreateReel(page, jobStatus);
+
+    await hookTextToggle(page).click();
+    await expect(hookTextToggle(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(killCounterToggle(page)).toHaveAttribute('aria-pressed', 'false');
+
+    await killCounterToggle(page).click();
+    await expect(hookTextToggle(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(killCounterToggle(page)).toHaveAttribute('aria-pressed', 'true');
+
+    const captured: {
+      recordBody?: { edit?: Record<string, unknown> };
+      renderBody?: { edit?: Record<string, unknown> };
+    } = {};
+    await page.route('**/api/demos/*/record', (route) => {
+      captured.recordBody = JSON.parse(route.request().postData() ?? '{}');
+      jobStatus.value = 'recorded';
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    await page.route('**/api/demos/*/renders/*', async (route: Route) => {
+      if (route.request().method() === 'POST') {
+        captured.renderBody = JSON.parse(route.request().postData() ?? '{}');
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'queued' }) });
+      }
+      return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) });
+    });
+
+    await page.getByRole('button', { name: 'FORJAR REEL' }).click();
+    await page.waitForURL(/\/videos/);
+
+    await expect.poll(() => captured.recordBody !== undefined, { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => captured.renderBody !== undefined, { timeout: 30_000 }).toBe(true);
+    expect(captured.recordBody?.edit?.hook_text).toBe(true);
+    expect(captured.recordBody?.edit?.kill_counter).toBe(true);
+    expect(captured.renderBody?.edit?.hook_text).toBe(true);
+    expect(captured.renderBody?.edit?.kill_counter).toBe(true);
+  });
+
   test('landscape format is sent with the record request', async ({ page }) => {
     const jobStatus = { value: 'parsed' };
     await gotoCreateReel(page, jobStatus);

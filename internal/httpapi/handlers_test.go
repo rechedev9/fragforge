@@ -1376,7 +1376,7 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(`{"music":"track01","edit":{"format":"landscape-16x9","killEffect":"velocity","transition":"whip","intro":true,"outro":true,"intro_text":"Watch this ace","outro_text":"follow for more"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(`{"music":"track01","edit":{"format":"landscape-16x9","killEffect":"velocity","transition":"whip","intro":true,"outro":true,"hook_text":true,"kill_counter":true,"intro_text":"Watch this ace","outro_text":"follow for more"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
@@ -1405,6 +1405,9 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	}
 	if payload.Edit.IntroText != "Watch this ace" || payload.Edit.OutroText != "follow for more" {
 		t.Fatalf("edit bookend text = %q / %q, want round-tripped custom text", payload.Edit.IntroText, payload.Edit.OutroText)
+	}
+	if !payload.Edit.HookText || !payload.Edit.KillCounter {
+		t.Fatalf("edit automatic text = hook %v / counter %v, want true / true", payload.Edit.HookText, payload.Edit.KillCounter)
 	}
 	if len(queue.options) != 1 || !hasAsynqOption(queue.options[0], "Unique(") {
 		t.Fatalf("enqueue options = %#v, want Unique option", queue.options)

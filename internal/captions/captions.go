@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/rechedev9/fragforge/internal/mediafont"
 )
 
 // WordCue is a single spoken word with its start and end time, in seconds
@@ -54,10 +56,7 @@ type Style struct {
 // layout, clear of platform UI (share/like buttons, captions safe area).
 func DefaultStyle() Style {
 	return Style{
-		// "Arial Black" gives the bold, blocky TikTok caption look. If the
-		// font is not installed, libass falls back to the nearest bold
-		// sans-serif rather than failing the render.
-		FontName:        "Arial Black",
+		FontName:        mediafont.FamilyName,
 		FontSize:        72,
 		PrimaryColour:   "&H00FFFFFF", // opaque white
 		HighlightColour: "&H0000FFFF", // opaque yellow (BGR: 00 FF FF)
@@ -247,9 +246,9 @@ func escapeASSText(word string) string {
 }
 
 // BurnFilter returns the FFmpeg video filter clause that burns in the ASS
-// subtitle track at assPath, e.g. for use in a -vf/-filter_complex chain.
-func BurnFilter(assPath string) string {
-	return fmt.Sprintf("ass='%s'", escapeFilterPath(assPath))
+// subtitle track and directs libass to the bundled font's directory.
+func BurnFilter(assPath, fontsDir string) string {
+	return fmt.Sprintf("ass='%s':fontsdir='%s'", escapeFilterPath(assPath), escapeFilterPath(fontsDir))
 }
 
 // escapeFilterPath escapes a filesystem path for use as a quoted FFmpeg

@@ -26,6 +26,8 @@ export type EditConfig = {
   transition: TransitionStyle;
   intro: boolean;
   outro: boolean;
+  hookText: boolean;
+  killCounter: boolean;
   /** Optional intro headline override, shown only while `intro` is on; empty = generated headline. */
   introText?: string;
   /** Optional outro text override, shown only while `outro` is on; empty = "FragForge". */

@@ -13,6 +13,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"github.com/rechedev9/fragforge/internal/captions"
+	"github.com/rechedev9/fragforge/internal/mediafont"
 	"github.com/rechedev9/fragforge/internal/streamclips"
 	"github.com/rechedev9/fragforge/internal/tasks"
 	"github.com/rechedev9/fragforge/internal/vodfetch"
@@ -250,8 +251,8 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 		t.Fatalf("runner calls = %d, want 2 (render + caption burn)", len(runner.calls))
 	}
 	burnArgs := runner.calls[1].args
-	if got := argValue(burnArgs, "-vf"); !strings.HasPrefix(got, "ass=") {
-		t.Fatalf("caption burn -vf = %q, want an ass= filter", got)
+	if got := argValue(burnArgs, "-vf"); !strings.HasPrefix(got, "ass=") || !strings.Contains(got, ":fontsdir='") {
+		t.Fatalf("caption burn -vf = %q, want an ass= filter with fontsdir", got)
 	}
 	if out := burnArgs[len(burnArgs)-1]; !strings.HasSuffix(out, "clip-001_captioned.mp4") {
 		t.Fatalf("caption burn output = %q, want a clip-001_captioned.mp4 path", out)
@@ -274,6 +275,9 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	}
 	if !strings.Contains(string(ass), `Dialogue: 0,0:00:00.00,0:00:01.00,Karaoke,,0,0,0,,{\k50}nice {\k25}gg`) {
 		t.Fatalf("caption artifact does not order cues chronologically: %s", ass)
+	}
+	if !strings.Contains(string(ass), "Style: Karaoke,"+mediafont.FamilyName+",") {
+		t.Fatalf("caption artifact does not use %s: %s", mediafont.FamilyName, ass)
 	}
 
 	resultKey, err := streamclips.RenderResultKey(id, streamclips.VariantStreamer4060)

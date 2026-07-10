@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/rechedev9/fragforge/internal/mediafont"
 )
 
 const (
@@ -183,10 +185,13 @@ func streamerBannerFilter(layout LayoutVariant, banner StreamerBannerPlan, fontP
 	)
 }
 
-// FindBannerFont returns the first supported bold system font available on
-// the current host. An explicit font file avoids drawtext's dependency on a
-// working Fontconfig installation, which is commonly absent on Windows.
+// FindBannerFont prefers the bundled Montserrat ExtraBold used across all
+// generated text. System fonts remain an exceptional fallback when the
+// embedded font cannot be written to the user cache.
 func FindBannerFont() string {
+	if fontPath, err := mediafont.Materialize(); err == nil {
+		return fontPath
+	}
 	var candidates []string
 	switch runtime.GOOS {
 	case "windows":
