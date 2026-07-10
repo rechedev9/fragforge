@@ -6,7 +6,7 @@
   "author": "FragForge",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "test:unit": "node --test \"src/**/*.test.ts\"",
@@ -48,10 +48,6 @@
       {
         "from": "build-resources/music",
         "to": "music"
-      },
-      {
-        "from": "build-resources/hlae-patch",
-        "to": "hlae-patch"
       }
     ],
     "win": {

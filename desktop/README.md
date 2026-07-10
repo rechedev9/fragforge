@@ -21,22 +21,18 @@ once per install and persisted in `<userData>/ports.json`; the web port in
 particular must stay stable across launches because the reel library lives in
 the browser's `localStorage`, which is keyed by origin (`host:port`).
 
-On first boot the app provisions HLAE, FFmpeg, and yt-dlp (~110 MB total) into
-`<userData>/tools`, each verified against a pinned sha256 digest, plus the
-music catalog; every download is best-effort, so an offline first boot just
-leaves that feature unconfigured until the next launch. The window lands on
-`/matches` (the app shell/dashboard, not a single flow), since Studio has both
-the demo-upload path and the Twitch stream-clips path.
+On first boot the app provisions the official HLAE 2.191.0 release, FFmpeg, and
+yt-dlp (~110 MB total) into `<userData>/tools`, each verified against a pinned
+sha256 digest, plus the music catalog. Every download is best-effort, so an
+offline first boot just leaves that feature unconfigured until the next launch.
+The HLAE version is intentionally fixed instead of following the latest release
+so every desktop build uses the same official package. The window
+lands on `/matches` (the app shell/dashboard, not a single flow), since Studio
+has both the demo-upload path and the Twitch stream-clips path.
 
-HLAE 2.190.2 receives the capture-tested FragForge Source 2 hook bundled under
-`resources/hlae-patch`. Studio verifies its SHA-256 before and after installing
-it, preserves the official hook, and never applies it to a different HLAE
-version. The exact AdvancedFX source patch, license, and third-party notices
-ship beside the DLL.
-
-Capture still needs CS2 + HLAE installed on the machine (Windows + GPU); the app
-only removes the setup friction, not that requirement. Job data (demos,
-artifacts) is written under the per-user app data dir, not Program Files.
+Capture still needs CS2 installed on the machine (Windows + GPU); Studio installs
+HLAE automatically. Job data (demos, artifacts) is written under the per-user
+app data dir, not Program Files.
 
 ## Build the installer (on Windows)
 

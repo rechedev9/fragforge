@@ -2,7 +2,6 @@
 //   build-resources/bin/   -> zv.exe, zv-orchestrator.exe, zv-editor.exe (+ zv-recorder.exe)
 //   build-resources/web/   -> the Next.js standalone server, ready to run
 //   build-resources/music/ -> catalog.json (track metadata; audio is downloaded on first boot)
-//   build-resources/hlae-patch/ -> capture-tested Source 2 hook + corresponding source
 //
 // The Next standalone output does NOT include .next/static or public, so we copy
 // them next to server.js the same way the web Dockerfile does. Cross-platform
@@ -19,7 +18,6 @@ const repo = join(desktop, '..');
 const web = join(repo, 'web');
 const bin = join(repo, 'bin');
 const out = join(desktop, 'build-resources');
-const hlaePatch = join(desktop, 'resources', 'hlae-patch');
 
 // zv-orchestrator.exe is the backend main.js spawns (directly, not via `zv
 // serve`, so quitting the app kills the real server). zv-editor.exe must sit
@@ -36,14 +34,6 @@ for (const required of [zvExe, zvOrchestrator, zvEditor]) {
     process.exit(1);
   }
 }
-for (const required of ['AfxHookSource2.dll', 'SOURCE.patch', 'LICENSE', 'README.md', 'THIRDPARTY.yml']) {
-  const file = join(hlaePatch, required);
-  if (!existsSync(file)) {
-    console.error(`\nmissing ${file}\nThe verified HLAE patch bundle is incomplete.\n`);
-    process.exit(1);
-  }
-}
-
 // electron-builder picks up build/icon.ico automatically (see desktop/README.md);
 // it does not fail loudly if it's missing, it just ships an installer with the
 // default Electron icon. Fail here instead, before the (slow) Next.js build
@@ -85,7 +75,6 @@ cpSync(zvOrchestrator, join(out, 'bin', 'zv-orchestrator.exe'));
 cpSync(zvEditor, join(out, 'bin', 'zv-editor.exe'));
 const recorder = join(bin, 'zv-recorder.exe');
 if (existsSync(recorder)) cpSync(recorder, join(out, 'bin', 'zv-recorder.exe'));
-cpSync(hlaePatch, join(out, 'hlae-patch'), { recursive: true });
 
 // Music: catalog.json plus any local-only audio (tracks without a downloadUrl,
 // e.g. the AI-generated ones). Remote CC0/CC-BY tracks are still downloaded by

@@ -75,7 +75,7 @@ const FEATURES: {
   {
     icon: Cpu,
     title: "Your GPU. Real CS2.",
-    body: "A verified HLAE hook drives CS2 locally and captures clean, high-fidelity POV footage instead of faking the moment.",
+    body: "The official HLAE release drives CS2 locally and captures clean, high-fidelity POV footage instead of faking the moment.",
     signal: "120 FPS CAPTURE",
     className: "md:col-span-5",
   },
@@ -98,7 +98,7 @@ const STEPS = [
 const REQUIREMENTS: { icon: LucideIcon; label: string; detail: string }[] = [
   { icon: MonitorCheck, label: "Windows 10 / 11", detail: "64-bit desktop" },
   { icon: Gamepad2, label: "Counter-Strike 2", detail: "Installed through Steam" },
-  { icon: Film, label: "HLAE", detail: "Installed and patched automatically" },
+  { icon: Film, label: "Official HLAE", detail: "Installed automatically" },
   { icon: Zap, label: "Dedicated GPU", detail: "Recommended for capture" },
   { icon: HardDrive, label: "~1 GB", detail: "Free disk space" },
 ];
