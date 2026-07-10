@@ -4,6 +4,9 @@ import { test, expect, type Page, request } from "@playwright/test";
 // must point at exactly this URL, and the URL must actually resolve.
 const DOWNLOAD_URL =
   "https://github.com/rechedev9/fragforge/releases/download/v1.0.1/FragForge.Studio.Setup.1.0.1.exe";
+const SOCIAL_TITLE = "Your CS2 frags, ready to post | FragForge";
+const SOCIAL_DESCRIPTION =
+  "Drop a CS2 demo. Pick your kills. Get a polished vertical Short — locally, free, and ready to upload.";
 
 function trackConsole(page: Page) {
   const errors: string[] = [];
@@ -65,6 +68,41 @@ test.describe("landing page", () => {
     await expect(page.getByText("ZERO CLOUD", { exact: true })).toBeVisible();
     await expect(page.getByText("REAL CAPTURE", { exact: true })).toBeVisible();
     await expect(page.getByText("POST READY", { exact: true })).toBeVisible();
+  });
+
+  test("publishes a concise large social card for Discord", async ({
+    page,
+    request: api,
+  }) => {
+    await page.goto("/", { waitUntil: "load" });
+
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
+      "content",
+      SOCIAL_TITLE,
+    );
+    await expect(
+      page.locator('meta[property="og:description"]'),
+    ).toHaveAttribute("content", SOCIAL_DESCRIPTION);
+    await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
+      "content",
+      "summary_large_image",
+    );
+
+    const imageUrl = await page
+      .locator('meta[property="og:image"]')
+      .getAttribute("content");
+    expect(imageUrl).not.toBeNull();
+
+    const parsedImageUrl = new URL(imageUrl ?? "", page.url());
+    const imageResponse = await api.get(
+      `${parsedImageUrl.pathname}${parsedImageUrl.search}`,
+    );
+    expect(imageResponse.status()).toBe(200);
+    expect(imageResponse.headers()["content-type"]).toContain("image/png");
+    const imageBody = await imageResponse.body();
+    expect(imageBody.subarray(1, 4).toString("ascii")).toBe("PNG");
+    expect(imageBody.readUInt32BE(16)).toBe(1200);
+    expect(imageBody.readUInt32BE(20)).toBe(630);
   });
 
   test("loads with zero console/page errors after settling", async ({

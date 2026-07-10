@@ -18,12 +18,13 @@ const shareTechMono = Share_Tech_Mono({
   display: "swap",
 });
 
+const SOCIAL_TITLE = "Your CS2 frags, ready to post | FragForge";
 const SITE_DESCRIPTION =
-  "FragForge Studio is a free Windows app that turns CS2 demo files into upload-ready 1080x1920 60fps vertical Shorts - captured with HLAE + CS2 and edited entirely on your own PC. No account, no uploads.";
+  "Drop a CS2 demo. Pick your kills. Get a polished vertical Short — locally, free, and ready to upload.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://fragforge.gravityroom.app"),
-  title: "FragForge Studio — Turn CS2 demos into viral Shorts",
+  title: SOCIAL_TITLE,
   description: SITE_DESCRIPTION,
   applicationName: "FragForge Studio",
   keywords: [
@@ -38,13 +39,13 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: "FragForge Studio",
-    title: "FragForge Studio — Turn CS2 demos into viral Shorts",
+    title: SOCIAL_TITLE,
     description: SITE_DESCRIPTION,
     url: "/",
   },
   twitter: {
     card: "summary_large_image",
-    title: "FragForge Studio — Turn CS2 demos into viral Shorts",
+    title: SOCIAL_TITLE,
     description: SITE_DESCRIPTION,
   },
 };
