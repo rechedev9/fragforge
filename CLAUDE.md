@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-`AGENTS.md` is auto-generated from this file by the `.githooks/pre-commit` hook, so both agents read identical instructions.
-Edit `CLAUDE.md` only.
-Do not edit `AGENTS.md` by hand; any direct change is overwritten on the next commit.
+`AGENTS.md` is a tracked symbolic link to this file, so both agents always read identical instructions.
+Edit `CLAUDE.md` only; never replace the `AGENTS.md` symlink with a regular file.
+The `.githooks/pre-commit` hook rejects commits when the symlink is missing or points anywhere other than `CLAUDE.md`.
 
 ## Project
 
@@ -98,9 +98,17 @@ Real `.dem` files are never committed, so the fixture stays local.
 
 ## Deployment
 
-There is no hosted deployment.
-FragForge ships as a Windows desktop `.exe` (Electron, `desktop/`) downloaded from the `landing/` site.
-"Deploying" a new version means building the installer (see `desktop/`'s own build docs) and publishing it - there is no server component to deploy.
+FragForge itself ships as a local Windows desktop `.exe` (Electron, `desktop/`); there is no hosted FragForge application or backend.
+
+The public marketing and download landing page is hosted on Vercel:
+
+- Production URL: `https://fragforge.gravityroom.app/`
+- Vercel project: `fragforge-landing`
+- Vercel team: `rechedevs-projects`
+- Vercel Root Directory: `landing/`
+- Canonical installer assets: GitHub Releases in `rechedev9/fragforge`
+
+Releasing a desktop version means building the installer, publishing the versioned asset to GitHub Releases, updating the landing download URL, and deploying the `landing/` project to Vercel production. Do not use the retired VPS landing deployment path or describe the landing host as undecided.
 
 ### Local Studio (web UI + local HLAE/CS2 capture)
 
