@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
@@ -24,7 +25,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tickMsg:
-		cmds := []tea.Cmd{tick()}
+		cmds := []tea.Cmd{m.tick()}
 		if m.mode == modeBrowse {
 			cmds = append(cmds, m.refreshCurrent())
 		}
@@ -77,6 +78,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case publishMsg:
+		m.busy = false
+		if m.mode == modePublish && msg.board.JobID == m.pub.jobID {
+			m.pub.board = msg.board
+			m.pub.loaded = true
+		}
+		return m, nil
+
 	case actionMsg:
 		m.busy = false
 		if msg.note != "" {
@@ -116,6 +125,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSegmentsKey(msg)
 	case modePreset:
 		return m.handlePresetKey(msg)
+	case modeStreamEdit:
+		return m.handleStreamEditKey(msg)
+	case modePublish:
+		return m.handlePublishKey(msg)
 	default:
 		return m.handleBrowseKey(msg)
 	}
@@ -178,6 +191,58 @@ func (m model) handleDemoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startRenderFlow()
 	case "d":
 		return m.downloadFinal()
+	case "P":
+		return m.openPublish()
+	}
+	return m, nil
+}
+
+// ---- overlays: publish board -----------------------------------------------
+
+// openPublish loads and shows the publish board for the focused job's ready
+// render variant (the terminal step: confirm artifacts are upload-ready and mark
+// the reel as uploaded).
+func (m model) openPublish() (tea.Model, tea.Cmd) {
+	job := m.focusedJob()
+	if job == nil {
+		return m, nil
+	}
+	if m.detail.render == nil || m.detail.render.Status != tuiclient.RenderReady {
+		m.errText = "publish is available once a render is ready"
+		return m, nil
+	}
+	m.pub = publishState{jobID: job.ID, variant: m.detail.render.Variant}
+	m.mode = modePublish
+	m.errText = ""
+	m.busy = true
+	return m, m.loadPublishBoard(job.ID, m.detail.render.Variant)
+}
+
+func (m model) handlePublishKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.mode = modeBrowse
+		return m, nil
+	case "r":
+		m.busy = true
+		return m, m.loadPublishBoard(m.pub.jobID, m.pub.variant)
+	case "m":
+		want := !m.pub.board.Uploaded
+		id, variant := m.pub.jobID, m.pub.variant
+		cl := m.cl
+		m.busy = true
+		return m, func() tea.Msg {
+			c, cancel := ctx()
+			defer cancel()
+			if err := cl.SetRenderUploaded(c, id, variant, want); err != nil {
+				return errMsg{err}
+			}
+			board, err := cl.GetRenderPublishBoard(c, id, variant)
+			if err != nil {
+				return errMsg{err}
+			}
+			return publishMsg{board: board}
+		}
 	}
 	return m, nil
 }
@@ -302,10 +367,119 @@ func (m model) handleStreamKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openPrompt(promptUploadStream, "path to a streamer .mp4 file", defaultUploadDir())
 	case "U":
 		return m.openPrompt(promptStreamURL, "source URL (needs yt-dlp on the host)", "")
+	case "e":
+		return m.openStreamEdit()
 	case "R", "enter":
 		return m.startStreamRender()
 	}
 	return m, nil
+}
+
+// ---- overlays: stream clip editor ------------------------------------------
+
+// openStreamEdit opens the clip-plan editor for the focused stream job, seeded
+// from its current edit plan so saving preserves the variant and crops.
+func (m model) openStreamEdit() (tea.Model, tea.Cmd) {
+	job := m.focusedStream()
+	if job == nil {
+		return m, nil
+	}
+	if m.streamDetail.plan == nil {
+		m.errText = "edit plan is not ready yet"
+		return m, nil
+	}
+	base := *m.streamDetail.plan
+	m.clipEd = clipEditor{
+		jobID:     job.ID,
+		basePlan:  base,
+		clips:     append([]tuiclient.ClipRange(nil), base.Clips...),
+		cursor:    0,
+		editIndex: -1,
+	}
+	m.mode = modeStreamEdit
+	m.errText = ""
+	return m, nil
+}
+
+func (m model) handleStreamEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.mode = modeBrowse
+		return m, nil
+	case "up", "k":
+		if m.clipEd.cursor > 0 {
+			m.clipEd.cursor--
+		}
+	case "down", "j":
+		if m.clipEd.cursor < len(m.clipEd.clips)-1 {
+			m.clipEd.cursor++
+		}
+	case "a":
+		m.clipEd.editIndex = -1
+		return m.openPrompt(promptClipRange, "start end [title]  e.g. 12 34 Ace on mirage", "")
+	case "e", "enter":
+		if len(m.clipEd.clips) == 0 {
+			return m, nil
+		}
+		c := m.clipEd.clips[m.clipEd.cursor]
+		m.clipEd.editIndex = m.clipEd.cursor
+		prefill := fmt.Sprintf("%g %g %s", c.StartSeconds, c.EndSeconds, c.Title)
+		return m.openPrompt(promptClipRange, "start end [title]", strings.TrimSpace(prefill))
+	case "d", "x":
+		if len(m.clipEd.clips) > 0 {
+			i := m.clipEd.cursor
+			m.clipEd.clips = append(m.clipEd.clips[:i], m.clipEd.clips[i+1:]...)
+			if m.clipEd.cursor >= len(m.clipEd.clips) {
+				m.clipEd.cursor = max(0, len(m.clipEd.clips)-1)
+			}
+		}
+	case "s":
+		return m.saveStreamPlan()
+	}
+	return m, nil
+}
+
+// applyClipRange parses a "start end [title]" line and adds or replaces a clip
+// in the editor, returning to the editor overlay.
+func (m model) applyClipRange(value string) (tea.Model, tea.Cmd) {
+	clip, err := parseClipRange(value)
+	if err != nil {
+		m.errText = err.Error()
+		m.mode = modeStreamEdit
+		return m, nil
+	}
+	if m.clipEd.editIndex >= 0 && m.clipEd.editIndex < len(m.clipEd.clips) {
+		clip.ID = m.clipEd.clips[m.clipEd.editIndex].ID
+		m.clipEd.clips[m.clipEd.editIndex] = clip
+		m.clipEd.cursor = m.clipEd.editIndex
+	} else {
+		clip.ID = fmt.Sprintf("c%d", len(m.clipEd.clips)+1)
+		m.clipEd.clips = append(m.clipEd.clips, clip)
+		m.clipEd.cursor = len(m.clipEd.clips) - 1
+	}
+	m.clipEd.editIndex = -1
+	m.mode = modeStreamEdit
+	m.errText = ""
+	return m, nil
+}
+
+// saveStreamPlan persists the edited clip list, preserving the base plan's
+// variant and crops, then closes the editor and refreshes.
+func (m model) saveStreamPlan() (tea.Model, tea.Cmd) {
+	if len(m.clipEd.clips) == 0 {
+		m.errText = "add at least one clip before saving"
+		return m, nil
+	}
+	plan := m.clipEd.basePlan
+	plan.Clips = append([]tuiclient.ClipRange(nil), m.clipEd.clips...)
+	id := m.clipEd.jobID
+	cl := m.cl
+	m.mode = modeBrowse
+	m.busy = true
+	return m, runAction(fmt.Sprintf("saved %d clip(s)", len(plan.Clips)), func(c context.Context) error {
+		_, err := cl.PutStreamEditPlan(c, id, plan)
+		return err
+	})
 }
 
 func (m model) startStreamRender() (tea.Model, tea.Cmd) {
@@ -424,14 +598,20 @@ func (m model) openPrompt(kind promptKind, placeholder, prefill string) (model, 
 }
 
 func (m model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// A clip-range prompt is a sub-overlay of the stream editor: cancelling or
+	// submitting returns to the editor, not the job list.
+	returnMode := modeBrowse
+	if m.promptKind == promptClipRange {
+		returnMode = modeStreamEdit
+	}
 	switch msg.String() {
 	case "esc":
-		m.mode = modeBrowse
+		m.mode = returnMode
 		m.prompt.Blur()
 		return m, nil
 	case "enter":
 		value := m.prompt.Value()
-		m.mode = modeBrowse
+		m.mode = returnMode
 		m.prompt.Blur()
 		if value == "" {
 			return m, nil
@@ -445,6 +625,9 @@ func (m model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) submitPrompt(value string) (tea.Model, tea.Cmd) {
 	cl := m.cl
+	if m.promptKind == promptClipRange {
+		return m.applyClipRange(value)
+	}
 	m.busy = true
 	switch m.promptKind {
 	case promptUploadDemo:

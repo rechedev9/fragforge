@@ -109,16 +109,21 @@ func (m model) hintBar() string {
 		return join(sep, keyHint("↑↓", "move"), keyHint("space", "toggle"), keyHint("a", "all"), keyHint("enter", "preset"), keyHint("esc", "back"))
 	case modePreset:
 		return join(sep, keyHint("↑↓", "preset"), keyHint("enter", "confirm"), keyHint("esc", "back"))
+	case modeStreamEdit:
+		return join(sep, keyHint("↑↓", "clip"), keyHint("a", "add"), keyHint("e", "edit"),
+			keyHint("d", "delete"), keyHint("s", "save"), keyHint("esc", "back"))
+	case modePublish:
+		return join(sep, keyHint("m", "toggle uploaded"), keyHint("r", "refresh"), keyHint("esc", "back"))
 	}
 	if m.screen == screenDemos {
 		return join(sep,
 			keyHint("↑↓", "nav"), keyHint("tab", "streams"), keyHint("u", "upload"),
 			keyHint("enter", "next step"), keyHint("r", "record"), keyHint("c", "compose"),
-			keyHint("R", "render"), keyHint("d", "download"), keyHint("q", "quit"))
+			keyHint("R", "render"), keyHint("d", "download"), keyHint("P", "publish"), keyHint("q", "quit"))
 	}
 	return join(sep,
 		keyHint("↑↓", "nav"), keyHint("tab", "demos"), keyHint("u", "upload"),
-		keyHint("U", "url"), keyHint("R", "render"), keyHint("q", "quit"))
+		keyHint("U", "url"), keyHint("e", "edit clips"), keyHint("R", "render"), keyHint("q", "quit"))
 }
 
 // ---- browse body -----------------------------------------------------------
@@ -304,7 +309,7 @@ func (m model) streamDetail_(w, h int) (string, string) {
 		}
 	}
 	b = append(b, "")
-	b = append(b, hintStyle.Render("press R to render (needs a ready clip + ffmpeg)"))
+	b = append(b, hintStyle.Render("press e to edit clips, R to render (needs ffmpeg)"))
 	return "Detail", strings.Join(b, "\n")
 }
 
@@ -325,6 +330,12 @@ func (m model) viewOverlay(bodyH int) string {
 	case modePreset:
 		title = "Pick a render preset"
 		content = m.presetView()
+	case modeStreamEdit:
+		title = "Edit clip plan"
+		content = m.clipEditorView()
+	case modePublish:
+		title = "Publish"
+		content = m.publishView()
 	default:
 		title = ""
 		content = ""
@@ -341,8 +352,72 @@ func (m model) promptTitle() string {
 		return "Upload a streamer clip (.mp4)"
 	case promptStreamURL:
 		return "Acquire a stream clip by URL"
+	case promptClipRange:
+		return "Clip range (start end [title], seconds)"
 	}
 	return "Input"
+}
+
+// publishView renders the publish board: artifact readiness per segment and
+// whether the reel has been marked uploaded.
+func (m model) publishView() string {
+	if !m.pub.loaded {
+		return itemDim.Render(m.spinner.View() + " loading publish board…")
+	}
+	b := m.pub.board
+	ready := checkboxOff.Render("not ready")
+	if b.RenderReady {
+		ready = checkboxOn.Render("ready")
+	}
+	uploaded := checkboxOff.Render("not uploaded")
+	if b.Uploaded {
+		uploaded = checkboxOn.Render("uploaded")
+	}
+	lines := []string{
+		labelStyle.Render("variant ") + b.Variant,
+		labelStyle.Render("render  ") + ready + "   " + uploaded,
+	}
+	if b.Error != "" {
+		lines = append(lines, errorStyle.Render("error   "+b.Error))
+	}
+	lines = append(lines, "", panelTitle.Render("Artifacts (video / cover / caption)"))
+	if len(b.Items) == 0 {
+		lines = append(lines, itemDim.Render("  (no items)"))
+	}
+	for _, it := range b.Items {
+		lines = append(lines, fmt.Sprintf("  %-10s %s %s %s",
+			shortID(it.SegmentID), mark(it.VideoReady), mark(it.CoverReady), mark(it.CaptionReady)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// mark renders a readiness tick or cross.
+func mark(ok bool) string {
+	if ok {
+		return checkboxOn.Render("✓")
+	}
+	return checkboxOff.Render("✗")
+}
+
+// clipEditorView renders the stream clip list being edited.
+func (m model) clipEditorView() string {
+	if len(m.clipEd.clips) == 0 {
+		return itemDim.Render("(no clips - press a to add one)")
+	}
+	var lines []string
+	for i, c := range m.clipEd.clips {
+		title := c.Title
+		if title == "" {
+			title = "(untitled)"
+		}
+		row := fmt.Sprintf("%-4s %6.1f - %-6.1f  %s", c.ID, c.StartSeconds, c.EndSeconds, title)
+		if i == m.clipEd.cursor {
+			lines = append(lines, itemSelected.Render("▌ "+row))
+		} else {
+			lines = append(lines, "  "+itemNormal.Render(row))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) segmentsView() string {
@@ -492,6 +567,8 @@ func nextHint(step tuiclient.Step) string {
 		return "→ press r to record segments"
 	case tuiclient.StepRender:
 		return "→ press R to render, c to compose, d to download"
+	case tuiclient.StepReady:
+		return "→ reel ready - press d to download, P to publish"
 	case tuiclient.StepRetry:
 		return "→ press r to retry recording"
 	default:

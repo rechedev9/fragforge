@@ -137,6 +137,20 @@ func (m *model) loadStreamDetail(id string) tea.Cmd {
 	}
 }
 
+// loadPublishBoard fetches the publish board for a ready render variant.
+func (m *model) loadPublishBoard(id, variant string) tea.Cmd {
+	cl := m.cl
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		board, err := cl.GetRenderPublishBoard(c, id, variant)
+		if err != nil {
+			return errMsg{err}
+		}
+		return publishMsg{board: board}
+	}
+}
+
 // runAction wraps a mutating client call, mapping its result to an actionMsg
 // (which triggers a refresh) or an errMsg.
 func runAction(note string, fn func(context.Context) error) tea.Cmd {
@@ -150,7 +164,7 @@ func runAction(note string, fn func(context.Context) error) tea.Cmd {
 	}
 }
 
-// tick schedules the next poll.
-func tick() tea.Cmd {
-	return tea.Tick(pollInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+// tick schedules the next poll at the model's poll interval.
+func (m model) tick() tea.Cmd {
+	return tea.Tick(m.pollInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }

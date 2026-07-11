@@ -39,6 +39,9 @@ type streamDetailMsg struct {
 	render *tuiclient.StreamRenderState
 }
 
+// publishMsg carries a freshly loaded publish board into the update loop.
+type publishMsg struct{ board tuiclient.PublishBoard }
+
 // actionMsg reports the outcome of a mutating action (parse, record, ...).
 type actionMsg struct {
 	note    string

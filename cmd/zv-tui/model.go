@@ -11,7 +11,11 @@ import (
 	"github.com/rechedev9/fragforge/internal/tuiclient"
 )
 
-const pollInterval = 2 * time.Second
+// defaultPollInterval is how often the browse screen re-fetches the active list
+// so async pipeline transitions (recording -> recorded, rendering -> ready)
+// surface without a keypress. It is copied into model.pollInterval at
+// construction so tests can dial it down instead of mutating a shared global.
+const defaultPollInterval = 2 * time.Second
 
 // fallbackRenderVariant is the default render variant name used until the preset
 // registry loads; "viral-60-clean" is the documented default. Once presets load
@@ -29,11 +33,13 @@ const (
 type mode int
 
 const (
-	modeBrowse   mode = iota // navigating a job list
-	modePrompt               // text-input overlay (upload path / URL)
-	modeRoster               // pick a player from the roster
-	modeSegments             // multi-select segments to record
-	modePreset               // pick a render preset
+	modeBrowse     mode = iota // navigating a job list
+	modePrompt                 // text-input overlay (upload path / URL)
+	modeRoster                 // pick a player from the roster
+	modeSegments               // multi-select segments to record
+	modePreset                 // pick a render preset
+	modeStreamEdit             // edit a stream job's clip plan
+	modePublish                // publish board for a ready render
 )
 
 type promptKind int
@@ -42,6 +48,7 @@ const (
 	promptUploadDemo promptKind = iota
 	promptUploadStream
 	promptStreamURL
+	promptClipRange // "start end [title]" for one clip of a stream edit plan
 )
 
 type presetPurpose int
@@ -75,11 +82,23 @@ type segmentPicker struct {
 	selected map[int]bool
 }
 
+// clipEditor is the in-progress edit of a stream job's clip list. It keeps the
+// base plan (variant, crops) so saving preserves everything the TUI does not
+// expose, only replacing the Clips. editIndex is -1 while adding a new clip.
+type clipEditor struct {
+	jobID     string
+	basePlan  tuiclient.StreamEditPlan
+	clips     []tuiclient.ClipRange
+	cursor    int
+	editIndex int
+}
+
 type model struct {
-	cl     *tuiclient.Client
-	width  int
-	height int
-	ready  bool
+	cl           *tuiclient.Client
+	pollInterval time.Duration
+	width        int
+	height       int
+	ready        bool
 
 	screen screen
 	mode   mode
@@ -120,6 +139,16 @@ type model struct {
 	segs          segmentPicker
 	presetCursor  int
 	presetPurpose presetPurpose
+	clipEd        clipEditor
+	pub           publishState
+}
+
+// publishState is the loaded publish board for a ready render variant.
+type publishState struct {
+	jobID   string
+	variant string
+	board   tuiclient.PublishBoard
+	loaded  bool
 }
 
 func newModel(cl *tuiclient.Client, initialDrops []string) model {
@@ -133,6 +162,7 @@ func newModel(cl *tuiclient.Client, initialDrops []string) model {
 
 	return model{
 		cl:             cl,
+		pollInterval:   defaultPollInterval,
 		initialDrops:   initialDrops,
 		screen:         screenDemos,
 		mode:           modeBrowse,
@@ -149,7 +179,7 @@ func (m model) Init() tea.Cmd {
 		m.loadPresets(),
 		m.loadJobs(),
 		m.loadStreams(),
-		tick(),
+		m.tick(),
 	}
 	drops, _ := m.dropCmds(m.initialDrops)
 	cmds = append(cmds, drops...)
