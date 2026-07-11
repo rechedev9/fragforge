@@ -42,7 +42,7 @@ export function RenderingCard({ video }: { video: Video }) {
 
   let accentClass: string;
   if (isCapturing) {
-    accentClass = 'border-stream/45 [--neon-bracket-color:var(--stream)]';
+    accentClass = 'neon-brackets border-stream/45 [--neon-bracket-color:var(--stream)]';
   } else if (isComposing) {
     accentClass = 'border-primary/40';
   } else {
@@ -101,7 +101,7 @@ export function RenderingCard({ video }: { video: Video }) {
   return (
     <div
       className={cn(
-        'studio-panel studio-panel-interactive neon-brackets flex h-full flex-col',
+        'studio-panel studio-panel-interactive flex h-full flex-col',
         accentClass,
       )}
     >

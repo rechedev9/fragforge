@@ -86,7 +86,7 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
     <>
       <article
         data-slot="card"
-        className="studio-panel studio-panel-raised studio-panel-interactive neon-brackets flex h-full flex-col"
+        className="studio-panel studio-panel-raised studio-panel-interactive flex h-full flex-col"
       >
         <div className="group relative aspect-video w-full overflow-hidden border-b border-border bg-muted">
           {video.thumbnailUrl ? (
@@ -169,7 +169,7 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
                 type="button"
                 onClick={publish}
                 disabled={publishing}
-                className="neon-notch min-h-10 bg-primary px-3 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                className="rounded-md min-h-10 bg-primary px-3 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
               >
                 {publishing ? 'PUBLICANDO…' : 'PUBLICAR'}
               </button>

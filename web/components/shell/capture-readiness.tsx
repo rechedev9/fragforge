@@ -73,7 +73,7 @@ export function CaptureReadiness() {
           type="button"
           aria-label={`Captura: ${meta.label}`}
           title={`Captura: ${meta.label}`}
-          className="studio-panel studio-panel-interactive neon-brackets relative w-full px-3.5 py-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar group-data-[collapsible=icon]:grid group-data-[collapsible=icon]:size-10 group-data-[collapsible=icon]:place-items-center group-data-[collapsible=icon]:p-0"
+          className="studio-panel studio-panel-interactive relative w-full px-3.5 py-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar group-data-[collapsible=icon]:grid group-data-[collapsible=icon]:size-10 group-data-[collapsible=icon]:place-items-center group-data-[collapsible=icon]:p-0"
         >
           <div className="group-data-[collapsible=icon]:hidden">
             <div className="flex items-center justify-between gap-3 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.16em]">

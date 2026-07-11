@@ -12,7 +12,7 @@
  */
 
 :root {
-  --radius: 0rem;
+  --radius: 0.625rem;
 
   /* Fuentes compuestas en runtime. `@theme inline` (abajo) solo inlina valores
    * en las utilidades font-* y NO emite estas variables, así que los usos
@@ -48,8 +48,8 @@
   --surface: oklch(0.164 0.026 263.5);
   --surface-raised: oklch(0.205 0.038 262.5);
   --border-strong: oklch(0.811 0.135 207.6 / 34%);
-  --border: oklch(0.811 0.135 207.6 / 20%); /* hairline cian */
-  --input: oklch(0.811 0.135 207.6 / 34%);
+  --border: oklch(0.32 0.03 261 / 55%); /* hairline navy neutro */
+  --input: oklch(0.36 0.03 261 / 70%);
   --ring: oklch(0.811 0.135 207.6);
 
   --chart-1: oklch(0.811 0.135 207.6); /* cian #22d9ee */
@@ -64,7 +64,7 @@
   --sidebar-primary-foreground: oklch(0.173 0.027 233.6);
   --sidebar-accent: oklch(0.214 0.05 265.4); /* #0e1830 */
   --sidebar-accent-foreground: oklch(0.983 0.011 226);
-  --sidebar-border: oklch(0.811 0.135 207.6 / 12%);
+  --sidebar-border: oklch(0.32 0.03 261 / 45%);
   --sidebar-ring: oklch(0.811 0.135 207.6);
 }
 
@@ -93,8 +93,8 @@
   --surface: oklch(0.164 0.026 263.5);
   --surface-raised: oklch(0.205 0.038 262.5);
   --border-strong: oklch(0.811 0.135 207.6 / 34%);
-  --border: oklch(0.811 0.135 207.6 / 20%);
-  --input: oklch(0.811 0.135 207.6 / 34%);
+  --border: oklch(0.32 0.03 261 / 55%);
+  --input: oklch(0.36 0.03 261 / 70%);
   --ring: oklch(0.811 0.135 207.6);
 
   --chart-1: oklch(0.811 0.135 207.6);
@@ -109,7 +109,7 @@
   --sidebar-primary-foreground: oklch(0.173 0.027 233.6);
   --sidebar-accent: oklch(0.214 0.05 265.4);
   --sidebar-accent-foreground: oklch(0.983 0.011 226);
-  --sidebar-border: oklch(0.811 0.135 207.6 / 12%);
+  --sidebar-border: oklch(0.32 0.03 261 / 45%);
   --sidebar-ring: oklch(0.811 0.135 207.6);
 }
 
@@ -218,23 +218,6 @@
 }
 
 /*
- * .neon-scanlines — capa global de scanlines (GrainOverlay). Fija, no
- * interactiva y casi invisible: líneas blancas de 1px cada 4px. Estática,
- * sin animación.
- */
-.neon-scanlines {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  pointer-events: none;
-  background-image: repeating-linear-gradient(
-    0deg,
-    rgba(255, 255, 255, 0.008) 0 1px,
-    transparent 1px 4px
-  );
-}
-
-/*
  * .neon-brackets — corner brackets del HUD en las esquinas superior-izquierda
  * e inferior-derecha. Requiere `position: relative` (o cualquier posicionado)
  * en el elemento. El color viene de `--neon-bracket-color` (cian por
@@ -310,6 +293,7 @@
   .studio-panel {
     position: relative;
     border: 1px solid var(--border);
+    border-radius: var(--radius);
     background:
       linear-gradient(135deg, color-mix(in oklch, var(--primary) 3%, transparent), transparent 46%),
       color-mix(in oklch, var(--surface) 94%, transparent);

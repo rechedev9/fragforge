@@ -84,7 +84,7 @@ export function AppSidebar() {
                     isActive={active}
                     tooltip={item.label}
                     className={cn(
-                      'h-12 gap-3 rounded-none px-6 font-[family-name:var(--font-display)] text-[13px] font-semibold uppercase tracking-[0.06em] text-sidebar-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-2.5!',
+                      'h-12 gap-3 rounded-md px-6 font-[family-name:var(--font-display)] text-[13px] font-semibold uppercase tracking-[0.06em] text-sidebar-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-2.5!',
                       // Neutralize the shadcn active defaults so the HUD
                       // gradient + inset bar below are what actually shows.
                       'data-[active=true]:bg-transparent data-[active=true]:font-semibold',

@@ -72,9 +72,9 @@ export function FeedCard({ item }: FeedCardProps) {
 
         <div className="flex items-center justify-between gap-3 border-t border-border/65 pt-3">
           <div className="flex min-w-0 items-center gap-2.5">
-            <Avatar className="size-8 rounded-none border border-border-strong">
+            <Avatar className="size-8 rounded-md border border-border-strong">
               <AvatarImage src={item.authorAvatarUrl} alt={item.author} />
-              <AvatarFallback className="rounded-none text-xs">{initials}</AvatarFallback>
+              <AvatarFallback className="rounded-md text-xs">{initials}</AvatarFallback>
             </Avatar>
             <span className="min-w-0 truncate font-[family-name:var(--font-mono)] text-xs tracking-[0.08em] text-muted-foreground">
               @{item.author}

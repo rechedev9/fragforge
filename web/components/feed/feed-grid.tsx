@@ -30,15 +30,15 @@ export function FeedGridSkeleton() {
     >
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="studio-panel overflow-hidden">
-          <Skeleton className="aspect-video w-full rounded-none" />
+          <Skeleton className="aspect-video w-full rounded-lg" />
           <div className="flex flex-col gap-4 p-4">
             <div className="flex flex-col gap-2">
-              <Skeleton className="h-5 w-3/4 rounded-none" />
-              <Skeleton className="h-3 w-1/3 rounded-none" />
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-3 w-1/3" />
             </div>
             <div className="flex items-center justify-between gap-4">
-              <Skeleton className="h-8 w-28 rounded-none" />
-              <Skeleton className="h-11 w-20 rounded-none" />
+              <Skeleton className="h-8 w-28" />
+              <Skeleton className="h-11 w-20" />
             </div>
           </div>
         </div>

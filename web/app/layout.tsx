@@ -1,7 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Chakra_Petch, Share_Tech_Mono } from 'next/font/google';
-import { GrainOverlay } from '@/components/brand/grain-overlay';
 import { Toaster } from '@/components/ui/sonner';
 
 const chakraPetch = Chakra_Petch({
@@ -32,7 +31,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es" className={`dark ${fontVars}`}>
       <body className="neon-grid bg-background text-foreground antialiased">
         {children}
-        <GrainOverlay />
         <Toaster />
       </body>
     </html>

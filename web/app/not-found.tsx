@@ -27,7 +27,7 @@ export default function NotFound() {
       <div className="relative mt-2 flex flex-wrap items-center justify-center gap-3">
         <Link
           href="/matches"
-          className="neon-notch neon-glow inline-flex h-10 items-center gap-2 bg-primary px-6 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
+          className="neon-glow rounded-md inline-flex h-10 items-center gap-2 bg-primary px-6 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
         >
           Volver a partidas
         </Link>
