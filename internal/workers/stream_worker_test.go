@@ -356,6 +356,7 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 		cfg            StreamRenderWorkerConfig
 		wantWhisper    bool
 		wantGroq       bool
+		wantXAI        bool
 		wantCaptioning bool
 	}{
 		{
@@ -363,7 +364,16 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 			cfg:            StreamRenderWorkerConfig{},
 			wantWhisper:    false,
 			wantGroq:       false,
+			wantXAI:        false,
 			wantCaptioning: false,
+		},
+		{
+			name:           "xai only",
+			cfg:            StreamRenderWorkerConfig{XAIAPIKey: "xai_test"},
+			wantWhisper:    false,
+			wantGroq:       false,
+			wantXAI:        true,
+			wantCaptioning: true,
 		},
 		{
 			name:           "whisper only",
@@ -410,6 +420,9 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 			if got := tt.cfg.groqConfigured(); got != tt.wantGroq {
 				t.Errorf("groqConfigured() = %v, want %v", got, tt.wantGroq)
 			}
+			if got := tt.cfg.xaiConfigured(); got != tt.wantXAI {
+				t.Errorf("xaiConfigured() = %v, want %v", got, tt.wantXAI)
+			}
 			if got := tt.cfg.captionsConfigured(); got != tt.wantCaptioning {
 				t.Errorf("captionsConfigured() = %v, want %v", got, tt.wantCaptioning)
 			}
@@ -447,6 +460,39 @@ func TestNewStreamRenderWorker_PrefersGroqWhenBothConfigured(t *testing.T) {
 	// to extract audio with ffmpeg (or reach the network), never that message.
 	if strings.Contains(err.Error(), "whisper binary not found") {
 		t.Fatalf("got error %q, selection used local whisper instead of groq", err.Error())
+	}
+}
+
+func TestNewStreamRenderWorker_PrefersXAIWhenGroqAlsoConfigured(t *testing.T) {
+	// The transcribe seam is built once in NewStreamRenderWorker from cfg; when
+	// both cloud backends are configured it must choose xAI (whole-file
+	// transcription, no per-chunk language detection) rather than Groq. An
+	// already-cancelled context short-circuits xAI's HTTP request before any
+	// DNS/network (context error) and the Groq path's ffmpeg audio extraction
+	// before any subprocess, so the two fail distinctly without a real network
+	// call or ffmpeg binary. The Groq path always wraps its error with "groq";
+	// its absence proves xAI was the backend chosen.
+	repo := newFakeStreamRepo()
+	store := newFakeStorage()
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		XAIAPIKey:  "xai_test",
+		GroqAPIKey: "gsk_test",
+	})
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := w.transcribe(ctx, mediaPath, dir, "es")
+	if err == nil {
+		t.Fatal("transcribe returned nil error, want a context error")
+	}
+	if strings.Contains(err.Error(), "groq") {
+		t.Fatalf("got error %q, selection used groq instead of xai", err.Error())
 	}
 }
 

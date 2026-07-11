@@ -131,6 +131,7 @@ func main() {
 			MusicDir:            cfg.MusicDir,
 			WhisperPath:         cfg.WhisperPath,
 			WhisperModelPath:    cfg.WhisperModelPath,
+			XAIAPIKey:           cfg.XAIAPIKey,
 			GroqAPIKey:          cfg.GroqAPIKey,
 			GroqModel:           cfg.GroqModel,
 			GroqCorrectionModel: cfg.GroqCorrectionModel,

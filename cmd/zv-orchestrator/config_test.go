@@ -180,6 +180,42 @@ func TestLoadConfigGroqCorrectionModelAloneDoesNotEnableGroq(t *testing.T) {
 	}
 }
 
+func TestLoadConfigXAIAPIKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		zvKey   string
+		envKey  string
+		wantKey string
+	}{
+		{name: "conventional name", envKey: "xai-abc", wantKey: "xai-abc"},
+		{name: "zv override wins over conventional name", zvKey: "zv-key", envKey: "xai-abc", wantKey: "zv-key"},
+		{name: "unset leaves xai disabled", wantKey: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("ZV_DATABASE_URL", "memory")
+			if tt.zvKey != "" {
+				t.Setenv("ZV_XAI_API_KEY", tt.zvKey)
+			}
+			if tt.envKey != "" {
+				t.Setenv("XAI_API_KEY", tt.envKey)
+			}
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("loadConfig error = %v", err)
+			}
+			if cfg.XAIAPIKey != tt.wantKey {
+				t.Fatalf("XAIAPIKey = %q, want %q", cfg.XAIAPIKey, tt.wantKey)
+			}
+			if got, want := cfg.xaiEnabled(), tt.wantKey != ""; got != want {
+				t.Fatalf("xaiEnabled() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
@@ -206,6 +242,8 @@ func clearConfigEnv(t *testing.T) {
 		"ZV_GROQ_API_KEY",
 		"ZV_GROQ_MODEL",
 		"ZV_GROQ_CORRECTION_MODEL",
+		"XAI_API_KEY",
+		"ZV_XAI_API_KEY",
 	} {
 		t.Setenv(key, "")
 	}
