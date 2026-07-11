@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.1",
+  "generated_at": "2026-07-10T21:05:00Z",
+  "demo": {
+    "path": "demos/inferno-vs-faze.dem",
+    "sha256": "9b1f6f0a4d3c2e8757a1c9e04b6d21f38ac5407de9128f6b0c3a7e51d482b6c0",
+    "map": "de_inferno",
+    "tickrate": 64,
+    "duration_ticks": 180000
+  },
+  "target": {
+    "steamid64": "76561198148986856",
+    "name_in_demo": "maaryy",
+    "team_at_start": "TERRORIST"
+  },
+  "segments": [
+    {
+      "id": "seg-001",
+      "round": 6,
+      "tick_start": 21000,
+      "tick_end": 22200,
+      "kills": [
+        {
+          "tick": 21900,
+          "weapon": "m4a1_silencer",
+          "headshot": false,
+          "wallbang": false,
+          "victim": {
+            "steamid64": "76561197911223344",
+            "name_in_demo": "rain",
+            "team_at_kill": "CT"
+          },
+          "killer_pos": [210.0, -404.5, 128.06],
+          "victim_pos": [305.2, -380.1, 128.06]
+        },
+        {
+          "tick": 21200,
+          "weapon": "ak47",
+          "headshot": true,
+          "wallbang": false,
+          "victim": {
+            "steamid64": "76561197944556677",
+            "name_in_demo": "broky",
+            "team_at_kill": "CT"
+          },
+          "killer_pos": [180.4, -420.0, 128.06],
+          "victim_pos": [260.7, -350.9, 128.06]
+        },
+        {
+          "tick": 21550,
+          "weapon": "ak47",
+          "headshot": false,
+          "wallbang": true,
+          "victim": {
+            "steamid64": "76561197966778899",
+            "name_in_demo": "karrigan",
+            "team_at_kill": "CT"
+          },
+          "killer_pos": [195.8, -410.2, 128.06],
+          "victim_pos": [280.0, -365.4, 128.06]
+        }
+      ]
+    },
+    {
+      "id": "seg-002",
+      "round": 11,
+      "tick_start": 46000,
+      "tick_end": 46800,
+      "kills": [
+        {
+          "tick": 46600,
+          "weapon": "deagle",
+          "headshot": true,
+          "wallbang": false,
+          "victim": {
+            "steamid64": "76561197988990011",
+            "name_in_demo": "frozen",
+            "team_at_kill": "CT"
+          },
+          "killer_pos": [-640.5, 210.3, 64.03],
+          "victim_pos": [-590.2, 260.8, 64.03]
+        },
+        {
+          "tick": 46250,
+          "weapon": "deagle",
+          "headshot": false,
+          "wallbang": false,
+          "victim": {
+            "steamid64": "76561197900112233",
+            "name_in_demo": "ropz",
+            "team_at_kill": "CT"
+          },
+          "killer_pos": [-655.0, 198.7, 64.03],
+          "victim_pos": [-610.4, 245.6, 64.03]
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "total_kills_target": 5,
+    "kills_after_filters": 5,
+    "segments_created": 2,
+    "duration_seconds_total": 31.25
+  }
+}

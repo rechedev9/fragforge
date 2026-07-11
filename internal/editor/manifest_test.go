@@ -829,7 +829,7 @@ func TestTailTrimmedDuration(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tailTrimmedDuration(tt.kills, tt.duration, tt.tail); got != tt.want {
+			if got := TailTrimmedDuration(tt.kills, tt.duration, tt.tail); got != tt.want {
 				t.Fatalf("tailTrimmedDuration = %.3f, want %.3f", got, tt.want)
 			}
 		})

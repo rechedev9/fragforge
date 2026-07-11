@@ -1,0 +1,162 @@
+{
+  "schema_version": "1.1",
+  "generated_at": "2026-07-10T18:32:00Z",
+  "demo": {
+    "path": "demos/mirage-vs-navi.dem",
+    "sha256": "3f786850e387550fdab836ed7e6dc881de23001b64ef4bfa8cfe287c3f7b9a3d",
+    "map": "de_mirage",
+    "tickrate": 64,
+    "duration_ticks": 210000
+  },
+  "target": {
+    "steamid64": "76561198148986856",
+    "name_in_demo": "maaryy",
+    "team_at_start": "CT"
+  },
+  "segments": [
+    {
+      "id": "seg-001",
+      "round": 4,
+      "tick_start": 12800,
+      "tick_end": 13600,
+      "kills": [
+        {
+          "tick": 13000,
+          "weapon": "ak47",
+          "headshot": true,
+          "wallbang": false,
+          "victim": {
+            "steamid64": "76561197987654321",
+            "name_in_demo": "s1mple",
+            "team_at_kill": "TERRORIST"
+          },
+          "killer_pos": [100.5, 200.25, 64.03],
+          "victim_pos": [150.75, 220.1, 64.03]
+        },
+        {
+          "tick": 13300,
+          "weapon": "ak47",
+          "headshot": false,
+          "wallbang": false,
+          "victim": {
+            "steamid64": "76561197912345678",
+            "name_in_demo": "ZywOo",
+            "team_at_kill": "TERRORIST"
+          },
+          "killer_pos": [98.2, 205.4, 64.03],
+          "victim_pos": [180.3, 260.9, 64.03]
+        }
+      ],
+      "utility": [
+        {
+          "id": "u-001",
+          "type": "flashbang",
+          "round": 4,
+          "throw_tick": 12850,
+          "pop_tick": 12900,
+          "expire_tick": 12980,
+          "thrower": {
+            "steamid64": "76561198148986856",
+            "name_in_demo": "maaryy",
+            "team_at_kill": "CT"
+          },
+          "throw_pos": [40.0, 150.0, 64.03],
+          "landing_pos": [160.0, 240.0, 64.03],
+          "landing_source": "trace",
+          "throw_place": "Palace",
+          "throw_action": "jumpthrow",
+          "stance": "standing",
+          "movement": "stationary",
+          "speed_2d": 0.0,
+          "on_ground": true,
+          "walking": false,
+          "ducking": false
+        }
+      ]
+    },
+    {
+      "id": "seg-002",
+      "round": 9,
+      "tick_start": 34000,
+      "tick_end": 34640,
+      "kills": [
+        {
+          "tick": 34300,
+          "weapon": "awp",
+          "headshot": true,
+          "wallbang": true,
+          "victim": {
+            "steamid64": "76561197955443322",
+            "name_in_demo": "device",
+            "team_at_kill": "TERRORIST"
+          },
+          "killer_pos": [-320.0, 512.5, 96.1],
+          "victim_pos": [-540.2, 610.7, 96.1]
+        }
+      ]
+    },
+    {
+      "id": "seg-003",
+      "round": 15,
+      "tick_start": 58000,
+      "tick_end": 58768,
+      "kills": [
+        {
+          "tick": 58400,
+          "weapon": "deagle",
+          "headshot": true,
+          "wallbang": false,
+          "victim": {
+            "steamid64": "76561197933221144",
+            "name_in_demo": "NiKo",
+            "team_at_kill": "TERRORIST"
+          },
+          "killer_pos": [512.0, -128.4, 64.03],
+          "victim_pos": [560.9, -95.2, 64.03]
+        }
+      ],
+      "utility": [
+        {
+          "id": "u-002",
+          "type": "smokegrenade",
+          "round": 15,
+          "throw_tick": 58050,
+          "pop_tick": 58114,
+          "expire_tick": 58500,
+          "thrower": {
+            "steamid64": "76561198148986856",
+            "name_in_demo": "maaryy",
+            "team_at_kill": "CT"
+          },
+          "throw_pos": [600.0, -200.0, 64.03],
+          "landing_pos": [720.4, -260.8, 64.03],
+          "landing_source": "lineup_catalog",
+          "throw_place": "Mid",
+          "throw_action": "standthrow",
+          "stance": "standing",
+          "movement": "stationary",
+          "speed_2d": 0.0,
+          "on_ground": true,
+          "walking": false,
+          "ducking": false,
+          "lineup_match": {
+            "id": "lineup-042",
+            "destination": "CT Mid Smoke",
+            "from_area": "T Spawn",
+            "side": "CT",
+            "confidence": 0.92,
+            "distance_units": 1450.5
+          }
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "total_kills_target": 4,
+    "kills_after_filters": 4,
+    "total_utility_target": 2,
+    "utility_after_filters": 2,
+    "segments_created": 3,
+    "duration_seconds_total": 34.5
+  }
+}

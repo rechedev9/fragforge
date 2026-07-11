@@ -239,7 +239,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		output := filepath.Join(opts.OutputDir, fmt.Sprintf("short-%03d-%s.mp4", index, safeID))
 		promptPath := filepath.Join(promptDir, fmt.Sprintf("short-%03d-%s-cover.md", index, safeID))
 		logBase := fmt.Sprintf("short-%03d-%s", index, safeID)
-		kills := killCues(segment, result.Plan.Tickrate)
+		kills := KillCues(segment, result.Plan.Tickrate)
 		smokes := smokeCues(segment, result.Plan.Tickrate, mapName, lineupCatalog, opts.LineupCatalogPath != "")
 		killCount := len(segment.Kills)
 		smokeCount := len(smokes)
@@ -257,7 +257,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		if smokeCount > 0 && killCount == 0 {
 			publishBase = publishSmokeFileBase(index, safeID, player, mapName, smokes[0])
 		}
-		duration := tailTrimmedDuration(kills, clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds), opts.TailTrimSeconds)
+		duration := TailTrimmedDuration(kills, ClipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds), opts.TailTrimSeconds)
 		coverTime := coverTimeSeconds(kills, duration)
 		if len(kills) == 0 && len(smokes) > 0 {
 			coverTime = coverTimeSecondsForSmoke(smokes[0], duration)
@@ -392,12 +392,12 @@ func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, 
 		if !ok {
 			continue
 		}
-		partKills := killCues(segment, result.Plan.Tickrate)
-		duration := clipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds)
+		partKills := KillCues(segment, result.Plan.Tickrate)
+		duration := ClipDuration(segment, result.Plan.Tickrate, clip.DurationSeconds)
 		if c.RhythmSync == nil {
 			// Rhythm sync placed segments using untrimmed durations, so tails
 			// are only trimmed on beat-free compilations (see buildManifest).
-			duration = tailTrimmedDuration(partKills, duration, c.TailTrimSeconds)
+			duration = TailTrimmedDuration(partKills, duration, c.TailTrimSeconds)
 		}
 		if duration <= 0 {
 			continue
@@ -681,7 +681,11 @@ func coverTimeSeconds(kills []KillCue, duration float64) float64 {
 	return duration * 0.35
 }
 
-func killCues(segment recording.RecordingSegment, tickrate int) []KillCue {
+// KillCues derives the per-kill render cues for a segment: kills sorted by
+// tick, timed relative to the effective record start, with formatted weapon
+// and victim metadata. Kills outside the recorded tick window are dropped.
+// Shared with zv trace so traced cues match the production edit.
+func KillCues(segment recording.RecordingSegment, tickrate int) []KillCue {
 	if tickrate <= 0 {
 		return nil
 	}
@@ -850,11 +854,11 @@ func coverTimeSecondsForSmoke(smoke SmokeCue, duration float64) float64 {
 	return t
 }
 
-// tailTrimmedDuration shortens a clip to end tailSeconds after its final kill,
+// TailTrimmedDuration shortens a clip to end tailSeconds after its final kill,
 // cutting the recorded quit-tick dead air. Kill-less clips (smoke lineups) and
 // a zero tail keep the full duration, and the trim never lands before the last
 // kill itself so a tick/frame offset cannot clip the payoff off-screen.
-func tailTrimmedDuration(kills []KillCue, duration, tailSeconds float64) float64 {
+func TailTrimmedDuration(kills []KillCue, duration, tailSeconds float64) float64 {
 	if tailSeconds <= 0 || len(kills) == 0 || duration <= 0 {
 		return duration
 	}
@@ -883,7 +887,10 @@ func tailTrimForRhythm(c compiledShortOptions) float64 {
 	return c.TailTrimSeconds
 }
 
-func clipDuration(segment recording.RecordingSegment, tickrate int, clipDuration float64) float64 {
+// ClipDuration returns the effective duration of a segment's clip: the probed
+// clip duration when known, otherwise the tick span from the effective record
+// start, matching what the recorder captures.
+func ClipDuration(segment recording.RecordingSegment, tickrate int, clipDuration float64) float64 {
 	if clipDuration > 0 {
 		return clipDuration
 	}

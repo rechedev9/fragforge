@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "source": {
+    "kind": "plan",
+    "path": "../../testdata/trace/killplan.outoforder.json"
+  },
+  "killplan": {
+    "schema_version": "1.1",
+    "generated_at": "0001-01-01T00:00:00Z",
+    "demo": {
+      "path": "demos/inferno-vs-faze.dem",
+      "sha256": "9b1f6f0a4d3c2e8757a1c9e04b6d21f38ac5407de9128f6b0c3a7e51d482b6c0",
+      "map": "de_inferno",
+      "tickrate": 64,
+      "duration_ticks": 180000
+    },
+    "target": {
+      "steamid64": "76561198148986856",
+      "name_in_demo": "maaryy",
+      "team_at_start": "TERRORIST"
+    },
+    "segments": [
+      {
+        "id": "seg-001",
+        "round": 6,
+        "tick_start": 21000,
+        "tick_end": 22200,
+        "kills": [
+          {
+            "tick": 21900,
+            "weapon": "m4a1_silencer",
+            "headshot": false,
+            "wallbang": false,
+            "victim": {
+              "steamid64": "76561197911223344",
+              "name_in_demo": "rain",
+              "team_at_kill": "CT"
+            },
+            "killer_pos": [
+              210,
+              -404.5,
+              128.06
+            ],
+            "victim_pos": [
+              305.2,
+              -380.1,
+              128.06
+            ]
+          },
+          {
+            "tick": 21200,
+            "weapon": "ak47",
+            "headshot": true,
+            "wallbang": false,
+            "victim": {
+              "steamid64": "76561197944556677",
+              "name_in_demo": "broky",
+              "team_at_kill": "CT"
+            },
+            "killer_pos": [
+              180.4,
+              -420,
+              128.06
+            ],
+            "victim_pos": [
+              260.7,
+              -350.9,
+              128.06
+            ]
+          },
+          {
+            "tick": 21550,
+            "weapon": "ak47",
+            "headshot": false,
+            "wallbang": true,
+            "victim": {
+              "steamid64": "76561197966778899",
+              "name_in_demo": "karrigan",
+              "team_at_kill": "CT"
+            },
+            "killer_pos": [
+              195.8,
+              -410.2,
+              128.06
+            ],
+            "victim_pos": [
+              280,
+              -365.4,
+              128.06
+            ]
+          }
+        ]
+      },
+      {
+        "id": "seg-002",
+        "round": 11,
+        "tick_start": 46000,
+        "tick_end": 46800,
+        "kills": [
+          {
+            "tick": 46600,
+            "weapon": "deagle",
+            "headshot": true,
+            "wallbang": false,
+            "victim": {
+              "steamid64": "76561197988990011",
+              "name_in_demo": "frozen",
+              "team_at_kill": "CT"
+            },
+            "killer_pos": [
+              -640.5,
+              210.3,
+              64.03
+            ],
+            "victim_pos": [
+              -590.2,
+              260.8,
+              64.03
+            ]
+          },
+          {
+            "tick": 46250,
+            "weapon": "deagle",
+            "headshot": false,
+            "wallbang": false,
+            "victim": {
+              "steamid64": "76561197900112233",
+              "name_in_demo": "ropz",
+              "team_at_kill": "CT"
+            },
+            "killer_pos": [
+              -655,
+              198.7,
+              64.03
+            ],
+            "victim_pos": [
+              -610.4,
+              245.6,
+              64.03
+            ]
+          }
+        ]
+      }
+    ],
+    "stats": {
+      "total_kills_target": 5,
+      "kills_after_filters": 5,
+      "segments_created": 2,
+      "duration_seconds_total": 31.25
+    }
+  },
+  "moments": {
+    "schema_version": "1.0",
+    "job_id": "00000000-0000-0000-0000-000000000000",
+    "generated_at": "0001-01-01T00:00:00Z",
+    "moments": [
+      {
+        "id": "mom-001",
+        "source": "killplan",
+        "segment_id": "seg-001",
+        "player": "maaryy",
+        "map": "de_inferno",
+        "round": 6,
+        "tick_start": 21000,
+        "tick_end": 22200,
+        "time_start_seconds": 328.125,
+        "time_end_seconds": 346.875,
+        "duration_seconds": 18.75,
+        "score": 1,
+        "reason_codes": [
+          "headshot",
+          "multi_kill",
+          "rifle",
+          "wallbang"
+        ],
+        "events": {
+          "kills": 3,
+          "headshots": 1,
+          "wallbangs": 1,
+          "weapons": [
+            "ak47",
+            "m4a1_silencer"
+          ]
+        },
+        "weapons": [
+          "ak47",
+          "m4a1_silencer"
+        ],
+        "victims": [
+          "broky",
+          "karrigan",
+          "rain"
+        ],
+        "default_variant": "viral-60-clean"
+      },
+      {
+        "id": "mom-002",
+        "source": "killplan",
+        "segment_id": "seg-002",
+        "player": "maaryy",
+        "map": "de_inferno",
+        "round": 11,
+        "tick_start": 46000,
+        "tick_end": 46800,
+        "time_start_seconds": 718.75,
+        "time_end_seconds": 731.25,
+        "duration_seconds": 12.5,
+        "score": 0.78,
+        "reason_codes": [
+          "headshot",
+          "multi_kill",
+          "pistol"
+        ],
+        "events": {
+          "kills": 2,
+          "headshots": 1,
+          "weapons": [
+            "deagle"
+          ]
+        },
+        "weapons": [
+          "deagle"
+        ],
+        "victims": [
+          "frozen",
+          "ropz"
+        ],
+        "default_variant": "viral-60-clean"
+      }
+    ]
+  },
+  "selection": {
+    "segment_ids": [
+      "seg-001",
+      "seg-002"
+    ],
+    "moment_ids": [
+      "mom-001",
+      "mom-002"
+    ]
+  },
+  "render": {
+    "preset": "clean-pov-60",
+    "output": {
+      "format": "short-9x16",
+      "width": 1080,
+      "height": 1920,
+      "fps": 60
+    },
+    "summary": {
+      "compiled": true,
+      "segment_count": 2,
+      "kill_count": 5,
+      "duration_seconds": 22.438000000000002,
+      "tail_trim_seconds": 1.5,
+      "video_crf": 16,
+      "video_preset": "slow"
+    },
+    "ffmpeg_argv": [
+      [
+        "ffmpeg",
+        "-y",
+        "-v",
+        "error",
+        "-t",
+        "13.563",
+        "-i",
+        "segment-seg-001.mp4",
+        "-t",
+        "8.875",
+        "-i",
+        "segment-seg-002.mp4",
+        "-filter_complex",
+        "[0:v]scale=w=1080:h=1920:force_original_aspect_ratio=increase:eval=frame:flags=lanczos,crop=1080:1920:(iw-ow)/2:(ih-oh)/2,setsar=1,fps=60,format=yuv420p[pv0];[0:a]aformat=channel_layouts=stereo,aresample=48000,asetpts=PTS-STARTPTS[pa0];[1:v]scale=w=1080:h=1920:force_original_aspect_ratio=increase:eval=frame:flags=lanczos,crop=1080:1920:(iw-ow)/2:(ih-oh)/2,setsar=1,fps=60,format=yuv420p[pv1];[1:a]aformat=channel_layouts=stereo,aresample=48000,asetpts=PTS-STARTPTS[pa1];[pv0][pa0][pv1][pa1]concat=n=2:v=1:a=1[catv][gamea];[catv]scale=w=1080:h=1920:force_original_aspect_ratio=increase:eval=frame:flags=lanczos,crop=1080:1920:(iw-ow)/2:(ih-oh)/2,setsar=1,fps=60,format=yuv420p[v];[gamea]loudnorm=I=-16:TP=-1.5:LRA=11[a]",
+        "-map",
+        "[v]",
+        "-map",
+        "[a]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "slow",
+        "-crf",
+        "16",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        "short-001-demo-compilation.mp4"
+      ]
+    ]
+  }
+}

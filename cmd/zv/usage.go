@@ -4,6 +4,7 @@ const usage = `zv - deterministic CS2 demo-to-video workflows
 
 Usage:
   zv short <demo.dem> --prompt "<instruction>" [--preset <name>] [--out <dir>] [--music <audio>] [--target-steamid <SteamID64>] [--from-recording <recording-result.json>] [--dry-run]
+  zv trace (--demo <path> --steamid <id> | --from-plan <killplan.json>) [--rules <path>] [--segment-mode kills|smokes|utility] [--preset <name>] [--tail-trim <seconds>] [--out <path>] [--pretty] [--deterministic]
   zv batch <dir> [--recursive] [--steamid <id>] [--out <dir>] [--jobs <n>] [--format text|json] [--report <path>]
   zv metrics [--reset]
   zv errors [--tail <n>] [--json] [--clear]
@@ -66,6 +67,24 @@ Prompt rules (deterministic keywords, no model calls):
   "música" / "music" / "beat" / "ritmo"  beat-synced edit; needs --music
   a SteamID64 in the prompt              selects the target player
   a preset name in the prompt            selects that preset
+`
+
+const traceUsage = `usage: zv trace (--demo <path> --steamid <id> | --from-plan <killplan.json>) [flags]
+
+Headless JSON trace of the pure decision layers: parse -> moments -> selection
+-> render plan (FFmpeg argv). No recording, no FFmpeg execution, no browser.
+
+Flags:
+  --demo <path>            .dem file to parse (requires --steamid)
+  --steamid <id>           target player SteamID64
+  --from-plan <json>       existing kill plan JSON; skips parsing
+  --rules <path>           optional JSON rules file (demo source only)
+  --segment-mode <mode>    kills, smokes, or utility (default kills)
+  --preset <name>          render preset; defaults to viral-60-clean
+  --tail-trim <seconds>    end each kill part this many seconds after its final kill; 0 disables (default 1.5)
+  --out <path>             output path, or "-" for stdout (default "-")
+  --pretty                 indent the JSON output
+  --deterministic          fixed job UUID, zeroed timestamps, placeholder ffmpeg path
 `
 
 const presetsUsage = `usage: zv presets [--format text|json]

@@ -29,6 +29,11 @@ const (
 
 	// StandardVideoPreset is the x264 speed/quality setting for viral-60-clean.
 	StandardVideoPreset = "slow"
+
+	// DefaultTailTrimSeconds is the production default for ending each kill
+	// clip this many seconds after its final kill (zv-editor --tail-trim).
+	// Shared with zv trace so traced argv matches what production would run.
+	DefaultTailTrimSeconds = 1.5
 )
 
 const (
