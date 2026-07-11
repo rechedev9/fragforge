@@ -208,6 +208,35 @@ func TestRunCanonicalGroupHelpReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestRunHelpListsTraceCommand(t *testing.T) {
+	var stdout, stderr strings.Builder
+
+	code := Run([]string{"zv", "--help"}, &stdout, &stderr, nil, &fakeRunner{})
+
+	if got, want := code, exitSuccess; got != want {
+		t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "zv trace ") {
+		t.Fatalf("root help = %q, want it to list the trace command", stdout.String())
+	}
+}
+
+func TestRunTraceHelpReturnsSuccess(t *testing.T) {
+	var stdout, stderr strings.Builder
+
+	code := Run([]string{"zv", "trace", "--help"}, &stdout, &stderr, nil, &fakeRunner{})
+
+	if got, want := code, exitSuccess; got != want {
+		t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
+	}
+	if got, want := stdout.String(), traceUsage; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func TestRunHelpDocumentsLegacyPassThroughs(t *testing.T) {
 	var stdout, stderr strings.Builder
 

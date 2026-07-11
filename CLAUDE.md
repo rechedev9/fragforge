@@ -179,6 +179,17 @@ Smoke tests:
 .\scripts\smoke-real.ps1 -Demo testdata\<demo>.dem -TargetSteamID <SteamID64>   # full real run against a running orchestrator
 ```
 
+`zv trace` - headless JSON trace of pipeline decisions (parse -> moments -> selection -> FFmpeg argv), with no CS2/HLAE/FFmpeg execution or browser, ideal for QA and debugging:
+
+```bash
+zv trace --from-plan testdata/trace/killplan.sample.json --pretty     # from a committed plan fixture
+zv trace --demo match.dem --steamid 76561198000000000 --deterministic   # from a real .dem; golden-test mode
+```
+
+Use `--from-plan <killplan.json>` to load a plan directly (skipping parse), or `--demo <path> --steamid <id>` to parse a real .dem file.
+Key flags: `--deterministic` (fixed job UUID, zeroed timestamps for golden tests), `--pretty` (indented JSON), `--preset <name>` (override render preset).
+Golden-test fixtures live under testdata/trace/.
+
 If an optional tool is missing (`goimports`, `staticcheck`, `govulncheck`, `gosec`), say so and continue with the available checks.
 
 ## Observability and error tracking
