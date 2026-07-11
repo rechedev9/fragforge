@@ -238,6 +238,38 @@ func TestXAITranscriber_Transcribe_Unauthorized(t *testing.T) {
 	}
 }
 
+// The exact error envelope the live xAI API returns for a bad key (verified
+// 2026-07-11): HTTP 400 with a top-level string "error", not the OpenAI-style
+// nested {"error":{"message":...}} object. The parsed message must be
+// surfaced (not the raw JSON) and recognized as a key rejection.
+func TestXAITranscriber_Transcribe_LiveErrorEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":"Client specified an invalid argument","error":"Incorrect API key provided: xa***QW. You can obtain an API key from https://console.x.ai."}`))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcriber := XAITranscriber{APIKey: "bad-key", BaseURL: server.URL}
+	_, err := transcriber.Transcribe(context.Background(), mediaPath, dir)
+	if err == nil {
+		t.Fatal("Transcribe returned nil error, want an error for a 400 response")
+	}
+	if !strings.Contains(err.Error(), "api key rejected") {
+		t.Fatalf("got error %q, want it to recognize the rejected api key", err.Error())
+	}
+	if !strings.Contains(err.Error(), "incorrect api key provided") {
+		t.Fatalf("got error %q, want the parsed top-level string error message", err.Error())
+	}
+	if strings.Contains(err.Error(), `"code"`) {
+		t.Fatalf("got error %q, want the parsed message, not the raw json envelope", err.Error())
+	}
+}
+
 func TestXAITranscriber_Transcribe_EmptyWords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

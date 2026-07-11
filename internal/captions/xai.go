@@ -139,15 +139,23 @@ func (x XAITranscriber) transcribe(ctx context.Context, mediaPath string) ([]byt
 // xaiTranscribeError builds a lowercase, actionable error from a non-2xx xAI
 // response. It never includes the API key: only the status code and xAI's own
 // error message (if the body parses) or a bounded snippet of the raw body.
+// xAI's live error envelope is {"code":"...","error":"message"} with a
+// top-level string error (verified against the real API); the OpenAI-style
+// {"error":{"message":"..."}} object is also accepted defensively.
 func xaiTranscribeError(status int, body []byte) error {
 	msg := strings.TrimSpace(string(body))
-	var parsed struct {
+	var stringEnvelope struct {
+		Error string `json:"error"`
+	}
+	var objectEnvelope struct {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error.Message != "" {
-		msg = parsed.Error.Message
+	if err := json.Unmarshal(body, &stringEnvelope); err == nil && stringEnvelope.Error != "" {
+		msg = stringEnvelope.Error
+	} else if err := json.Unmarshal(body, &objectEnvelope); err == nil && objectEnvelope.Error.Message != "" {
+		msg = objectEnvelope.Error.Message
 	}
 	msg = strings.ToLower(strings.TrimSpace(msg))
 	if len(msg) > xaiErrorBodyMax {
@@ -155,8 +163,10 @@ func xaiTranscribeError(status int, body []byte) error {
 	}
 
 	switch {
-	case status == http.StatusUnauthorized:
-		return fmt.Errorf("captions: xai api key rejected (401 unauthorized): %s", msg)
+	// A bad key comes back as a 401 or, observed live, as a 400 with an
+	// "incorrect api key" message; both surface the same actionable error.
+	case status == http.StatusUnauthorized || strings.Contains(msg, "api key"):
+		return fmt.Errorf("captions: xai api key rejected (status %d): %s", status, msg)
 	case status == http.StatusRequestEntityTooLarge || strings.Contains(msg, "too large"):
 		return fmt.Errorf("captions: media file too large for xai (status %d): %s; shorten the clip or check xai's per-request size limit", status, msg)
 	default:
@@ -164,8 +174,8 @@ func xaiTranscribeError(status int, body []byte) error {
 	}
 }
 
-// xaiTranscript mirrors the subset of xAI's /stt response that ParseXAIJSON
-// needs. The optional per-word "speaker" field is intentionally ignored.
+// xaiTranscript mirrors the subset of xAI's /stt response that
+// parseXAITranscript needs. The optional per-word "speaker" field is intentionally ignored.
 type xaiTranscript struct {
 	Text     string    `json:"text"`
 	Duration float64   `json:"duration"`
