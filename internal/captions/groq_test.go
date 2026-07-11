@@ -596,6 +596,78 @@ func TestParseGroqWordsDropsHallucinatedSegments(t *testing.T) {
 	}
 }
 
+// Regression for a real stream-clip render (background music mixed at 15%
+// volume): genuine Spanish speech decoded at avg_logprob -0.781, well below
+// the -0.7 logprob gate, but no_speech_prob was 0.005, meaning Whisper was
+// near-certain it heard real speech. The old logprob-only gate discarded all
+// three segments and the clip published with no captions at all.
+func TestParseGroqWordsSpeechCertainSkipsLogprobGate(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      string
+		wantWords []string
+	}{
+		{
+			name: "music-suppressed genuine speech kept",
+			data: `{
+			  "words": [
+			    {"word": "A", "start": 0.0, "end": 0.3},
+			    {"word": "ver,", "start": 0.3, "end": 0.6},
+			    {"word": "¿me", "start": 0.6, "end": 1.0},
+			    {"word": "muero?", "start": 1.0, "end": 1.4},
+			    {"word": "¿Qué?", "start": 1.4, "end": 2.0},
+			    {"word": "Buen", "start": 15.0, "end": 15.5},
+			    {"word": "round.", "start": 15.5, "end": 16.0},
+			    {"word": "Ahora", "start": 17.0, "end": 17.3},
+			    {"word": "vamos", "start": 17.3, "end": 17.6},
+			    {"word": "a", "start": 17.6, "end": 17.9},
+			    {"word": "hacer", "start": 17.9, "end": 18.2},
+			    {"word": "comida,", "start": 18.2, "end": 18.6},
+			    {"word": "¿vale?", "start": 18.6, "end": 19.0}
+			  ],
+			  "segments": [
+			    {"start": 0.0, "end": 2.0, "text": " A ver, ¿me muero? ¿Qué?", "no_speech_prob": 0.005, "avg_logprob": -0.781},
+			    {"start": 15.0, "end": 16.0, "text": " Buen round.", "no_speech_prob": 0.005, "avg_logprob": -0.781},
+			    {"start": 17.0, "end": 19.0, "text": " Ahora vamos a hacer comida, ¿vale?", "no_speech_prob": 0.005, "avg_logprob": -0.781}
+			  ]
+			}`,
+			wantWords: []string{
+				"A", "ver,", "¿me", "muero?", "¿Qué?",
+				"Buen", "round.",
+				"Ahora", "vamos", "a", "hacer", "comida,", "¿vale?",
+			},
+		},
+		{
+			name: "actual hallucination still dropped despite low no_speech_prob margin",
+			data: `{
+			  "words": [{"word": "Gracias.", "start": 0.2, "end": 0.6}],
+			  "segments": [{"start": 0.0, "end": 1.0, "text": " Gracias.", "no_speech_prob": 0.3, "avg_logprob": -0.85}]
+			}`,
+			wantWords: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cues, err := parseGroqWords([]byte(tt.data))
+			if err != nil {
+				t.Fatalf("parseGroqWords error = %v", err)
+			}
+			got := make([]string, 0, len(cues))
+			for _, c := range cues {
+				got = append(got, c.Word)
+			}
+			if len(got) != len(tt.wantWords) {
+				t.Fatalf("got %d words %+v, want %d words %+v", len(got), got, len(tt.wantWords), tt.wantWords)
+			}
+			for i, w := range tt.wantWords {
+				if got[i] != w {
+					t.Fatalf("got word[%d] = %q, want %q (got=%+v)", i, got[i], w, got)
+				}
+			}
+		})
+	}
+}
+
 func TestParseGroqWordsKeepsAllWordsWithoutSegments(t *testing.T) {
 	data := `{"words":[{"word":"hola","start":0.2,"end":0.6},{"word":"mundo","start":1.0,"end":1.4}]}`
 	cues, err := parseGroqWords([]byte(data))

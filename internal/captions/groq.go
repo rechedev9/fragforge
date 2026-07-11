@@ -562,9 +562,22 @@ type groqSegment struct {
 // Whisper's own 0.6 default and only catches the obvious silence case.
 // Burned captions favour precision: a dropped mumble is invisible, a
 // hallucinated caption is not.
+//
+// The logprob gate alone is too aggressive when something other than
+// hallucination depresses decode confidence: a real render (Spanish
+// commentary over background music mixed at 15% volume) produced a perfect
+// transcription that decoded at avg_logprob -0.781 across all three of its
+// segments, below the -0.7 gate, yet no_speech_prob was 0.005 on every one -
+// Whisper was near-certain it heard real speech, and the clip published with
+// no captions at all. hallucinationSpeechCertain skips the logprob gate for
+// segments below it: every hallucination in the calibration data scores
+// no_speech_prob >= 0.25, so 0.15 separates cleanly from genuine speech
+// however mediocre its logprob, while shouted speech over gunfire (~0.37)
+// stays at/above the threshold and intentionally keeps the logprob gate.
 const (
-	hallucinationNoSpeechProb = 0.6
-	hallucinationAvgLogprob   = -0.7
+	hallucinationNoSpeechProb  = 0.6
+	hallucinationAvgLogprob    = -0.7
+	hallucinationSpeechCertain = 0.15
 )
 
 // filterHallucinatedWords drops words that fall inside a hallucination-grade
@@ -586,7 +599,8 @@ func filterHallucinatedWords(t groqTranscript, words []WordCue) []WordCue {
 	for _, s := range t.Segments {
 		text := strings.TrimSpace(s.Text)
 		loop := text != "" && repeats[text] >= 2 && len(strings.Fields(text)) <= 2
-		if !loop && s.NoSpeechProb <= hallucinationNoSpeechProb && s.AvgLogprob >= hallucinationAvgLogprob {
+		speechCertain := s.NoSpeechProb < hallucinationSpeechCertain
+		if !loop && s.NoSpeechProb <= hallucinationNoSpeechProb && (speechCertain || s.AvgLogprob >= hallucinationAvgLogprob) {
 			accepted = append(accepted, s)
 		}
 	}
