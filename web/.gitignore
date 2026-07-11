@@ -9,6 +9,9 @@ next-env.d.ts
 # visual-judge screenshot harness output (e2e/screenshots.config.ts)
 e2e/screenshots/
 
+# Playwright E2E evidence screenshots (live-matches.spec.ts)
+e2e-artifacts/
+
 # design-sync (staged scripts, build output, machine state)
 .ds-sync/
 ds-bundle/

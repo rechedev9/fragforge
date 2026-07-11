@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Clapperboard, Swords, UploadCloud } from 'lucide-react';
 import { api } from '@/lib/api';
+import { startPollLoop } from '@/lib/poll-loop';
 import type { Match } from '@/lib/api/types';
 import { MatchFilters, type MatchFilter } from '@/components/matches/match-filters';
 import { MatchList } from '@/components/matches/match-list';
@@ -49,19 +50,60 @@ function NoMatchesYet() {
   );
 }
 
+// Poll for server-side jobs so a match created out of band (via the MCP server or
+// plain HTTP) surfaces here without any UI action. On this page the only visible
+// change is a match appearing (its job reached `parsed`) or leaving (a pre-parse
+// job failed): a match is a played game with no in-page pipeline state, so we
+// poll fast while the set of match ids is still changing and back off to idle
+// once it settles. A newly-listed job flips the cadence back to fast.
+const FAST_POLL_MS = 1500;
+const IDLE_POLL_MS = 5000;
+
+/** True when the id sets differ (or on the first tick, when prev is unknown). */
+function idsChanged(prev: Set<string> | null, next: Match[]): boolean {
+  if (prev === null || prev.size !== next.length) return true;
+  return next.some((m) => !prev.has(m.id));
+}
+
 export default function MatchesPage() {
   const [matches, setMatches] = useState<Match[] | null>(null);
   const [filter, setFilter] = useState<MatchFilter>('all');
   const [query, setQuery] = useState('');
 
+  // Guards against overlapping listMatches() calls (the poll loop never overlaps
+  // its own ticks, but a future manual refresh could race one).
+  const inFlight = useRef(false);
+  // The match ids seen last tick, to detect appear/leave changes for the cadence.
+  const prevIds = useRef<Set<string> | null>(null);
+
   useEffect(() => {
     let active = true;
-    (async () => {
-      const next = await api.listMatches();
-      if (active) setMatches(next);
-    })();
+
+    // A throwing tick (transient proxy/orchestrator hiccup) must not kill the
+    // loop: startPollLoop catches it and reschedules at the idle cadence.
+    const stop = startPollLoop({
+      tick: async () => {
+        if (inFlight.current) return 'idle';
+        inFlight.current = true;
+        let next: Match[];
+        try {
+          next = await api.listMatches();
+        } finally {
+          inFlight.current = false;
+        }
+        if (!active) return 'idle';
+        const changed = idsChanged(prevIds.current, next);
+        prevIds.current = new Set(next.map((m) => m.id));
+        setMatches(next);
+        return changed ? 'fast' : 'idle';
+      },
+      fastMs: FAST_POLL_MS,
+      idleMs: IDLE_POLL_MS,
+    });
+
     return () => {
       active = false;
+      stop();
     };
   }, []);
 

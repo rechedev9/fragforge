@@ -1,8 +1,9 @@
 import type { ApiClient } from './client';
-import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch, CaptureProgress } from './types';
+import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch, CaptureProgress, JobSummary } from './types';
 import { SERVICE_UNAVAILABLE_CODE } from './types';
 import { MockApiClient } from './mock';
-import { planToMatch, planToPlays, type KillPlan } from './map';
+import { planToMatch, planToPlays, jobSummariesToMatches, prettifyMap, type KillPlan } from './map';
+import { selectSyntheticCandidates, syntheticIntentFrom, staleSyntheticVideoIds } from './match-sync';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
 import { dataPlane, type DataPlane } from './dataplane';
@@ -173,6 +174,13 @@ export class RealApiClient implements ApiClient {
   private readonly driving = new Set<string>();
   /** Server-reported artifact names for each reel (the file names the editor wrote). */
   private readonly artifactNames = new Map<string, { video: string; cover: string }>();
+  /**
+   * videoIds of the synthetic reels reflecting server-side renders (MCP-driven
+   * jobs the user never forged locally). Tracked separately so they stay
+   * ephemeral: they live in `intents`/`reels` for the reconcile loop to advance,
+   * but are re-derived from server state each session and never persisted.
+   */
+  private readonly synthetic = new Set<string>();
 
   constructor() {
     // Rehydrate the reels the user asked for so the Library survives a hard reload
@@ -338,7 +346,7 @@ export class RealApiClient implements ApiClient {
       published: false,
     };
     this.intents.set(videoId, intent);
-    saveReelIntents(Array.from(this.intents.values()));
+    this.persistIntents();
     this.reels.set(videoId, videoFromIntent(intent));
     void this.reconcile(); // kick now (idempotent); /videos polling continues it.
     return { ...videoFromIntent(intent) };
@@ -366,7 +374,7 @@ export class RealApiClient implements ApiClient {
     const intent = this.intents.get(id);
     if (intent) {
       this.intents.set(id, { ...intent, published: true });
-      saveReelIntents(Array.from(this.intents.values()));
+      this.persistIntents();
     }
     return { ...updated };
   }
@@ -420,7 +428,8 @@ export class RealApiClient implements ApiClient {
     this.artifactNames.delete(id);
     this.intents.delete(id);
     this.reels.delete(id);
-    saveReelIntents(Array.from(this.intents.values()));
+    this.synthetic.delete(id);
+    this.persistIntents();
   }
 
   /**
@@ -429,11 +438,92 @@ export class RealApiClient implements ApiClient {
    * reload simply reattaches. One reel's failure never breaks the batch.
    */
   private async reconcile(): Promise<void> {
+    // Reflect server-side renders (MCP-created jobs) into the library before the
+    // per-reel loop, so a synthetic intent is present for reconcileOne to advance.
+    await this.syncSynthetic();
     const active = Array.from(this.intents.values()).filter((intent) => {
       const v = this.reels.get(intent.videoId);
       return !v || (v.status !== 'ready' && v.status !== 'failed');
     });
     await Promise.all(active.map((intent) => this.reconcileOne(intent).catch(() => {})));
+  }
+
+  /**
+   * Reconciles the reel library with the server: derives a synthetic intent for
+   * any server job that has render activity but no local intent (so an MCP render
+   * shows up in /videos), and evicts synthetics whose job vanished or is now
+   * covered by a local intent. Purely reflective: a synthetic is only ever
+   * created once a render already exists (renderStatus !== 'none'), so the
+   * reconcile loop never drives it to start a capture or render the user never
+   * asked for - it only surfaces composing/ready/failed. Only the default variant
+   * is probed, so an MCP render of a non-default preset won't surface until the
+   * orchestrator exposes a per-job render list. Best-effort: any failure leaves
+   * the library exactly as it was.
+   */
+  private async syncSynthetic(): Promise<void> {
+    const summaries = await this.fetchJobSummaries();
+    if (summaries.length === 0 && this.synthetic.size === 0) return;
+
+    const localJobIds = new Set(
+      Array.from(this.intents.values())
+        .filter((intent) => !this.synthetic.has(intent.videoId))
+        .map((intent) => intent.jobId),
+    );
+    const liveJobIds = new Set(summaries.map((s) => s.id));
+
+    for (const videoId of staleSyntheticVideoIds({ syntheticVideoIds: this.synthetic, localJobIds, liveJobIds })) {
+      this.intents.delete(videoId);
+      this.reels.delete(videoId);
+      this.artifactNames.delete(videoId);
+      this.synthetic.delete(videoId);
+    }
+
+    const candidates = selectSyntheticCandidates({
+      summaries,
+      localJobIds,
+      existingSyntheticVideoIds: this.synthetic,
+    });
+    for (const summary of candidates) {
+      // Best-effort per candidate: a probe rejecting (navigation abort, server
+      // gone mid-flight) must not abort the sweep or escape to createVideo's
+      // fire-and-forget reconcile call.
+      let render: Awaited<ReturnType<typeof this.fetchRenderStatus>>;
+      try {
+        render = await this.fetchRenderStatus(summary.id, DEFAULT_VARIANT);
+      } catch {
+        continue;
+      }
+      if (render.status === 'none') continue; // no render for the default variant.
+      const intent = syntheticIntentFrom(summary, {
+        variant: DEFAULT_VARIANT,
+        editConfig: DEFAULT_EDIT_CONFIG,
+        map: prettifyMap(summary.map ?? ''),
+      });
+      this.intents.set(intent.videoId, intent);
+      this.reels.set(intent.videoId, videoFromIntent(intent));
+      this.synthetic.add(intent.videoId);
+    }
+  }
+
+  /**
+   * Persists only the real (user-forged) intents. Synthetic intents live in
+   * `this.intents` for the reconcile loop but are reflections of server state,
+   * not durable facts the user asked for, so they are filtered out here - they
+   * are re-derived from the server every session and must never leak to storage.
+   */
+  private persistIntents(): void {
+    saveReelIntents(Array.from(this.intents.values()).filter((intent) => !this.synthetic.has(intent.videoId)));
+  }
+
+  /** Lists the orchestrator's jobs via the /api/demos proxy; [] on any failure. */
+  private async fetchJobSummaries(): Promise<JobSummary[]> {
+    try {
+      const res = await fetch('/api/demos?limit=50', { cache: 'no-store' });
+      const { jobs } = await readJson<{ jobs: JobSummary[] }>(res);
+      return jobs;
+    } catch {
+      return []; // orchestrator offline: nothing to reflect this tick.
+    }
   }
 
   private async reconcileOne(intent: ReelIntent): Promise<void> {
@@ -644,10 +734,15 @@ export class RealApiClient implements ApiClient {
       return { recordEnabled: false, status: 'offline', tools: [] };
     }
   }
-  listMatches(): Promise<Match[]> {
-    // The desktop app has no match library: a match is opened by job id from
-    // the upload flow, not listed.
-    return Promise.resolve([]);
+  /**
+   * Lists server-side jobs as matches so externally-created work (an MCP or plain
+   * HTTP `create_job`) appears on /matches without any UI action. Only plan-ready,
+   * non-failed jobs become matches (see jobSummariesToMatches), so every card is
+   * clickable. Empty when the orchestrator is offline - the same graceful blank
+   * the page already handled.
+   */
+  async listMatches(): Promise<Match[]> {
+    return jobSummariesToMatches(await this.fetchJobSummaries());
   }
   /** @deprecated Superseded by scanDemo + parseDemo. */
   uploadDemo(input: { fileName: string }): Promise<Match> {

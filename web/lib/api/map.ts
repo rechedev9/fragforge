@@ -1,4 +1,4 @@
-import type { Match, Play, DemoPlayer } from './types';
+import type { Match, Play, DemoPlayer, JobSummary } from './types';
 
 /**
  * Minimal mirror of the killplan JSON (github.com/rechedev9/fragforge
@@ -146,4 +146,48 @@ export function planToMatch(jobId: string, plan: KillPlan, player: DemoPlayer): 
     thumbnailUrl: thumb(jobId),
     source: 'upload',
   };
+}
+
+/**
+ * One job-list summary → a Match for the matches page. The list response carries
+ * no roster, so only the target's kill count is known: every other stat degrades
+ * to 0/undefined, exactly the plan-only fallback the detail path already uses (no
+ * invented data). playedAt is the job's real server timestamp, and score is ""
+ * (the parser computes no round score - the UI hides an empty score).
+ */
+export function jobSummaryToMatch(s: JobSummary): Match {
+  const kills = s.target_kills ?? 0;
+  return {
+    id: s.id,
+    map: prettifyMap(s.map ?? ''),
+    score: '',
+    playedAt: s.created_at,
+    stats: {
+      kills,
+      deaths: 0,
+      assists: 0,
+      mvps: 0,
+      kd: kills,
+      rating: undefined,
+      adr: undefined,
+      kast: undefined,
+      hsPct: undefined,
+    },
+    decentPlays: s.segment_count ?? 0,
+    thumbnailUrl: thumb(s.id),
+    source: 'upload',
+  };
+}
+
+/**
+ * Job summaries → the matches list. Only plan-ready, non-failed jobs become
+ * matches: `map` is present exactly when the kill plan exists (parsed onward),
+ * which is the point at which the detail page's getMatch stops 404ing, so a card
+ * that appears is always clickable. Newest first.
+ */
+export function jobSummariesToMatches(jobs: JobSummary[]): Match[] {
+  return jobs
+    .filter((s) => s.map !== undefined && s.status !== 'failed')
+    .map(jobSummaryToMatch)
+    .sort((a, b) => b.playedAt.localeCompare(a.playedAt));
 }
