@@ -67,6 +67,12 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 			return exitInvalidArgs
 		}
 		return runDelegate("zv-orchestrator", args[1:], stdout, stderr, stdin, runner)
+	case "mcp":
+		if len(args) == 2 && isHelp(args[1]) {
+			fmt.Fprint(stdout, mcpUsage)
+			return exitSuccess
+		}
+		return runMCP(args[1:], stdout, stderr)
 	case "pipeline":
 		return runCanonicalDelegate(args, "zv-pipeline", args[1:], stdout, stderr, stdin, runner)
 	default:

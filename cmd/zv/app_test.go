@@ -145,6 +145,23 @@ func TestRunServeDelegatesToOrchestrator(t *testing.T) {
 	}
 }
 
+func TestRunMCPRejectsExtraArgs(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+
+	code := Run([]string{"zv", "mcp", "bogus"}, &stdout, &stderr, nil, runner)
+
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `unexpected extra args for "mcp"`) {
+		t.Fatalf("stderr = %q, want unexpected extra args", stderr.String())
+	}
+	if got := runner.name; got != "" {
+		t.Fatalf("runner.name = %q, want no delegated command", got)
+	}
+}
+
 func TestRunUnknownCommandReturnsInvalidArgs(t *testing.T) {
 	runner := &fakeRunner{}
 	var stdout, stderr strings.Builder
@@ -187,6 +204,8 @@ func TestRunCanonicalGroupHelpReturnsSuccess(t *testing.T) {
 		{name: "gallery", argv: []string{"zv", "gallery", "--help"}, want: galleryUsage},
 		{name: "skills", argv: []string{"zv", "skills", "--help"}, want: skillsUsage},
 		{name: "workflows", argv: []string{"zv", "workflows", "--help"}, want: workflowsUsage},
+		{name: "mcp", argv: []string{"zv", "mcp", "--help"}, want: mcpUsage},
+		{name: "mcp-bare-help", argv: []string{"zv", "mcp", "help"}, want: mcpUsage},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

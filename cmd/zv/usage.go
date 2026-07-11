@@ -28,6 +28,7 @@ Usage:
   zv workflows check
   zv serve
   zv tui [--url <orchestrator>] [--token <token>]
+  zv mcp [--url <orchestrator>] [--token <token>]
   zv pipeline [zv-pipeline flags]
 
 Legacy pass-throughs:
@@ -120,6 +121,34 @@ const galleryUsage = `usage: zv gallery open --path <index.html>
 `
 
 const serveUsage = `usage: zv serve
+`
+
+const mcpUsage = `zv mcp - MCP stdio server exposing the FragForge demo-to-Short pipeline
+
+Usage:
+  zv mcp [--url <orchestrator>] [--token <token>]
+
+Starts a Model Context Protocol server over stdio so coding agents (Claude Code,
+Codex) can drive the pipeline as typed tools: list/create jobs, pick a target,
+record, compose, render, and download the final Short. next_step returns the one
+recommended action per job so an agent can loop next_step -> act -> poll.
+
+Connection discovery (first match wins):
+  1. --url
+  2. $ORCHESTRATOR_URL
+  3. the running FragForge Studio desktop app (ports.json in its userData dir)
+  4. http://127.0.0.1:8080 (a dev "zv serve")
+
+Register it with one line in an agent config (.mcp.json / Claude Code):
+  {"mcpServers":{"fragforge":{"command":"zv","args":["mcp"]}}}
+
+Flags:
+  --url <addr>     orchestrator base URL (default $ORCHESTRATOR_URL or discovery)
+  --token <tok>    X-FragForge-Token for a non-loopback orchestrator
+                   (default $ZV_MUTATION_TOKEN)
+
+Recording and rendering run only where capture is configured (a Windows+GPU host
+with HLAE/CS2/ffmpeg); elsewhere those tools return capability_missing.
 `
 
 const checkUsage = `usage: zv check [--format text|json]
