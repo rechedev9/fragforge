@@ -22,6 +22,7 @@ import { escapeHtml, psQuote } from './escaping';
 import { PINNED_HLAE_TOOL } from './hlae-tool';
 import { validateWindowState, type WindowState } from './window-state';
 import { lastLines } from './log-tail';
+import { musicDownloadHeaders } from './music-download';
 
 // Every loopback server and health check binds/targets this host; named once so
 // the value that couples all the URLs below is not a scattered magic string.
@@ -97,6 +98,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 interface DownloadOptions {
+  headers?: http.OutgoingHttpHeaders;
   signal?: AbortSignal;
   onProgress?: (received: number, total: number | undefined) => void;
 }
@@ -162,8 +164,8 @@ const TOOLS: Record<ToolName, ToolSpec> = {
  * AbortSignal to cancel an in-flight download: the request and response
  * stream are destroyed so nothing writes after the signal fires.
  */
-async function downloadFile(url: string, destPath: string, { signal, onProgress }: DownloadOptions = {}): Promise<string> {
-  const res = await fetchStream(url, { signal });
+async function downloadFile(url: string, destPath: string, { headers, signal, onProgress }: DownloadOptions = {}): Promise<string> {
+  const res = await fetchStream(url, { headers, signal });
   const total = Number(res.headers['content-length']) || undefined;
   const tmp = `${destPath}.tmp`;
   const hash = createHash('sha256');
@@ -342,6 +344,7 @@ async function provisionTools(onStatus?: StatusReporter): Promise<Record<string,
 const DOWNLOAD_SOCKET_IDLE_TIMEOUT_MS = 60_000;
 
 interface FetchStreamOptions {
+  headers?: http.OutgoingHttpHeaders;
   redirectsLeft?: number;
   signal?: AbortSignal;
 }
@@ -352,13 +355,17 @@ interface FetchStreamOptions {
  * caller-side timeout actually stops the network activity instead of just
  * abandoning the promise.
  */
-function fetchStream(url: string, { redirectsLeft = 5, signal }: FetchStreamOptions = {}): Promise<http.IncomingMessage> {
+function fetchStream(url: string, { headers, redirectsLeft = 5, signal }: FetchStreamOptions = {}): Promise<http.IncomingMessage> {
   return new Promise((resolve, reject) => {
     const handler = (res: http.IncomingMessage): void => {
       const code = res.statusCode;
       if (code !== undefined && code >= 300 && code < 400 && res.headers.location && redirectsLeft > 0) {
         res.resume();
-        resolve(fetchStream(new URL(res.headers.location, url).toString(), { redirectsLeft: redirectsLeft - 1, signal }));
+        resolve(fetchStream(new URL(res.headers.location, url).toString(), {
+          headers,
+          redirectsLeft: redirectsLeft - 1,
+          signal,
+        }));
         return;
       }
       if (code !== 200) {
@@ -369,8 +376,8 @@ function fetchStream(url: string, { redirectsLeft = 5, signal }: FetchStreamOpti
       resolve(res);
     };
     const req = url.startsWith('https:')
-      ? https.get(url, { signal }, handler)
-      : http.get(url, { signal }, handler);
+      ? https.get(url, { headers, signal }, handler)
+      : http.get(url, { headers, signal }, handler);
     req.on('error', reject);
     req.setTimeout(DOWNLOAD_SOCKET_IDLE_TIMEOUT_MS, () => req.destroy(new Error(`GET ${url}: timed out`)));
   });
@@ -404,7 +411,7 @@ async function provisionMusic(): Promise<void> {
   // so there is no need to hammer several release hosts at once during boot.
   for (const track of tracks) {
     if (!isRecord(track)) continue;
-    const { id, ext, downloadUrl } = track;
+    const { id, ext, downloadUrl, sourceUrl } = track;
     if (typeof id !== 'string' || !id || typeof ext !== 'string' || !ext) continue;
     const dest = path.join(musicDir, `${id}.${ext}`);
     if (fs.existsSync(dest)) continue;
@@ -423,7 +430,7 @@ async function provisionMusic(): Promise<void> {
     // downloadFile stages through a temp name and renames on success, so a
     // half-written file never shows up as a playable track.
     try {
-      await downloadFile(downloadUrl, dest);
+      await downloadFile(downloadUrl, dest, { headers: musicDownloadHeaders(sourceUrl) });
       logLine(`[music] downloaded ${id}.${ext}\n`);
     } catch (err) {
       logLine(`[music] skip ${id}: ${String(err)}\n`);

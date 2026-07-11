@@ -240,8 +240,8 @@ func TestGroqTranscriber_Transcribe_OmitsAutoLanguage(t *testing.T) {
 	if sawLanguageField {
 		t.Fatal("request included a language field for \"auto\", want it omitted")
 	}
-	if !strings.Contains(gotPrompt, "CS2") || strings.Contains(strings.ToLower(gotPrompt), "spanish") || strings.Contains(strings.ToLower(gotPrompt), "english") {
-		t.Fatalf("auto prompt = %q, want neutral CS2 context without a forced language", gotPrompt)
+	if !strings.Contains(gotPrompt, "CS2") || !strings.Contains(gotPrompt, "Spanish and English") || !strings.Contains(gotPrompt, "do not translate") {
+		t.Fatalf("auto prompt = %q, want bilingual original-language guidance", gotPrompt)
 	}
 }
 
@@ -709,9 +709,9 @@ func TestParseGroqWordsDropsRepetitionLoops(t *testing.T) {
 
 // Regression for the missing "apunta apunta": on noisy chunks auto-detection
 // picks an absurd language (Korean) and decodes gibberish the hallucination
-// filter drops, losing real speech. Chunks that end up empty are retried with
-// the majority language of the rest of the clip forced.
-func TestGroqTranscriber_TranscribeRetriesEmptiedSpanWithMajorityLanguage(t *testing.T) {
+// filter drops, losing real speech. Chunks that end up empty are retried in
+// both Spanish and English without forcing the rest of the clip.
+func TestGroqTranscriber_TranscribeRetriesEmptiedSpanBilingually(t *testing.T) {
 	var languages []string
 	var requests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -726,8 +726,10 @@ func TestGroqTranscriber_TranscribeRetriesEmptiedSpanWithMajorityLanguage(t *tes
 			_, _ = w.Write([]byte(`{"language":"Spanish","words":[{"word":"joder","start":0.1,"end":0.5},{"word":"tío","start":0.5,"end":0.9}],"segments":[{"start":0,"end":1,"text":" joder tío","no_speech_prob":0.05,"avg_logprob":-0.3}]}`))
 		case 2: // noisy chunk: Korean hallucination loop, filtered to nothing
 			_, _ = w.Write([]byte(`{"language":"Korean","words":[{"word":"아","start":0.5,"end":1.0},{"word":"아","start":3.0,"end":3.5}],"segments":[{"start":0.5,"end":1.5,"text":" 아","no_speech_prob":0.3,"avg_logprob":-0.85},{"start":3.0,"end":4.0,"text":" 아","no_speech_prob":0.3,"avg_logprob":-0.85}]}`))
-		default: // retry of chunk 2 with language=es decodes real speech
+		case 3: // Spanish retry decodes real speech
 			_, _ = w.Write([]byte(`{"language":"Spanish","words":[{"word":"apunta","start":0.4,"end":0.9},{"word":"apunta","start":1.0,"end":1.5}],"segments":[{"start":0.3,"end":1.6,"text":" apunta apunta","no_speech_prob":0.06,"avg_logprob":-0.46}]}`))
+		default: // English retry remains empty
+			_, _ = w.Write([]byte(`{"language":"English","words":[]}`))
 		}
 	}))
 	defer server.Close()
@@ -754,11 +756,11 @@ func TestGroqTranscriber_TranscribeRetriesEmptiedSpanWithMajorityLanguage(t *tes
 	if err != nil {
 		t.Fatalf("Transcribe returned error: %v", err)
 	}
-	if requests != 3 {
-		t.Fatalf("groq requests = %d, want 3 (two spans + one language retry)", requests)
+	if requests != 4 {
+		t.Fatalf("groq requests = %d, want 4 (two spans + Spanish and English retries)", requests)
 	}
-	if len(languages) != 3 || languages[0] != "" || languages[1] != "" || languages[2] != "es" {
-		t.Fatalf("language fields = %v, want auto, auto, then forced es", languages)
+	if len(languages) != 4 || languages[0] != "" || languages[1] != "" || languages[2] != "es" || languages[3] != "en" {
+		t.Fatalf("language fields = %v, want auto, auto, then forced es and en", languages)
 	}
 	var got []string
 	for _, c := range cues {

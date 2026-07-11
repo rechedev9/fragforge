@@ -348,6 +348,62 @@ func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
 	}
 }
 
+func TestStreamRenderWorkerClampsRangeAndRejectsCaptionsAfterEOF(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	plan.Clips[0].EndSeconds = 59
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{DurationSeconds: 19.55, AudioCodec: "aac"},
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		WorkDir: t.TempDir(), FFmpegPath: "ffmpeg", WhisperPath: "whisper-cli", WhisperModelPath: "model.bin",
+	})
+	w.runner = runner
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		return []captions.WordCue{{Word: "late", StartSeconds: 20.02, EndSeconds: 20.10}}, nil
+	}
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("runner calls = %d, want render only", len(runner.calls))
+	}
+	if got := argValue(runner.calls[0].args, "-t"); got != "19.550" {
+		t.Fatalf("render duration = %q, want 19.550", got)
+	}
+	resultKey, err := streamclips.RenderResultKey(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result streamclips.RenderResult
+	if err := json.Unmarshal(store.files[resultKey], &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Clips) != 1 || result.Clips[0].DurationSeconds != 19.55 {
+		t.Fatalf("result clips = %+v, want truthful 19.55s duration", result.Clips)
+	}
+	if !strings.Contains(strings.Join(result.Warnings, " "), "no words within rendered duration") ||
+		!strings.Contains(strings.Join(result.Warnings, " "), "end clamped") {
+		t.Fatalf("warnings = %v, want range and out-of-bounds caption warnings", result.Warnings)
+	}
+}
+
 // --- captions backend selection --------------------------------------------
 
 func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {

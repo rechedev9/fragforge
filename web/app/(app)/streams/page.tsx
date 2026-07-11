@@ -585,9 +585,7 @@ function StreamEditor({
     onPlanChange({ ...plan, streamer_banner: { ...plan.streamer_banner, slide_enabled: slideEnabled } });
   const setClips = (clips: StreamClipRange[]) => onPlanChange({ ...plan, clips });
   const setCaptionsEnabled = (enabled: boolean) =>
-    onPlanChange({ ...plan, captions: { enabled, language: plan.captions?.language ?? 'auto' } });
-  const setLanguage = (language: string) =>
-    onPlanChange({ ...plan, captions: { enabled: plan.captions?.enabled ?? false, language } });
+    onPlanChange({ ...plan, captions: { enabled, language: 'auto' } });
   const setMusicKey = (key: string) =>
     onPlanChange({ ...plan, music: key ? { key, volume: plan.music?.volume } : {} });
   const setMusicVolume = (volume: number) =>
@@ -753,20 +751,9 @@ function StreamEditor({
                 {plan.captions?.enabled ? 'Subtítulos incrustados: activados' : 'Subtítulos incrustados: desactivados'}
               </Button>
               {plan.captions?.enabled ? (
-                <Select
-                  value={plan.captions?.language ?? 'auto'}
-                  disabled={busy}
-                  onValueChange={setLanguage}
-                >
-                  <SelectTrigger aria-label="Idioma de subtítulos" className="w-52">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Detección automática</SelectItem>
-                    <SelectItem value="es">Español</SelectItem>
-                    <SelectItem value="en">Inglés</SelectItem>
-                  </SelectContent>
-                </Select>
+                <span className="border border-border/70 bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                  Español + inglés · detección automática · sin traducción
+                </span>
               ) : null}
             </div>
           </div>

@@ -1,9 +1,51 @@
 package captions
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestBoundCuesToDuration(t *testing.T) {
+	tests := []struct {
+		name        string
+		cues        []WordCue
+		duration    float64
+		want        []WordCue
+		wantDropped int
+		wantClipped int
+	}{
+		{
+			name: "keeps in-range and clips crossing eof",
+			cues: []WordCue{
+				{Word: "keep", StartSeconds: 1, EndSeconds: 2},
+				{Word: "clip", StartSeconds: 19.4, EndSeconds: 19.8},
+				{Word: "drop", StartSeconds: 20.02, EndSeconds: 20.10},
+			},
+			duration:    19.55,
+			want:        []WordCue{{Word: "keep", StartSeconds: 1, EndSeconds: 2}, {Word: "clip", StartSeconds: 19.4, EndSeconds: 19.55}},
+			wantDropped: 1,
+			wantClipped: 1,
+		},
+		{
+			name:        "unknown duration drops all",
+			cues:        []WordCue{{Word: "word", StartSeconds: 0, EndSeconds: 1}},
+			duration:    0,
+			wantDropped: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, dropped, clipped := BoundCuesToDuration(tt.cues, tt.duration)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("BoundCuesToDuration() = %+v, want %+v", got, tt.want)
+			}
+			if dropped != tt.wantDropped || clipped != tt.wantClipped {
+				t.Fatalf("counts = dropped %d clipped %d, want dropped %d clipped %d", dropped, clipped, tt.wantDropped, tt.wantClipped)
+			}
+		})
+	}
+}
 
 func TestDefaultStyle(t *testing.T) {
 	style := DefaultStyle()

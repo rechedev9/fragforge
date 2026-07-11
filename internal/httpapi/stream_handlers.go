@@ -318,6 +318,11 @@ func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	plan, _, err := streamclips.ClampEditPlanToDuration(plan, j.Probe.DurationSeconds)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.streamRepo.SetEditPlan(r.Context(), j.ID, plan); err != nil {
 		if errors.Is(err, streamclips.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "stream job not found")

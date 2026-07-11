@@ -146,40 +146,17 @@ func (g GroqTranscriber) transcribeBySpeechSpan(ctx context.Context, ffmpegPath,
 		if err != nil {
 			return nil, false
 		}
-		results = append(results, spanResult{
-			span:       span,
-			chunkPath:  chunkPath,
-			transcript: transcript,
-			words:      cuesFromTranscript(transcript),
-		})
-	}
-
-	// Second pass: auto-detection picks absurd languages ("Korean") on noisy
-	// chunks and decodes gibberish the hallucination filter then rightly
-	// drops — losing real speech. Retry those emptied chunks forcing the
-	// language the rest of the clip agreed on; a genuinely different-language
-	// chunk that decoded confidently on its own is never retried, so
-	// code-switched clips keep working.
-	if lang := strings.TrimSpace(g.Language); lang == "" || strings.EqualFold(lang, "auto") {
-		if majority := majorityLanguage(results); majority != "" {
-			for i, r := range results {
-				if len(r.words) > 0 || len(r.transcript.Words) == 0 {
-					continue // kept something, or was true silence
-				}
-				if isoLanguageCode(r.transcript.Language) == majority {
-					continue // same language; a retry would decode the same
-				}
-				data, err := g.transcribeAudio(ctx, r.chunkPath, majority)
-				if err != nil {
-					return nil, false
-				}
-				transcript, err := parseGroqTranscript(data)
-				if err != nil {
-					return nil, false
-				}
-				results[i].words = cuesFromTranscript(transcript)
+		words := cuesFromTranscript(transcript)
+		if (strings.TrimSpace(g.Language) == "" || strings.EqualFold(strings.TrimSpace(g.Language), "auto")) && len(words) == 0 && len(transcript.Words) > 0 {
+			words, err = g.transcribeBilingualRetry(ctx, chunkPath)
+			if err != nil {
+				return nil, false
 			}
 		}
+		results = append(results, spanResult{
+			span:  span,
+			words: words,
+		})
 	}
 
 	var cues []WordCue
@@ -200,45 +177,31 @@ func (g GroqTranscriber) transcribeBySpeechSpan(ctx context.Context, ffmpegPath,
 // transcript (for its detected language) and the hallucination-filtered
 // words in chunk-local time.
 type spanResult struct {
-	span       speechSpan
-	chunkPath  string
-	transcript groqTranscript
-	words      []WordCue
+	span  speechSpan
+	words []WordCue
 }
 
-// majorityLanguage returns the ISO-639-1 code most of the kept words were
-// decoded in, or "" when nothing was kept or the name is unknown.
-func majorityLanguage(results []spanResult) string {
-	votes := map[string]int{}
-	for _, r := range results {
-		if len(r.words) == 0 {
-			continue
+// transcribeBilingualRetry retries an auto-detected span independently in
+// Spanish and English, then keeps the valid strict-filtered result containing
+// more timed words. This avoids forcing the whole clip to one majority
+// language while preserving the hallucination safeguards for game noise.
+func (g GroqTranscriber) transcribeBilingualRetry(ctx context.Context, chunkPath string) ([]WordCue, error) {
+	var best []WordCue
+	for _, language := range []string{"es", "en"} {
+		data, err := g.transcribeAudio(ctx, chunkPath, language)
+		if err != nil {
+			return nil, err
 		}
-		if code := isoLanguageCode(r.transcript.Language); code != "" {
-			votes[code] += len(r.words)
+		transcript, err := parseGroqTranscript(data)
+		if err != nil {
+			return nil, err
+		}
+		words := cuesFromTranscript(transcript)
+		if len(words) > len(best) {
+			best = words
 		}
 	}
-	majority, best := "", 0
-	for code, n := range votes {
-		if n > best {
-			majority, best = code, n
-		}
-	}
-	return majority
-}
-
-// isoLanguageCode maps the language name Groq's verbose_json reports
-// ("Spanish", "english") to the ISO-639-1 code its language parameter
-// expects. Unknown names return "" and simply skip the retry.
-func isoLanguageCode(name string) string {
-	codes := map[string]string{
-		"english": "en", "spanish": "es", "portuguese": "pt", "french": "fr",
-		"german": "de", "italian": "it", "dutch": "nl", "polish": "pl",
-		"russian": "ru", "ukrainian": "uk", "turkish": "tr", "arabic": "ar",
-		"japanese": "ja", "korean": "ko", "chinese": "zh", "hindi": "hi",
-		"swedish": "sv", "norwegian": "no", "danish": "da", "finnish": "fi",
-	}
-	return codes[strings.ToLower(strings.TrimSpace(name))]
+	return best, nil
 }
 
 // speechSpan is one detected speech region of the extracted audio, in
@@ -493,7 +456,7 @@ func groqTranscriptionPrompt(language string) string {
 	case "en":
 		return "Transcribe in the spoken language with correct spelling, capitalization, and punctuation. CS2 vocabulary: " + groqCS2Vocabulary + "."
 	default:
-		return "CS2 gameplay vocabulary: " + groqCS2Vocabulary + "."
+		return "Transcribe every spoken word in its original language. The speaker may switch between Spanish and English in the same clip. Preserve each language exactly as spoken and do not translate. Use correct spelling, capitalization, and punctuation. CS2 gameplay vocabulary: " + groqCS2Vocabulary + "."
 	}
 }
 

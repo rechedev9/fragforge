@@ -780,6 +780,10 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if err := plan.Validate(); err != nil {
 		return err
 	}
+	plan, rangeWarnings, err := streamclips.ClampEditPlanToDuration(plan, j.Probe.DurationSeconds)
+	if err != nil {
+		return err
+	}
 	if len(plan.Clips) == 0 {
 		return fmt.Errorf("edit plan has no clips")
 	}
@@ -819,7 +823,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	runCtx, cancel := context.WithTimeout(ctx, cfg.timeoutDuration())
 	defer cancel()
 	var videos []streamclips.VideoEntry
-	var warnings []string
+	warnings := append([]string(nil), rangeWarnings...)
 	musicPath := ""
 	if plan.Music.Key != "" {
 		if musicPath = resolveMusicFile(cfg.MusicDir, plan.Music.Key); musicPath == "" {
@@ -846,15 +850,16 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		publishPath := outPath
 		publishClipID := clip.ID
 		if plan.Captions.Enabled {
-			captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, j.ID, variant, clip.ID, plan.Captions.Language)
+			clipDuration := clip.EndSeconds - clip.StartSeconds
+			captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, j.ID, variant, clip.ID, plan.Captions.Language, clipDuration)
 			if err != nil {
 				return err
 			}
-			switch {
-			case captionedPath != "":
+			if captionedPath != "" {
 				publishPath = captionedPath
 				publishClipID = clip.ID + "_captioned"
-			case warning != "":
+			}
+			if warning != "" {
 				warnings = append(warnings, warning)
 			}
 		}
@@ -905,7 +910,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
 // explicitly requested and whisper is configured.
-func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath string, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
+func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath string, id uuid.UUID, variant, clipID, language string, clipDuration float64) (captionedPath, warning string, err error) {
 	cues, err := w.transcribe(ctx, clipPath, workDir, language)
 	if err != nil {
 		if strings.Contains(err.Error(), "no words") {
@@ -916,6 +921,13 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 	sort.SliceStable(cues, func(i, j int) bool {
 		return cues[i].StartSeconds < cues[j].StartSeconds
 	})
+	cues, dropped, clipped := captions.BoundCuesToDuration(cues, clipDuration)
+	if len(cues) == 0 {
+		return "", fmt.Sprintf("clip %s: transcription produced no words within rendered duration %.3fs, publishing without captions", clipID, clipDuration), nil
+	}
+	if dropped > 0 || clipped > 0 {
+		warning = fmt.Sprintf("clip %s: bounded captions to rendered duration %.3fs (%d dropped, %d clipped)", clipID, clipDuration, dropped, clipped)
+	}
 	fontPath, err := mediafont.Materialize()
 	if err != nil {
 		return "", "", fmt.Errorf("materialize caption font for clip %s: %w", clipID, err)
@@ -954,7 +966,7 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 	if _, err := w.runner.Run(ctx, cfg.FFmpegPath, args...); err != nil {
 		return "", "", fmt.Errorf("burn captions for clip %s: %w", clipID, err)
 	}
-	return out, "", nil
+	return out, warning, nil
 }
 
 func (w *StreamRenderWorker) writeStreamState(id uuid.UUID, variant string, status streamclips.Status, warnings []string, errMsg string, videos []streamclips.VideoEntry) error {

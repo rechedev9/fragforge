@@ -6,6 +6,7 @@ package captions
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -18,6 +19,32 @@ type WordCue struct {
 	Word         string
 	StartSeconds float64
 	EndSeconds   float64
+}
+
+// BoundCuesToDuration returns an independent cue slice that can be displayed
+// within mediaDuration. Cues starting at or after EOF are dropped and cues
+// crossing EOF are clipped. Invalid timestamps are dropped so a malformed
+// late transcription cannot produce a nominally captioned video with no
+// visible text.
+func BoundCuesToDuration(cues []WordCue, mediaDuration float64) (bounded []WordCue, dropped, clipped int) {
+	if mediaDuration <= 0 || math.IsNaN(mediaDuration) || math.IsInf(mediaDuration, 0) {
+		return nil, len(cues), 0
+	}
+	bounded = make([]WordCue, 0, len(cues))
+	for _, cue := range cues {
+		if math.IsNaN(cue.StartSeconds) || math.IsInf(cue.StartSeconds, 0) ||
+			math.IsNaN(cue.EndSeconds) || math.IsInf(cue.EndSeconds, 0) ||
+			cue.StartSeconds < 0 || cue.StartSeconds >= mediaDuration || cue.EndSeconds <= cue.StartSeconds {
+			dropped++
+			continue
+		}
+		if cue.EndSeconds > mediaDuration {
+			cue.EndSeconds = mediaDuration
+			clipped++
+		}
+		bounded = append(bounded, cue)
+	}
+	return bounded, dropped, clipped
 }
 
 // Style configures the look of the karaoke subtitle track. Colours use ASS

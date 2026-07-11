@@ -18,6 +18,7 @@ const repo = join(desktop, '..');
 const web = join(repo, 'web');
 const bin = join(repo, 'bin');
 const out = join(desktop, 'build-resources');
+const desktopPackage = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8'));
 
 // zv-orchestrator.exe is the backend main.js spawns (directly, not via `zv
 // serve`, so quitting the app kills the real server). zv-editor.exe must sit
@@ -47,11 +48,15 @@ if (!existsSync(iconFile)) {
 
 // 1. Build the web in local mode. NEXT_PUBLIC_FRAGFORGE_MODE is inlined into the
 //    client bundle at build time, so the desktop distributable is local-only.
-console.log('[assemble] building web (NEXT_PUBLIC_FRAGFORGE_MODE=local)...');
+console.log(`[assemble] building web (local mode, Studio v${desktopPackage.version})...`);
 execSync('npm run build', {
   cwd: web,
   stdio: 'inherit',
-  env: { ...process.env, NEXT_PUBLIC_FRAGFORGE_MODE: 'local' },
+  env: {
+    ...process.env,
+    NEXT_PUBLIC_FRAGFORGE_MODE: 'local',
+    NEXT_PUBLIC_FRAGFORGE_VERSION: desktopPackage.version,
+  },
 });
 
 const standalone = join(web, '.next', 'standalone');

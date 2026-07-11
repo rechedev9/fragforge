@@ -108,8 +108,8 @@ type StreamerBannerPlan struct {
 }
 
 // CaptionsPlan opts a stream render into a burned-in karaoke caption pass.
-// Language is a whisper language code ("es", "en", ...); empty means "auto".
-// Nothing is required when Enabled is false.
+// Enabled plans are normalized to multilingual auto-detection so Spanish and
+// English can coexist in the same clip without forcing or translating either.
 type CaptionsPlan struct {
 	Enabled  bool   `json:"enabled"`
 	Language string `json:"language,omitempty"`
@@ -313,6 +313,9 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 	for i := range plan.Clips {
 		plan.Clips[i].ID = strings.TrimSpace(plan.Clips[i].ID)
 	}
+	if plan.Captions.Enabled {
+		plan.Captions.Language = "auto"
+	}
 	plan.StreamerBanner.Nick = strings.TrimSpace(plan.StreamerBanner.Nick)
 	plan.Music.Key = strings.TrimSpace(plan.Music.Key)
 	if plan.Music.Key == "" {
@@ -321,4 +324,28 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 		plan.Music.Volume = defaultMusicVolume
 	}
 	return plan
+}
+
+// ClampEditPlanToDuration returns a copy whose clip ranges cannot extend past
+// the probed source duration. Unknown durations leave the plan unchanged.
+// A clip beginning at or after EOF is rejected because no truthful non-empty
+// output can be rendered for it.
+func ClampEditPlanToDuration(plan EditPlan, duration float64) (EditPlan, []string, error) {
+	if duration <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+		return plan, nil, nil
+	}
+	clamped := plan
+	clamped.Clips = append([]ClipRange(nil), plan.Clips...)
+	var warnings []string
+	for i := range clamped.Clips {
+		clip := &clamped.Clips[i]
+		if clip.StartSeconds >= duration {
+			return EditPlan{}, nil, fmt.Errorf("clip %s starts at %.3fs, at or after source duration %.3fs", clip.ID, clip.StartSeconds, duration)
+		}
+		if clip.EndSeconds > duration {
+			warnings = append(warnings, fmt.Sprintf("clip %s end clamped from %.3fs to source duration %.3fs", clip.ID, clip.EndSeconds, duration))
+			clip.EndSeconds = duration
+		}
+	}
+	return clamped, warnings, nil
 }

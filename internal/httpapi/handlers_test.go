@@ -2482,6 +2482,37 @@ func TestPutStreamEditPlanRejectsLargeJSONBody(t *testing.T) {
 	}
 }
 
+func TestPutStreamEditPlanClampsClipToSourceDuration(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	streamRepo.jobs[id] = streamclips.Job{
+		ID: id, Status: streamclips.StatusUploaded, SourcePath: streamclips.SourceKey(id),
+		Probe: streamclips.SourceProbe{DurationSeconds: 19.55},
+	}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{}, WithStreamRepository(streamRepo))
+	r := chi.NewRouter()
+	r.Put("/api/stream-jobs/{id}/edit-plan", h.PutStreamEditPlan)
+	plan := streamclips.DefaultEditPlan()
+	plan.Clips = []streamclips.ClipRange{{ID: "clip-001", StartSeconds: 0, EndSeconds: 59}}
+	body, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPut, "/api/stream-jobs/"+id.String()+"/edit-plan", bytes.NewReader(body))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	var saved streamclips.EditPlan
+	if err := json.Unmarshal(streamRepo.jobs[id].EditPlan, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Clips) != 1 || saved.Clips[0].EndSeconds != 19.55 {
+		t.Fatalf("saved clips = %+v, want end 19.55", saved.Clips)
+	}
+}
+
 func TestStreamVideoRejectsUnsafeClipID(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	id := uuid.New()

@@ -1,6 +1,7 @@
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/shell/app-sidebar';
 import { Wordmark } from '@/components/brand/wordmark';
+import { formatAppVersion } from '@/lib/app-version';
 
 /**
  * Authenticated app shell. Renders the persistent left sidebar (which collapses
@@ -8,9 +9,11 @@ import { Wordmark } from '@/components/brand/wordmark';
  * screen. Onboarding screens live outside this group and have no sidebar.
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const version = formatAppVersion(process.env.NEXT_PUBLIC_FRAGFORGE_VERSION);
+
   return (
     <SidebarProvider style={{ '--sidebar-width': '240px' } as React.CSSProperties}>
-      <AppSidebar />
+      <AppSidebar version={version} />
       {/* SidebarInset paints an opaque bg-background over <body>, so it needs
           its own neon-grid layer for the HUD grid to show in the content area. */}
       <SidebarInset className="neon-grid">

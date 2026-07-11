@@ -52,7 +52,7 @@ function isActiveHref(pathname: string, href: string): boolean {
  * nav (active item gets the inset accent bar; the active destination always
  * uses cyan), and a footer with the local CAPTURA readiness card.
  */
-export function AppSidebar() {
+export function AppSidebar({ version }: { version: string | null }) {
   const pathname = usePathname();
 
   return (
@@ -122,6 +122,14 @@ export function AppSidebar() {
 
       <SidebarFooter className="gap-3 px-4 pb-5 group-data-[collapsible=icon]:px-1">
         <CaptureReadiness />
+        {version ? (
+          <p
+            aria-label={`Versión de FragForge Studio ${version}`}
+            className="px-1 text-center font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden"
+          >
+            FragForge Studio · {version}
+          </p>
+        ) : null}
       </SidebarFooter>
     </Sidebar>
   );
