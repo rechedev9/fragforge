@@ -9,7 +9,7 @@ export function MatchListSkeleton() {
           key={i}
           className="flex items-center gap-6 border border-primary/10 bg-card/75 px-5 py-4"
         >
-          <Skeleton className="h-11 w-[3px] rounded-none" />
+          <Skeleton className="h-11 w-[3px] rounded-full" />
           <div className="flex w-[150px] flex-col gap-1.5">
             <Skeleton className="h-5 w-28" />
             <Skeleton className="h-3 w-24" />

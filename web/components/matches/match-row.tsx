@@ -37,7 +37,7 @@ export function MatchRow({ match, featured = false }: MatchRowProps) {
       className={cn(
         'flex items-stretch gap-4 px-4 py-4 transition-colors sm:gap-5 sm:px-5',
         featured
-          ? 'studio-panel studio-panel-raised neon-brackets'
+          ? 'studio-panel studio-panel-raised'
           : 'studio-panel studio-panel-interactive bg-card/80',
       )}
     >
@@ -77,7 +77,7 @@ export function MatchRow({ match, featured = false }: MatchRowProps) {
           {featured ? (
             <Link
               href={`/matches/${match.id}`}
-              className="neon-notch neon-glow inline-flex h-11 w-full items-center justify-center bg-primary px-5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-auto"
+              className="neon-glow rounded-md inline-flex h-11 w-full items-center justify-center bg-primary px-5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-auto"
             >
               FORJAR REEL
             </Link>

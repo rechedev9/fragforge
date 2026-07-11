@@ -184,10 +184,10 @@ function LibrarySkeleton() {
     <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,250px),300px))] justify-start gap-5">
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="studio-panel space-y-4 p-4">
-          <Skeleton className="aspect-video w-full rounded-none" />
-          <Skeleton className="h-4 w-2/3 rounded-none" />
-          <Skeleton className="h-3 w-1/2 rounded-none" />
-          <Skeleton className="h-9 w-full rounded-none" />
+          <Skeleton className="aspect-video w-full rounded-lg" />
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-3 w-1/2" />
+          <Skeleton className="h-9 w-full" />
         </div>
       ))}
     </div>

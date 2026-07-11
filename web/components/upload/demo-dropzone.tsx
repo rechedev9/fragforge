@@ -53,7 +53,7 @@ export function DemoDropzone({ onFile }: DemoDropzoneProps) {
           accept(e.dataTransfer.files?.[0]);
         }}
         className={cn(
-          'studio-panel studio-panel-raised neon-brackets group relative isolate flex min-h-[268px] cursor-pointer flex-col items-center justify-center overflow-hidden px-6 py-10 text-center transition-[border-color,box-shadow,transform] duration-200 sm:min-h-[300px] sm:px-10 sm:py-12',
+          'studio-panel studio-panel-raised group relative isolate flex min-h-[268px] cursor-pointer flex-col items-center justify-center overflow-hidden px-6 py-10 text-center transition-[border-color,box-shadow,transform] duration-200 sm:min-h-[300px] sm:px-10 sm:py-12',
           'focus-within:border-primary focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background',
           dragging
             ? 'border-primary ring-2 ring-primary/60 shadow-[0_0_32px_color-mix(in_oklch,var(--primary)_18%,transparent)]'

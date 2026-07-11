@@ -30,16 +30,15 @@ export function StudioEmptyState({
     <section
       aria-label={title}
       className={cn(
-        'studio-panel studio-panel-raised neon-brackets flex w-full max-w-3xl flex-col items-center px-6 text-center sm:px-10',
+        'studio-panel studio-panel-raised flex w-full max-w-3xl flex-col items-center px-6 text-center sm:px-10',
         compact ? 'py-10' : 'py-14 sm:py-16',
-        magenta && '[--neon-bracket-color:var(--stream)]',
         className,
       )}
     >
       <span
         className={cn(
-          'grid size-12 place-items-center border bg-background/55 shadow-inner',
-          magenta ? 'border-stream/45 text-stream' : 'border-primary/45 text-primary',
+          'grid size-12 place-items-center rounded-lg border bg-background/55 shadow-inner',
+          magenta ? 'border-stream/30 text-stream' : 'border-primary/30 text-primary',
         )}
       >
         <Icon className="size-5" aria-hidden />

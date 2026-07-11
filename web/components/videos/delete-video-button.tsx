@@ -66,7 +66,7 @@ export function DeleteVideoButton({ video, onDeleted }: { video: Video; onDelete
               size="sm"
               onClick={() => setOpen(false)}
               disabled={deleting}
-              className="rounded-none border border-primary/40 font-[family-name:var(--font-display)] font-bold tracking-[0.05em] uppercase hover:bg-primary/10"
+              className="border border-primary/40 font-[family-name:var(--font-display)] font-bold tracking-[0.05em] uppercase hover:bg-primary/10"
             >
               Cancelar
             </Button>
@@ -75,7 +75,7 @@ export function DeleteVideoButton({ video, onDeleted }: { video: Video; onDelete
               size="sm"
               onClick={onConfirm}
               disabled={deleting}
-              className="neon-notch rounded-none font-[family-name:var(--font-display)] font-bold tracking-[0.05em] uppercase"
+              className="font-[family-name:var(--font-display)] font-bold tracking-[0.05em] uppercase"
             >
               <Trash2 className="size-4" />
               {deleting ? 'Borrando…' : 'Borrar'}

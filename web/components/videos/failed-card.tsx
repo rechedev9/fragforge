@@ -28,7 +28,7 @@ export function FailedCard({ video, onChange }: { video: Video; onChange: () => 
   }
 
   return (
-    <div className="studio-panel neon-brackets flex flex-col gap-4 border-destructive/45 px-4 py-4 [--neon-bracket-color:var(--destructive)] sm:flex-row sm:items-center sm:px-5">
+    <div className="studio-panel flex flex-col gap-4 border-destructive/45 px-4 py-4 sm:flex-row sm:items-center sm:px-5">
       <div className="grid size-12 shrink-0 place-items-center border border-destructive/45 bg-destructive/10">
         <AlertTriangle className="size-5 text-destructive" aria-hidden />
       </div>

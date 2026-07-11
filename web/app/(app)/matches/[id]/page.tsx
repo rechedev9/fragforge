@@ -385,7 +385,7 @@ function LoadingState() {
         <Skeleton className="h-6 w-48" />
         <div className="flex flex-col gap-px overflow-hidden border border-border">
           {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-[76px] w-full rounded-none" />
+            <Skeleton key={i} className="h-[76px] w-full" />
           ))}
         </div>
       </div>

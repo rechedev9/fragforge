@@ -375,7 +375,7 @@ function LocalStreamsPage() {
         <button
           type="button"
           onClick={() => reset('')}
-          className="neon-notch bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
+          className="rounded-md bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90"
         >
           EMPEZAR DE NUEVO
         </button>
@@ -441,7 +441,7 @@ function SourceCard({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="studio-panel studio-panel-raised neon-brackets [--neon-bracket-color:var(--stream)] relative max-w-5xl p-5 sm:p-7">
+    <div className="studio-panel studio-panel-raised relative max-w-5xl p-5 sm:p-7">
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-stretch">
         <div>
           <SectionEyebrow label="FUENTE" accent="magenta" />
@@ -677,7 +677,7 @@ function StreamEditor({
                 aria-invalid={!STREAMER_NICK_RE.test(plan.streamer_banner?.nick?.trim() ?? '')}
                 onChange={(e) => setStreamerNick(e.target.value)}
                 placeholder="zacketizorcs2"
-                className="max-w-sm rounded-none"
+                className="max-w-sm"
               />
               {!STREAMER_NICK_RE.test(plan.streamer_banner?.nick?.trim() ?? '') ? (
                 <p className="text-xs text-destructive">Usa solo letras, números o guiones bajos (máximo 25).</p>
@@ -709,9 +709,7 @@ function StreamEditor({
                     size="sm"
                     disabled={busy}
                     aria-pressed={plan.streamer_banner?.slide_enabled ?? false}
-                    onClick={() => setStreamerSlide(!(plan.streamer_banner?.slide_enabled ?? false))}
-                    className="rounded-none"
-                  >
+                    onClick={() => setStreamerSlide(!(plan.streamer_banner?.slide_enabled ?? false))}                  >
                     {plan.streamer_banner?.slide_enabled
                       ? 'Deslizamiento: activado'
                       : 'Deslizamiento: desactivado'}
@@ -721,9 +719,7 @@ function StreamEditor({
                     variant="ghost"
                     size="sm"
                     disabled={busy || plan.streamer_banner?.position_y === undefined}
-                    onClick={resetStreamerPosition}
-                    className="rounded-none"
-                  >
+                    onClick={resetStreamerPosition}                  >
                     Restablecer posición
                   </Button>
                 </div>
@@ -751,7 +747,7 @@ function StreamEditor({
                 size="sm"
                 disabled={busy}
                 onClick={() => setCaptionsEnabled(!plan.captions?.enabled)}
-                className="gap-1.5 rounded-none"
+                className="gap-1.5"
               >
                 <Captions className="size-4" />
                 {plan.captions?.enabled ? 'Subtítulos incrustados: activados' : 'Subtítulos incrustados: desactivados'}
@@ -762,7 +758,7 @@ function StreamEditor({
                   disabled={busy}
                   onValueChange={setLanguage}
                 >
-                  <SelectTrigger aria-label="Idioma de subtítulos" className="w-52 rounded-none">
+                  <SelectTrigger aria-label="Idioma de subtítulos" className="w-52">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -796,7 +792,7 @@ function StreamEditor({
             type="button"
             onClick={onCreate}
             disabled={busy}
-            className="neon-notch neon-glow inline-flex items-center gap-1.5 bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            className="neon-glow rounded-md inline-flex items-center gap-1.5 bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
             {stage === 'rendering' ? 'RENDERIZANDO…' : 'CREAR SHORTS'}
@@ -915,7 +911,7 @@ function ClipEditor({
                     value={clip.start_seconds}
                     disabled={disabled}
                     onChange={(e) => updateClip(clip.id, { start_seconds: Number(e.target.value) })}
-                    className="w-24 rounded-none"
+                    className="w-24"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
@@ -931,7 +927,7 @@ function ClipEditor({
                     disabled={disabled}
                     aria-invalid={invalid}
                     onChange={(e) => updateClip(clip.id, { end_seconds: Number(e.target.value) })}
-                    className="w-24 rounded-none"
+                    className="w-24"
                   />
                 </div>
                 <div className="flex min-w-40 flex-1 flex-col gap-1">
@@ -943,9 +939,7 @@ function ClipEditor({
                     value={clip.title ?? ''}
                     disabled={disabled}
                     onChange={(e) => updateClip(clip.id, { title: e.target.value })}
-                    placeholder={`Clip ${i + 1}`}
-                    className="rounded-none"
-                  />
+                    placeholder={`Clip ${i + 1}`}                  />
                 </div>
                 <Button
                   type="button"
@@ -1163,7 +1157,7 @@ function MusicAndEffectsCard({
                 disabled={busy || songs === null}
                 onValueChange={(value) => onMusicKey(value === NO_MUSIC_VALUE ? '' : value)}
               >
-                <SelectTrigger id="stream-music" className="w-72 max-w-[calc(80vw-2.5rem)] rounded-none">
+                <SelectTrigger id="stream-music" className="w-72 max-w-[calc(80vw-2.5rem)]">
                   <SelectValue>{selectedMusicLabel}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -1183,7 +1177,7 @@ function MusicAndEffectsCard({
                 disabled={busy || songs === null || !selectedSong?.previewUrl}
                 onClick={() => void togglePreview()}
                 aria-label={`${previewPlaying ? 'Pausar' : 'Escuchar'} ${selectedSong?.title ?? 'música seleccionada'}`}
-                className="shrink-0 rounded-none"
+                className="shrink-0"
               >
                 {previewPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
               </Button>
@@ -1216,7 +1210,7 @@ function MusicAndEffectsCard({
                 disabled={busy}
               >
                 {MUSIC_VOLUMES.map((v) => (
-                  <ToggleGroupItem key={v.value} value={String(v.value)} className="rounded-none text-xs">
+                  <ToggleGroupItem key={v.value} value={String(v.value)} className="text-xs">
                     {v.label}
                   </ToggleGroupItem>
                 ))}
@@ -1232,7 +1226,7 @@ function MusicAndEffectsCard({
             size="sm"
             disabled={busy}
             onClick={() => onGrade(!grade)}
-            className="gap-1.5 rounded-none"
+            className="gap-1.5"
           >
             <Sparkles className="size-4" />
             {grade ? 'Gradación viral: activada' : 'Gradación viral: desactivada'}
