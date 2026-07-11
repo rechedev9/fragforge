@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { orchestratorUrl, mutationHeaders, forwardError, callOrchestrator, serviceUnavailable, jobUrl } from './_lib';
+import type { JobSummary } from '@/lib/api/types';
 
 /**
  * Local-mode `/api/demos/*` handlers. In local mode the web is a thin proxy to a
@@ -47,6 +48,64 @@ export async function localScan(request: Request): Promise<Response> {
 
   const { id } = (await res.json()) as { id: string };
   return NextResponse.json({ jobId: id }, { status: 201 });
+}
+
+/** Default and bounds for the job-list page size, mirroring the orchestrator. */
+const DEFAULT_LIST_LIMIT = 50;
+const MIN_LIST_LIMIT = 1;
+const MAX_LIST_LIMIT = 100;
+
+/** The raw upstream job shape, of which we forward only the whitelisted scalars. */
+type UpstreamJob = {
+  id: string;
+  status: string;
+  failure_reason?: string;
+  created_at: string;
+  kill_plan?: {
+    demo?: { map?: string };
+    stats?: { total_kills_target?: number };
+    segments?: unknown[];
+  };
+};
+
+/**
+ * Projects one raw orchestrator job onto the flat, whitelisted JobSummary. The
+ * plan-derived fields (map / target_kills / segment_count) exist only once the
+ * job has a kill plan, so they are set only when present; the raw kill_plan,
+ * rules, demo_path, demo_sha256, and target_steamid are never forwarded.
+ */
+function toJobSummary(job: UpstreamJob): JobSummary {
+  const summary: JobSummary = { id: job.id, status: job.status, created_at: job.created_at };
+  if (job.failure_reason) summary.failure_reason = job.failure_reason;
+  const plan = job.kill_plan;
+  if (plan) {
+    if (typeof plan.demo?.map === 'string') summary.map = plan.demo.map;
+    if (typeof plan.stats?.total_kills_target === 'number') summary.target_kills = plan.stats.total_kills_target;
+    if (Array.isArray(plan.segments)) summary.segment_count = plan.segments.length;
+  }
+  return summary;
+}
+
+/**
+ * GET /api/demos (local) - list the orchestrator's jobs so the desktop UI can
+ * enumerate server-side work (matches page poll, reel-library synthesis). Only a
+ * whitelisted per-job projection is forwarded (see toJobSummary), never the raw
+ * job objects, so the polled payload stays small. `limit` is clamped to the
+ * orchestrator's 1-100 range so an out-of-range query never 400s here.
+ */
+export async function localListJobs(request: Request): Promise<Response> {
+  const raw = Number(new URL(request.url).searchParams.get('limit'));
+  const limit = Number.isFinite(raw) && raw > 0
+    ? Math.min(MAX_LIST_LIMIT, Math.max(MIN_LIST_LIMIT, Math.trunc(raw)))
+    : DEFAULT_LIST_LIMIT;
+
+  const res = await callOrchestrator(`${orchestratorUrl()}/api/jobs?limit=${limit}`);
+  if (res === null) return serviceUnavailable();
+  if (!res.ok) return forwardError(res);
+
+  const body = (await res.json()) as { jobs?: UpstreamJob[] };
+  const jobs = (body.jobs ?? []).map(toJobSummary);
+  return NextResponse.json({ jobs });
 }
 
 /** GET /api/demos/{jobId}/status (local) - proxy the job's current status. */

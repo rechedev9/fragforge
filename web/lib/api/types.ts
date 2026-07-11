@@ -12,6 +12,23 @@ export type MatchStats = {
   hsPct?: number;
 };
 export type Match = { id: string; map: string; score: string; playedAt: string; stats: MatchStats; decentPlays: number; thumbnailUrl?: string; source?: 'steam' | 'upload' };
+/**
+ * A flat, whitelisted view of one orchestrator job as returned by the
+ * `GET /api/demos` list proxy (snake_case on the wire). The proxy never forwards
+ * the raw job.Job: it projects only these scalars off each job (pulling map /
+ * kills / segment count out of the kill plan) so the polled payload stays small
+ * even at 50 jobs. `map`, `target_kills`, and `segment_count` exist only once the
+ * job has a kill plan (i.e. from `parsed` onward), so they are optional.
+ */
+export type JobSummary = {
+  id: string;
+  status: string;
+  created_at: string;
+  failure_reason?: string;
+  map?: string;
+  target_kills?: number;
+  segment_count?: number;
+};
 export type PlayKind = 'clean' | 'highlight';
 export type Play = { id: string; matchId: string; label: string; kind: PlayKind; round: number; kills: number; weapon?: string; thumbnailUrl?: string };
 export type RenderMode = 'clean' | 'music';
