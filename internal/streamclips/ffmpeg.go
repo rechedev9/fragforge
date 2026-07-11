@@ -223,8 +223,10 @@ func FindBannerFont() string {
 }
 
 func ffmpegFilterPath(value string) string {
-	value = filepath.ToSlash(value)
-	value = strings.ReplaceAll(value, `\`, `\\`)
+	// Windows font paths must become forward-slashed for FFmpeg filter args.
+	// filepath.ToSlash is a no-op on Linux, so replace explicitly to keep the
+	// generated filtergraph identical on every platform.
+	value = strings.ReplaceAll(value, `\`, "/")
 	value = strings.ReplaceAll(value, ":", `\:`)
 	return strings.ReplaceAll(value, "'", `\'`)
 }
