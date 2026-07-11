@@ -36,6 +36,7 @@ type config struct {
 	YtdlpPath           string
 	WhisperPath         string
 	WhisperModelPath    string
+	XAIAPIKey           string
 	GroqAPIKey          string
 	GroqModel           string
 	GroqCorrectionModel string
@@ -80,6 +81,11 @@ func loadConfig() (config, error) {
 		YtdlpPath:        os.Getenv("ZV_YTDLP_PATH"),
 		WhisperPath:      os.Getenv("ZV_WHISPER_PATH"),
 		WhisperModelPath: os.Getenv("ZV_WHISPER_MODEL"),
+		// XAI_API_KEY is the key's conventional name across xAI's own tooling;
+		// ZV_XAI_API_KEY is an explicit override for when a user-level
+		// XAI_API_KEY is set for something unrelated. Neither is auto-detected
+		// (an API key cannot be probed on PATH or disk).
+		XAIAPIKey: firstNonEmpty(os.Getenv("ZV_XAI_API_KEY"), os.Getenv("XAI_API_KEY")),
 		// GROQ_API_KEY is the key's conventional name across Groq's own tooling;
 		// ZV_GROQ_API_KEY is an explicit override for when a user-level
 		// GROQ_API_KEY is set for something unrelated. Neither is auto-detected
@@ -157,6 +163,10 @@ func (c config) groqEnabled() bool {
 	return c.GroqAPIKey != ""
 }
 
+func (c config) xaiEnabled() bool {
+	return c.XAIAPIKey != ""
+}
+
 // streamAcquireWorkerEnabled reports whether the acquire-by-URL worker can
 // run. It only needs yt-dlp; stream rendering (ffmpeg) is gated separately by
 // streamRenderWorkerEnabled.
@@ -179,6 +189,7 @@ func (c config) captureCapabilities(src captureToolSource) httpapi.Capabilities 
 		YtdlpEnabled:   c.ytdlpEnabled(),
 		WhisperEnabled: c.whisperEnabled(),
 		GroqEnabled:    c.groqEnabled(),
+		XAIEnabled:     c.xaiEnabled(),
 		RecordTools: []httpapi.CaptureTool{
 			tool("ZV_RECORDER_PATH", c.RecorderPath),
 			tool("ZV_HLAE_PATH", c.HLAEPath),

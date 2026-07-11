@@ -206,6 +206,12 @@ type StreamRenderWorkerConfig struct {
 	// be set for it to run.
 	WhisperPath      string
 	WhisperModelPath string
+	// XAIAPIKey configures the xAI cloud captions pass
+	// (internal/captions.XAITranscriber). It is the preferred backend when set:
+	// xAI transcribes the whole media file in one request with word-level
+	// timestamps, needing no ffmpeg preprocessing or per-chunk language
+	// detection (see NewStreamRenderWorker).
+	XAIAPIKey string
 	// GroqAPIKey, GroqModel, and GroqCorrectionModel configure the Groq cloud
 	// captions pass (internal/captions.GroqTranscriber). GroqModel is optional
 	// and defaults inside GroqTranscriber when empty. GroqCorrectionModel is
@@ -215,8 +221,8 @@ type StreamRenderWorkerConfig struct {
 	// backend is configured; the HTTP layer rejects a render start with
 	// captions enabled before neither is configured (see
 	// requireCaptionsEnabled), but the worker still checks defensively since
-	// it may run a redriven task from before the config changed. When both
-	// are configured, Groq is preferred (see NewStreamRenderWorker).
+	// it may run a redriven task from before the config changed. When several
+	// are configured, xAI is preferred, then Groq (see NewStreamRenderWorker).
 	GroqAPIKey          string
 	GroqModel           string
 	GroqCorrectionModel string
@@ -721,11 +727,22 @@ func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, c
 		cfg:     cfg,
 		runner:  execCommandRunner{},
 	}
-	// Groq is preferred when configured: it needs no local model download and
-	// runs on a GPU the user does not have to own. Local whisper.cpp remains
+	// Preference order: xAI, then Groq, then local whisper. xAI transcribes the
+	// whole media file in one request with word-level timestamps, so it needs no
+	// ffmpeg preprocessing and no per-chunk language detection - the Groq path's
+	// per-speech-region auto-detection is precisely what hallucinates
+	// wrong-language text. Groq is the next best cloud option (no local model
+	// download, runs on a GPU the user does not own); local whisper.cpp remains
 	// the offline fallback.
 	w.transcribe = func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error) {
-		if w.cfg.groqConfigured() {
+		switch {
+		case w.cfg.xaiConfigured():
+			x := captions.XAITranscriber{
+				APIKey:   w.cfg.XAIAPIKey,
+				Language: language,
+			}
+			return x.Transcribe(ctx, mediaPath, workDir)
+		case w.cfg.groqConfigured():
 			g := captions.GroqTranscriber{
 				APIKey:          w.cfg.GroqAPIKey,
 				Model:           w.cfg.GroqModel,
@@ -734,9 +751,10 @@ func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, c
 				FFmpegPath:      w.cfg.FFmpegPath,
 			}
 			return g.Transcribe(ctx, mediaPath, workDir)
+		default:
+			t := captions.Transcriber{BinaryPath: w.cfg.WhisperPath, ModelPath: w.cfg.WhisperModelPath, Language: language}
+			return t.Transcribe(ctx, mediaPath, workDir)
 		}
-		t := captions.Transcriber{BinaryPath: w.cfg.WhisperPath, ModelPath: w.cfg.WhisperModelPath, Language: language}
-		return t.Transcribe(ctx, mediaPath, workDir)
 	}
 	return w
 }
@@ -784,7 +802,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		return fmt.Errorf("edit plan has no clips")
 	}
 	if plan.Captions.Enabled && !cfg.captionsConfigured() {
-		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL)")
+		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (set XAI_API_KEY or GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL)")
 	}
 	bannerFontPath := ""
 	if plan.StreamerBanner.Nick != "" {
@@ -1006,10 +1024,16 @@ func (c StreamRenderWorkerConfig) groqConfigured() bool {
 	return c.GroqAPIKey != ""
 }
 
+// xaiConfigured reports whether an xAI API key is set, the minimum needed to
+// run the xAI cloud captions transcription pass.
+func (c StreamRenderWorkerConfig) xaiConfigured() bool {
+	return c.XAIAPIKey != ""
+}
+
 // captionsConfigured reports whether any captions transcription backend
-// (Groq or local whisper) is configured.
+// (xAI, Groq, or local whisper) is configured.
 func (c StreamRenderWorkerConfig) captionsConfigured() bool {
-	return c.groqConfigured() || c.whisperConfigured()
+	return c.xaiConfigured() || c.groqConfigured() || c.whisperConfigured()
 }
 
 // Encoder settings for the captions burn-in pass, matching the first render
