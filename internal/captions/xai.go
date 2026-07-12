@@ -51,11 +51,27 @@ const xaiErrorBodyMax = 512
 // should remain far below this defensive ceiling.
 const xaiSuccessBodyMax int64 = 64 << 20
 
+// xaiMaxTranscriptionAttempts lets the client recover when xAI returns a
+// valid transcript whose word timestamps span only a small part of the media.
+// This has been observed with bilingual stream clips: one call may omit the
+// first language entirely, while a later call covers the whole clip. Complete
+// first responses still use one API call; temporally sparse responses may use
+// up to this many calls, separated by bounded backoff.
+const xaiMaxTranscriptionAttempts = 3
+
+const xaiPartialSpanThreshold = 0.5
+
+const (
+	xaiRetryInitialBackoff = 250 * time.Millisecond
+	xaiRetryMaxBackoff     = time.Second
+)
+
 // XAITranscriber transcribes media through xAI's speech-to-text API (POST
-// /v1/stt) to produce word-level cues for BuildASS. It uploads the whole media
-// file in a single request and lets xAI return word-level timestamps directly,
-// with no ffmpeg preprocessing or per-region language detection. It never logs
-// or returns the API key.
+// /v1/stt) to produce word-level cues for BuildASS. Each attempt uploads the
+// whole media file and lets xAI return word-level timestamps directly, with no
+// per-region language detection. A complete response takes one attempt; a
+// temporally sparse response may take up to xaiMaxTranscriptionAttempts. It
+// never logs or returns the API key.
 type XAITranscriber struct {
 	APIKey   string
 	BaseURL  string // defaults to "https://api.x.ai/v1"
@@ -66,10 +82,11 @@ type XAITranscriber struct {
 	HTTPClient *http.Client
 }
 
-// Transcribe uploads mediaPath to xAI's /stt endpoint in a single request and
-// returns the parsed word cues in media time. workDir is unused (no chunk
-// files are produced); it is kept for parity with the other transcribers so
-// XAITranscriber satisfies the same shape.
+// Transcribe uploads mediaPath to xAI's /stt endpoint and returns the parsed
+// word cues in media time. It normally makes one request, but may make up to
+// xaiMaxTranscriptionAttempts when a response is temporally sparse. workDir is
+// unused (no chunk files are produced); it is kept for parity with the other
+// transcribers so XAITranscriber satisfies the same shape.
 func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir string) ([]WordCue, error) {
 	if strings.TrimSpace(x.APIKey) == "" {
 		return nil, fmt.Errorf("captions: xai api key not configured")
@@ -82,11 +99,67 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 		return nil, fmt.Errorf("captions: media file is %d bytes, exceeding xai's 500 MB limit", info.Size())
 	}
 
-	data, err := x.transcribe(ctx, mediaPath)
-	if err != nil {
-		return nil, err
+	var best []WordCue
+	var bestDuration float64
+	var lastErr error
+	for attempt := 0; attempt < xaiMaxTranscriptionAttempts; attempt++ {
+		data, err := x.transcribe(ctx, mediaPath)
+		if err != nil {
+			return bestXAITranscriptAfterError(ctx, best, err)
+		}
+		cues, duration, err := parseXAITranscriptResponse(data)
+		if err != nil {
+			lastErr = err
+			if !strings.Contains(err.Error(), "no words") {
+				return bestXAITranscriptAfterError(ctx, best, err)
+			}
+		} else {
+			if betterXAITranscript(cues, duration, best, bestDuration) {
+				best = cues
+				bestDuration = duration
+			}
+			if !xaiTranscriptLooksTemporallyPartial(cues, duration) {
+				return cues, nil
+			}
+		}
+		if attempt+1 < xaiMaxTranscriptionAttempts {
+			if err := waitForXAIRetry(ctx, attempt+1); err != nil {
+				return nil, fmt.Errorf("captions: waiting to retry xai transcription: %w", err)
+			}
+		}
 	}
-	return parseXAITranscript(data)
+	if len(best) > 0 {
+		return best, nil
+	}
+	return nil, lastErr
+}
+
+func bestXAITranscriptAfterError(ctx context.Context, best []WordCue, err error) ([]WordCue, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("captions: xai transcription interrupted: %w", ctxErr)
+	}
+	if len(best) > 0 {
+		return best, nil
+	}
+	return nil, err
+}
+
+func waitForXAIRetry(ctx context.Context, completedAttempts int) error {
+	delay := xaiRetryInitialBackoff
+	for attempt := 1; attempt < completedAttempts && delay < xaiRetryMaxBackoff; attempt++ {
+		delay *= 2
+		if delay > xaiRetryMaxBackoff {
+			delay = xaiRetryMaxBackoff
+		}
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // transcribe streams mediaPath to xAI's /stt endpoint as multipart form data
@@ -252,9 +325,14 @@ type xaiWord struct {
 // message contains "no words" (the worker relies on that substring to publish
 // the clip uncaptioned instead of failing the render).
 func parseXAITranscript(data []byte) ([]WordCue, error) {
+	cues, _, err := parseXAITranscriptResponse(data)
+	return cues, err
+}
+
+func parseXAITranscriptResponse(data []byte) ([]WordCue, float64, error) {
 	var transcript xaiTranscript
 	if err := json.Unmarshal(data, &transcript); err != nil {
-		return nil, fmt.Errorf("captions: invalid xai transcript json: %w", err)
+		return nil, 0, fmt.Errorf("captions: invalid xai transcript json: %w", err)
 	}
 	cues := make([]WordCue, 0, len(transcript.Words))
 	for _, w := range transcript.Words {
@@ -275,9 +353,43 @@ func parseXAITranscript(data []byte) ([]WordCue, error) {
 	})
 	cues = normalizeXAICueTimings(cues)
 	if len(cues) == 0 {
-		return nil, fmt.Errorf("captions: xai transcript contains no words")
+		return nil, transcript.Duration, fmt.Errorf("captions: xai transcript contains no words")
 	}
-	return cues, nil
+	return cues, transcript.Duration, nil
+}
+
+func xaiTranscriptLooksTemporallyPartial(cues []WordCue, duration float64) bool {
+	if duration <= 0 || len(cues) == 0 {
+		return false
+	}
+	return xaiTranscriptSpanRatio(cues, duration) < xaiPartialSpanThreshold
+}
+
+func betterXAITranscript(cues []WordCue, duration float64, best []WordCue, bestDuration float64) bool {
+	if len(best) == 0 {
+		return true
+	}
+	spanRatio := xaiTranscriptSpanRatio(cues, duration)
+	bestSpanRatio := xaiTranscriptSpanRatio(best, bestDuration)
+	if spanRatio != bestSpanRatio {
+		return spanRatio > bestSpanRatio
+	}
+	return len(cues) > len(best)
+}
+
+// xaiTranscriptSpanRatio measures only the interval from the first usable word
+// to the last usable word relative to xAI's reported media duration. It is a
+// retry signal for transcripts concentrated in one temporal region, not proof
+// that every spoken word or region was transcribed.
+func xaiTranscriptSpanRatio(cues []WordCue, duration float64) float64 {
+	if len(cues) == 0 {
+		return 0
+	}
+	span := cues[len(cues)-1].EndSeconds - cues[0].StartSeconds
+	if duration <= 0 {
+		return span
+	}
+	return span / duration
 }
 
 // normalizeXAICueTimings removes small adjacent timestamp overlaps before the
