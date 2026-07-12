@@ -1,98 +1,91 @@
-# CS2.VIDEO — legacy Next.js web prototype
+# FragForge web UI
 
-This directory contains the original Next.js prototype. It is no longer required
-for the localhost FragForge production flow.
+`web/` is the Next.js UI shipped inside the FragForge Windows desktop app. The
+desktop process starts this app as a standalone Next.js server alongside the
+local Go orchestrator, then opens it in an Electron window. It is not a hosted
+web application.
 
-This is a standalone Next.js 15 app (App Router, React 19, TypeScript, Tailwind
-CSS v4) built on **[shadcn/ui](https://ui.shadcn.com)**. It lives inside the
-FragForge Go monorepo under `web/` but is fully independent — it does not import
-or build any Go code.
+The production upload flow uses `RealApiClient`. Browser requests go to the
+same-origin `/api/demos/*` route handlers, which proxy the local orchestrator
+server-side:
 
-The supported local UI is now the HTMX workbench served by `zv-orchestrator`:
-
-```bash
-scripts/run-local.sh
+```text
+Electron renderer
+  -> Next.js /api/demos/*
+  -> local zv-orchestrator
+  -> parse, HLAE/CS2 capture, render, and local artifacts
 ```
 
-Open `http://127.0.0.1:8080/`. That flow does not require Node, Next.js, or a
-TypeScript dev server.
+The browser never receives the orchestrator URL or token. The orchestrator is
+the source of truth for jobs and artifacts; the client stores only lightweight
+reel intent in `localStorage`. Screens without an orchestrator-backed product
+surface still use typed fixture data through `MockApiClient`.
 
 ## Design
 
-The look & feel is the **v2 "replay studio"** identity: a left-sidebar shell,
+The look and feel is the v2 "replay studio" identity: a left-sidebar shell,
 acid-lime signal color on charcoal, and monospace tabular numbers for every
-stat. The **design contract** lives in [`web/design.md`](./design.md) — read it
-before changing anything visual. It defines the palette (oklch tokens in
-`app/globals.css`), the fonts (Space Grotesk / Inter / JetBrains Mono), the
-sidebar IA, and the signature components (`PipelineSteps`, `ScoreBar`,
-`StatMono`, `RecDot`, `Filmstrip`, `GrainOverlay`).
+stat. The design contract lives in [`design.md`](./design.md). Read it before
+changing anything visual; it defines the palette, fonts, sidebar information
+architecture, and signature components.
 
 UI primitives come from shadcn/ui (`components/ui/*`, configured in
-`components.json` with the `neutral` base color and lime token overrides).
-Brand-specific pieces live in `components/brand/*`.
-
-## Status: mock API only
-
-Fase 1 is the **frontend only**, running against a typed **in-memory mock API**
-(`lib/api/mock.ts`). There is no real backend yet:
-
-- Sign in, match history, PC pairing, matches, clips, songs, videos, and feed
-  are all served from `lib/api/fixtures.ts`.
-- Created videos advance `queued → recording → composing → ready` based on
-  elapsed time, so the UI can poll and show real-looking progress with no timers.
-
-The real backend wires in during **Fase 2**: implement a `RealApiClient` against
-the same `ApiClient` interface (`lib/api/client.ts`) and select it in
-`lib/api/index.ts` when `NEXT_PUBLIC_API_BASE` is set. No screen code changes.
+`components.json`). Brand-specific pieces live in `components/brand/*`.
 
 ## Run locally
 
-Requires Node 20+.
+The supported development launcher starts the SQLite-backed orchestrator and
+the web UI together, then opens the upload flow:
 
-```bash
+```powershell
+# From the repository root, after .\scripts\build.ps1
+.\scripts\local-studio.ps1
+```
+
+For frontend-only work, start a local orchestrator separately and then run:
+
+```powershell
 cd web
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open `http://localhost:3000`. `ORCHESTRATOR_URL` is a server-side setting and
+defaults to `http://127.0.0.1:8080`.
 
-Other scripts:
+Verification commands:
 
-```bash
-npm run build      # production build
-npm run start      # serve the production build
-npm run lint       # next lint
-npm run typecheck  # tsc --noEmit
+```powershell
+npm run typecheck
+npm run lint
+npm run test:unit
+npm run build
 ```
 
-## Deploy to Vercel
+## Desktop packaging
 
-1. Import the repository into Vercel.
-2. Set the project's **Root Directory** to `web`.
-3. Framework preset: **Next.js** (auto-detected). No env vars are needed for the
-   mock phase.
-4. Deploy.
+`output: 'standalone'` in `next.config.mjs` produces the self-contained server
+bundle assembled into the Windows installer. See
+[`../desktop/README.md`](../desktop/README.md) for the installer build and boot
+architecture.
 
 ## Layout
 
-```
+```text
 web/
-  app/                 # routes (App Router)
-    layout.tsx         # root layout: fonts, <html class="dark">, GrainOverlay, Toaster
-    page.tsx           # / — redirects to /matches (no sidebar)
-    upload/page.tsx    # /upload — drop a .dem, no login (no sidebar)
-    (app)/layout.tsx   # app shell (left Sidebar + container)
-    (app)/matches/     # /matches and /matches/[id]
-    (app)/videos/      # /videos (Library)
-    (app)/feed/        # /feed
+  app/                         # App Router pages and same-origin API routes
+    api/demos/                 # server-side proxy to the local orchestrator
+    upload/page.tsx            # no-login demo upload flow
+    (app)/matches/             # match and clip selection views
+    (app)/videos/              # local reel library
+    (app)/feed/                # feed view
   components/
-    ui/                # shadcn/ui primitives (button, card, sidebar, dialog, ...)
-    brand/             # PipelineSteps, ScoreBar, StatMono, RecDot, Filmstrip, GrainOverlay, Wordmark
-    shell/             # app-sidebar (left nav + capture readiness)
-    matches/ clips/ videos/ feed/   # per-screen pieces
+    ui/                        # shadcn/ui primitives
+    brand/                     # FragForge presentation components
+    shell/                     # app shell and capture readiness
+    matches/ clips/ videos/    # feature components
   lib/
-    api/               # types, ApiClient interface, RealApiClient, MockApiClient, fixtures
-    format.ts          # cn(), timeAgo, formatCountdown, productStatusLabel, ...
-  design.md            # v2 design contract (read this before visual changes)
+    api/                       # typed clients, contracts, stores, and fixtures
+    format.ts                  # shared display formatting
+  design.md                    # v2 visual design contract
 ```

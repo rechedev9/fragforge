@@ -97,8 +97,7 @@ npm start
    `ZV_DATA_DIR=<userData>/data`, `ZV_HTTP_ADDR=127.0.0.1:<orchPort>`, plus any
    provisioned tool paths).
 4. Spawns the Next standalone `server.js` via `ELECTRON_RUN_AS_NODE`
-   (`NEXT_PUBLIC_FRAGFORGE_MODE=local`, `ORCHESTRATOR_URL` pointing at the
-   orchestrator, `PORT=<webPort>`).
+   (`ORCHESTRATOR_URL` pointing at the orchestrator, `PORT=<webPort>`).
 5. Waits for `/healthz` and the web root.
 6. Loads `/matches` in the window.
 7. Kills the orchestrator and web children on quit. A single-instance lock

@@ -1,8 +1,6 @@
-// design-sync shim for `@/lib/api` — the app picks Real vs Mock client at module
-// load via process.env.NEXT_PUBLIC_API_BASE, which is undefined in the standalone
-// DS bundle (no `process`). Always bind the in-memory MockApiClient so the bundle
-// evaluates cleanly; feature components only call `api` in event handlers, so
-// previews render identically. Re-exports the same surface as the real index.
+// Design-sync shim for `@/lib/api`. Production always uses RealApiClient, while
+// standalone previews have no local orchestrator. Bind MockApiClient so previews
+// stay deterministic; feature components only call `api` in event handlers.
 import { MockApiClient } from '../../lib/api/mock';
 
 export const api = new MockApiClient();

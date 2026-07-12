@@ -60,8 +60,9 @@ own Windows + GPU PC, capture included:
 .\scripts\local-studio.ps1
 ```
 
-It starts the orchestrator (memory mode, HLAE/CS2 auto-detected) and the web UI
-in local mode, then opens `http://localhost:3000/upload`.
+It starts the orchestrator with a persistent local SQLite job database and an
+in-process queue (HLAE/CS2 auto-detected), then starts the web UI and opens
+`http://localhost:3000/upload`.
 The flow is: upload a demo -> pick a player -> pick specific kills -> create the
 reel, at which point HLAE + CS2 open to capture and the edit is applied.
 

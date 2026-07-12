@@ -46,13 +46,11 @@ if (!existsSync(iconFile)) {
   process.exit(1);
 }
 
-// 1. Build the web in local mode. NEXT_PUBLIC_FRAGFORGE_MODE is inlined into the
-//    client bundle at build time, so the desktop distributable is local-only.
-console.log('[assemble] building web (NEXT_PUBLIC_FRAGFORGE_MODE=local)...');
+// 1. Build the desktop-bundled web server.
+console.log('[assemble] building web...');
 execSync('npm run build', {
   cwd: web,
   stdio: 'inherit',
-  env: { ...process.env, NEXT_PUBLIC_FRAGFORGE_MODE: 'local' },
 });
 
 const standalone = join(web, '.next', 'standalone');

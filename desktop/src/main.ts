@@ -6,8 +6,9 @@
 // Capture (HLAE/CS2) is driven by the orchestrator exactly as before; Electron
 // only replaces the "install Node, run a script, open a browser" friction.
 //
-// Both children bind loopback on dynamically-chosen free ports, so two installs
-// (or a stray process) never collide on a fixed port.
+// Both children bind loopback on per-install ports persisted in user data. The
+// ports stay stable across launches when available and are reallocated if a
+// stray process has claimed one.
 
 import { app, BrowserWindow, shell, session } from 'electron';
 import * as path from 'node:path';
@@ -430,7 +431,6 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
     NODE_ENV: 'production',
     PORT: String(webPort),
     HOSTNAME: LOOPBACK_HOST,
-    NEXT_PUBLIC_FRAGFORGE_MODE: 'local',
     ORCHESTRATOR_URL: orchestratorUrl,
   });
 
