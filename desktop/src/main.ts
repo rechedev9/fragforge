@@ -15,12 +15,12 @@ import * as fs from 'node:fs';
 import * as net from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { escapeHtml } from './escaping';
-import { downloadFile } from './http-download';
 import { validateWindowState, type WindowState } from './window-state';
 import { lastLines } from './log-tail';
 import { provisionRuntimeTools, RUNTIME_TOOL_LABELS } from './runtime-tools';
 import { ProcessSession, type LaunchedProcess } from './process-session';
 import { waitForDesktopServices } from './service-health';
+import { provisionMusicLibrary } from './music-library';
 
 // Every loopback server and health check binds/targets this host; named once so
 // the value that couples all the URLs below is not a scattered magic string.
@@ -89,67 +89,9 @@ function logLine(text: string): void {
   }
 }
 
-// Narrows a JSON.parse'd (or otherwise untrusted) value to an indexable object
-// before any property is read. Used at every on-disk-JSON trust boundary below.
+// Narrows the persisted ports JSON before reading service keys from it.
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-/**
- * Provisions the music catalog into the user's data dir (the Node port of
- * scripts/fetch-music.sh): copies the bundled catalog.json and downloads each
- * CC0/CC-BY track to <musicDir>/<id>.<ext> if missing. Idempotent and
- * best-effort - an offline first boot just means the song picker shows fewer
- * tracks until the next launch. Runs concurrently with the backend boot; the
- * orchestrator rescans the dir on every /api/songs request, so tracks appear
- * as they land.
- */
-async function provisionMusic(signal: AbortSignal): Promise<void> {
-  const bundledCatalog = resourcePath('music', 'catalog.json');
-  if (!fs.existsSync(bundledCatalog)) return;
-  fs.mkdirSync(musicDir, { recursive: true });
-  fs.copyFileSync(bundledCatalog, path.join(musicDir, 'catalog.json'));
-
-  let tracks: unknown[];
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(bundledCatalog, 'utf8'));
-    tracks = isRecord(parsed) && Array.isArray(parsed.tracks) ? parsed.tracks : [];
-  } catch (err) {
-    logLine(`[music] bad catalog.json: ${String(err)}\n`);
-    return;
-  }
-  // Downloads run one at a time on purpose: this is the faithful port of the
-  // original sequential loop, and the orchestrator picks up tracks as they land,
-  // so there is no need to hammer several release hosts at once during boot.
-  for (const track of tracks) {
-    if (signal.aborted) return;
-    if (!isRecord(track)) continue;
-    const { id, ext, downloadUrl } = track;
-    if (typeof id !== 'string' || !id || typeof ext !== 'string' || !ext) continue;
-    const dest = path.join(musicDir, `${id}.${ext}`);
-    if (fs.existsSync(dest)) continue;
-    // Local-only tracks (no downloadUrl, e.g. AI-generated) ship inside the
-    // installer's music resources; copy them instead of downloading.
-    if (typeof downloadUrl !== 'string' || !downloadUrl) {
-      const bundledAudio = resourcePath('music', `${id}.${ext}`);
-      if (fs.existsSync(bundledAudio)) {
-        fs.copyFileSync(bundledAudio, dest);
-        logLine(`[music] copied bundled ${id}.${ext}\n`);
-      } else {
-        logLine(`[music] skip ${id}: no downloadUrl and no bundled audio\n`);
-      }
-      continue;
-    }
-    // downloadFile stages through a temp name and renames on success, so a
-    // half-written file never shows up as a playable track.
-    try {
-      await downloadFile(downloadUrl, dest, { signal });
-      logLine(`[music] downloaded ${id}.${ext}\n`);
-    } catch (err) {
-      if (signal.aborted) return;
-      logLine(`[music] skip ${id}: ${String(err)}\n`);
-    }
-  }
 }
 
 /** Grabs an OS-assigned free loopback port, then releases it for the child. */
@@ -517,7 +459,12 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
   allowedOrigins.add(`http://${LOOPBACK_HOST}:${webPort}`);
 
   // Tracks can land in the background; the API rescans the music dir per request.
-  provisionMusic(attempt.controller.signal).catch((err: unknown) => {
+  provisionMusicLibrary({
+    bundledMusicDir: resourcePath('music'),
+    musicDir,
+    signal: attempt.controller.signal,
+    logLine,
+  }).catch((err: unknown) => {
     if (!attempt.controller.signal.aborted) logLine(`[music] provision failed: ${String(err)}\n`);
   });
 
