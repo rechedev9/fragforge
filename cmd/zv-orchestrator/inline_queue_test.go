@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"reflect"
 	"runtime"
@@ -91,7 +92,7 @@ func TestInlineQueueRetriesPureTaskOnceAfterFailure(t *testing.T) {
 			maxRetries:     1,
 		},
 	}
-	err := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
+	err, _ := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
 		calls++
 		if calls == 1 {
 			return errors.New("transient parse failure")
@@ -120,7 +121,7 @@ func TestInlineQueueProvidesAttemptMetadataToHandlers(t *testing.T) {
 		maxRetry int
 	}
 	var got []attempt
-	err := queue.handle(context.Background(), queued, func(ctx context.Context, _ *asynq.Task) error {
+	err, _ := queue.handle(context.Background(), queued, func(ctx context.Context, _ *asynq.Task) error {
 		retried, maxRetry, ok := tasktypes.TaskAttempt(ctx)
 		if !ok {
 			t.Fatal("TaskAttempt metadata missing")
@@ -148,7 +149,7 @@ func TestInlineQueueStopsAfterPureTaskRetryIsExhausted(t *testing.T) {
 		task:   asynq.NewTask(tasktypes.TypeScanRoster, nil),
 		policy: inlineTaskPolicy{maxRetries: 1},
 	}
-	err := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
+	err, _ := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
 		calls++
 		return wantErr
 	})
@@ -172,7 +173,7 @@ func TestInlineQueueAppliesDeadlineToEachPureTaskAttempt(t *testing.T) {
 	}
 	started := time.Now()
 	var calls int
-	err := queue.handle(context.Background(), queued, func(ctx context.Context, _ *asynq.Task) error {
+	err, _ := queue.handle(context.Background(), queued, func(ctx context.Context, _ *asynq.Task) error {
 		calls++
 		deadline, ok := ctx.Deadline()
 		if !ok {
@@ -204,13 +205,16 @@ func TestInlineQueueDoesNotRetryAfterParentCancellation(t *testing.T) {
 		task:   asynq.NewTask(tasktypes.TypeParseDemo, nil),
 		policy: inlineTaskPolicy{maxRetries: 1},
 	}
-	err := queue.handle(ctx, queued, func(context.Context, *asynq.Task) error {
+	err, parentCanceled := queue.handle(ctx, queued, func(context.Context, *asynq.Task) error {
 		calls++
 		cancel()
 		return errors.New("parse interrupted")
 	})
 	if err == nil {
 		t.Fatal("handle() error = nil")
+	}
+	if !parentCanceled {
+		t.Fatal("handle() parentCanceled = false, want true")
 	}
 	if calls != 1 {
 		t.Fatalf("handler calls = %d, want 1", calls)
@@ -225,7 +229,7 @@ func TestInlineQueueDoesNotRetryMediaTasks(t *testing.T) {
 		task:   asynq.NewTask(tasktypes.TypeRecordDemo, nil),
 		policy: defaultInlineTaskPolicy(tasktypes.TypeRecordDemo),
 	}
-	err := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
+	err, _ := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
 		calls++
 		return wantErr
 	})
@@ -855,6 +859,138 @@ func TestInlineQueueCloseReleasesDiscardedUniqueLeases(t *testing.T) {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
 	defer shutdownCancel()
 	queue.Shutdown(shutdownCtx)
+}
+
+func TestInlineQueueCloseCompensatesDiscardedTransitionBeforeUniqueLeaseRelease(t *testing.T) {
+	releaseActive := make(chan struct{})
+	activeStarted := make(chan struct{}, 1)
+	queue := newInlineQueue(map[string]taskHandler{
+		"render": func(context.Context, *asynq.Task) error {
+			activeStarted <- struct{}{}
+			<-releaseActive
+			return nil
+		},
+	}, 1)
+	queue.Start(context.Background())
+
+	if _, err := queue.Enqueue(asynq.NewTask("render", []byte("active"))); err != nil {
+		t.Fatalf("active Enqueue() error = %v", err)
+	}
+	<-activeStarted
+
+	var decisions []error
+	leasePresentDuringDiscard := false
+	_, err := queue.EnqueueWithTransition(
+		asynq.NewTask("render", []byte("pending")),
+		func(decision error) error {
+			decisions = append(decisions, decision)
+			if errors.Is(decision, errInlineQueueDiscarded) {
+				// closePending owns uniqueMu while transitions run, so this
+				// read verifies compensation precedes lease release.
+				leasePresentDuringDiscard = len(queue.uniqueLocks) == 1
+			}
+			return nil
+		},
+		asynq.Unique(time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("pending EnqueueWithTransition() error = %v", err)
+	}
+
+	queue.closePending()
+	if len(decisions) != 2 {
+		t.Fatalf("transition decisions = %d, want 2", len(decisions))
+	}
+	if decisions[0] != nil {
+		t.Fatalf("accepted transition decision = %v, want nil", decisions[0])
+	}
+	if decisions[1] != errInlineQueueDiscarded {
+		t.Fatalf("discard transition decision = %v, want %v", decisions[1], errInlineQueueDiscarded)
+	}
+	if !leasePresentDuringDiscard {
+		t.Fatal("discard transition ran after unique lease release")
+	}
+	if got := len(queue.uniqueLocks); got != 0 {
+		t.Fatalf("unique locks after compensation = %d, want 0", got)
+	}
+
+	close(releaseActive)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	queue.Shutdown(shutdownCtx)
+}
+
+func TestInlineQueueCompensatesPoppedTaskCanceledBeforeFirstAttempt(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var decisions []error
+	leasePresentDuringDiscard := false
+	queued := inlineTask{
+		task: asynq.NewTask("render", []byte("popped")),
+		id:   "inline-popped",
+		transition: func(decision error) error {
+			decisions = append(decisions, decision)
+			leasePresentDuringDiscard = len(queue.uniqueLocks) == 1
+			return nil
+		},
+		unique: true,
+		uniqueKey: inlineUniqueKey{
+			queue:       inlineDefaultQueue,
+			taskType:    "render",
+			payloadHash: sha256.Sum256([]byte("popped")),
+		},
+	}
+	queue.uniqueLocks[queued.uniqueKey] = inlineUniqueLock{
+		taskID:    queued.id,
+		expiresAt: time.Now().Add(time.Minute),
+	}
+
+	handlerCalls := 0
+	err := queue.process(ctx, queued, func(context.Context, *asynq.Task) error {
+		handlerCalls++
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("process() error = %v, want context.Canceled", err)
+	}
+	if handlerCalls != 0 {
+		t.Fatalf("handler calls = %d, want 0", handlerCalls)
+	}
+	if len(decisions) != 1 || decisions[0] != errInlineQueueDiscarded {
+		t.Fatalf("transition decisions = %v, want [%v]", decisions, errInlineQueueDiscarded)
+	}
+	if !leasePresentDuringDiscard {
+		t.Fatal("discard transition ran after unique lease release")
+	}
+	if got := len(queue.uniqueLocks); got != 0 {
+		t.Fatalf("unique locks after compensation = %d, want 0", got)
+	}
+}
+
+func TestInlineQueueDoesNotCompensateNormalHandlerFailure(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	wantErr := errors.New("render failed")
+	transitionCalls := 0
+	queued := inlineTask{
+		task: asynq.NewTask("render", nil),
+		id:   "inline-failed",
+		transition: func(error) error {
+			transitionCalls++
+			return nil
+		},
+	}
+
+	err := queue.process(context.Background(), queued, func(context.Context, *asynq.Task) error {
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("process() error = %v, want %v", err, wantErr)
+	}
+	if transitionCalls != 0 {
+		t.Fatalf("discard transition calls = %d, want 0", transitionCalls)
+	}
 }
 
 func TestInlineQueueReleasesLockWhenContextIsCanceledBeforePush(t *testing.T) {

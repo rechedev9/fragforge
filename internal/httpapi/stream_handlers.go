@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -180,14 +181,10 @@ func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request
 		internalError(w, "build stream acquire task", err)
 		return
 	}
-	if _, err := h.queue.Enqueue(task, asynq.MaxRetry(0), asynq.Unique(streamAcquireUniqueTTL)); err != nil {
+	if _, err := h.queue.EnqueueWithTransition(task, func(decision error) error {
+		return h.persistStreamAcquireQueueDecision(j.ID, decision)
+	}, asynq.MaxRetry(0), asynq.Unique(streamAcquireUniqueTTL)); err != nil {
 		if !errors.Is(err, asynq.ErrDuplicateTask) {
-			// The job row is already persisted; mark it failed so it is not
-			// stranded in "acquiring" with no task to advance it.
-			if uerr := h.streamRepo.UpdateStatus(r.Context(), j.ID, streamclips.StatusFailed, "enqueue stream acquire task: "+err.Error()); uerr != nil {
-				internalError(w, "mark stream job failed after enqueue error", uerr)
-				return
-			}
 			internalError(w, "enqueue stream acquire task", err)
 			return
 		}
@@ -198,6 +195,20 @@ func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request
 		"status": j.Status,
 		"probe":  j.Probe,
 	})
+}
+
+// persistStreamAcquireQueueDecision prevents URL-backed jobs from remaining
+// "acquiring" after the process-local queue rejects or discards their task.
+func (h *Handlers) persistStreamAcquireQueueDecision(id uuid.UUID, decision error) error {
+	if decision == nil || errors.Is(decision, asynq.ErrDuplicateTask) {
+		return nil
+	}
+	markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer markCancel()
+	if err := h.streamRepo.UpdateStatus(markCtx, id, streamclips.StatusFailed, "enqueue stream acquire task: "+decision.Error()); err != nil {
+		return fmt.Errorf("mark stream job failed after acquire queue decision: %w", err)
+	}
+	return nil
 }
 
 // isJSONContentType reports whether the request's Content-Type is (or starts
@@ -379,7 +390,7 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		default:
-			failedState, stateErr := streamclips.NewRenderState(j.ID, variant, streamclips.StatusFailed, nil, "enqueue render: "+decision.Error(), nil)
+			failedState, stateErr := streamclips.NewRenderState(j.ID, variant, streamclips.StatusFailed, state.Warnings, "enqueue render: "+decision.Error(), state.Videos)
 			if stateErr != nil {
 				return stateErr
 			}

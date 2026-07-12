@@ -255,6 +255,27 @@ func (r *memoryStreamJobRepository) List(ctx context.Context, limit int) ([]stre
 	return out, nil
 }
 
+func (r *memoryStreamJobRepository) ListByStatus(ctx context.Context, status streamclips.Status) ([]streamclips.Job, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []streamclips.Job{}
+	for _, j := range r.jobs {
+		if j.Status == status {
+			out = append(out, cloneStreamJob(j))
+		}
+	}
+	sort.Slice(out, func(i, k int) bool {
+		if out[i].UpdatedAt.Equal(out[k].UpdatedAt) {
+			return out[i].CreatedAt.After(out[k].CreatedAt)
+		}
+		return out[i].UpdatedAt.After(out[k].UpdatedAt)
+	})
+	return out, nil
+}
+
 func (r *memoryStreamJobRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status streamclips.Status, failureReason string) error {
 	if err := ctx.Err(); err != nil {
 		return err

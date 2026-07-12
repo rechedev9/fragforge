@@ -203,9 +203,10 @@ func (f *fakeStorage) Delete(key string) error {
 
 // fakeQueue captures enqueued tasks.
 type fakeQueue struct {
-	enqueued []*asynq.Task
-	options  [][]asynq.Option
-	err      error
+	enqueued    []*asynq.Task
+	options     [][]asynq.Option
+	transitions []func(error) error
+	err         error
 }
 
 func (q *fakeQueue) Enqueue(t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
@@ -227,6 +228,9 @@ func (q *fakeQueue) enqueue(t *asynq.Task, transition func(error) error, opts ..
 	}
 	q.enqueued = append(q.enqueued, t)
 	q.options = append(q.options, opts)
+	if transition != nil {
+		q.transitions = append(q.transitions, transition)
+	}
 	return &asynq.TaskInfo{ID: "x"}, nil
 }
 
@@ -630,6 +634,33 @@ func TestPostJobsMarksJobFailedWhenEnqueueFails(t *testing.T) {
 	}
 }
 
+func TestPostJobsMarksAcceptedPendingJobFailedWhenQueueDiscardsIt(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	body, contentType := multipartBody(t, []byte("dem-bytes"), `{"target_steamid":"76561198000000000"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+	req.Header.Set("Content-Type", contentType)
+	rw := httptest.NewRecorder()
+	h.CreateJob(rw, req)
+
+	if rw.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.transitions) != 1 {
+		t.Fatalf("queue transitions = %d, want 1", len(queue.transitions))
+	}
+	if err := queue.transitions[0](errors.New("inline queue task discarded during shutdown")); err != nil {
+		t.Fatalf("discard transition error = %v", err)
+	}
+	for _, j := range repo.jobs {
+		if j.Status != job.StatusFailed || !strings.Contains(j.FailureReason, "discarded during shutdown") {
+			t.Fatalf("job after discard = status %s, reason %q; want failed discard reason", j.Status, j.FailureReason)
+		}
+	}
+}
+
 func TestPostJobsFailedWriteSurvivesCancelledRequestContext(t *testing.T) {
 	repo := newFakeRepo()
 	repo.updateHonorsCtx = true // mimic pgxpool: refuse a cancelled context
@@ -871,6 +902,34 @@ func TestStartParseAcceptsScannedJob(t *testing.T) {
 	}
 	if got := repo.jobs[j.ID].TargetSteamID; got != "76561198000000000" {
 		t.Fatalf("TargetSteamID = %q, want persisted target", got)
+	}
+}
+
+func TestStartParseMarksAcceptedPendingJobFailedWhenQueueDiscardsIt(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusScanned, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/parse", h.StartParse)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/parse", strings.NewReader(`{"target_steamid":"76561198000000000"}`))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.transitions) != 1 {
+		t.Fatalf("queue transitions = %d, want 1", len(queue.transitions))
+	}
+	if err := queue.transitions[0](errors.New("inline queue task discarded during shutdown")); err != nil {
+		t.Fatalf("discard transition error = %v", err)
+	}
+	got := repo.jobs[j.ID]
+	if got.Status != job.StatusFailed || !strings.Contains(got.FailureReason, "discarded during shutdown") {
+		t.Fatalf("job after discard = status %s, reason %q; want failed discard reason", got.Status, got.FailureReason)
 	}
 }
 
@@ -1508,6 +1567,37 @@ func TestStartRenderVariantMarksStateFailedWhenEnqueueFails(t *testing.T) {
 	}
 	if state.Error != "enqueue render task: inline queue is full" {
 		t.Fatalf("state error = %q", state.Error)
+	}
+}
+
+func TestStartRenderVariantMarksAcceptedPendingStateFailedWhenQueueDiscardsIt(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue)
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.transitions) != 1 {
+		t.Fatalf("queue transitions = %d, want 1", len(queue.transitions))
+	}
+	if err := queue.transitions[0](errors.New("inline queue task discarded during shutdown")); err != nil {
+		t.Fatalf("discard transition error = %v", err)
+	}
+	state, ok, err := h.readRenderVariantState(j.ID, editor.PresetViral60Clean)
+	if err != nil || !ok {
+		t.Fatalf("readRenderVariantState = (%v, %v, %v)", state, ok, err)
+	}
+	if state.Status != renderplan.RenderVariantStatusFailed || !strings.Contains(state.Error, "discarded during shutdown") {
+		t.Fatalf("state after discard = status %q, error %q; want failed discard reason", state.Status, state.Error)
 	}
 }
 
@@ -2699,6 +2789,35 @@ func TestCreateStreamJobFromURLAcquiresAndEnqueues(t *testing.T) {
 	}
 }
 
+func TestCreateStreamJobFromURLMarksAcceptedPendingJobFailedWhenQueueDiscardsIt(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	queue := &fakeQueue{}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue,
+		WithStreamRepository(streamRepo),
+		WithCapabilities(Capabilities{YtdlpEnabled: true}),
+	)
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", strings.NewReader(`{"source_url":"https://clips.twitch.tv/SomeSlug"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.transitions) != 1 {
+		t.Fatalf("queue transitions = %d, want 1", len(queue.transitions))
+	}
+	if err := queue.transitions[0](errors.New("inline queue task discarded during shutdown")); err != nil {
+		t.Fatalf("discard transition error = %v", err)
+	}
+	for _, got := range streamRepo.jobs {
+		if got.Status != streamclips.StatusFailed || !strings.Contains(got.FailureReason, "discarded during shutdown") {
+			t.Fatalf("stream job after discard = status %q, reason %q; want failed discard reason", got.Status, got.FailureReason)
+		}
+	}
+}
+
 func TestCreateStreamJobFromURLRejectsInvalidURL(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{},
@@ -2817,6 +2936,41 @@ func TestStartStreamRenderMarksStateFailedWhenEnqueueFails(t *testing.T) {
 	}
 	if state.Error != "enqueue render: inline queue is full" {
 		t.Fatalf("render state error = %q", state.Error)
+	}
+}
+
+func TestStartStreamRenderMarksAcceptedPendingStateFailedWhenQueueDiscardsIt(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	store := newFakeStorage()
+	id := uuid.New()
+	variant := streamclips.DefaultVariant().Name
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+	queue := &fakeQueue{}
+	h := NewHandlers(newFakeRepo(), store, queue, WithStreamRepository(streamRepo))
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+variant, nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.transitions) != 1 {
+		t.Fatalf("queue transitions = %d, want 1", len(queue.transitions))
+	}
+	if err := queue.transitions[0](errors.New("inline queue task discarded during shutdown")); err != nil {
+		t.Fatalf("discard transition error = %v", err)
+	}
+	key, err := streamclips.RenderStateKey(id, variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state streamclips.RenderState
+	if err := json.Unmarshal(store.puts[key], &state); err != nil {
+		t.Fatalf("unmarshal render state: %v", err)
+	}
+	if state.Status != streamclips.StatusFailed || !strings.Contains(state.Error, "discarded during shutdown") {
+		t.Fatalf("state after discard = status %q, error %q; want failed discard reason", state.Status, state.Error)
 	}
 }
 

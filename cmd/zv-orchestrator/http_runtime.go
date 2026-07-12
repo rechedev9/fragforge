@@ -53,8 +53,8 @@ func (s *preparedHTTPServer) Wait(ctx context.Context) error {
 	}
 }
 
-// waitAndCancelOnHTTPFailure cancels the worker lifetime before shutdown waits
-// for it, so a dead HTTP server cannot leave media work running until timeout.
+// waitAndCancelOnHTTPFailure cancels the runtime's signal context when serving
+// dies unexpectedly. run still stops HTTP admissions before canceling workers.
 func waitAndCancelOnHTTPFailure(ctx context.Context, cancel func(), server *preparedHTTPServer) error {
 	err := server.Wait(ctx)
 	if err != nil {

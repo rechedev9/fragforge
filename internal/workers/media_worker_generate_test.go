@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -25,6 +26,15 @@ type fakeEnqueuer struct {
 	mu    sync.Mutex
 	tasks []*asynq.Task
 	err   error
+}
+
+type failingRecordGetRepo struct {
+	*fakeRepo
+	err error
+}
+
+func (r *failingRecordGetRepo) Get(context.Context, uuid.UUID) (job.Job, error) {
+	return job.Job{}, r.err
 }
 
 func (e *fakeEnqueuer) Enqueue(t *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
@@ -122,7 +132,13 @@ func TestRecordWorkerChainsRenderFromGenerateIntent(t *testing.T) {
 		Transition: renderplan.TransitionWhip,
 		Intro:      true,
 	}
-	intent := renderplan.GenerateIntent{Variant: editor.PresetCleanPOV60, MusicKey: "phonk-01", Edit: edit}
+	intent := renderplan.GenerateIntent{
+		Variant:     editor.PresetCleanPOV60,
+		MusicKey:    "phonk-01",
+		Edit:        edit,
+		ActiveRunID: uuid.New(),
+	}
+	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
 	enq := &fakeEnqueuer{}
 	w := newRecordWorkerForTest(repo, store, t)
 	w.UseEnqueuer(enq)
@@ -160,15 +176,74 @@ func TestRecordWorkerChainsRenderFromGenerateIntent(t *testing.T) {
 	if state.Status != renderplan.RenderVariantStatusQueued {
 		t.Fatalf("render state status = %q, want queued", state.Status)
 	}
+	var completed renderplan.GenerateIntent
+	completedRaw := store.files[artifacts.GenerateIntentKey(id)]
+	if err := json.Unmarshal(completedRaw, &completed); err != nil {
+		t.Fatalf("unmarshal completed intent %q: %v", completedRaw, err)
+	}
+	if completed.ActiveRunID != uuid.Nil {
+		t.Fatalf("active run after render admission = %s, want cleared", completed.ActiveRunID)
+	}
+}
+
+func TestRecordWorkerMarksGuidedGenerateFailedWhenJobLoadFails(t *testing.T) {
+	store := newFakeStorage()
+	base, id := parsedRecordJob(store)
+	wantErr := errors.New("sqlite read failed")
+	repo := &failingRecordGetRepo{fakeRepo: base, err: wantErr}
+	w := NewRecordWorker(repo, store, RecordWorkerConfig{})
+	intent := renderplan.GenerateIntent{
+		Variant:     editor.PresetViral60Clean,
+		Edit:        renderplan.DefaultEditRequest(),
+		ActiveRunID: uuid.New(),
+	}
+	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
+
+	err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("HandleRecordDemo error = %v, want %v", err, wantErr)
+	}
+	got := base.jobs[id]
+	if got.Status != job.StatusFailed || !strings.Contains(got.FailureReason, wantErr.Error()) {
+		t.Fatalf("job after load failure = status %s reason %q; want failed load error", got.Status, got.FailureReason)
+	}
+}
+
+func TestRecordWorkerOlderCaptureDoesNotClearNewerActiveRun(t *testing.T) {
+	store := newFakeStorage()
+	repo, id := parsedRecordJob(store)
+	oldIntent := renderplan.GenerateIntent{
+		Variant:     editor.PresetViral60Clean,
+		Edit:        renderplan.DefaultEditRequest(),
+		ActiveRunID: uuid.New(),
+	}
+	newIntent := oldIntent
+	newIntent.ActiveRunID = uuid.New()
+	putJSON(t, store, artifacts.GenerateIntentKey(id), newIntent)
+	w := newRecordWorkerForTest(repo, store, t)
+	w.UseEnqueuer(&fakeEnqueuer{})
+
+	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, oldIntent)); err != nil {
+		t.Fatalf("HandleRecordDemo error = %v", err)
+	}
+	var got renderplan.GenerateIntent
+	if err := json.Unmarshal(store.files[artifacts.GenerateIntentKey(id)], &got); err != nil {
+		t.Fatalf("unmarshal current intent: %v", err)
+	}
+	if got.ActiveRunID != newIntent.ActiveRunID {
+		t.Fatalf("active run = %s, want newer %s preserved", got.ActiveRunID, newIntent.ActiveRunID)
+	}
 }
 
 func TestRecordWorkerMarksChainedRenderFailedWhenEnqueueFails(t *testing.T) {
 	store := newFakeStorage()
 	repo, id := parsedRecordJob(store)
 	intent := renderplan.GenerateIntent{
-		Variant: editor.PresetViral60Clean,
-		Edit:    renderplan.DefaultEditRequest(),
+		Variant:     editor.PresetViral60Clean,
+		Edit:        renderplan.DefaultEditRequest(),
+		ActiveRunID: uuid.New(),
 	}
+	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
 	enqueueErr := errors.New("inline queue is full")
 	w := newRecordWorkerForTest(repo, store, t)
 	w.UseEnqueuer(&fakeEnqueuer{err: enqueueErr})
@@ -192,6 +267,14 @@ func TestRecordWorkerMarksChainedRenderFailedWhenEnqueueFails(t *testing.T) {
 	}
 	if state.Error != "enqueue render: "+enqueueErr.Error() {
 		t.Fatalf("render state error = %q", state.Error)
+	}
+	var completed renderplan.GenerateIntent
+	completedRaw := store.files[artifacts.GenerateIntentKey(id)]
+	if err := json.Unmarshal(completedRaw, &completed); err != nil {
+		t.Fatalf("unmarshal completed intent %q: %v", completedRaw, err)
+	}
+	if completed.ActiveRunID != uuid.Nil {
+		t.Fatalf("active run after rejected render admission = %s, want cleared", completed.ActiveRunID)
 	}
 }
 

@@ -91,6 +91,11 @@ func TestStartGenerateEnqueuesRecordAndWritesIntent(t *testing.T) {
 			Intro:      true,
 		},
 	}
+	if intent.ActiveRunID == uuid.Nil || intent.AcceptedAt.IsZero() {
+		t.Fatalf("active generate marker = run %s accepted %s, want populated", intent.ActiveRunID, intent.AcceptedAt)
+	}
+	want.ActiveRunID = intent.ActiveRunID
+	want.AcceptedAt = intent.AcceptedAt
 	if intent != want {
 		t.Fatalf("intent = %#v, want %#v", intent, want)
 	}
@@ -154,6 +159,38 @@ func TestStartGenerateEnqueueFailureDoesNotPublishIntent(t *testing.T) {
 	}
 }
 
+func TestStartGenerateMarksAcceptedPendingJobFailedWhenQueueDiscardsIt(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean"}`)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.transitions) != 1 {
+		t.Fatalf("queue transitions = %d, want 1", len(queue.transitions))
+	}
+	if err := queue.transitions[0](errors.New("inline queue task discarded during shutdown")); err != nil {
+		t.Fatalf("discard transition error = %v", err)
+	}
+	got := repo.jobs[j.ID]
+	if got.Status != job.StatusFailed || !strings.Contains(got.FailureReason, "discarded during shutdown") {
+		t.Fatalf("job after discard = status %s, reason %q; want failed discard reason", got.Status, got.FailureReason)
+	}
+	intent, ok, err := h.readGenerateIntent(j.ID)
+	if err != nil || !ok {
+		t.Fatalf("readGenerateIntent = (%#v, %v, %v)", intent, ok, err)
+	}
+	if intent.ActiveRunID != uuid.Nil {
+		t.Fatalf("active run after discard = %s, want cleared", intent.ActiveRunID)
+	}
+}
+
 func TestStartGenerateDistinctCapturesKeepTheirOwnTaskIntent(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()
@@ -188,6 +225,9 @@ func TestStartGenerateDistinctCapturesKeepTheirOwnTaskIntent(t *testing.T) {
 	}
 	if first.Variant == second.Variant {
 		t.Fatalf("task variants = %q/%q, want distinct", first.Variant, second.Variant)
+	}
+	if first.ActiveRunID == uuid.Nil || second.ActiveRunID == uuid.Nil || first.ActiveRunID == second.ActiveRunID {
+		t.Fatalf("task active run ids = %s/%s, want distinct non-zero ids", first.ActiveRunID, second.ActiveRunID)
 	}
 }
 
@@ -414,6 +454,49 @@ func TestWorkbenchGenerateAdapterEnqueuesAndShowsProgress(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("fragment missing %q: %s", want, body)
 		}
+	}
+}
+
+func TestWorkbenchNewGenerateIgnoresReadyStateFromPriorRun(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	plan.Segments = []killplan.Segment{{ID: "seg-001", TickStart: 1, TickEnd: 2}}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+	loadout, err := renderplan.LoadoutForVariant(editor.PresetViral60Clean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:   j.ID,
+		Loadout: loadout,
+		Status:  renderplan.RenderVariantStatusReady,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.writeRenderVariantState(ready); err != nil {
+		t.Fatal(err)
+	}
+	r := Routes(h)
+
+	form := "preset=viral-60-clean&format=short-9x16&kill_effect=punch-in&transition=flash"
+	req := httptest.NewRequest(http.MethodPost, "/ui/jobs/"+j.ID.String()+"/generate", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), "Starting capture") {
+		t.Fatalf("new run did not replace prior ready phase: %s", rw.Body.String())
+	}
+	if strings.Contains(rw.Body.String(), "Short ready") {
+		t.Fatalf("new run exposed prior ready state: %s", rw.Body.String())
 	}
 }
 

@@ -263,14 +263,32 @@ func (w *RecordWorker) UseEnqueuer(e Enqueuer) {
 	w.enqueuer = e
 }
 
-func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) error {
+func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) (retErr error) {
 	var payload tasks.RecordDemoPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
 	}
+	// Once the payload identifies the durable job, every terminal failure must
+	// close that job's active generate/record lifecycle. In particular, early
+	// repository and task-header errors happen before the recorder call and were
+	// previously able to leave a guided generate request pending forever.
+	defer func() {
+		if retErr != nil {
+			recordTaskFailure(ctx, w.repo, payload.JobID, tasks.TypeRecordDemo, retErr)
+		}
+	}()
 	generateIntent, hasGenerateIntent, err := tasks.GenerateIntentFromTask(t)
 	if err != nil {
 		return fmt.Errorf("decode record task generate intent: %w", err)
+	}
+	if hasGenerateIntent {
+		defer func() {
+			if retErr != nil && taskIsTerminal(ctx) {
+				if err := w.completeGenerateIntent(payload.JobID, generateIntent.ActiveRunID); err != nil {
+					logWorkerError(payload.JobID, "complete failed generate intent", err)
+				}
+			}
+		}()
 	}
 
 	j, err := w.repo.Get(ctx, payload.JobID)
@@ -283,7 +301,6 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecording)
 
 	if err := w.record(ctx, j, payload.HUDMode, payload.SegmentIDs, payload.PortraitSafeKillfeed); err != nil {
-		recordTaskFailure(ctx, w.repo, j.ID, tasks.TypeRecordDemo, err)
 		return err
 	}
 	if err := w.repo.UpdateStatus(ctx, j.ID, job.StatusRecorded, ""); err != nil {
@@ -301,32 +318,92 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 // best effort: every failure is logged and swallowed so successful capture is
 // never reported as failed.
 func (w *RecordWorker) chainRender(id uuid.UUID, intent renderplan.GenerateIntent, hasIntent bool) {
-	if w.enqueuer == nil || !hasIntent {
+	if !hasIntent {
+		return
+	}
+	if w.enqueuer == nil {
+		w.failGenerateHandoff(id, intent, errors.New("render queue is not configured"))
 		return
 	}
 	task, err := tasks.NewRenderVariantTask(id, intent.Variant, intent.MusicKey, intent.Edit)
 	if err != nil {
-		logWorkerError(id, "build chained render task", err)
+		w.failGenerateHandoff(id, intent, fmt.Errorf("build chained render task: %w", err))
 		return
 	}
 	_, err = w.enqueuer.EnqueueWithTransition(task, func(decision error) error {
+		var stateErr error
 		switch {
 		case decision == nil:
 			// Publish queued before the task is visible so a fast render worker
 			// cannot advance to rendering/ready and then be overwritten.
-			return w.writeQueuedRenderState(id, intent.Variant)
+			stateErr = w.writeQueuedRenderState(id, intent.Variant)
 		case errors.Is(decision, asynq.ErrDuplicateTask):
 			// Another task owns the render and its state; never downgrade it.
-			return nil
 		default:
-			return w.writeFailedRenderState(id, intent.Variant, fmt.Sprintf("enqueue render: %v", decision))
+			stateErr = w.writeFailedRenderState(id, intent.Variant, fmt.Sprintf("enqueue render: %v", decision))
 		}
+		if stateErr != nil {
+			return stateErr
+		}
+		return w.completeGenerateIntent(id, intent.ActiveRunID)
 	}, asynq.Unique(chainedRenderUniqueTTL))
 	if err != nil {
+		if errors.Is(err, asynq.ErrDuplicateTask) {
+			logWorkerTransition(id, tasks.TypeRenderVariant, job.StatusRecorded)
+			return
+		}
 		logWorkerError(id, "enqueue chained render", err)
+		if completeErr := w.completeGenerateIntent(id, intent.ActiveRunID); completeErr != nil {
+			logWorkerError(id, "complete failed generate intent", completeErr)
+			markFailed(w.repo, id, err.Error())
+		}
 		return
 	}
 	logWorkerTransition(id, tasks.TypeRenderVariant, job.StatusRecorded)
+}
+
+func (w *RecordWorker) failGenerateHandoff(id uuid.UUID, intent renderplan.GenerateIntent, cause error) {
+	logWorkerError(id, "generate render handoff", cause)
+	if err := w.writeFailedRenderState(id, intent.Variant, cause.Error()); err != nil {
+		logWorkerError(id, "write failed generate render state", err)
+	}
+	if err := w.completeGenerateIntent(id, intent.ActiveRunID); err != nil {
+		logWorkerError(id, "complete failed generate intent", err)
+		markFailed(w.repo, id, cause.Error())
+	}
+}
+
+func (w *RecordWorker) completeGenerateIntent(id, runID uuid.UUID) error {
+	if runID == uuid.Nil {
+		return nil
+	}
+	key := artifacts.GenerateIntentKey(id)
+	rc, err := w.storage.Open(key)
+	if err != nil {
+		if storage.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("open generate intent: %w", err)
+	}
+	var current renderplan.GenerateIntent
+	if err := json.NewDecoder(rc).Decode(&current); err != nil {
+		return fmt.Errorf("decode generate intent: %w", errors.Join(err, rc.Close()))
+	}
+	if err := rc.Close(); err != nil {
+		return fmt.Errorf("close generate intent: %w", err)
+	}
+	if current.ActiveRunID != runID {
+		return nil
+	}
+	current.ActiveRunID = uuid.Nil
+	b, err := json.MarshalIndent(current, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal generate intent: %w", err)
+	}
+	if err := w.storage.Put(key, bytes.NewReader(b)); err != nil {
+		return fmt.Errorf("write generate intent: %w", err)
+	}
+	return nil
 }
 
 func (w *RecordWorker) writeQueuedRenderState(id uuid.UUID, variant string) error {

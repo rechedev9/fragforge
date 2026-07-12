@@ -19,6 +19,11 @@ import (
 	"github.com/rechedev9/fragforge/internal/workers"
 )
 
+type orchestratorStreamJobRepository interface {
+	httpapi.StreamJobRepository
+	streamInterruptSweeper
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Printf("fatal: %v", err)
@@ -58,7 +63,7 @@ func run() error {
 	}
 
 	var repo orchestratorJobRepository
-	var streamRepo httpapi.StreamJobRepository
+	var streamRepo orchestratorStreamJobRepository
 	switch {
 	case cfg.DatabaseURL == databaseURLMemory:
 		repo = newMemoryJobRepository()
@@ -82,15 +87,33 @@ func run() error {
 		return fmt.Errorf("unsupported ZV_DATABASE_URL %q: fragforge desktop only supports %q or %q", cfg.DatabaseURL, databaseURLMemory, databaseURLSQLite)
 	}
 
-	// Reconcile jobs stranded in a transient in-flight status by a previous
-	// process that crashed or was quit mid-stage. Do it after the repo is ready
-	// and before serving traffic, so the UI never shows a forever-"recording"
-	// card for a job whose worker died. Covers the memory and sqlite repos
-	// alike (both implement ListByStatus/UpdateStatus).
+	// Reconcile durable state whose process-local work vanished with the previous
+	// desktop process. Run every sweep before serving traffic so clients never
+	// observe an active state with no queue owner capable of advancing it.
 	if n, err := sweepInterruptedJobs(ctx, repo, obs.Default()); err != nil {
 		log.Printf("startup: sweep interrupted jobs failed: %v", err)
 	} else if n > 0 {
 		log.Printf("startup: marked %d interrupted job(s) as failed", n)
+	}
+	if n, err := sweepInterruptedDemoRenderStates(ctx, repo, store); err != nil {
+		log.Printf("startup: sweep interrupted demo renders failed: %v", err)
+	} else if n > 0 {
+		log.Printf("startup: marked %d interrupted demo render(s) as failed", n)
+	}
+	if n, err := sweepInterruptedGenerateRuns(ctx, repo, store, obs.Default()); err != nil {
+		log.Printf("startup: sweep interrupted generate runs failed: %v", err)
+	} else if n > 0 {
+		log.Printf("startup: marked %d interrupted generate request(s) as failed", n)
+	}
+	if n, err := sweepInterruptedStreamJobs(ctx, streamRepo, obs.Default()); err != nil {
+		log.Printf("startup: sweep interrupted stream jobs failed: %v", err)
+	} else if n > 0 {
+		log.Printf("startup: marked %d interrupted stream job(s) as failed", n)
+	}
+	if n, err := sweepInterruptedStreamRenderStates(ctx, streamRepo, store); err != nil {
+		log.Printf("startup: sweep interrupted stream renders failed: %v", err)
+	} else if n > 0 {
+		log.Printf("startup: marked %d interrupted stream render(s) as failed", n)
 	}
 
 	taskHandlers := map[string]taskHandler{}
@@ -205,7 +228,9 @@ func run() error {
 
 	// The address is reserved now, so workers cannot start behind a server that
 	// already failed to bind.
-	inline.Start(ctx)
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	defer cancelWorkers()
+	inline.Start(workerCtx)
 	log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
 	httpRuntime.Start()
 	log.Printf("http: listening on %s", httpRuntime.Addr())
@@ -219,7 +244,11 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// Stop accepting mutations before canceling workers. Any request already in
+	// flight can finish its atomic admission while the queue is still live;
+	// shutdown then compensates accepted work that remains pending.
 	_ = httpRuntime.Shutdown(shutdownCtx)
+	cancelWorkers()
 	inline.Shutdown(shutdownCtx)
 	log.Print("shutdown: done")
 	if serveErr != nil {

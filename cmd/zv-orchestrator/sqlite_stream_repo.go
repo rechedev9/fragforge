@@ -108,6 +108,30 @@ func (r *sqliteStreamJobRepository) List(ctx context.Context, limit int) ([]stre
 	return out, nil
 }
 
+func (r *sqliteStreamJobRepository) ListByStatus(ctx context.Context, status streamclips.Status) ([]streamclips.Job, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, status, COALESCE(failure_reason,''), source_path, source_sha256,
+		        COALESCE(source_url,''), COALESCE(title,''), probe, edit_plan, created_at, updated_at
+		 FROM stream_jobs WHERE status = ? ORDER BY updated_at DESC, created_at DESC`, string(status))
+	if err != nil {
+		return nil, fmt.Errorf("query stream jobs by status: %w", err)
+	}
+	defer rows.Close()
+
+	out := []streamclips.Job{}
+	for rows.Next() {
+		j, err := scanSQLiteStreamJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate stream jobs by status: %w", err)
+	}
+	return out, nil
+}
+
 func (r *sqliteStreamJobRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status streamclips.Status, failureReason string) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE stream_jobs SET status = ?, failure_reason = ?, updated_at = ? WHERE id = ?`,
