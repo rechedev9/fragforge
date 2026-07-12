@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/lineups"
 	"github.com/rechedev9/fragforge/internal/recording"
@@ -14,13 +13,13 @@ import (
 )
 
 func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Manifest, error) {
-	clips, warnings, clipErr := composition.SegmentClipsFromRecording(result)
+	clips, warnings, clipErr := recording.ResolveSegmentClips(result)
 	if clipErr != nil {
 		// The manifest is built best-effort: a missing segment clip is recorded
 		// as a warning rather than aborting manifest generation.
 		warnings = append(warnings, clipErr.Error())
 	}
-	clipBySegment := map[string]composition.SegmentClip{}
+	clipBySegment := map[string]recording.SegmentClip{}
 	for _, clip := range clips {
 		clipBySegment[clip.SegmentID] = clip
 	}
@@ -342,7 +341,7 @@ type compiledShortOptions struct {
 	Preset            string
 	Player            string
 	MapName           string
-	ClipBySegment     map[string]composition.SegmentClip
+	ClipBySegment     map[string]recording.SegmentClip
 	Selected          map[string]bool
 	RhythmSync        map[string]rhythm.SegmentSync
 	VideoCRF          int
