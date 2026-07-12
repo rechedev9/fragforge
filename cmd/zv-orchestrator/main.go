@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -18,9 +20,16 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Printf("fatal: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		return fmt.Errorf("config: %w", err)
 	}
 	// Auto-detect HLAE/CS2/recorder/editor/ffmpeg on the host so capture and
 	// rendering work without the user setting env vars; explicit env still wins.
@@ -45,7 +54,7 @@ func main() {
 
 	store, err := storage.NewLocal(cfg.DataDir)
 	if err != nil {
-		log.Fatalf("storage: %v", err)
+		return fmt.Errorf("storage: %w", err)
 	}
 
 	var repo orchestratorJobRepository
@@ -59,18 +68,18 @@ func main() {
 		path := sqlitePath(cfg.DatabaseURL, cfg.DataDir)
 		sqliteRepo, err := newSQLiteJobRepository(path)
 		if err != nil {
-			log.Fatalf("sqlite: %v", err)
+			return fmt.Errorf("sqlite: %w", err)
 		}
 		defer func() { _ = sqliteRepo.Close() }()
 		repo = sqliteRepo
 		sqliteStreamRepo, err := newSQLiteStreamJobRepository(sqliteRepo.db)
 		if err != nil {
-			log.Fatalf("sqlite stream jobs: %v", err)
+			return fmt.Errorf("sqlite stream jobs: %w", err)
 		}
 		streamRepo = sqliteStreamRepo
 		log.Printf("jobs: using sqlite repository at %s", path)
 	default:
-		log.Fatalf("unsupported ZV_DATABASE_URL %q: fragforge desktop only supports %q or %q", cfg.DatabaseURL, databaseURLMemory, databaseURLSQLite)
+		return fmt.Errorf("unsupported ZV_DATABASE_URL %q: fragforge desktop only supports %q or %q", cfg.DatabaseURL, databaseURLMemory, databaseURLSQLite)
 	}
 
 	// Reconcile jobs stranded in a transient in-flight status by a previous
@@ -165,9 +174,6 @@ func main() {
 	if recordWorker != nil {
 		recordWorker.UseEnqueuer(queue)
 	}
-	inline.Start(ctx)
-	log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
-
 	// Defense-in-depth gating only kicks in on an exposed (non-loopback) bind;
 	// the loopback default stays unauthenticated and unthrottled for the local
 	// UI and e2e.
@@ -192,21 +198,32 @@ func main() {
 		Handler:           httpapi.Routes(handlers),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	httpRuntime, err := prepareHTTPServer(srv)
+	if err != nil {
+		return fmt.Errorf("http: %w", err)
+	}
 
-	// Start HTTP
-	go func() {
-		log.Printf("http: listening on %s", cfg.HTTPAddr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("http: %v", err)
-		}
-	}()
+	// The address is reserved now, so workers cannot start behind a server that
+	// already failed to bind.
+	inline.Start(ctx)
+	log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
+	httpRuntime.Start()
+	log.Printf("http: listening on %s", httpRuntime.Addr())
 
-	<-ctx.Done()
-	log.Print("shutdown: received signal, draining")
+	serveErr := waitAndCancelOnHTTPFailure(ctx, stop, httpRuntime)
+	if serveErr != nil {
+		log.Printf("shutdown: http server failed, draining: %v", serveErr)
+	} else {
+		log.Print("shutdown: received signal, draining")
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
+	_ = httpRuntime.Shutdown(shutdownCtx)
 	inline.Shutdown(shutdownCtx)
 	log.Print("shutdown: done")
+	if serveErr != nil {
+		return fmt.Errorf("http: %w", serveErr)
+	}
+	return nil
 }
