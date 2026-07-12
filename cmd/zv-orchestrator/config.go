@@ -41,7 +41,8 @@ type config struct {
 }
 
 const (
-	databaseURLMemory = "memory"
+	databaseURLMemory            = "memory"
+	xaiAPIKeyEnvironmentVariable = "XAI_API_KEY"
 	// databaseURLSQLite selects the on-disk SQLite job repository. Accepts the
 	// bare value "sqlite" (stores <DataDir>/jobs.db) or "sqlite:<path>".
 	databaseURLSQLite = "sqlite"
@@ -80,7 +81,7 @@ func loadConfig() (config, error) {
 		WhisperModelPath: os.Getenv("ZV_WHISPER_MODEL"),
 		// XAI_API_KEY is the only cloud transcription credential. It is not
 		// auto-detected because an API key cannot be probed on PATH or disk.
-		XAIAPIKey: os.Getenv("XAI_API_KEY"),
+		XAIAPIKey: os.Getenv(xaiAPIKeyEnvironmentVariable),
 		// Firecrawl enriches strategy suggestions with public CS2 trend
 		// references. It is optional and never sent to the web renderer.
 		FirecrawlAPIKey: os.Getenv("FIRECRAWL_API_KEY"),
@@ -116,6 +117,23 @@ func loadConfig() (config, error) {
 		return c, err
 	}
 	return c, nil
+}
+
+// clearXAIAPIKeyEnvironment keeps the credential in config memory while
+// preventing editor, recorder, FFmpeg, HLAE, CS2, and other subprocesses from
+// inheriting it. EqualFold also removes casing variants on Windows, where
+// environment variable names are case-insensitive.
+func clearXAIAPIKeyEnvironment() error {
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(name, xaiAPIKeyEnvironmentVariable) {
+			continue
+		}
+		if err := os.Unsetenv(name); err != nil {
+			return fmt.Errorf("unset %s: %w", xaiAPIKeyEnvironmentVariable, err)
+		}
+	}
+	return nil
 }
 
 func (c config) recordWorkerEnabled() bool {

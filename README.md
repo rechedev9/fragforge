@@ -171,6 +171,12 @@ xAI prices batch speech-to-text separately from streaming; check the
 [current Voice API pricing](https://x.ai/api/voice). Local whisper.cpp remains
 available as an offline fallback.
 
+Source builds and the standard desktop installer do not contain a credential.
+For the deliberately shared internal-team edition, `npm run dist:team` from
+`desktop/` packages the build machine's `XAI_API_KEY`; see
+`desktop/README.md`. That key is extractable by anyone who obtains the
+installer, and a local `XAI_API_KEY` overrides it at runtime for rotation.
+
 Set a newly generated key in the same PowerShell session that starts Local
 Studio without putting the secret in command history:
 

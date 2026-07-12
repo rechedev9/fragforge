@@ -11,6 +11,12 @@ import { execSync } from 'node:child_process';
 import { existsSync, rmSync, mkdirSync, cpSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  assembleUsesTeamXAIKey,
+  environmentWithoutXAIAPIKey,
+  resolveTeamXAIKey,
+  stageTeamXAIKey,
+} from './team-xai-key.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = join(here, '..');
@@ -18,6 +24,21 @@ const repo = join(desktop, '..');
 const web = join(repo, 'web');
 const bin = join(repo, 'bin');
 const out = join(desktop, 'build-resources');
+const teamKeyPath = join(out, 'team', 'xai-api-key');
+const args = process.argv.slice(2);
+
+// Do this before argument/key validation so every failed rebuild removes a
+// credential left by an earlier team assembly.
+rmSync(teamKeyPath, { force: true });
+
+let teamXAIKey = '';
+try {
+  teamXAIKey = resolveTeamXAIKey(assembleUsesTeamXAIKey(args));
+} catch (err) {
+  const message = err instanceof Error ? err.message : 'invalid team build configuration';
+  console.error(`\n[assemble] ${message}\n`);
+  process.exit(1);
+}
 
 // zv-orchestrator.exe is the backend main.js spawns (directly, not via `zv
 // serve`, so quitting the app kills the real server). zv-editor.exe must sit
@@ -48,9 +69,11 @@ if (!existsSync(iconFile)) {
 
 // 1. Build the desktop-bundled web server.
 console.log('[assemble] building web...');
+const webBuildEnvironment = environmentWithoutXAIAPIKey();
 execSync('npm run build', {
   cwd: web,
   stdio: 'inherit',
+  env: webBuildEnvironment,
 });
 
 const standalone = join(web, '.next', 'standalone');
@@ -63,6 +86,7 @@ if (!existsSync(join(standalone, 'server.js'))) {
 console.log('[assemble] staging build-resources/...');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'bin'), { recursive: true });
+stageTeamXAIKey(join(out, 'team'), teamXAIKey);
 
 cpSync(standalone, join(out, 'web'), { recursive: true });
 cpSync(join(web, '.next', 'static'), join(out, 'web', '.next', 'static'), { recursive: true });

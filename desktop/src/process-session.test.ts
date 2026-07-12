@@ -142,6 +142,56 @@ test('refuses to launch new children after stop', () => {
   assert.throws(() => harness.session.launch('web', 'node.exe', [], {}), /stopped session/);
 });
 
+test('can remove a sensitive inherited variable for a specific child', (t) => {
+  const previous = process.env.XAI_API_KEY;
+  process.env.XAI_API_KEY = 'local-team-key';
+  t.after(() => {
+    if (previous === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = previous;
+  });
+  let childEnvironment: NodeJS.ProcessEnv | undefined;
+  const session = new ProcessSession({
+    logLine: () => {},
+    launchProcess: (_executable, _args, env) => {
+      childEnvironment = env;
+      return new FakeProcess(1000);
+    },
+  });
+
+  session.launch('web', 'node.exe', [], { XAI_API_KEY: undefined });
+
+  assert.equal(childEnvironment?.XAI_API_KEY, undefined);
+  assert.equal(childEnvironment && 'XAI_API_KEY' in childEnvironment, false);
+});
+
+test('removes differently-cased sensitive variables from Windows child environments', (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('Windows environment names are case-insensitive');
+    return;
+  }
+  const inheritedName = 'xai_api_key';
+  const previous = process.env[inheritedName];
+  process.env[inheritedName] = 'local-team-key';
+  t.after(() => {
+    if (previous === undefined) delete process.env[inheritedName];
+    else process.env[inheritedName] = previous;
+  });
+  let childEnvironment: NodeJS.ProcessEnv | undefined;
+  const session = new ProcessSession({
+    logLine: () => {},
+    launchProcess: (_executable, _args, env) => {
+      childEnvironment = env;
+      return new FakeProcess(1000);
+    },
+  });
+
+  session.launch('web', 'node.exe', [], { XAI_API_KEY: undefined });
+
+  const inheritedKeys = Object.keys(childEnvironment ?? {})
+    .filter((name) => name.toLowerCase() === 'xai_api_key');
+  assert.deepEqual(inheritedKeys, []);
+});
+
 test('surfaces a nonzero Windows taskkill result', () => {
   const child = new FakeProcess(4242);
   assert.throws(

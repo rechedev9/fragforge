@@ -45,6 +45,13 @@ visibility, and scheduling choices. No Google credentials are required by the
 installer. Optional public trend hints remain available when
 `FIRECRAWL_API_KEY` is inherited by the desktop process.
 
+The standard installer remains credential-free. FragForge also has an explicit
+internal team build that packages one shared `XAI_API_KEY` for stream
+subtitles. At runtime a locally configured `XAI_API_KEY` takes precedence, so
+the shared key can be replaced immediately without rebuilding. The credential
+is passed only to `zv-orchestrator.exe`, never to the bundled Next.js server or
+the renderer.
+
 ## Build the installer (on Windows)
 
 Prerequisites: Go 1.26+, Node.js + npm, and the web deps installed.
@@ -73,6 +80,25 @@ icon lives at `build/icon.ico`, which electron-builder picks up automatically;
 packaged app can parse, capture, and render reels. The developer `zv.exe` CLI
 stays available in the repository build but is not shipped in the desktop
 installer.
+
+To produce the internal team installer, load the shared key without placing it
+in command history and use the separate build target:
+
+```powershell
+$secureKey = Read-Host "xAI team API key" -AsSecureString
+$env:XAI_API_KEY = (New-Object System.Net.NetworkCredential("", $secureKey)).Password
+npm run dist:team
+Remove-Item Env:XAI_API_KEY
+```
+
+`npm run dist:team` refuses to run when the key is missing or malformed. It
+stores the credential in `resources/team/xai-api-key` inside the installed app;
+the ignored `build-resources/` and `dist-installer/` directories are its only
+local staging locations. This is convenience, not secret protection: anyone
+who receives the installer can extract and use the shared key, so distribute
+that edition only to people authorized to consume the team's xAI quota. Running
+the ordinary `npm run dist` afterward replaces the staged key with an empty
+resource and produces a credential-free installer.
 
 This v2 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
 on first run - choose "More info" -> "Run anyway". Code signing and auto-update

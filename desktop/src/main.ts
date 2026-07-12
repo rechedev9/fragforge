@@ -22,6 +22,7 @@ import { ProcessSession, type LaunchedProcess } from './process-session';
 import { waitForDesktopServices } from './service-health';
 import { provisionMusicLibrary } from './music-library';
 import { allocateStableServicePorts } from './stable-ports';
+import { resolveXAIAPIKey } from './xai-api-key';
 
 // Every loopback server and health check binds/targets this host; named once so
 // the value that couples all the URLs below is not a scattered magic string.
@@ -62,6 +63,7 @@ const orchestratorExe = resourcePath(
 const nextServer = resourcePath('web', 'server.js');
 const dataDir = path.join(app.getPath('userData'), 'data');
 const musicDir = path.join(dataDir, 'music');
+const bundledTeamXAIKeyPath = resourcePath('team', 'xai-api-key');
 
 // All child output is mirrored to this file so a failed boot is diagnosable
 // from a user report: the packaged app has no console, so stdout alone is
@@ -379,6 +381,14 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
   allowedOrigins.clear();
   allowedInternalUrls.clear();
 
+  // The normal build stages an empty file; the internal team build stages the
+  // shared subtitle credential. A local environment value wins for emergency
+  // rotation, and the result is passed only to the Go orchestrator below.
+  const xaiAPIKey = resolveXAIAPIKey({
+    environmentValue: process.env.XAI_API_KEY,
+    bundledPath: bundledTeamXAIKeyPath,
+  });
+
   // Tracks can land in the background; the API rescans the music dir per request.
   provisionMusicLibrary({
     bundledMusicDir: resourcePath('music'),
@@ -422,6 +432,7 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
     ZV_DATA_DIR: dataDir,
     ZV_HTTP_ADDR: `${LOOPBACK_HOST}:${orchPort}`,
     ZV_MUSIC_DIR: musicDir,
+    XAI_API_KEY: xaiAPIKey,
     ...toolEnv,
   });
 
@@ -432,6 +443,9 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
     PORT: String(webPort),
     HOSTNAME: LOOPBACK_HOST,
     ORCHESTRATOR_URL: orchestratorUrl,
+    // ProcessSession normally inherits the desktop environment. Explicitly
+    // remove this server-irrelevant secret from the Next child.
+    XAI_API_KEY: undefined,
   });
 
   // Either child dying is terminal during either health wait. Cancelling the
