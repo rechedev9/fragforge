@@ -44,7 +44,7 @@ Pure stages (parse, compose) retry automatically; recording does not retry autom
 
 Module boundaries (keep `cmd/` entrypoints thin):
 
-- `cmd/` - CLI entrypoints (`zv` unified binary plus `zv-parser`, `zv-recorder`, `zv-composer`, `zv-editor`, `zv-pipeline`, `zv-orchestrator`, ...).
+- `cmd/` - CLI entrypoints (`zv` unified binary plus `zv-parser`, `zv-recorder`, `zv-composer`, `zv-editor`, `zv-orchestrator`, ...).
 - `internal/parser` - `.dem` parsing and segment extraction (built on `markus-wa/demoinfocs-golang`).
 - `internal/killplan` - shared kill/segment plan types; the kill plan is the contract between parse and every later stage.
 - `internal/moments` - scored, reviewable clip candidates derived from kill plans.
@@ -75,9 +75,9 @@ The editing rationale: hook text in the first 1-2s, punch-ins on kills, slow-mo 
 
 `web/` is a standalone Next.js app (App Router, React 19, Tailwind 4): the no-login `/upload` entry, match/clip/video views, and a typed API client under `web/lib/api`.
 It is local-first and stateless: it talks only to the orchestrator (`zv serve`) through same-origin proxy route handlers under `web/app/api/demos/*`, which forward `.dem` uploads and job calls while keeping the orchestrator URL and token server-side.
-`web/lib/api` uses the real client when `NEXT_PUBLIC_API_BASE` is set (see `web/.env.local`), otherwise an in-memory mock.
+`web/lib/api` always uses the real typed client; same-origin route handlers keep the orchestrator URL and token server-side.
 
-Run it locally (needs the orchestrator on `127.0.0.1:8080`; orchestrator memory mode is enough for the upload -> roster -> parse path):
+Run it locally (needs the orchestrator on `127.0.0.1:8080`; the desktop/local-studio path uses persistent SQLite plus the inline queue):
 
 ```bash
 cd web && npm install && npm run dev   # http://localhost:3000
@@ -112,7 +112,7 @@ Local Studio runs the whole product from the web UI on the user's own Windows + 
 The web proxies the entire `/api/demos/*` pipeline to a local orchestrator (`zv serve`) on the same machine, so the browser flow (upload -> pick player -> pick kills -> create reel) drives local HLAE/CS2 capture directly.
 
 ```powershell
-.\scripts\local-studio.ps1   # starts zv serve (memory mode, capture auto-detected) + the web in local mode, opens /upload
+.\scripts\local-studio.ps1   # starts zv serve (persistent SQLite, capture auto-detected) + the bundled-style web server, opens /upload
 ```
 
 This is a native Windows run, so capture works. Prerequisites: Go toolchain, Node, CS2 + HLAE installed, and the binaries built via `.\scripts\build.ps1`.
@@ -306,7 +306,7 @@ React:
 
 - Derive types from data (`typeof x`, `as const` unions) instead of maintaining parallel enums.
 - No `React.FC`; type props with an explicit interface or inline object type.
-- Handle loading, error, and empty states explicitly in UI that fetches; the mock/real client split in `web/lib/api` exists so both paths stay typed.
+- Handle loading, error, and empty states explicitly in UI that fetches; keep response parsing and error mapping inside the typed `web/lib/api` boundary.
 
 Testing:
 
@@ -316,6 +316,11 @@ Testing:
 - Bug fixes need a regression test, same as Go.
 
 ## Operational rules
+
+Codex agent limit:
+
+- When using `codex --yolo` with GPT-5.6 Sol Ultra, never spawn more than 15 sub-agents for a single user request.
+  This is a total cap across the entire delegation tree, not a concurrency limit: count sub-agents spawned by the root and every descendant, including sub-agents that have already finished.
 
 Before editing:
 
