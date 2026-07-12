@@ -276,7 +276,7 @@ export const fixtureSongs: Song[] = [
 ];
 
 /**
- * Seed videos. One is already ready+published; one is mid-render (recent
+ * Seed videos. One is already ready; one is mid-render (recent
  * createdAt so the elapsed-time status mapping in the mock client reports it as
  * recording/composing). Status here is a starting value; listVideos/getVideo
  * recompute it from createdAt.
@@ -295,7 +295,6 @@ export function seedVideos(): Video[] {
       createdAt: now - 6 * 3600 * 1000,
       availableForSec: 14 * 3600,
       thumbnailUrl: thumb('v-seed-ready'),
-      published: true,
       downloadUrl: SAMPLE_REEL_URL,
     },
     {
@@ -310,7 +309,6 @@ export function seedVideos(): Video[] {
       createdAt: now - 4 * 1000,
       availableForSec: 14 * 3600,
       thumbnailUrl: thumb('v-seed-rendering'),
-      published: false,
     },
   ];
 }

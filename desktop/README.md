@@ -36,6 +36,15 @@ Capture still needs CS2 installed on the machine (Windows + GPU); Studio install
 HLAE automatically. Job data (demos, artifacts) is written under the per-user
 app data dir, not Program Files.
 
+Finished Library reels include a manual publication assistant. Studio generates
+Madrid-time guidance and factual metadata alternatives, lets the user copy the
+title, description, and tags, downloads the MP4, and opens
+`https://studio.youtube.com/` in the system browser. The user completes YouTube's
+official **CREAR -> Subir vídeos** flow there, including channel, audience,
+visibility, and scheduling choices. No Google credentials are required by the
+installer. Optional public trend hints remain available when
+`FIRECRAWL_API_KEY` is inherited by the desktop process.
+
 ## Build the installer (on Windows)
 
 Prerequisites: Go 1.26+, Node.js + npm, and the web deps installed.

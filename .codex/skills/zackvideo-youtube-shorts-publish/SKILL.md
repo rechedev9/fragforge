@@ -1,11 +1,12 @@
 ---
 name: zackvideo-youtube-shorts-publish
-description: "Prepare or upload FragForge YouTube Shorts publish packs with titles, captions, hashtags, covers, and optional YouTube Data API upload."
+description: "Prepare FragForge YouTube Shorts publish packs with titles, captions, hashtags, covers, and manual YouTube Studio guidance. Use when Codex needs to create or review upload-ready metadata and guide a user through the official browser-based publication flow."
 ---
 
 # FragForge YouTube Shorts Publish
 
-Use this skill when the user asks for YouTube titles, captions, Shorts upload packs, or uploads.
+Prepare and review upload-ready YouTube Shorts assets. Keep account, audience,
+visibility, scheduling, and publication decisions inside YouTube Studio.
 
 ## Publish Pack
 
@@ -49,8 +50,16 @@ CS2 Inferno utility reference.
 
 Keep hashtags relevant and limited. Do not spam broad tags.
 
-## Upload Notes
+## Manual publication
 
-YouTube upload should use the YouTube Data API `videos.insert` endpoint with OAuth. Do not promise public visibility before checking the account/API status: uploads may default to private or be restricted by channel verification, API quota, or policy checks.
+Download the finished MP4 and open only:
 
-Before uploading, confirm the exact account/channel and whether the user wants `private`, `unlisted`, or `public`.
+```text
+https://studio.youtube.com/
+```
+
+Guide the user through YouTube Studio's official **CREAR -> Subir vídeos** flow.
+Do not request Google credentials or attempt account connection or direct
+publication. Leave the channel, made-for-kids declaration, visibility, and
+schedule for the user to select in Studio. Follow YouTube's official guide:
+https://support.google.com/youtube/answer/57407?hl=es

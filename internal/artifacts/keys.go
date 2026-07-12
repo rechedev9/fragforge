@@ -133,16 +133,6 @@ func RenderVariantPublishSummaryKey(id uuid.UUID, variant string) (string, error
 	return path.Join(prefix, "publish-summary.md"), nil
 }
 
-// RenderVariantUploadStatusKey returns the local manual-upload marker for a
-// named render variant.
-func RenderVariantUploadStatusKey(id uuid.UUID, variant string) (string, error) {
-	prefix, err := RenderVariantPrefix(id, variant)
-	if err != nil {
-		return "", err
-	}
-	return path.Join(prefix, "uploaded.json"), nil
-}
-
 // RenderVariantVideoKey returns the MP4 key for one video artifact inside a
 // named render variant.
 func RenderVariantVideoKey(id uuid.UUID, variant, name string) (string, error) {

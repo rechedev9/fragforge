@@ -26,7 +26,6 @@ export type ReelIntent = {
   map: string;
   score: string;
   createdAt: number;
-  published: boolean;
 };
 
 const STORE_KEY = 'fragforge.reels.v1';
@@ -97,7 +96,6 @@ export function coerceIntents(parsed: unknown): ReelIntent[] {
       map: typeof r.map === 'string' ? r.map : 'Unknown',
       score: typeof r.score === 'string' ? r.score : '',
       createdAt: typeof r.createdAt === 'number' ? r.createdAt : 0,
-      published: r.published === true,
     });
   }
   return out;

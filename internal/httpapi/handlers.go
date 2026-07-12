@@ -74,17 +74,19 @@ type Enqueuer interface {
 
 // Handlers bundles the dependencies needed by every endpoint.
 type Handlers struct {
-	repo            JobRepository
-	streamRepo      StreamJobRepository
-	storage         storage.Storage
-	generateIntents *generateintent.Store
-	queue           Enqueuer
-	mutationToken   string
-	requireReadAuth bool
-	rateLimiter     *rateLimiter
-	streamProber    streamclips.Prober
-	musicDir        string
-	capabilities    Capabilities
+	repo             JobRepository
+	streamRepo       StreamJobRepository
+	storage          storage.Storage
+	generateIntents  *generateintent.Store
+	queue            Enqueuer
+	mutationToken    string
+	requireReadAuth  bool
+	rateLimiter      *rateLimiter
+	streamProber     streamclips.Prober
+	musicDir         string
+	capabilities     Capabilities
+	youtubeTrends    YouTubeTrends
+	publishAssistant *publishAssistantCache
 }
 
 type Option func(*Handlers)
@@ -144,13 +146,22 @@ func WithCapabilities(c Capabilities) Option {
 	}
 }
 
+// WithPublishAssistantTrends enables optional Firecrawl discovery. Missing
+// public trend data never makes the manual publishing assistant unavailable.
+func WithPublishAssistantTrends(trends YouTubeTrends) Option {
+	return func(h *Handlers) {
+		h.youtubeTrends = trends
+	}
+}
+
 // NewHandlers constructs an HTTP handler set.
 func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts ...Option) *Handlers {
 	h := &Handlers{
-		repo:            repo,
-		storage:         store,
-		generateIntents: generateintent.New(store),
-		queue:           queue,
+		repo:             repo,
+		storage:          store,
+		generateIntents:  generateintent.New(store),
+		queue:            queue,
+		publishAssistant: newPublishAssistantCache(),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -162,10 +173,6 @@ func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts
 type createJobConfig struct {
 	TargetSteamID string       `json:"target_steamid"`
 	Rules         *rules.Rules `json:"rules,omitempty"`
-}
-
-type uploadStatusRequest struct {
-	Uploaded bool `json:"uploaded"`
 }
 
 // isDemoHeader reports whether the leading bytes look like a CS2 (Source 2) or
@@ -1171,7 +1178,6 @@ func (h *Handlers) GetRenderPublishBoard(w http.ResponseWriter, r *http.Request)
 		JobID:          j.ID,
 		Variant:        variant,
 		SegmentIDs:     segmentIDs,
-		Uploaded:       h.renderVariantUploaded(j.ID, variant),
 		Warnings:       result.Warnings,
 		Error:          result.Error,
 		ArtifactExists: h.storage.Exists,
@@ -1181,45 +1187,6 @@ func (h *Handlers) GetRenderPublishBoard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, board)
-}
-
-// SetRenderUploaded handles POST /api/jobs/{id}/renders/{variant}/publish/uploaded.
-func (h *Handlers) SetRenderUploaded(w http.ResponseWriter, r *http.Request) {
-	j, ok := h.loadJob(w, r)
-	if !ok {
-		return
-	}
-	variant := chi.URLParam(r, "variant")
-	if _, err := renderplan.LoadoutForVariant(variant); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
-	var req uploadStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			writeError(w, http.StatusRequestEntityTooLarge, "upload status JSON is too large")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "invalid upload status JSON")
-		return
-	}
-	key, err := renderplan.RenderVariantUploadStatusKey(j.ID, variant)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	doc := renderplan.NewRenderVariantUploadStatus(j.ID, variant, req.Uploaded)
-	b, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		internalError(w, "marshal upload status", err)
-		return
-	}
-	if err := h.storage.Put(key, bytes.NewReader(b)); err != nil {
-		internalError(w, "write upload status", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, doc)
 }
 
 // StartCaptionAgent handles POST /api/jobs/{id}/renders/{variant}/agent/captions.
@@ -1284,23 +1251,6 @@ func (h *Handlers) GetCaptionAgent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, rc)
-}
-
-func (h *Handlers) renderVariantUploaded(id uuid.UUID, variant string) bool {
-	key, err := renderplan.RenderVariantUploadStatusKey(id, variant)
-	if err != nil {
-		return false
-	}
-	rc, err := h.storage.Open(key)
-	if err != nil {
-		return false
-	}
-	defer rc.Close()
-	var doc renderplan.RenderVariantUploadStatus
-	if err := json.NewDecoder(rc).Decode(&doc); err != nil {
-		return false
-	}
-	return doc.Uploaded
 }
 
 // GetRenderQuality handles GET /api/jobs/{id}/renders/{variant}/quality.

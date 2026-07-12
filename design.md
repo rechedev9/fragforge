@@ -40,7 +40,7 @@ work, less hidden state, and fewer repeated manual commands.
 - Surface every important stage visually: upload, parsing, moments, recording,
   rendering, QA, captions, publish readiness, and cleanup.
 - Make expensive or risky operations explicit and approved: HLAE/CS2 recording,
-  long renders, marking uploaded, and recycling demos.
+  long renders, and recycling demos.
 - Deliver a professional, dense, operator-friendly UI suited to repeated
   production work.
 
@@ -50,7 +50,9 @@ work, less hidden state, and fewer repeated manual commands.
   backend.
 - Do not expose arbitrary shell commands from the browser.
 - Do not build a Canva-style timeline editor in V1.
-- Do not require cloud upload, OAuth, or YouTube API integration in V1.
+- Do not add cloud upload, account connection, or YouTube API integration in
+  V1. The post-render assistant may prepare metadata, download the MP4, and open
+  YouTube Studio, but publication remains manual.
 - Do not replace `zv` CLI workflows. The UI should call stable API/task
   contracts that the CLI can continue to use.
 - Do not hide raw artifacts from advanced users. The Workbench should reduce
@@ -250,7 +252,7 @@ controls, state, and concise labels.
 13. Operator approves render.
 14. Publish pack appears with video, cover, caption, gallery, QA.
 15. Codex proposes captions/hashtags and cleanup.
-16. Operator marks uploaded when done.
+16. Operator prepares publication, downloads the MP4, and opens YouTube Studio.
 
 ### 8.2 Prompt With SteamID64
 
@@ -413,7 +415,7 @@ Content:
 - caption readiness
 - gallery link
 - manifest link
-- upload status toggle
+- publication assistant action
 
 Statuses:
 
@@ -421,7 +423,6 @@ Statuses:
 - `needs_cover`
 - `needs_caption`
 - `ready`
-- `uploaded`
 - `failed`
 
 The `ready` state should be visually distinct and calm, not celebratory. This
@@ -581,7 +582,7 @@ Important examples:
 - `ActionProposal`: proposed, approved, running, completed, rejected, failed.
 - `StageTimeline`: pending, active, completed, blocked, failed.
 - `MomentTable`: loading, empty, selectable, filtered, parse failed.
-- `PublishBoard`: draft, needs cover, needs caption, ready, uploaded, failed.
+- `PublishBoard`: draft, needs cover, needs caption, ready, failed.
 - `WorkerHealth`: ready, unavailable, misconfigured, unknown.
 
 ### Iconography
@@ -601,7 +602,7 @@ Use icons for compact controls when implementing with a frontend icon library:
 - external link
 
 Text buttons are acceptable for major actions such as `Approve recording`,
-`Render`, and `Mark uploaded`.
+`Render`, and `Open YouTube Studio`.
 
 ### Motion
 
@@ -667,7 +668,7 @@ Good labels:
 - `Render viral-60-clean`
 - `Open gallery`
 - `Show logs`
-- `Mark uploaded`
+- `Open YouTube Studio`
 - `Recycle demo`
 
 Avoid vague labels:
@@ -883,7 +884,6 @@ Allowed action kinds:
 - `start_composition`
 - `start_render_variant`
 - `start_caption_agent`
-- `mark_uploaded`
 - `request_demo_cleanup`
 
 Codex cannot emit raw commands. The backend validates every action kind,
@@ -998,22 +998,6 @@ Payload:
 }
 ```
 
-### `mark_uploaded`
-
-Purpose: mark the publish pack as uploaded after manual platform upload.
-
-Approval: yes.
-
-Payload:
-
-```json
-{
-  "job_id": "uuid",
-  "variant": "viral-60-clean",
-  "uploaded": true
-}
-```
-
 ### `request_demo_cleanup`
 
 Purpose: recycle used local `.dem` copies after final output is validated.
@@ -1052,7 +1036,6 @@ intake.uploaded
   -> render.ready
   -> caption agent / QA summary
   -> publish.ready
-  -> mark uploaded
   -> cleanup approval
 ```
 
@@ -1136,7 +1119,7 @@ Minimum bar:
 
 - Implement approve/reject endpoints.
 - Implement allowlisted action executors.
-- Add approval gates for recording, rendering, uploaded marker, and cleanup.
+- Add approval gates for recording, rendering, and cleanup.
 - Add tests for rejected transitions and malformed payloads.
 
 ### Phase 6: Review Quality
@@ -1167,7 +1150,7 @@ V1 is good enough when the operator can:
 9. Approve rendering from the browser.
 10. Review upload-ready video, cover, caption, gallery, pack manifest, and QA.
 11. Find final outputs under `shortslistosparasubir`.
-12. Mark a pack uploaded.
+12. Prepare publication, download the MP4, and open YouTube Studio.
 13. Approve demo cleanup only after validation.
 
 Quality bar:
@@ -1214,4 +1197,4 @@ Run this checklist before calling the UI slice ready:
   `target_steamid` in production jobs.
 - Auto-run scope: allow parser-only and player-inspection actions to run
   automatically when safe; require approval for HLAE/CS2, long renders,
-  uploaded markers, and cleanup.
+  and cleanup.

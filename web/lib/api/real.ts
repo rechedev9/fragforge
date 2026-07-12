@@ -6,6 +6,7 @@ import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
 import { dataPlane, type DataPlane } from './dataplane';
+import { parsePublishAssistant, type PublishAssistant } from './publish-assistant';
 import { playsSelectionLabel } from '@/lib/format';
 
 /** Segment ids joined into the stable local id for a reel (not an artifact path). */
@@ -148,7 +149,6 @@ function videoFromIntent(intent: ReelIntent): Video {
     status: 'queued',
     createdAt: intent.createdAt,
     availableForSec: 14 * 3600,
-    published: intent.published,
   };
 }
 
@@ -172,7 +172,7 @@ export class RealApiClient implements ApiClient {
   /** Reels with a record/render POST in flight, so a tick never double-drives. */
   private readonly driving = new Set<string>();
   /** Server-reported artifact names for each reel (the file names the editor wrote). */
-  private readonly artifactNames = new Map<string, { video: string; cover: string }>();
+  private readonly artifactNames = new Map<string, { video: string; cover?: string }>();
 
   constructor() {
     // Rehydrate the reels the user asked for so the Library survives a hard reload
@@ -335,7 +335,6 @@ export class RealApiClient implements ApiClient {
       map: match?.map ?? 'Unknown',
       score: match?.score ?? '',
       createdAt: Date.now(),
-      published: false,
     };
     this.intents.set(videoId, intent);
     saveReelIntents(Array.from(this.intents.values()));
@@ -358,17 +357,21 @@ export class RealApiClient implements ApiClient {
     return this.fallback.getVideo(id);
   }
 
-  async publishVideo(id: string): Promise<Video> {
-    const reel = this.reels.get(id);
-    if (!reel) return this.fallback.publishVideo(id);
-    const updated: Video = { ...reel, published: true };
-    this.reels.set(id, updated);
+  async getPublishAssistant(id: string): Promise<PublishAssistant> {
     const intent = this.intents.get(id);
-    if (intent) {
-      this.intents.set(id, { ...intent, published: true });
-      saveReelIntents(Array.from(this.intents.values()));
-    }
-    return { ...updated };
+    if (!intent) return this.fallback.getPublishAssistant(id);
+    const reel = this.reels.get(id);
+    if (!reel || reel.status !== 'ready') throw new Error('video is not ready for publication');
+    const variant = variantOf(intent);
+    const name = await this.resolveArtifactName(intent, variant);
+    if (!name) throw new Error('rendered video artifact is not available');
+    const raw = await readJson<unknown>(
+      await this.send((dp) => ({
+        url: dp.publishAssistantUrl(intent.jobId, variant, name),
+        init: { cache: 'no-store' },
+      })),
+    );
+    return parsePublishAssistant(raw);
   }
 
   /**
@@ -404,7 +407,6 @@ export class RealApiClient implements ApiClient {
   async deleteVideo(id: string): Promise<void> {
     const intent = this.intents.get(id);
     if (!intent) return this.fallback.deleteVideo(id);
-
     try {
       const variant = variantOf(intent);
       const name = await this.resolveArtifactName(intent, variant);
@@ -444,8 +446,10 @@ export class RealApiClient implements ApiClient {
     ]);
     // Capture the server's real artifact names so applyView addresses the reel
     // by the editor's file names instead of guessing from segment ids.
-    if (render.videoName && render.coverName) {
-      this.artifactNames.set(intent.videoId, { video: render.videoName, cover: render.coverName });
+    if (render.videoName) {
+      const names: { video: string; cover?: string } = { video: render.videoName };
+      if (render.coverName) names.cover = render.coverName;
+      this.artifactNames.set(intent.videoId, names);
     }
     if (job === null) {
       // Memory-mode orchestrator restart drops jobs; surface it instead of spinning.
@@ -483,7 +487,7 @@ export class RealApiClient implements ApiClient {
       const variant = variantOf(intent);
       const dp = dataPlane();
       next.downloadUrl = dp.videoUrl(intent.jobId, variant, names.video);
-      next.thumbnailUrl = dp.coverUrl(intent.jobId, variant, names.cover);
+      if (names.cover) next.thumbnailUrl = dp.coverUrl(intent.jobId, variant, names.cover);
     }
     this.reels.set(intent.videoId, next);
   }

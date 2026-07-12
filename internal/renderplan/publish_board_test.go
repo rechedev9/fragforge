@@ -79,24 +79,6 @@ func TestNewPublishBoardMarksFailedFromRenderError(t *testing.T) {
 	}
 }
 
-func TestNewPublishBoardMarksUploadedWhenReadyAndUploaded(t *testing.T) {
-	board := NewPublishBoard(NewPublishBoardOptions{
-		JobID:    uuid.New(),
-		Variant:  "viral-60-clean",
-		Uploaded: true,
-		Items: []PublishBoardItem{{
-			SegmentID:    "seg-001",
-			VideoReady:   true,
-			CoverReady:   true,
-			CaptionReady: true,
-		}},
-	})
-
-	if board.Status != "uploaded" || !board.Uploaded {
-		t.Fatalf("status/uploaded = %q/%v, want uploaded/true", board.Status, board.Uploaded)
-	}
-}
-
 func TestNewPublishBoardForVariantDerivesArtifactKeysAndReadiness(t *testing.T) {
 	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	ready := map[string]bool{

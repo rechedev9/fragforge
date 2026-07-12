@@ -27,6 +27,7 @@ export type DataPlane = {
   recordUrl(jobId: string): string;
   renderUrl(jobId: string, variant: string): string;
   videoUrl(jobId: string, variant: string, name: string): string;
+  publishAssistantUrl(jobId: string, variant: string, name: string, days?: number): string;
   coverUrl(jobId: string, variant: string, name: string): string;
   capabilitiesUrl: string;
 };
@@ -54,6 +55,8 @@ export function dataPlane(): DataPlane {
     recordUrl: (jobId) => `/api/demos/${jobId}/record`,
     renderUrl: (jobId, variant) => `/api/demos/${jobId}/renders/${variant}`,
     videoUrl: (jobId, variant, name) => `/api/demos/${jobId}/renders/${variant}/videos/${name}`,
+    publishAssistantUrl: (jobId, variant, name, days = 7) =>
+      `/api/demos/${jobId}/renders/${variant}/videos/${name}/publish-assistant?days=${days}`,
     coverUrl: (jobId, variant, name) => `/api/demos/${jobId}/renders/${variant}/covers/${name}`,
     capabilitiesUrl: '/api/capabilities',
   };
