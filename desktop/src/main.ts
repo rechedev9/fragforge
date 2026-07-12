@@ -11,17 +11,16 @@
 
 import { app, BrowserWindow, shell, session } from 'electron';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
-import * as https from 'node:https';
 import * as net from 'node:net';
 import { pathToFileURL } from 'node:url';
-import { escapeHtml, psQuote } from './escaping';
-import { PINNED_HLAE_TOOL } from './hlae-tool';
+import { escapeHtml } from './escaping';
+import { downloadFile } from './http-download';
 import { validateWindowState, type WindowState } from './window-state';
 import { lastLines } from './log-tail';
+import { provisionRuntimeTools, RUNTIME_TOOL_LABELS } from './runtime-tools';
 
 // Every loopback server and health check binds/targets this host; named once so
 // the value that couples all the URLs below is not a scattered magic string.
@@ -94,286 +93,6 @@ function logLine(text: string): void {
 // before any property is read. Used at every on-disk-JSON trust boundary below.
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-interface DownloadOptions {
-  signal?: AbortSignal;
-  onProgress?: (received: number, total: number | undefined) => void;
-}
-
-// Third-party tools the pipeline needs at runtime but that cannot ship inside
-// the installer (size, licensing hygiene): they are provisioned into userData
-// on first boot and handed to the orchestrator via env vars (env always wins
-// over its auto-detection). Every tool uses a pinned release URL and sha256
-// digest, including the official HLAE release. Every download is best-effort:
-// a failure just leaves that feature unconfigured, the UI explains, and the
-// next boot retries.
-//
-// - HLAE (advancedfx, MIT): drives CS2 capture. Zip ships its LICENSES/.
-// - FFmpeg (BtbN autobuild, GPL): every render (reels and stream clips) shells
-//   out to ffmpeg/ffprobe; without it nothing can be rendered on a clean PC.
-//   Pinned to a dated autobuild tag because the "latest" tag's assets are
-//   replaced daily and would break the hash.
-// - yt-dlp (Unlicense): fetches Twitch/YouTube sources for Stream Clips.
-const toolsRoot = (): string => path.join(app.getPath('userData'), 'tools');
-
-type ToolName = 'hlae' | 'ffmpeg' | 'ytdlp';
-
-interface ToolSpec {
-  version: string;
-  url: string;
-  sha256: string;
-  kind: 'zip' | 'exe';
-  exeRel: string;
-  timeoutMs: number;
-}
-
-// Fires once per tool that actually needs a download (detail undefined), then
-// again as coarse progress trickles in (detail a short string like "45%").
-type StatusReporter = (name: ToolName, detail?: string) => void;
-
-const TOOLS: Record<ToolName, ToolSpec> = {
-  hlae: PINNED_HLAE_TOOL,
-  ffmpeg: {
-    version: 'n8.1.2',
-    url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-03-13-21/ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1.zip',
-    sha256: 'e0337e822bc66d01747bfa917080561739252aaceef3bccc049bcb299d6f9be0',
-    kind: 'zip',
-    exeRel: path.join('ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1', 'bin', 'ffmpeg.exe'),
-    timeoutMs: 300_000, // ~80 MB; generous for slow lines, capped so boot never wedges
-  },
-  ytdlp: {
-    version: '2026.06.09',
-    url: 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp.exe',
-    sha256: '3a48cb955d55c8821b60ccbdbbc6f61bc958f2f3d3b7ad5eaf3d83a543293a27',
-    kind: 'exe',
-    exeRel: 'yt-dlp.exe',
-    timeoutMs: 90_000,
-  },
-};
-
-/**
- * Downloads url to destPath, staging through `<destPath>.tmp` and renaming
- * only once every byte has arrived, so a request that dies mid-stream (a
- * network drop, or the caller's own abort on timeout) never leaves a partial
- * file sitting at destPath. Returns the sha256 hex digest of the downloaded
- * bytes. onProgress(bytesSoFar, totalBytes), if given, fires as data arrives
- * (totalBytes is undefined when the server omits Content-Length). Pass an
- * AbortSignal to cancel an in-flight download: the request and response
- * stream are destroyed so nothing writes after the signal fires.
- */
-async function downloadFile(url: string, destPath: string, { signal, onProgress }: DownloadOptions = {}): Promise<string> {
-  const res = await fetchStream(url, { signal });
-  const total = Number(res.headers['content-length']) || undefined;
-  const tmp = `${destPath}.tmp`;
-  const hash = createHash('sha256');
-  try {
-    let received = 0;
-    await new Promise<void>((resolve, reject) => {
-      const out = fs.createWriteStream(tmp);
-      // Shared by the stream-error path and the abort-signal path below so a
-      // cancellation always tears down both ends instead of leaving the
-      // response free to keep writing into `out`.
-      const fail = (err: Error): void => {
-        res.destroy();
-        out.destroy();
-        reject(err);
-      };
-      res.on('data', (chunk: Buffer) => {
-        hash.update(chunk);
-        received += chunk.length;
-        if (onProgress) onProgress(received, total);
-      });
-      res.pipe(out);
-      res.on('error', fail);
-      out.on('error', fail);
-      out.on('finish', resolve);
-      if (signal) {
-        if (signal.aborted) {
-          fail(new Error('download aborted'));
-        } else {
-          signal.addEventListener('abort', () => fail(new Error('download aborted')), { once: true });
-        }
-      }
-    });
-    fs.renameSync(tmp, destPath);
-    return hash.digest('hex');
-  } catch (err) {
-    fs.rmSync(tmp, { force: true });
-    throw err;
-  }
-}
-
-/** Expand-Archive via PowerShell (ships with every Windows 10/11). */
-function expandArchive(zipPath: string, destDir: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const ps = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command',
-        `Expand-Archive -LiteralPath ${psQuote(zipPath)} -DestinationPath ${psQuote(destDir)} -Force`],
-      { windowsHide: true },
-    );
-    let stderr = '';
-    ps.stderr?.on('data', (b: Buffer) => { stderr += String(b); });
-    ps.on('error', reject);
-    ps.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`Expand-Archive exited ${code}: ${stderr.trim()}`))));
-  });
-}
-
-// Throttle for download-progress status updates: frequent enough to look
-// alive, infrequent enough not to repaint the loading screen on every chunk.
-const PROGRESS_REPORT_MIN_INTERVAL_MS = 1000;
-
-/**
- * Ensures one tool from TOOLS is installed under userData\tools and returns
- * its exe path, or '' on failure (offline, bad hash, timeout); the caller then
- * simply omits the env var and the orchestrator falls back to auto-detection.
- * Idempotent: a cached install returns instantly. Each tool is capped by its
- * own timeout so one stalled download can never wedge the boot; on timeout
- * the in-flight HTTP request is aborted (not just abandoned), so nothing
- * writes to disk after this function has already told its caller it failed.
- */
-async function provisionTool(name: ToolName, onStatus?: StatusReporter): Promise<string> {
-  const tool = TOOLS[name];
-  const dir = path.join(toolsRoot(), name, tool.version);
-  const exe = path.join(dir, tool.exeRel);
-  if (fs.existsSync(exe)) return exe;
-  // Only fires when a real download is about to start (cache hits above never
-  // reach here), so the loading screen doesn't flash a status for instant boots.
-  if (onStatus) onStatus(name);
-
-  const controller = new AbortController();
-  let lastReportAt = 0;
-  let lastPct = -1;
-  const onProgress = (done: number, total: number | undefined): void => {
-    if (!onStatus) return;
-    const now = Date.now();
-    if (now - lastReportAt < PROGRESS_REPORT_MIN_INTERVAL_MS) return;
-    if (total) {
-      const pct = Math.floor((done / total) * 100);
-      if (pct === lastPct) return;
-      lastPct = pct;
-      lastReportAt = now;
-      onStatus(name, `${pct}%`);
-    } else {
-      lastReportAt = now;
-      onStatus(name, `${(done / (1024 * 1024)).toFixed(0)} MB`);
-    }
-  };
-
-  const work = (async (): Promise<string> => {
-    fs.mkdirSync(dir, { recursive: true });
-    const part = path.join(dir, 'download.part');
-    const zipPath = path.join(dir, 'download.zip');
-    try {
-      logLine(`[tools] downloading ${name} ${tool.version}...\n`);
-      const digest = await downloadFile(tool.url, part, { signal: controller.signal, onProgress });
-      if (digest !== tool.sha256) {
-        throw new Error(`sha256 mismatch: got ${digest}, want ${tool.sha256}`);
-      }
-      if (tool.kind === 'exe') {
-        fs.renameSync(part, exe);
-      } else {
-        // Only a fully-downloaded, hash-verified archive gets the .zip name:
-        // Expand-Archive refuses any other extension, and the rename doubles
-        // as the "download completed" marker a .part convention provides.
-        fs.renameSync(part, zipPath);
-        await expandArchive(zipPath, dir);
-      }
-      if (!fs.existsSync(exe)) throw new Error(`${tool.exeRel} missing after install in ${dir}`);
-      logLine(`[tools] installed ${exe}\n`);
-      return exe;
-    } finally {
-      fs.rmSync(part, { force: true });
-      fs.rmSync(zipPath, { force: true });
-    }
-  })();
-
-  try {
-    return await Promise.race([
-      work,
-      new Promise<string>((_resolve, reject) =>
-        setTimeout(() => {
-          // Abort the underlying request so the download actually stops
-          // instead of continuing to stream (and write .part bytes) in the
-          // background after this function has already reported failure.
-          controller.abort();
-          reject(new Error(`timed out after ${tool.timeoutMs}ms`));
-        }, tool.timeoutMs)),
-    ]);
-  } catch (err) {
-    logLine(`[tools] ${name} provisioning failed (feature stays unconfigured, retried next boot): ${String(err)}\n`);
-    return '';
-  }
-}
-
-// Display names for the loading-screen per-tool status lines; TOOLS keys are
-// the internal provisioning names, these are what a user recognizes.
-const TOOL_LABELS: Record<ToolName, string> = { hlae: 'HLAE', ffmpeg: 'FFmpeg', ytdlp: 'yt-dlp' };
-
-/**
- * Provisions all runtime tools concurrently and returns the env vars to hand
- * the orchestrator. ffprobe.exe sits next to ffmpeg.exe in the same archive.
- * onStatus(name, detail), if given, fires once per tool that actually needs a
- * download (detail undefined), then again as coarse progress trickles in
- * (detail a short string like "45%" or "12 MB").
- */
-async function provisionTools(onStatus?: StatusReporter): Promise<Record<string, string>> {
-  if (process.platform !== 'win32') return {};
-  const [hlae, ffmpeg, ytdlp] = await Promise.all([
-    provisionTool('hlae', onStatus),
-    provisionTool('ffmpeg', onStatus),
-    provisionTool('ytdlp', onStatus),
-  ]);
-  const env: Record<string, string> = {};
-  if (hlae) env.ZV_HLAE_PATH = hlae;
-  if (ffmpeg) {
-    env.ZV_FFMPEG_PATH = ffmpeg;
-    const ffprobe = path.join(path.dirname(ffmpeg), 'ffprobe.exe');
-    if (fs.existsSync(ffprobe)) env.ZV_FFPROBE_PATH = ffprobe;
-  }
-  if (ytdlp) env.ZV_YTDLP_PATH = ytdlp;
-  return env;
-}
-
-// Idle-socket timeout for a download in progress: generous (large archives on
-// a slow line), but stalled sockets are a real failure mode worth cutting off
-// rather than hanging until the per-tool timeout in provisionTool.
-const DOWNLOAD_SOCKET_IDLE_TIMEOUT_MS = 60_000;
-
-interface FetchStreamOptions {
-  redirectsLeft?: number;
-  signal?: AbortSignal;
-}
-
-/**
- * GET that follows redirects (archive.org download links bounce to mirrors).
- * Pass signal to abort the request (and any pending redirect chain) so a
- * caller-side timeout actually stops the network activity instead of just
- * abandoning the promise.
- */
-function fetchStream(url: string, { redirectsLeft = 5, signal }: FetchStreamOptions = {}): Promise<http.IncomingMessage> {
-  return new Promise((resolve, reject) => {
-    const handler = (res: http.IncomingMessage): void => {
-      const code = res.statusCode;
-      if (code !== undefined && code >= 300 && code < 400 && res.headers.location && redirectsLeft > 0) {
-        res.resume();
-        resolve(fetchStream(new URL(res.headers.location, url).toString(), { redirectsLeft: redirectsLeft - 1, signal }));
-        return;
-      }
-      if (code !== 200) {
-        res.resume();
-        reject(new Error(`GET ${url}: HTTP ${code}`));
-        return;
-      }
-      resolve(res);
-    };
-    const req = url.startsWith('https:')
-      ? https.get(url, { signal }, handler)
-      : http.get(url, { signal }, handler);
-    req.on('error', reject);
-    req.setTimeout(DOWNLOAD_SOCKET_IDLE_TIMEOUT_MS, () => req.destroy(new Error(`GET ${url}: timed out`)));
-  });
 }
 
 /**
@@ -859,8 +578,11 @@ async function boot(): Promise<void> {
   // Each tool has its own timeout, so worst case the app boots without one and
   // the UI says which feature is unconfigured.
   setLoadingStatus('Descargando herramientas (~110 MB, solo el primer arranque)…');
-  const toolEnv = await provisionTools((name, detail) =>
-    setLoadingStatus(`Descargando ${TOOL_LABELS[name] || name}${detail ? ` (${detail})` : ''}…`));
+  const toolEnv = await provisionRuntimeTools(
+    { toolsDir: path.join(app.getPath('userData'), 'tools'), logLine },
+    (name, detail) =>
+      setLoadingStatus(`Descargando ${RUNTIME_TOOL_LABELS[name]}${detail ? ` (${detail})` : ''}…`),
+  );
 
   // The orchestrator: SQLite job repo on disk (so reels survive an app restart)
   // + inline queue, capture and render tools from the provisioned env above,
