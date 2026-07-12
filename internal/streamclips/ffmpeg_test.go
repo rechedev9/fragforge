@@ -67,7 +67,7 @@ func TestBuildFFmpegArgsCreatesVerticalStackCommand(t *testing.T) {
 	}
 }
 
-func TestBuildFFmpegArgsOldStreamerBannerPlanStaysStaticAtStackSeam(t *testing.T) {
+func TestBuildFFmpegArgsOldStreamerBannerPlanUsesCurrentLayoutDefault(t *testing.T) {
 	var banner StreamerBannerPlan
 	if err := json.Unmarshal([]byte(`{"nick":"zacketizorcs2"}`), &banner); err != nil {
 		t.Fatalf("Unmarshal old streamer banner plan: %v", err)
@@ -92,7 +92,7 @@ func TestBuildFFmpegArgsOldStreamerBannerPlanStaysStaticAtStackSeam(t *testing.T
 		`fontfile='C\:/Windows/Fonts/arialbd.ttf'`,
 		"text='zacketizorcs2'",
 		"fontsize=52",
-		"overlay=x='0':y=720:eval=frame:eof_action=pass:shortest=0",
+		"overlay=x='0':y=670:eval=frame:eof_action=pass:shortest=0",
 		"fps=60",
 	} {
 		if !strings.Contains(joined, want) {
@@ -140,6 +140,31 @@ func TestBuildFFmpegArgsDefaultsFullFrameBannerToTwentyPercent(t *testing.T) {
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "overlay=x='0':y=336:eval=frame") {
 		t.Fatalf("args missing full-frame banner centered at 20%%: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsDefaultsLegacyBannerToStackSeam(t *testing.T) {
+	layout, ok := VariantByName(VariantStreamerVerticalStack)
+	if !ok {
+		t.Fatal("legacy layout is not registered")
+	}
+	plan := DefaultEditPlan()
+	plan.Variant = layout.Name
+	plan.FaceCrop = layout.DefaultFaceCrop
+	plan.GameplayCrop = layout.DefaultGameplayCrop
+	plan.StreamerBanner = StreamerBannerPlan{Nick: "zacketizorcs2"}
+	plan.Clips = []ClipRange{{ID: "one", StartSeconds: 0, EndSeconds: 5}}
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:     "source.mp4",
+		OutputPath:     "out.mp4",
+		BannerFontPath: "font.ttf",
+	}, plan, plan.Clips[0])
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "overlay=x='0':y=472:eval=frame") {
+		t.Fatalf("args missing legacy banner centered at the 520px seam: %s", joined)
 	}
 }
 

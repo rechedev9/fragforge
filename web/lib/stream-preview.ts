@@ -13,7 +13,7 @@ export const STREAMER_BANNER_MIN_POSITION = 0.025;
 export const STREAMER_BANNER_MAX_POSITION = 0.975;
 
 const STREAMER_BANNER_DEFAULTS: Record<StreamVariant, number> = {
-  'streamer-vertical-stack-40-60': 0.4,
+  'streamer-vertical-stack-40-60': 0.374,
   'streamer-vertical-stack': 520 / 1920,
   'streamer-fullframe-nocam': 0.2,
 };

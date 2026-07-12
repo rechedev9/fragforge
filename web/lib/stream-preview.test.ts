@@ -85,7 +85,7 @@ test('representative time is the safe midpoint for every editor video', () => {
 });
 
 test('streamer banner defaults follow each output layout', () => {
-  assert.equal(defaultStreamerBannerPosition('streamer-vertical-stack-40-60'), 0.4);
+  assert.equal(defaultStreamerBannerPosition('streamer-vertical-stack-40-60'), 0.374);
   assert.equal(defaultStreamerBannerPosition('streamer-vertical-stack'), 520 / 1920);
   assert.equal(defaultStreamerBannerPosition('streamer-fullframe-nocam'), 0.2);
 });
@@ -109,7 +109,7 @@ test('streamer banner position clamps to keep the strip fully visible', () => {
 });
 
 test('undefined streamer banner position resets to the current layout default', () => {
-  assert.equal(resolveStreamerBannerPosition('streamer-vertical-stack-40-60', undefined), 0.4);
+  assert.equal(resolveStreamerBannerPosition('streamer-vertical-stack-40-60', undefined), 0.374);
   assert.equal(resolveStreamerBannerPosition('streamer-vertical-stack', undefined), 520 / 1920);
   assert.equal(resolveStreamerBannerPosition('streamer-fullframe-nocam', undefined), 0.2);
 });

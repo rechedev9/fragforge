@@ -41,6 +41,9 @@ type LayoutVariant struct {
 	// FullFrame variants.
 	DefaultFaceCrop     CropRect
 	DefaultGameplayCrop CropRect
+	// DefaultBannerPositionY is the banner center as a normalized fraction of
+	// the full 1920px output height. An explicit edit-plan position overrides it.
+	DefaultBannerPositionY float64
 }
 
 // layoutVariants is the single source of layout variant knowledge: split
@@ -48,33 +51,36 @@ type LayoutVariant struct {
 // entry is the product default.
 var layoutVariants = []LayoutVariant{
 	{
-		Name:                VariantStreamer4060,
-		Label:               "Facecam 40 / Gameplay 60",
-		Description:         "default vertical stack: a 40% facecam band over a 60% gameplay band, both full width",
-		OutputWidth:         1080,
-		FaceOutputHeight:    768,
-		GameOutputHeight:    1152,
-		DefaultFaceCrop:     CropRect{X: 0, Y: 0, Width: 0.25, Height: 0.30},
-		DefaultGameplayCrop: CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+		Name:                   VariantStreamer4060,
+		Label:                  "Facecam 40 / Gameplay 60",
+		Description:            "default vertical stack: a 40% facecam band over a 60% gameplay band, both full width",
+		OutputWidth:            1080,
+		FaceOutputHeight:       768,
+		GameOutputHeight:       1152,
+		DefaultFaceCrop:        CropRect{X: 0, Y: 0, Width: 0.25, Height: 0.30},
+		DefaultGameplayCrop:    CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+		DefaultBannerPositionY: 0.374,
 	},
 	{
-		Name:                VariantStreamerVerticalStack,
-		Label:               "Facecam 35 / Gameplay 65 (legacy)",
-		Description:         "legacy vertical stack: a 35% facecam band over a 65% gameplay band, both full width",
-		OutputWidth:         1080,
-		FaceOutputHeight:    520,
-		GameOutputHeight:    1400,
-		DefaultFaceCrop:     CropRect{X: 0, Y: 0, Width: 1, Height: 0.35},
-		DefaultGameplayCrop: CropRect{X: 0, Y: 0.35, Width: 1, Height: 0.65},
+		Name:                   VariantStreamerVerticalStack,
+		Label:                  "Facecam 35 / Gameplay 65 (legacy)",
+		Description:            "legacy vertical stack: a 35% facecam band over a 65% gameplay band, both full width",
+		OutputWidth:            1080,
+		FaceOutputHeight:       520,
+		GameOutputHeight:       1400,
+		DefaultFaceCrop:        CropRect{X: 0, Y: 0, Width: 1, Height: 0.35},
+		DefaultGameplayCrop:    CropRect{X: 0, Y: 0.35, Width: 1, Height: 0.65},
+		DefaultBannerPositionY: 520.0 / 1920.0,
 	},
 	{
-		Name:                VariantStreamerFullframeNoCam,
-		Label:               "Full Frame (no facecam)",
-		Description:         "no facecam band: the gameplay crop fills the whole 1080x1920 frame",
-		FullFrame:           true,
-		OutputWidth:         1080,
-		GameOutputHeight:    1920,
-		DefaultGameplayCrop: CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+		Name:                   VariantStreamerFullframeNoCam,
+		Label:                  "Full Frame (no facecam)",
+		Description:            "no facecam band: the gameplay crop fills the whole 1080x1920 frame",
+		FullFrame:              true,
+		OutputWidth:            1080,
+		GameOutputHeight:       1920,
+		DefaultGameplayCrop:    CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+		DefaultBannerPositionY: 0.2,
 	},
 }
 
