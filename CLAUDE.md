@@ -84,16 +84,12 @@ cd web && npm install && npm run dev   # http://localhost:3000
 npm run typecheck                      # tsc --noEmit
 npm run lint                           # oxlint (config in web/.oxlintrc.json)
 npm run test:unit                      # node --test unit tests (lib/**/*.test.ts)
-npm run test:e2e                       # Playwright e2e
 ```
 
 Proxy-route contract: every `/api/demos/*` route reaches the orchestrator through `callOrchestrator` (`web/app/api/demos/_lib.ts`).
 When the orchestrator is unreachable the route returns `503 {code: "service_unavailable"}` and logs the cause server-side, and the UI tells "service offline" apart from a bad demo via `SERVICE_UNAVAILABLE_CODE`.
 Keep that contract when adding `/api/demos/*` routes; do not let a bare `fetch` throw into a code-less 500.
 
-E2E lives in `web/e2e` (`playwright.config.ts`, `@playwright/test`); run it with `npm run test:e2e`.
-The error-messaging specs mock the network and need only the dev server.
-The happy-path spec uploads a real demo and is gated on a reachable orchestrator plus a demo at `ZV_E2E_DEMO` (default `../testdata/sample.dem`), so it skips rather than fails when either is absent.
 Real `.dem` files are never committed, so the fixture stays local.
 
 ## Deployment
@@ -258,7 +254,7 @@ Testing:
 
 ## TypeScript style (web/)
 
-Applies to everything under `web/` (Next.js App Router, React 19, Tailwind 4, Playwright).
+Applies to everything under `web/` (Next.js App Router, React 19, Tailwind 4).
 Adapted from the jvidalv/berrus agent guidelines.
 Same priorities as the Go rules: clarity, simplicity, concision, maintainability, and repo consistency, in that order.
 
@@ -315,8 +311,8 @@ React:
 Testing:
 
 - Unit tests are `lib/**/*.test.ts` on `node:test`, run with `npm run test:unit` (Node strips types natively; relative imports keep the `.ts` extension, allowed by `allowImportingTsExtensions`).
+- Browser E2E/Playwright was removed by project policy; integration coverage lives in Go HTTP/worker tests and targeted manual smoke commands such as `scripts/smoke-xai-stt.ps1`.
 - A test double for an external client (e.g. a fake `SupabaseClient`) types only the call surface it fakes and is cast once at creation with `as unknown as <ClientType>` plus a comment; that is the sole sanctioned use of a double cast.
-- E2E lives in `web/e2e` on `@playwright/test`; specs are TypeScript under the same no-`any` rules.
 - Bug fixes need a regression test, same as Go.
 
 ## Operational rules

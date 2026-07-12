@@ -58,6 +58,22 @@ func TestGetPlanNotReadyIsConflict(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesParsesXAIStreamBackend(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"stream": map[string]any{"xai_enabled": true},
+		})
+	})
+
+	got, err := c.Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if !got.Stream.XAIEnabled {
+		t.Fatal("Stream.XAIEnabled = false, want true")
+	}
+}
+
 func TestGetRenderVariantNotFound(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)

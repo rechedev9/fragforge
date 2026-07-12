@@ -189,9 +189,9 @@ export default async function OpengraphImage() {
               letterSpacing: "0.04em",
             }}
           >
-            <span style={{ color: CYAN, fontWeight: 700 }}>100% LOCAL</span>
+            <span style={{ color: CYAN, fontWeight: 700 }}>LOCAL CAPTURE</span>
             <span>•</span>
-            <span>NO ACCOUNT</span>
+            <span>NO FRAGFORGE ACCOUNT</span>
             <span>•</span>
             <span>FRAGFORGE.GRAVITYROOM.APP</span>
           </div>

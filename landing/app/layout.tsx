@@ -20,7 +20,7 @@ const shareTechMono = Share_Tech_Mono({
 
 const SOCIAL_TITLE = "Your CS2 frags, ready to post | FragForge";
 const SITE_DESCRIPTION =
-  "Drop a CS2 demo. Pick your kills. Get a polished vertical Short — locally, free, and ready to upload.";
+  "Turn CS2 demos and stream moments into polished vertical Shorts with local capture, ready-to-post edits and optional xAI subtitles.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://fragforge.gravityroom.app"),

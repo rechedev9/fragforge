@@ -61,9 +61,9 @@ icon lives at `build/icon.ico`, which electron-builder picks up automatically;
 `zv-editor.exe` are required at assemble time; `zv-recorder.exe` is the only
 optional one, bundled only when it's present in `bin/`.
 
-This v1 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
+This v2 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
 on first run - choose "More info" -> "Run anyway". Code signing and auto-update
-are intentionally out of scope for v1.
+are intentionally out of scope for v2.
 
 ## Run without packaging (dev)
 

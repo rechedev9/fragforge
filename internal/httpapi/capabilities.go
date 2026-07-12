@@ -32,19 +32,19 @@ type Capabilities struct {
 	// the local whisper.cpp backend: both a whisper-cli binary and a model
 	// file are configured.
 	WhisperEnabled bool
-	// GroqEnabled reports whether a stream render can burn in captions using
-	// the Groq cloud backend: a Groq API key is configured. The key itself is
-	// never reported, only this boolean.
-	GroqEnabled bool
+	// XAIEnabled reports whether a stream render can burn in captions using the
+	// xAI cloud backend: an xAI API key is configured. The key itself is never
+	// reported, only this boolean.
+	XAIEnabled  bool
 	RecordTools []CaptureTool // recorder, HLAE, CS2
 	RenderTools []CaptureTool // editor, ffmpeg
 	StreamTools []CaptureTool // yt-dlp, whisper binary, whisper model
 }
 
 // captionsEnabled reports whether at least one captions transcription
-// backend (Groq or local whisper) is configured.
+// backend (xAI or local whisper) is configured.
 func (c Capabilities) captionsEnabled() bool {
-	return c.WhisperEnabled || c.GroqEnabled
+	return c.WhisperEnabled || c.XAIEnabled
 }
 
 // GetCapabilities handles GET /api/capabilities. It is read-only: the web UI
@@ -59,7 +59,7 @@ func (h *Handlers) GetCapabilities(w http.ResponseWriter, _ *http.Request) {
 		"stream": map[string]any{
 			"ytdlp_enabled":   c.YtdlpEnabled,
 			"whisper_enabled": c.WhisperEnabled,
-			"groq_enabled":    c.GroqEnabled,
+			"xai_enabled":     c.XAIEnabled,
 			"tools":           resolveTools(c.StreamTools),
 		},
 	})
@@ -108,7 +108,7 @@ func (h *Handlers) requireYtdlpEnabled(w http.ResponseWriter) bool {
 }
 
 // requireCaptionsEnabled reports whether burned-in captions are configured,
-// via either the Groq cloud backend or the local whisper backend. When
+// via either the xAI cloud backend or the local whisper backend. When
 // neither is, it writes a 409 naming the env vars to set, so starting a
 // render with captions enabled fails fast instead of the worker failing
 // mid-render.
@@ -116,6 +116,6 @@ func (h *Handlers) requireCaptionsEnabled(w http.ResponseWriter) bool {
 	if h.capabilities.captionsEnabled() {
 		return true
 	}
-	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but no transcription backend is configured on this machine; set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, and restart the orchestrator")
+	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but no transcription backend is configured on this machine; set XAI_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, and restart the orchestrator")
 	return false
 }

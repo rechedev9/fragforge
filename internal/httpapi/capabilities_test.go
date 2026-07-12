@@ -23,6 +23,7 @@ func TestGetCapabilitiesReportsPerToolStatus(t *testing.T) {
 	}
 	caps := Capabilities{
 		RecordEnabled: true,
+		XAIEnabled:    true,
 		RecordTools: []CaptureTool{
 			{Name: "ZV_RECORDER_PATH", Path: present},                       // configured + accessible
 			{Name: "ZV_HLAE_PATH", Path: filepath.Join(dir, "missing.exe")}, // configured, not accessible
@@ -42,12 +43,18 @@ func TestGetCapabilitiesReportsPerToolStatus(t *testing.T) {
 			Enabled bool          `json:"enabled"`
 			Tools   []CaptureTool `json:"tools"`
 		} `json:"record"`
+		Stream struct {
+			XAIEnabled bool `json:"xai_enabled"`
+		} `json:"stream"`
 	}
 	if err := json.Unmarshal(rw.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if !got.Record.Enabled {
 		t.Error("record.enabled = false, want true")
+	}
+	if !got.Stream.XAIEnabled {
+		t.Error("stream.xai_enabled = false, want true")
 	}
 	want := map[string][2]bool{ // [configured, accessible]
 		"ZV_RECORDER_PATH": {true, true},

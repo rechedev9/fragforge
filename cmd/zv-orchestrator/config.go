@@ -12,38 +12,35 @@ import (
 )
 
 type config struct {
-	HTTPAddr            string
-	DatabaseURL         string
-	DataDir             string
-	WorkerConcurrency   int
-	MediaWorkDir        string
-	RecorderPath        string
-	ComposerPath        string
-	EditorPath          string
-	HLAEPath            string
-	CS2Path             string
-	RecordHUD           string
-	FFmpegPath          string
-	FFprobePath         string
-	MusicDir            string
-	RecordTimeout       string
-	ComposeTimeout      string
-	RenderTimeout       string
-	MutationToken       string
-	CodexPath           string
-	CodexModel          string
-	AgentTimeout        string
-	YtdlpPath           string
-	WhisperPath         string
-	WhisperModelPath    string
-	GroqAPIKey          string
-	GroqModel           string
-	GroqCorrectionModel string
+	HTTPAddr          string
+	DatabaseURL       string
+	DataDir           string
+	WorkerConcurrency int
+	MediaWorkDir      string
+	RecorderPath      string
+	ComposerPath      string
+	EditorPath        string
+	HLAEPath          string
+	CS2Path           string
+	RecordHUD         string
+	FFmpegPath        string
+	FFprobePath       string
+	MusicDir          string
+	RecordTimeout     string
+	ComposeTimeout    string
+	RenderTimeout     string
+	MutationToken     string
+	CodexPath         string
+	CodexModel        string
+	AgentTimeout      string
+	YtdlpPath         string
+	WhisperPath       string
+	WhisperModelPath  string
+	XAIAPIKey         string
 }
 
 const (
-	databaseURLMemory          = "memory"
-	defaultGroqCorrectionModel = "llama-3.3-70b-versatile"
+	databaseURLMemory = "memory"
 	// databaseURLSQLite selects the on-disk SQLite job repository. Accepts the
 	// bare value "sqlite" (stores <DataDir>/jobs.db) or "sqlite:<path>".
 	databaseURLSQLite = "sqlite"
@@ -80,13 +77,9 @@ func loadConfig() (config, error) {
 		YtdlpPath:        os.Getenv("ZV_YTDLP_PATH"),
 		WhisperPath:      os.Getenv("ZV_WHISPER_PATH"),
 		WhisperModelPath: os.Getenv("ZV_WHISPER_MODEL"),
-		// GROQ_API_KEY is the key's conventional name across Groq's own tooling;
-		// ZV_GROQ_API_KEY is an explicit override for when a user-level
-		// GROQ_API_KEY is set for something unrelated. Neither is auto-detected
-		// (an API key cannot be probed on PATH or disk).
-		GroqAPIKey:          firstNonEmpty(os.Getenv("ZV_GROQ_API_KEY"), os.Getenv("GROQ_API_KEY")),
-		GroqModel:           os.Getenv("ZV_GROQ_MODEL"),
-		GroqCorrectionModel: envOr("ZV_GROQ_CORRECTION_MODEL", defaultGroqCorrectionModel),
+		// XAI_API_KEY is the only cloud transcription credential. It is not
+		// auto-detected because an API key cannot be probed on PATH or disk.
+		XAIAPIKey: os.Getenv("XAI_API_KEY"),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
@@ -153,8 +146,8 @@ func (c config) whisperEnabled() bool {
 	return c.WhisperPath != "" && c.WhisperModelPath != ""
 }
 
-func (c config) groqEnabled() bool {
-	return c.GroqAPIKey != ""
+func (c config) xaiEnabled() bool {
+	return c.XAIAPIKey != ""
 }
 
 // streamAcquireWorkerEnabled reports whether the acquire-by-URL worker can
@@ -178,7 +171,7 @@ func (c config) captureCapabilities(src captureToolSource) httpapi.Capabilities 
 		RenderEnabled:  c.renderWorkerEnabled(),
 		YtdlpEnabled:   c.ytdlpEnabled(),
 		WhisperEnabled: c.whisperEnabled(),
-		GroqEnabled:    c.groqEnabled(),
+		XAIEnabled:     c.xaiEnabled(),
 		RecordTools: []httpapi.CaptureTool{
 			tool("ZV_RECORDER_PATH", c.RecorderPath),
 			tool("ZV_HLAE_PATH", c.HLAEPath),
@@ -256,14 +249,4 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
-}
-
-// firstNonEmpty returns the first non-empty value, or "" if all are empty.
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
