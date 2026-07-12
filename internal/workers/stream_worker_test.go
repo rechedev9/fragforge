@@ -355,49 +355,42 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 		name           string
 		cfg            StreamRenderWorkerConfig
 		wantWhisper    bool
-		wantGroq       bool
+		wantXAI        bool
 		wantCaptioning bool
 	}{
 		{
 			name:           "neither configured",
 			cfg:            StreamRenderWorkerConfig{},
 			wantWhisper:    false,
-			wantGroq:       false,
+			wantXAI:        false,
 			wantCaptioning: false,
+		},
+		{
+			name:           "xai only",
+			cfg:            StreamRenderWorkerConfig{XAIAPIKey: "xai_test"},
+			wantWhisper:    false,
+			wantXAI:        true,
+			wantCaptioning: true,
 		},
 		{
 			name:           "whisper only",
 			cfg:            StreamRenderWorkerConfig{WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
 			wantWhisper:    true,
-			wantGroq:       false,
+			wantXAI:        false,
 			wantCaptioning: true,
 		},
 		{
 			name:           "whisper missing model path is not configured",
 			cfg:            StreamRenderWorkerConfig{WhisperPath: "whisper-cli"},
 			wantWhisper:    false,
-			wantGroq:       false,
-			wantCaptioning: false,
-		},
-		{
-			name:           "groq only",
-			cfg:            StreamRenderWorkerConfig{GroqAPIKey: "gsk_test"},
-			wantWhisper:    false,
-			wantGroq:       true,
-			wantCaptioning: true,
-		},
-		{
-			name:           "correction model without api key does not enable groq",
-			cfg:            StreamRenderWorkerConfig{GroqCorrectionModel: "llama-test"},
-			wantWhisper:    false,
-			wantGroq:       false,
+			wantXAI:        false,
 			wantCaptioning: false,
 		},
 		{
 			name:           "both configured",
-			cfg:            StreamRenderWorkerConfig{GroqAPIKey: "gsk_test", WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
+			cfg:            StreamRenderWorkerConfig{XAIAPIKey: "xai_test", WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
 			wantWhisper:    true,
-			wantGroq:       true,
+			wantXAI:        true,
 			wantCaptioning: true,
 		},
 	}
@@ -407,8 +400,8 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 			if got := tt.cfg.whisperConfigured(); got != tt.wantWhisper {
 				t.Errorf("whisperConfigured() = %v, want %v", got, tt.wantWhisper)
 			}
-			if got := tt.cfg.groqConfigured(); got != tt.wantGroq {
-				t.Errorf("groqConfigured() = %v, want %v", got, tt.wantGroq)
+			if got := tt.cfg.xaiConfigured(); got != tt.wantXAI {
+				t.Errorf("xaiConfigured() = %v, want %v", got, tt.wantXAI)
 			}
 			if got := tt.cfg.captionsConfigured(); got != tt.wantCaptioning {
 				t.Errorf("captionsConfigured() = %v, want %v", got, tt.wantCaptioning)
@@ -417,17 +410,15 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 	}
 }
 
-func TestNewStreamRenderWorker_PrefersGroqWhenBothConfigured(t *testing.T) {
+func TestNewStreamRenderWorker_PrefersXAIWhenWhisperAlsoConfigured(t *testing.T) {
 	// The transcribe seam is built once in NewStreamRenderWorker from cfg; when
-	// both backends are configured it must choose Groq (no local model
-	// download, runs on Groq's GPU) rather than local whisper. A GroqTranscriber
-	// call fails distinctly (missing/unreachable API) from a Transcriber call
-	// (missing binary), so the error text tells them apart without a real
-	// network call or whisper binary on disk.
+	// both backends are configured it must choose xAI rather than local whisper.
+	// A cancelled context stops xAI before network access, while selecting local
+	// Whisper would fail on the intentionally missing binary.
 	repo := newFakeStreamRepo()
 	store := newFakeStorage()
 	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
-		GroqAPIKey:       "gsk_test",
+		XAIAPIKey:        "xai_test",
 		WhisperPath:      filepath.Join(t.TempDir(), "does-not-exist-whisper-cli.exe"),
 		WhisperModelPath: filepath.Join(t.TempDir(), "does-not-exist-model.bin"),
 	})
@@ -438,15 +429,14 @@ func TestNewStreamRenderWorker_PrefersGroqWhenBothConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := w.transcribe(context.Background(), mediaPath, dir, "en")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := w.transcribe(ctx, mediaPath, dir, "en")
 	if err == nil {
-		t.Fatal("transcribe returned nil error, want an error (no real ffmpeg/network in this test)")
+		t.Fatal("transcribe returned nil error, want a context error")
 	}
-	// A Transcriber (local whisper) call on a missing binary fails with
-	// "whisper binary not found"; a GroqTranscriber call instead fails trying
-	// to extract audio with ffmpeg (or reach the network), never that message.
 	if strings.Contains(err.Error(), "whisper binary not found") {
-		t.Fatalf("got error %q, selection used local whisper instead of groq", err.Error())
+		t.Fatalf("got error %q, selection used local whisper instead of xai", err.Error())
 	}
 }
 
@@ -461,7 +451,7 @@ func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) 
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
 	})
 
-	// Neither GroqAPIKey nor Whisper*Path is set: the worker must fail fast
+	// Neither XAIAPIKey nor Whisper*Path is set: the worker must fail fast
 	// (defensively, even though the HTTP layer already gates this) rather than
 	// launch ffmpeg and then fail deep into the render.
 	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{FFmpegPath: "ffmpeg"})

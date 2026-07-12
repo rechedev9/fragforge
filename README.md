@@ -9,7 +9,8 @@ Download it from the [`landing/`](./landing) site - there is no hosted service t
 
 It parses demos into kill plans, records gameplay with HLAE/CS2, and
 post-processes clips with FFmpeg, Lua effects, overlays, and publishing
-metadata. Everything runs locally on Windows.
+metadata. Capture and rendering run locally on Windows; optional stream-caption
+audio is sent to xAI only when cloud subtitles are enabled.
 
 ```text
 .dem + prompt
@@ -120,10 +121,28 @@ address requires `ZV_MUTATION_TOKEN`. Optional environment variables:
 | `ZV_WORKER_CONCURRENCY` | Asynq worker concurrency (default 2). |
 | `ZV_MEDIA_WORK_DIR` | Keep media workdirs for debugging (deleted after each task when unset). |
 | `ZV_CODEX_PATH`, `ZV_CODEX_MODEL`, `ZV_AGENT_TIMEOUT` | Optional local editorial assistant (`codex exec`, read-only sandbox) for caption/title suggestions. |
-| `GROQ_API_KEY` or `ZV_GROQ_API_KEY`, `ZV_GROQ_MODEL` | Optional Groq cloud transcription for stream captions. |
-| `ZV_GROQ_CORRECTION_MODEL` | Optional Groq contextual correction model override (default `llama-3.3-70b-versatile`). |
+| `XAI_API_KEY` | Optional xAI speech-to-text for stream captions. |
 
-Groq contextual correction is best-effort and preserves every word cue's original timing.
+xAI captions use the REST `/v1/stt` endpoint, which returns word-level timestamps
+and accepts the rendered MP4 directly. The endpoint does not take a model name;
+xAI prices batch speech-to-text separately from streaming; check the
+[current Voice API pricing](https://x.ai/api/voice). Local whisper.cpp remains
+available as an offline fallback.
+
+Set a newly generated key in the same PowerShell session that starts Local
+Studio without putting the secret in command history:
+
+```powershell
+$secureKey = Read-Host "xAI API key" -AsSecureString
+$env:XAI_API_KEY = (New-Object System.Net.NetworkCredential("", $secureKey)).Password
+.\scripts\local-studio.ps1
+```
+
+Validate a real clip against xAI without printing the key or transcript:
+
+```powershell
+.\scripts\smoke-xai-stt.ps1 -MediaPath .\data\clip.mp4 -Language es -ASSPath .\data\clip.ass -ExpectedText "texto conocido de la fixture"
+```
 
 ### Smoke tests
 

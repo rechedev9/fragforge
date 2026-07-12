@@ -23,8 +23,8 @@ import HeroForge from "@/components/hero-forge";
 import Reveal from "@/components/reveal";
 
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v1.0.5/FragForge.Studio.Setup.1.0.5.exe";
-const RELEASE_VERSION = "v1.0.5";
+  "https://github.com/rechedev9/fragforge/releases/download/v2.0.0/FragForge.Studio.Setup.2.0.0.exe";
+const RELEASE_VERSION = "v2.0.0";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
 function Corners() {
@@ -85,14 +85,21 @@ const FEATURES: {
     title: "The edit lands ready to post",
     body: "Native killfeed, hook text, punch-ins, kill counter, final-kill slow motion and a pristine 1080x1920 render — all assembled automatically.",
     signal: "1080 × 1920 · 60 FPS",
-    className: "md:col-span-12",
+    className: "md:col-span-7",
+  },
+  {
+    icon: Sparkles,
+    title: "Stream clips speak clearly",
+    body: "Cut Twitch or YouTube moments and optionally turn their speech into word-timed, burned-in subtitles through xAI — ready for vertical viewing.",
+    signal: "XAI WORD TIMESTAMPS",
+    className: "md:col-span-5",
   },
 ];
 
 const STEPS = [
-  { title: "Drop the demo", body: "Add a .dem file. Nothing uploads; parsing starts on your PC." },
+  { title: "Add the source", body: "Drop a .dem or paste a stream URL. Demo parsing and capture stay on your PC." },
   { title: "Choose the story", body: "Pick the player, round and exact kills worth turning into a Short." },
-  { title: "Let the forge run", body: "FragForge records the real POV through HLAE and composes the vertical edit." },
+  { title: "Let the forge run", body: "FragForge records the real POV or cuts the stream, then composes the vertical edit and optional xAI captions." },
   { title: "Post the result", body: "Open the finished pack and upload the MP4, cover and caption." },
 ];
 
@@ -145,7 +152,7 @@ export default function Home() {
             </h1>
 
             <p className="mt-7 max-w-2xl text-pretty text-lg leading-relaxed text-slate-300 sm:text-xl">
-              Turn raw CS2 demos into upload-ready vertical Shorts with real HLAE capture, native killfeed and a complete edit — entirely on your own PC.
+              Turn raw CS2 demos and stream moments into upload-ready vertical Shorts with real HLAE capture, native killfeed and optional xAI subtitles. Capture and rendering stay on your PC.
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -161,9 +168,9 @@ export default function Home() {
             </div>
 
             <div className="mt-7 flex flex-wrap gap-x-6 gap-y-3 font-mono text-xs uppercase tracking-[0.12em] text-slate-400">
-              <span className="inline-flex items-center gap-2"><LockKeyhole className="size-4 text-cyan-300" />100% local</span>
+              <span className="inline-flex items-center gap-2"><LockKeyhole className="size-4 text-cyan-300" />Local capture</span>
               <span className="inline-flex items-center gap-2"><Gauge className="size-4 text-cyan-300" />60 FPS output</span>
-              <span className="inline-flex items-center gap-2"><CheckCircle2 className="size-4 text-cyan-300" />No account</span>
+              <span className="inline-flex items-center gap-2"><CheckCircle2 className="size-4 text-cyan-300" />No FragForge account</span>
             </div>
           </div>
 
@@ -380,7 +387,7 @@ export default function Home() {
               Your demo already has the story.<span className="block text-cyan-300">Forge the Short.</span>
             </h2>
             <p className="mt-6 max-w-2xl text-lg text-slate-300">
-              Free, local and built for players who want the real moment — not another generic montage.
+              Free core, local capture and built for players who want the real moment — not another generic montage.
             </p>
             <a href={DOWNLOAD_URL} className="group mt-9 inline-flex min-h-14 items-center gap-3 bg-cyan-300 px-8 font-bold text-slate-950 shadow-[0_0_50px_rgba(34,217,238,0.35)] transition duration-300 hover:-translate-y-1 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
               <Download className="size-5" />Download FragForge Studio
@@ -393,7 +400,7 @@ export default function Home() {
 
       <footer className="bg-[#040711] px-5 py-10 sm:px-8 lg:px-12">
         <div className="mx-auto flex max-w-[1320px] flex-col items-center justify-between gap-7 text-center sm:flex-row sm:text-left">
-          <div><Wordmark compact /><p className="mt-3 text-sm text-slate-500">Free and local. Your demos never leave your PC.</p></div>
+          <div><Wordmark compact /><p className="mt-3 text-sm text-slate-500">Free core and local capture. Optional stream-caption audio goes only to xAI when enabled.</p></div>
           <div className="flex flex-col items-center gap-3 sm:items-end">
             <a href={REPO_URL} className="inline-flex items-center gap-2 text-sm font-semibold text-slate-300 transition hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"><Github className="size-4" />GitHub repository</a>
             <p className="font-mono text-xs text-slate-600">© 2026 FragForge</p>

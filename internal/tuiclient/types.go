@@ -202,7 +202,7 @@ type CapabilityGroup struct {
 type StreamCapabilities struct {
 	YtdlpEnabled   bool          `json:"ytdlp_enabled"`
 	WhisperEnabled bool          `json:"whisper_enabled"`
-	GroqEnabled    bool          `json:"groq_enabled"`
+	XAIEnabled     bool          `json:"xai_enabled"`
 	Tools          []CaptureTool `json:"tools"`
 }
 

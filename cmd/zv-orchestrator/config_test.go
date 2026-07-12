@@ -138,45 +138,34 @@ func TestLoadConfigRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
-func TestLoadConfigGroqCorrectionModel(t *testing.T) {
+func TestLoadConfigXAIAPIKey(t *testing.T) {
 	tests := []struct {
-		name      string
-		override  string
-		wantModel string
+		name    string
+		key     string
+		wantKey string
 	}{
-		{name: "default", wantModel: "llama-3.3-70b-versatile"},
-		{name: "environment override", override: "custom-correction-model", wantModel: "custom-correction-model"},
+		{name: "configured", key: "xai-abc", wantKey: "xai-abc"},
+		{name: "unset leaves xai disabled", wantKey: ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			clearConfigEnv(t)
 			t.Setenv("ZV_DATABASE_URL", "memory")
-			if tt.override != "" {
-				t.Setenv("ZV_GROQ_CORRECTION_MODEL", tt.override)
+			if tt.key != "" {
+				t.Setenv("XAI_API_KEY", tt.key)
 			}
 			cfg, err := loadConfig()
 			if err != nil {
 				t.Fatalf("loadConfig error = %v", err)
 			}
-			if cfg.GroqCorrectionModel != tt.wantModel {
-				t.Fatalf("GroqCorrectionModel = %q, want %q", cfg.GroqCorrectionModel, tt.wantModel)
+			if cfg.XAIAPIKey != tt.wantKey {
+				t.Fatalf("XAIAPIKey = %q, want %q", cfg.XAIAPIKey, tt.wantKey)
+			}
+			if got, want := cfg.xaiEnabled(), tt.wantKey != ""; got != want {
+				t.Fatalf("xaiEnabled() = %v, want %v", got, want)
 			}
 		})
-	}
-}
-
-func TestLoadConfigGroqCorrectionModelAloneDoesNotEnableGroq(t *testing.T) {
-	clearConfigEnv(t)
-	t.Setenv("ZV_DATABASE_URL", "memory")
-	t.Setenv("ZV_GROQ_CORRECTION_MODEL", "custom-correction-model")
-
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig error = %v", err)
-	}
-	if cfg.groqEnabled() {
-		t.Fatal("groqEnabled = true with a correction model but no API key, want false")
 	}
 }
 
@@ -202,10 +191,7 @@ func clearConfigEnv(t *testing.T) {
 		"ZV_CODEX_PATH",
 		"ZV_CODEX_MODEL",
 		"ZV_AGENT_TIMEOUT",
-		"GROQ_API_KEY",
-		"ZV_GROQ_API_KEY",
-		"ZV_GROQ_MODEL",
-		"ZV_GROQ_CORRECTION_MODEL",
+		"XAI_API_KEY",
 	} {
 		t.Setenv(key, "")
 	}

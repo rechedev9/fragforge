@@ -206,20 +206,19 @@ type StreamRenderWorkerConfig struct {
 	// be set for it to run.
 	WhisperPath      string
 	WhisperModelPath string
-	// GroqAPIKey, GroqModel, and GroqCorrectionModel configure the Groq cloud
-	// captions pass (internal/captions.GroqTranscriber). GroqModel is optional
-	// and defaults inside GroqTranscriber when empty. GroqCorrectionModel is
-	// optional; an empty value disables contextual correction.
+	// XAIAPIKey configures the xAI cloud captions pass
+	// (internal/captions.XAITranscriber). It is the preferred backend when set:
+	// xAI transcribes the whole media file in one request with word-level
+	// timestamps, needing no ffmpeg preprocessing or per-chunk language
+	// detection (see NewStreamRenderWorker).
+	XAIAPIKey string
 	//
 	// A render honours EditPlan.Captions.Enabled only when at least one
 	// backend is configured; the HTTP layer rejects a render start with
 	// captions enabled before neither is configured (see
 	// requireCaptionsEnabled), but the worker still checks defensively since
-	// it may run a redriven task from before the config changed. When both
-	// are configured, Groq is preferred (see NewStreamRenderWorker).
-	GroqAPIKey          string
-	GroqModel           string
-	GroqCorrectionModel string
+	// it may run a redriven task from before the config changed. When xAI and
+	// local Whisper are configured, xAI is preferred (see NewStreamRenderWorker).
 }
 
 // RecordWorker handles the "record:demo" Asynq task.
@@ -721,22 +720,22 @@ func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, c
 		cfg:     cfg,
 		runner:  execCommandRunner{},
 	}
-	// Groq is preferred when configured: it needs no local model download and
-	// runs on a GPU the user does not have to own. Local whisper.cpp remains
-	// the offline fallback.
+	// Preference order: xAI, then local whisper. xAI transcribes the
+	// whole media file in one request with word-level timestamps, so it needs no
+	// ffmpeg preprocessing and no per-chunk language detection. Local whisper.cpp
+	// remains the offline fallback.
 	w.transcribe = func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error) {
-		if w.cfg.groqConfigured() {
-			g := captions.GroqTranscriber{
-				APIKey:          w.cfg.GroqAPIKey,
-				Model:           w.cfg.GroqModel,
-				CorrectionModel: w.cfg.GroqCorrectionModel,
-				Language:        language,
-				FFmpegPath:      w.cfg.FFmpegPath,
+		switch {
+		case w.cfg.xaiConfigured():
+			x := captions.XAITranscriber{
+				APIKey:   w.cfg.XAIAPIKey,
+				Language: language,
 			}
-			return g.Transcribe(ctx, mediaPath, workDir)
+			return x.Transcribe(ctx, mediaPath, workDir)
+		default:
+			t := captions.Transcriber{BinaryPath: w.cfg.WhisperPath, ModelPath: w.cfg.WhisperModelPath, Language: language}
+			return t.Transcribe(ctx, mediaPath, workDir)
 		}
-		t := captions.Transcriber{BinaryPath: w.cfg.WhisperPath, ModelPath: w.cfg.WhisperModelPath, Language: language}
-		return t.Transcribe(ctx, mediaPath, workDir)
 	}
 	return w
 }
@@ -784,7 +783,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		return fmt.Errorf("edit plan has no clips")
 	}
 	if plan.Captions.Enabled && !cfg.captionsConfigured() {
-		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL)")
+		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (set XAI_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL)")
 	}
 	bannerFontPath := ""
 	if plan.StreamerBanner.Nick != "" {
@@ -898,13 +897,13 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	return nil
 }
 
-// burnClipCaptions transcribes clipPath with whisper and burns the resulting
+// burnClipCaptions transcribes clipPath with the configured caption backend and burns the resulting
 // karaoke captions into a second copy, <clipID>_captioned.mp4, next to
 // clipPath. It returns the captioned file's path on success. If the
 // transcript has no words, it returns ("", warning, nil) so the caller
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
-// explicitly requested and whisper is configured.
+// explicitly requested and a transcription backend is configured.
 func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath string, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
 	cues, err := w.transcribe(ctx, clipPath, workDir, language)
 	if err != nil {
@@ -1000,16 +999,16 @@ func (c StreamRenderWorkerConfig) whisperConfigured() bool {
 	return c.WhisperPath != "" && c.WhisperModelPath != ""
 }
 
-// groqConfigured reports whether a Groq API key is set, the minimum needed
-// to run a cloud captions transcription pass.
-func (c StreamRenderWorkerConfig) groqConfigured() bool {
-	return c.GroqAPIKey != ""
+// xaiConfigured reports whether an xAI API key is set, the minimum needed to
+// run the xAI cloud captions transcription pass.
+func (c StreamRenderWorkerConfig) xaiConfigured() bool {
+	return c.XAIAPIKey != ""
 }
 
 // captionsConfigured reports whether any captions transcription backend
-// (Groq or local whisper) is configured.
+// (xAI or local whisper) is configured.
 func (c StreamRenderWorkerConfig) captionsConfigured() bool {
-	return c.groqConfigured() || c.whisperConfigured()
+	return c.xaiConfigured() || c.whisperConfigured()
 }
 
 // Encoder settings for the captions burn-in pass, matching the first render
