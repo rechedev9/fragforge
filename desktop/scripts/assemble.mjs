@@ -1,5 +1,5 @@
 // Assembles the resources electron-builder bundles into the installer:
-//   build-resources/bin/   -> zv-orchestrator.exe, zv-editor.exe (+ zv-recorder.exe)
+//   build-resources/bin/   -> zv-orchestrator.exe, zv-editor.exe, zv-recorder.exe
 //   build-resources/web/   -> the Next.js standalone server, ready to run
 //   build-resources/music/ -> catalog.json (track metadata; audio is downloaded on first boot)
 //
@@ -23,11 +23,13 @@ const out = join(desktop, 'build-resources');
 // serve`, so quitting the app kills the real server). zv-editor.exe must sit
 // in the same bin/ so the orchestrator auto-detects it and enables the render
 // worker; without it every created reel fails after capture with an
-// unconfigured render:variant queue. The developer CLI is intentionally not
-// part of the desktop runtime.
+// unconfigured render:variant queue. zv-recorder.exe is the capture worker the
+// orchestrator launches for selected demo segments. The developer CLI is
+// intentionally not part of the desktop runtime.
 const zvOrchestrator = join(bin, 'zv-orchestrator.exe');
 const zvEditor = join(bin, 'zv-editor.exe');
-for (const required of [zvOrchestrator, zvEditor]) {
+const zvRecorder = join(bin, 'zv-recorder.exe');
+for (const required of [zvOrchestrator, zvEditor, zvRecorder]) {
   if (!existsSync(required)) {
     console.error(`\nmissing ${required}\nBuild the Go binaries first:  .\\scripts\\build.ps1\n`);
     process.exit(1);
@@ -71,8 +73,7 @@ if (existsSync(publicDir)) cpSync(publicDir, join(out, 'web', 'public'), { recur
 
 cpSync(zvOrchestrator, join(out, 'bin', 'zv-orchestrator.exe'));
 cpSync(zvEditor, join(out, 'bin', 'zv-editor.exe'));
-const recorder = join(bin, 'zv-recorder.exe');
-if (existsSync(recorder)) cpSync(recorder, join(out, 'bin', 'zv-recorder.exe'));
+cpSync(zvRecorder, join(out, 'bin', 'zv-recorder.exe'));
 
 // Music: catalog.json plus any local-only audio (tracks without a downloadUrl,
 // e.g. the AI-generated ones). Remote CC0/CC-BY tracks are still downloaded by

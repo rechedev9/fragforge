@@ -12,6 +12,8 @@ It bundles the same pieces `scripts/local-studio.ps1` runs:
   (job state persists in `<userData>/data/jobs.db` across restarts) and
   `ZV_DATA_DIR=<userData>/data`; HLAE/CS2/FFmpeg are auto-detected, or use the
   tools provisioned on first boot below.
+- `zv-recorder.exe` and `zv-editor.exe` - the required capture and render
+  workers, auto-detected beside the orchestrator.
 - The Next.js standalone server - started with Electron's own Node (no separate
   Node runtime shipped), in local mode so the UI proxies the whole pipeline to
   the orchestrator.
@@ -52,15 +54,16 @@ npm run dist
 ```
 
 `npm run dist` runs `scripts/assemble.mjs` (builds the web in local mode and
-stages `zv-orchestrator.exe`, `zv-editor.exe`, and the standalone server into
-`build-resources/`), then `electron-builder` produces the
+stages `zv-orchestrator.exe`, `zv-editor.exe`, `zv-recorder.exe`, and the
+standalone server into `build-resources/`), then `electron-builder` produces the
 installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
 where `<version>` is the `version` field in `desktop/package.json`). The app
 icon lives at `build/icon.ico`, which electron-builder picks up automatically;
-`assemble.mjs` fails fast if it's missing. `zv-orchestrator.exe` and
-`zv-editor.exe` are required at assemble time; `zv-recorder.exe` is optional
-and bundled only when it's present in `bin/`. The developer `zv.exe` CLI stays
-available in the repository build but is not shipped in the desktop installer.
+`assemble.mjs` fails fast if it's missing. `zv-orchestrator.exe`,
+`zv-editor.exe`, and `zv-recorder.exe` are required at assemble time so the
+packaged app can parse, capture, and render reels. The developer `zv.exe` CLI
+stays available in the repository build but is not shipped in the desktop
+installer.
 
 This v2 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
 on first run - choose "More info" -> "Run anyway". Code signing and auto-update
@@ -75,8 +78,8 @@ cd desktop; npm install
 npm run assemble        # builds the web + stages build-resources/
 
 # In dev, src/main.ts resolves every bundled resource (zv-orchestrator.exe,
-# zv-editor.exe, the web server) from .\build-resources, the same layout
-# `npm run assemble` stages for packaging. Launch the Electron shell:
+# zv-editor.exe, zv-recorder.exe, the web server) from .\build-resources, the
+# same layout `npm run assemble` stages for packaging. Launch the Electron shell:
 npm start
 ```
 
