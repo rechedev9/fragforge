@@ -12,7 +12,6 @@
 import { app, BrowserWindow, shell, session } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import * as net from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { escapeHtml } from './escaping';
 import { validateWindowState, type WindowState } from './window-state';
@@ -21,6 +20,7 @@ import { provisionRuntimeTools, RUNTIME_TOOL_LABELS } from './runtime-tools';
 import { ProcessSession, type LaunchedProcess } from './process-session';
 import { waitForDesktopServices } from './service-health';
 import { provisionMusicLibrary } from './music-library';
+import { allocateStableServicePorts } from './stable-ports';
 
 // Every loopback server and health check binds/targets this host; named once so
 // the value that couples all the URLs below is not a scattered magic string.
@@ -89,77 +89,7 @@ function logLine(text: string): void {
   }
 }
 
-// Narrows the persisted ports JSON before reading service keys from it.
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-/** Grabs an OS-assigned free loopback port, then releases it for the child. */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.unref();
-    srv.on('error', reject);
-    srv.listen(0, LOOPBACK_HOST, () => {
-      const addr = srv.address();
-      if (addr === null || typeof addr === 'string') {
-        srv.close(() => reject(new Error('freePort: server has no assigned address')));
-        return;
-      }
-      const { port } = addr;
-      srv.close(() => resolve(port));
-    });
-  });
-}
-
-/** Reports whether a specific loopback port is currently free. */
-function portFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.unref();
-    srv.on('error', () => resolve(false));
-    srv.listen(port, LOOPBACK_HOST, () => srv.close(() => resolve(true)));
-  });
-}
-
 const portsFile = path.join(app.getPath('userData'), 'ports.json');
-
-/**
- * Returns a per-install stable loopback port for the given service, falling
- * back to a fresh OS-assigned one when the saved port is taken. The web port
- * MUST stay stable across launches: the reel library lives in the renderer's
- * localStorage, which is keyed by origin (host:port), so a random port per
- * launch would empty the library on every restart even though the job state
- * survives in SQLite.
- */
-async function stablePort(key: string): Promise<number> {
-  let saved: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(portsFile, 'utf8'));
-    if (isRecord(parsed)) saved = parsed;
-  } catch {
-    // first launch or unreadable file; fall through to picking a new port
-  }
-  const savedPort = saved[key];
-  if (typeof savedPort === 'number' && Number.isInteger(savedPort)) {
-    if (await portFree(savedPort)) return savedPort;
-    // Something else grabbed the saved port (another instance that ignored
-    // the single-instance lock, a stray leftover process, an unrelated app);
-    // picking a fresh port is safe but changes the origin the web UI depends
-    // on, so make that visible instead of silently shifting under the user.
-    const hint = key === 'web'
-      ? ' the reel library kept in the browser localStorage is keyed by origin, so it may appear empty on the new port'
-      : '';
-    logLine(`[ports] saved ${key} port ${savedPort} was taken, picking a new one;${hint}\n`);
-  }
-  const port = await freePort();
-  try {
-    fs.writeFileSync(portsFile, JSON.stringify({ ...saved, [key]: port }));
-  } catch (err) {
-    logLine(`[ports] could not persist ${key} port: ${String(err)}\n`);
-  }
-  return port;
-}
 
 /** Last lines of studio.log, HTML-escaped for the error screen. */
 function logTail(maxLines = 40): string {
@@ -448,16 +378,6 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
   allowedOrigins.clear();
   allowedInternalUrls.clear();
 
-  setLoadingStatus('Eligiendo puertos libres…');
-  // Sequential because both calls read and rewrite the same ports.json file.
-  const orchPort = await stablePort('orchestrator');
-  assertBootAttemptActive(attempt);
-  const webPort = await stablePort('web');
-  assertBootAttemptActive(attempt);
-  const orchestratorUrl = `http://${LOOPBACK_HOST}:${orchPort}`;
-  allowedOrigins.add(`http://${LOOPBACK_HOST}:${orchPort}`);
-  allowedOrigins.add(`http://${LOOPBACK_HOST}:${webPort}`);
-
   // Tracks can land in the background; the API rescans the music dir per request.
   provisionMusicLibrary({
     bundledMusicDir: resourcePath('music'),
@@ -479,6 +399,21 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
       setLoadingStatus(`Descargando ${RUNTIME_TOOL_LABELS[name]}${detail ? ` (${detail})` : ''}…`),
   );
   assertBootAttemptActive(attempt);
+
+  // Probe immediately before launch. Runtime provisioning can take minutes on
+  // first boot, so selecting ports before it would leave a long window for an
+  // unrelated process to claim a released probe port.
+  setLoadingStatus('Eligiendo puertos libres…');
+  const { orchestrator: orchPort, web: webPort } = await allocateStableServicePorts({
+    host: LOOPBACK_HOST,
+    portsFile,
+    logLine,
+    signal: attempt.controller.signal,
+  });
+  assertBootAttemptActive(attempt);
+  const orchestratorUrl = `http://${LOOPBACK_HOST}:${orchPort}`;
+  allowedOrigins.add(`http://${LOOPBACK_HOST}:${orchPort}`);
+  allowedOrigins.add(`http://${LOOPBACK_HOST}:${webPort}`);
 
   setLoadingStatus('Iniciando el orquestador…');
   const orch = attempt.processes.launch('orchestrator', orchestratorExe, [], {
