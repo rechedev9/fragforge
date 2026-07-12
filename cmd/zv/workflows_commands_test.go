@@ -1329,12 +1329,6 @@ func TestRunWorkflowsRunDelegatesCatalogWorkflow(t *testing.T) {
 			wantArgs:       []string{"--recording-result", "recording-result.json", "--out", "shorts"},
 		},
 		{
-			name:           "pipeline",
-			argv:           []string{"zv", "workflows", "run", "pipeline", "--", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe"},
-			wantExecutable: executableName("zv-pipeline"),
-			wantArgs:       []string{"--killplan", "plan.json", "--demo", "inferno.dem", "--out", "pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe"},
-		},
-		{
 			name:           "serve",
 			argv:           []string{"zv", "workflows", "run", "serve"},
 			wantExecutable: executableName("zv-orchestrator"),
@@ -1780,7 +1774,6 @@ func TestValidateLegacyPassThroughEntrypointsRejectsMissingEntrypoint(t *testing
 		"zv-composer",
 		"zv-orchestrator",
 		"zv-analysis-viewer",
-		"zv-pipeline",
 		"zv-rhythm",
 		"zv-tui",
 	}

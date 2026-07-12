@@ -28,7 +28,6 @@ Usage:
   zv workflows check
   zv serve
   zv tui [--url <orchestrator>] [--token <token>]
-  zv pipeline [zv-pipeline flags]
 
 Legacy pass-throughs:
   zv parser [zv-parser args]

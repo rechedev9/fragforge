@@ -1132,7 +1132,7 @@ func TestZVBinaryCurrentDirectDocExamplesEndToEnd(t *testing.T) {
 		switch command[0] {
 		case "gallery":
 			wantOpenPathCalls++
-		case "demo", "utility", "record", "compose", "shorts", "music", "analysis", "serve", "pipeline":
+		case "demo", "utility", "record", "compose", "shorts", "music", "analysis", "serve":
 			wantSubcommandCalls++
 		}
 		runZVBinaryWithEnv(t, exe, root, env, command...)

@@ -100,12 +100,6 @@ func buildWorkflowCatalog() []workflowInfo {
 			RunArgs:     []string{"serve"},
 		},
 		{
-			Name:        "pipeline",
-			Description: "Run the local recorder-to-composer pipeline.",
-			Command:     "zv pipeline --killplan <plan.json> --demo <demo.dem> --out <pipeline-dir> --hlae <HLAE.exe> --cs2 <cs2.exe>",
-			RunArgs:     []string{"pipeline"},
-		},
-		{
 			Name:        "skills-check",
 			Description: "Validate repo-local Codex skills.",
 			Command:     "zv skills check",

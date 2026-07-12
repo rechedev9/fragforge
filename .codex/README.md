@@ -156,8 +156,6 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows show gallery-open --format json
 ./bin/zv workflows show serve
 ./bin/zv workflows show serve --format json
-./bin/zv workflows show pipeline
-./bin/zv workflows show pipeline --format json
 ./bin/zv workflows show skills-check
 ./bin/zv workflows show skills-check --format json
 ./bin/zv workflows show workflows-check
@@ -175,7 +173,6 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json
 ./bin/zv gallery open --path data/runs/run-004/shorts/publish/index.html
 ./bin/zv serve
-./bin/zv pipeline --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/pipeline --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv workflows run demo-parse -- --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json
 ./bin/zv workflows run demo-players -- --demo testdata/foo.dem
 ./bin/zv workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
@@ -187,7 +184,6 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json
 ./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts/publish/index.html
 ./bin/zv workflows run serve
-./bin/zv workflows run pipeline -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/pipeline --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
 ./bin/zv workflows run skills-check
 ./bin/zv workflows run skills-check -- --format json
 ./bin/zv workflows run workflows-check

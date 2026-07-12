@@ -87,8 +87,6 @@ func validateSkillCommand(command []string) string {
 		}
 	case "record":
 		return validateRequiredFlags(`"record"`, command[1:], requiredFlagsForRunArgs("record")...)
-	case "pipeline":
-		return validateRequiredFlags(`"pipeline"`, command[1:], requiredFlagsForRunArgs("pipeline")...)
 	case "serve":
 		if isSingleHelp(command[1:]) {
 			return ""
@@ -364,8 +362,6 @@ func commandValueFlags(commandName string, required []string) []string {
 		flags = append(flags, "--sample")
 	case `"analysis view"`:
 		flags = append(flags, "--addr")
-	case `"pipeline"`:
-		flags = append(flags, "--recorder", "--composer", "--ffmpeg", "--record-timeout", "--compose-timeout")
 	}
 	return flags
 }

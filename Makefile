@@ -10,7 +10,6 @@ build:
 	go build -o bin/zv-editor ./cmd/zv-editor
 	go build -o bin/zv-rhythm ./cmd/zv-rhythm
 	go build -o bin/zv-analysis-viewer ./cmd/zv-analysis-viewer
-	go build -o bin/zv-pipeline ./cmd/zv-pipeline
 	go build -o bin/zv-tactical-data ./cmd/zv-tactical-data
 	go build -o bin/zv-tui ./cmd/zv-tui
 

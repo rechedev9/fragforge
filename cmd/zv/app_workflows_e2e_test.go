@@ -15,7 +15,6 @@ func TestZVBinaryWorkflowsCatalogEndToEnd(t *testing.T) {
 	listOut := runZVBinary(t, exe, tempDir, "workflows", "list")
 	for _, want := range []string{
 		"demo-parse\tParse a CS2 demo",
-		"pipeline\tRun the local recorder-to-composer pipeline.",
 		"workflows-check\tValidate skills, workflow catalog, and current workflow docs.",
 		"project-check\tRun the full FragForge CLI, workflow, docs, and skills contract.",
 	} {
@@ -346,10 +345,6 @@ func TestZVBinaryCanonicalWorkflowFlagsAreScopedEndToEnd(t *testing.T) {
 			name: "analysis viewer optional addr",
 			args: []string{"analysis", "view", "--json", "analysis.json", "--addr", "127.0.0.1:0"},
 		},
-		{
-			name: "pipeline optional tools",
-			args: []string{"pipeline", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe", "--recorder", "zv-recorder.exe", "--composer", "zv-composer.exe", "--ffmpeg", "ffmpeg.exe", "--record-timeout", "1m", "--compose-timeout", "2m"},
-		},
 	}
 	for _, tt := range valid {
 		t.Run("valid/"+tt.name, func(t *testing.T) {
@@ -387,11 +382,6 @@ func TestZVBinaryCanonicalWorkflowFlagsAreScopedEndToEnd(t *testing.T) {
 			name:       "shorts render rejects demo players value flag",
 			args:       []string{"shorts", "render", "--recording-result", "recording-result.json", "--out", "shorts", "--contains", "zack"},
 			wantStderr: "error: unknown flag --contains for \"shorts render\"\n",
-		},
-		{
-			name:       "pipeline rejects unsupported dry run",
-			args:       []string{"pipeline", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe", "--dry-run"},
-			wantStderr: "error: unknown flag --dry-run for \"pipeline\"\n",
 		},
 		{
 			name:       "workflow run demo parse rejects record boolean",
@@ -687,16 +677,6 @@ func TestZVBinaryCanonicalWorkflowOptionalValueFlagsRequireValuesEndToEnd(t *tes
 			args:       []string{"workflows", "run", "analysis-viewer", "--", "--json", "analysis.json", "--addr"},
 			wantStderr: "error: missing value for flag --addr for \"analysis view\"\n" + workflowsRunUsage,
 		},
-		{
-			name:       "direct pipeline missing record timeout",
-			args:       []string{"pipeline", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe", "--record-timeout"},
-			wantStderr: "error: missing value for flag --record-timeout for \"pipeline\"\n",
-		},
-		{
-			name:       "workflow pipeline empty compose timeout",
-			args:       []string{"workflows", "run", "pipeline", "--", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe", "--compose-timeout="},
-			wantStderr: "error: missing value for flag --compose-timeout for \"pipeline\"\n" + workflowsRunUsage,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -812,11 +792,6 @@ func TestZVBinaryCanonicalWorkflowRejectsSingleDashFlagsEndToEnd(t *testing.T) {
 			name:       "workflow record single dash dry run",
 			args:       []string{"workflows", "run", "record", "--", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording", "-dry-run"},
 			wantStderr: "error: unknown flag -dry-run for \"record\"\n" + workflowsRunUsage,
-		},
-		{
-			name:       "workflow pipeline short flag",
-			args:       []string{"workflows", "run", "pipeline", "--", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe", "-x"},
-			wantStderr: "error: unknown flag -x for \"pipeline\"\n" + workflowsRunUsage,
 		},
 	}
 	for _, tt := range tests {
@@ -2003,12 +1978,6 @@ func TestZVBinaryCanonicalWorkflowDelegatesEndToEnd(t *testing.T) {
 			wantArgs:       []string{"--json", "run/analysis.json", "--addr", "127.0.0.1:0"},
 		},
 		{
-			name:           "pipeline",
-			args:           []string{"pipeline", "--killplan", "run/plan.json", "--demo", "inferno.dem", "--out", "run/pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe"},
-			wantExecutable: executableName("zv-pipeline"),
-			wantArgs:       []string{"--killplan", "run/plan.json", "--demo", "inferno.dem", "--out", "run/pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe"},
-		},
-		{
 			name:           "serve",
 			args:           []string{"serve"},
 			wantExecutable: executableName("zv-orchestrator"),
@@ -2061,12 +2030,6 @@ func TestZVBinaryCanonicalWorkflowDelegatesEndToEnd(t *testing.T) {
 			args:           []string{"workflows", "run", "analysis-viewer", "--", "--json", "run/analysis.json"},
 			wantExecutable: executableName("zv-analysis-viewer"),
 			wantArgs:       []string{"--json", "run/analysis.json"},
-		},
-		{
-			name:           "workflow run pipeline",
-			args:           []string{"workflows", "run", "pipeline", "--", "--killplan", "run/plan.json", "--demo", "inferno.dem", "--out", "run/pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe"},
-			wantExecutable: executableName("zv-pipeline"),
-			wantArgs:       []string{"--killplan", "run/plan.json", "--demo", "inferno.dem", "--out", "run/pipeline", "--hlae", "HLAE.exe", "--cs2", "cs2.exe"},
 		},
 		{
 			name:           "workflow run serve",
