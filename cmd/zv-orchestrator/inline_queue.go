@@ -24,6 +24,8 @@ const inlineMinimumPendingTasks = 1024
 
 const inlineParseAttemptTimeout = 15 * time.Minute
 
+const inlineDiscardCompensationTimeout = 10 * time.Second
+
 var (
 	errInlineQueueFull      = errors.New("inline queue is full")
 	errInlineQueueDiscarded = errors.New("inline queue task discarded during shutdown")
@@ -144,6 +146,11 @@ type inlineQueue struct {
 	stopClose func() bool
 	nextID    atomic.Uint64
 
+	closeMu      sync.Mutex
+	closeStarted bool
+	closeDone    chan struct{}
+	closeErr     error
+
 	uniqueMu    sync.Mutex
 	uniqueLocks map[inlineUniqueKey]inlineUniqueLock
 	now         func() time.Time
@@ -161,6 +168,7 @@ func newInlineQueue(handlers map[string]taskHandler, concurrency int) *inlineQue
 		handlers:    handlers,
 		concurrency: concurrency,
 		tasks:       newInlineTaskQueue(maxPending),
+		closeDone:   make(chan struct{}),
 		uniqueLocks: make(map[inlineUniqueKey]inlineUniqueLock),
 		now:         time.Now,
 	}
@@ -184,7 +192,10 @@ func (q *inlineQueue) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.Ta
 // the rejection error for duplicate/full/shutdown decisions. Accepted work is
 // not visible to workers until the callback succeeds. If shutdown later
 // discards accepted work before completion, the callback runs again with
-// errInlineQueueDiscarded so its durable state can be compensated.
+// errInlineQueueDiscarded so its durable state can be compensated. The
+// admission invocation runs while queue locks serialize the transition with
+// task visibility, so it must not call Enqueue or EnqueueWithTransition on
+// this queue. The later discard invocation runs without those queue locks.
 func (q *inlineQueue) EnqueueWithTransition(task *asynq.Task, transition func(error) error, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	return q.enqueue(task, transition, opts...)
 }
@@ -237,11 +248,11 @@ func (q *inlineQueue) enqueue(task *asynq.Task, transition func(error) error, op
 	}, nil
 }
 
-func (q *inlineQueue) Shutdown(ctx context.Context) {
+func (q *inlineQueue) Shutdown(ctx context.Context) error {
 	if q.stopClose != nil {
 		q.stopClose()
 	}
-	q.closePending()
+	closeErr := q.closePendingWithin(ctx)
 	done := make(chan struct{})
 	go func() {
 		q.wg.Wait()
@@ -249,17 +260,86 @@ func (q *inlineQueue) Shutdown(ctx context.Context) {
 	}()
 	select {
 	case <-done:
+		return closeErr
 	case <-ctx.Done():
+		return errors.Join(closeErr, ctx.Err())
 	}
 }
 
 func (q *inlineQueue) closePending() {
-	q.uniqueMu.Lock()
-	defer q.uniqueMu.Unlock()
-	for _, task := range q.tasks.close() {
-		q.compensateDiscarded(task)
-		q.releaseUniqueLocked(task)
+	ctx, cancel := context.WithTimeout(context.Background(), inlineDiscardCompensationTimeout)
+	defer cancel()
+	if err := q.closePendingWithin(ctx); err != nil {
+		log.Printf("inline queue: close pending tasks: %v", err)
 	}
+}
+
+func (q *inlineQueue) closePendingWithin(ctx context.Context) error {
+	q.closeMu.Lock()
+	if q.closeStarted {
+		done := q.closeDone
+		q.closeMu.Unlock()
+		select {
+		case <-done:
+			q.closeMu.Lock()
+			err := q.closeErr
+			q.closeMu.Unlock()
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	q.closeStarted = true
+	q.closeMu.Unlock()
+
+	err := q.finishClosePending(ctx)
+	q.closeMu.Lock()
+	q.closeErr = err
+	close(q.closeDone)
+	q.closeMu.Unlock()
+	return err
+}
+
+func (q *inlineQueue) finishClosePending(ctx context.Context) error {
+	// Serialize closing with unique admission, then release the lock before
+	// durable compensation. Each lease remains installed until its callback
+	// finishes, so a re-drive cannot overtake the state transition.
+	q.uniqueMu.Lock()
+	discarded := q.tasks.close()
+	q.uniqueMu.Unlock()
+
+	var errs []error
+	for index, task := range discarded {
+		if err := ctx.Err(); err != nil {
+			for _, remaining := range discarded[index:] {
+				q.releaseUnique(remaining)
+			}
+			errs = append(errs, fmt.Errorf(
+				"discard compensation stopped with %d task(s) unresolved: %w",
+				len(discarded)-index,
+				err,
+			))
+			break
+		}
+		if err := q.compensateDiscardedWithin(ctx, task); err != nil {
+			errs = append(errs, err)
+			q.releaseUnique(task)
+			if ctx.Err() != nil {
+				for _, remaining := range discarded[index+1:] {
+					q.releaseUnique(remaining)
+				}
+				errs = append(errs, fmt.Errorf(
+					"discard compensation stopped with %d task(s) unresolved: %w",
+					len(discarded)-index,
+					ctx.Err(),
+				))
+				break
+			}
+			continue
+		}
+		q.releaseUnique(task)
+	}
+	return errors.Join(errs...)
 }
 
 func (q *inlineQueue) run(ctx context.Context) {
@@ -286,15 +366,14 @@ func (q *inlineQueue) run(ctx context.Context) {
 }
 
 func (q *inlineQueue) process(ctx context.Context, queued inlineTask, handler taskHandler) error {
-	err, parentCanceled := q.handle(ctx, queued, handler)
-	if parentCanceled {
+	err, handlerStarted := q.handle(ctx, queued, handler)
+	if !handlerStarted && ctx.Err() != nil {
 		// The task has already left the pending FIFO, so closePending cannot see
-		// it. Compensate its accepted state before releasing its uniqueness
-		// lease, just as closePending does for work still in the FIFO.
-		q.uniqueMu.Lock()
+		// it. Compensate only when cancellation wins before the first handler
+		// attempt. Once a handler starts, its own terminal path owns the durable
+		// failure detail and must not be overwritten by admission compensation.
 		q.compensateDiscarded(queued)
-		q.releaseUniqueLocked(queued)
-		q.uniqueMu.Unlock()
+		q.releaseUnique(queued)
 		return err
 	}
 	// The uniqueness lease belongs to the logical task, including all of its
@@ -307,9 +386,10 @@ func (q *inlineQueue) process(ctx context.Context, queued inlineTask, handler ta
 
 func (q *inlineQueue) handle(ctx context.Context, queued inlineTask, handler taskHandler) (error, bool) {
 	var err error
+	handlerStarted := false
 	for attempt := 0; attempt <= queued.policy.maxRetries; attempt++ {
 		if parentErr := ctx.Err(); parentErr != nil {
-			return parentErr, true
+			return parentErr, handlerStarted
 		}
 
 		attemptCtx := tasks.WithTaskAttempt(ctx, attempt, queued.policy.maxRetries)
@@ -317,32 +397,56 @@ func (q *inlineQueue) handle(ctx context.Context, queued inlineTask, handler tas
 		if queued.policy.attemptTimeout > 0 {
 			attemptCtx, cancel = context.WithTimeout(attemptCtx, queued.policy.attemptTimeout)
 		}
+		handlerStarted = true
 		err = handler(attemptCtx, queued.task)
 		cancel()
 		if err == nil {
-			return nil, false
+			return nil, handlerStarted
 		}
 		if ctx.Err() != nil {
-			return err, true
+			return err, handlerStarted
 		}
 		if attempt == queued.policy.maxRetries {
-			return err, false
+			return err, handlerStarted
 		}
 		log.Printf(
 			"inline queue: %s attempt %d failed, retrying: %v",
 			queued.task.Type(), attempt+1, err,
 		)
 	}
-	return err, false
+	return err, handlerStarted
 }
 
 func (q *inlineQueue) compensateDiscarded(task inlineTask) {
+	if err := applyInlineDiscardTransition(task); err != nil {
+		log.Printf("inline queue: %v", err)
+	}
+}
+
+func (q *inlineQueue) compensateDiscardedWithin(ctx context.Context, task inlineTask) error {
 	if task.transition == nil {
-		return
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- applyInlineDiscardTransition(task)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("compensate discarded task %s: %w", task.id, ctx.Err())
+	}
+}
+
+func applyInlineDiscardTransition(task inlineTask) error {
+	if task.transition == nil {
+		return nil
 	}
 	if err := task.transition(errInlineQueueDiscarded); err != nil {
-		log.Printf("inline queue: compensate discarded task %s: %v", task.id, err)
+		return fmt.Errorf("compensate discarded task %s: %w", task.id, err)
 	}
+	return nil
 }
 
 type inlineEnqueueOptions struct {

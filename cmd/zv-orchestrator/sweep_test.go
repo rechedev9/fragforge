@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -56,6 +58,42 @@ type streamInterruptSweeperRepo interface {
 	Get(context.Context, uuid.UUID) (streamclips.Job, error)
 }
 
+type failingDemoUpdateRepo struct {
+	interruptSweeperRepo
+	failIDs map[uuid.UUID]bool
+}
+
+func (r failingDemoUpdateRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status job.Status, reason string) error {
+	if r.failIDs[id] {
+		return errors.New("injected demo update failure")
+	}
+	return r.interruptSweeperRepo.UpdateStatus(ctx, id, status, reason)
+}
+
+type failingStreamUpdateRepo struct {
+	streamInterruptSweeperRepo
+	failIDs map[uuid.UUID]bool
+}
+
+func (r failingStreamUpdateRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status streamclips.Status, reason string) error {
+	if r.failIDs[id] {
+		return errors.New("injected stream update failure")
+	}
+	return r.streamInterruptSweeperRepo.UpdateStatus(ctx, id, status, reason)
+}
+
+type failingPutStorage struct {
+	storage.Storage
+	failKeys map[string]bool
+}
+
+func (s failingPutStorage) Put(key string, r io.Reader) error {
+	if s.failKeys[key] {
+		return errors.New("injected storage write failure")
+	}
+	return s.Storage.Put(key, r)
+}
+
 func seedStreamJob(t *testing.T, repo streamInterruptSweeperRepo, status streamclips.Status) streamclips.Job {
 	t.Helper()
 	j := &streamclips.Job{
@@ -93,13 +131,23 @@ func readSweepFixture(t *testing.T, store storage.Storage, key string, dst any) 
 	}
 }
 
-func TestSweepInterruptedJobsFailsOnlyTransientStates(t *testing.T) {
+func interruptedObsCount(rec *obs.Recorder, stage string) int64 {
+	var count int64
+	for _, metric := range rec.Snapshot() {
+		if metric.Name == "fragforge_errors_total" && metric.Labels["stage"] == stage && metric.Labels["class"] == interruptedClass {
+			count += metric.Value
+		}
+	}
+	return count
+}
+
+func TestSweepInterruptedJobsFailsOnlyNonresumableStates(t *testing.T) {
 	repos := map[string]interruptSweeperRepo{
 		"memory": newMemoryJobRepository(),
 		"sqlite": newTestSQLiteRepo(t),
 	}
 
-	transient := []job.Status{
+	nonresumable := []job.Status{
 		job.StatusQueued,
 		job.StatusScanning,
 		job.StatusParsing,
@@ -120,9 +168,9 @@ func TestSweepInterruptedJobsFailsOnlyTransientStates(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 
-			transientIDs := map[job.Status]job.Job{}
-			for _, s := range transient {
-				transientIDs[s] = seedJob(t, repo, s)
+			nonresumableIDs := map[job.Status]job.Job{}
+			for _, s := range nonresumable {
+				nonresumableIDs[s] = seedJob(t, repo, s)
 			}
 			untouchedIDs := map[job.Status]job.Job{}
 			for _, s := range untouched {
@@ -138,11 +186,11 @@ func TestSweepInterruptedJobsFailsOnlyTransientStates(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sweepInterruptedJobs: %v", err)
 			}
-			if swept != len(transient) {
-				t.Errorf("swept = %d, want %d", swept, len(transient))
+			if swept != len(nonresumable) {
+				t.Errorf("swept = %d, want %d", swept, len(nonresumable))
 			}
 
-			for s, seeded := range transientIDs {
+			for s, seeded := range nonresumableIDs {
 				got, err := repo.Get(ctx, seeded.ID)
 				if err != nil {
 					t.Fatalf("Get(%s): %v", s, err)
@@ -175,10 +223,44 @@ func TestSweepInterruptedJobsFailsOnlyTransientStates(t *testing.T) {
 					interruptErrors += m.Value
 				}
 			}
-			if interruptErrors != int64(len(transient)) {
-				t.Errorf("obs interrupted errors = %d, want %d", interruptErrors, len(transient))
+			if interruptErrors != int64(len(nonresumable)) {
+				t.Errorf("obs interrupted errors = %d, want %d", interruptErrors, len(nonresumable))
 			}
 		})
+	}
+}
+
+func TestSweepInterruptedJobsAggregatesRecordFailures(t *testing.T) {
+	base := newMemoryJobRepository()
+	firstFailure := seedJob(t, base, job.StatusQueued)
+	success := seedJob(t, base, job.StatusQueued)
+	secondFailure := seedJob(t, base, job.StatusParsing)
+	repo := failingDemoUpdateRepo{
+		interruptSweeperRepo: base,
+		failIDs: map[uuid.UUID]bool{
+			firstFailure.ID:  true,
+			secondFailure.ID: true,
+		},
+	}
+
+	swept, err := sweepInterruptedJobs(context.Background(), repo, nil)
+	if err == nil {
+		t.Fatal("sweepInterruptedJobs error = nil, want aggregated update failures")
+	}
+	for _, id := range []uuid.UUID{firstFailure.ID, secondFailure.ID} {
+		if !strings.Contains(err.Error(), id.String()) {
+			t.Errorf("error %q does not include failed job %s", err, id)
+		}
+	}
+	if got, want := swept, 1; got != want {
+		t.Fatalf("swept = %d, want %d", got, want)
+	}
+	got, err := base.Get(context.Background(), success.ID)
+	if err != nil {
+		t.Fatalf("Get(success): %v", err)
+	}
+	if got.Status != job.StatusFailed {
+		t.Errorf("successful record status = %s, want failed", got.Status)
 	}
 }
 
@@ -241,7 +323,7 @@ func TestSweepInterruptedDemoRenderStatesFailsActiveStatesAcrossParentStatuses(t
 				fixtures = append(fixtures, fixture{key: key, before: state, wantFailed: tc.wantFailed})
 			}
 
-			swept, err := sweepInterruptedDemoRenderStates(context.Background(), repo, store)
+			swept, err := sweepInterruptedDemoRenderStates(context.Background(), repo, store, nil)
 			if err != nil {
 				t.Fatalf("sweepInterruptedDemoRenderStates: %v", err)
 			}
@@ -265,6 +347,68 @@ func TestSweepInterruptedDemoRenderStatesFailsActiveStatesAcrossParentStatuses(t
 				}
 			}
 		})
+	}
+}
+
+func TestSweepInterruptedDemoRenderStatesRepairsCorruptDocumentsAndContinues(t *testing.T) {
+	repo := newMemoryJobRepository()
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	loadouts := renderplan.LoadoutCatalog()
+	if len(loadouts) == 0 {
+		t.Fatal("LoadoutCatalog is empty")
+	}
+	loadout := loadouts[0]
+	repairedJob := seedJob(t, repo, job.StatusDone)
+	unwritableJob := seedJob(t, repo, job.StatusRecorded)
+	repairedKey, err := renderplan.RenderVariantStateKey(repairedJob.ID, loadout.Variant)
+	if err != nil {
+		t.Fatalf("RenderVariantStateKey(repaired): %v", err)
+	}
+	unwritableKey, err := renderplan.RenderVariantStateKey(unwritableJob.ID, loadout.Variant)
+	if err != nil {
+		t.Fatalf("RenderVariantStateKey(unwritable): %v", err)
+	}
+	for _, key := range []string{repairedKey, unwritableKey} {
+		if err := store.Put(key, strings.NewReader(`{"status":"queued"`)); err != nil {
+			t.Fatalf("Put corrupt %s: %v", key, err)
+		}
+	}
+	rec, err := obs.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("obs.New: %v", err)
+	}
+
+	swept, err := sweepInterruptedDemoRenderStates(
+		context.Background(),
+		repo,
+		failingPutStorage{Storage: store, failKeys: map[string]bool{unwritableKey: true}},
+		rec,
+	)
+	if err == nil {
+		t.Fatal("sweepInterruptedDemoRenderStates error = nil, want unwritable record error")
+	}
+	for _, want := range []string{"decode demo render state", "write failed demo render state", unwritableKey} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not include %q", err, want)
+		}
+	}
+	if got, want := swept, 1; got != want {
+		t.Fatalf("swept = %d, want %d", got, want)
+	}
+
+	var repaired renderplan.RenderVariantState
+	readSweepFixture(t, store, repairedKey, &repaired)
+	if repaired.JobID != repairedJob.ID || repaired.Variant != loadout.Variant || repaired.Status != renderplan.RenderVariantStatusFailed {
+		t.Errorf("repaired state = %+v, want job=%s variant=%s status=failed", repaired, repairedJob.ID, loadout.Variant)
+	}
+	if repaired.SchemaVersion == "" || repaired.CreatedAt.IsZero() || repaired.Error != interruptedDemoRenderReason {
+		t.Errorf("repaired state metadata = %+v, want minimal complete failed state", repaired)
+	}
+	if got, want := interruptedObsCount(rec, obs.StageRender), int64(1); got != want {
+		t.Errorf("render interrupted obs = %d, want %d", got, want)
 	}
 }
 
@@ -298,15 +442,20 @@ func TestSweepInterruptedGenerateRunsUsesActiveRunMarker(t *testing.T) {
 			activeWithReadyState := seedJob(t, repo, job.StatusRecorded)
 			activeWithMalformedState := seedJob(t, repo, job.StatusParsed)
 			activeInvalidIntent := seedJob(t, repo, job.StatusRecorded)
+			malformedIntent := seedJob(t, repo, job.StatusParsed)
+			failedWithActiveIntent := seedJob(t, repo, job.StatusFailed)
 			staleDisplayIntent := seedJob(t, repo, job.StatusRecorded)
 			withoutIntent := seedJob(t, repo, job.StatusRecorded)
 			doneWithActiveIntent := seedJob(t, repo, job.StatusDone)
-			for _, j := range []job.Job{activeParsed, activeWithReadyState, activeWithMalformedState, doneWithActiveIntent} {
+			for _, j := range []job.Job{activeParsed, activeWithReadyState, activeWithMalformedState, failedWithActiveIntent, doneWithActiveIntent} {
 				putSweepFixture(t, store, artifacts.GenerateIntentKey(j.ID), activeIntent)
 			}
 			invalidIntent := activeIntent
 			invalidIntent.Variant = "retired-preset"
 			putSweepFixture(t, store, artifacts.GenerateIntentKey(activeInvalidIntent.ID), invalidIntent)
+			if err := store.Put(artifacts.GenerateIntentKey(malformedIntent.ID), strings.NewReader(`{"active_run_id":`)); err != nil {
+				t.Fatalf("Put malformed generate intent: %v", err)
+			}
 			putSweepFixture(t, store, artifacts.GenerateIntentKey(staleDisplayIntent.ID), staleIntent)
 
 			state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
@@ -334,10 +483,10 @@ func TestSweepInterruptedGenerateRunsUsesActiveRunMarker(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sweepInterruptedGenerateRuns: %v", err)
 			}
-			if got, want := swept, 4; got != want {
+			if got, want := swept, 7; got != want {
 				t.Fatalf("swept = %d, want %d", got, want)
 			}
-			for _, j := range []job.Job{activeParsed, activeWithReadyState, activeWithMalformedState, activeInvalidIntent} {
+			for _, j := range []job.Job{activeParsed, activeWithReadyState, activeWithMalformedState, activeInvalidIntent, malformedIntent} {
 				got, err := repo.Get(context.Background(), j.ID)
 				if err != nil {
 					t.Fatalf("Get(%s): %v", j.ID, err)
@@ -346,13 +495,31 @@ func TestSweepInterruptedGenerateRunsUsesActiveRunMarker(t *testing.T) {
 					t.Errorf("active run %s = status %s reason %q, want failed/%q", j.ID, got.Status, got.FailureReason, interruptedGenerateReason)
 				}
 			}
-			for _, j := range []job.Job{staleDisplayIntent, withoutIntent, doneWithActiveIntent} {
+			for _, j := range []job.Job{staleDisplayIntent, withoutIntent, failedWithActiveIntent, doneWithActiveIntent} {
 				got, err := repo.Get(context.Background(), j.ID)
 				if err != nil {
 					t.Fatalf("Get(%s): %v", j.ID, err)
 				}
 				if got.Status != j.Status {
 					t.Errorf("preserved job %s status = %s, want %s", j.ID, got.Status, j.Status)
+				}
+			}
+			for _, j := range []job.Job{
+				activeParsed,
+				activeWithReadyState,
+				activeWithMalformedState,
+				activeInvalidIntent,
+				malformedIntent,
+				failedWithActiveIntent,
+				doneWithActiveIntent,
+			} {
+				var repaired renderplan.GenerateIntent
+				readSweepFixture(t, store, artifacts.GenerateIntentKey(j.ID), &repaired)
+				if repaired.ActiveRunID != uuid.Nil {
+					t.Errorf("repaired intent %s ActiveRunID = %s, want nil", j.ID, repaired.ActiveRunID)
+				}
+				if err := repaired.Validate(); err != nil {
+					t.Errorf("repaired intent %s is invalid: %v", j.ID, err)
 				}
 			}
 		})
@@ -409,6 +576,40 @@ func TestSweepInterruptedStreamJobsFailsOnlyAcquiringAndRendering(t *testing.T) 
 				}
 			}
 		})
+	}
+}
+
+func TestSweepInterruptedStreamJobsAggregatesRecordFailures(t *testing.T) {
+	base := newMemoryStreamJobRepository()
+	firstFailure := seedStreamJob(t, base, streamclips.StatusAcquiring)
+	success := seedStreamJob(t, base, streamclips.StatusAcquiring)
+	secondFailure := seedStreamJob(t, base, streamclips.StatusRendering)
+	repo := failingStreamUpdateRepo{
+		streamInterruptSweeperRepo: base,
+		failIDs: map[uuid.UUID]bool{
+			firstFailure.ID:  true,
+			secondFailure.ID: true,
+		},
+	}
+
+	swept, err := sweepInterruptedStreamJobs(context.Background(), repo, nil)
+	if err == nil {
+		t.Fatal("sweepInterruptedStreamJobs error = nil, want aggregated update failures")
+	}
+	for _, id := range []uuid.UUID{firstFailure.ID, secondFailure.ID} {
+		if !strings.Contains(err.Error(), id.String()) {
+			t.Errorf("error %q does not include failed stream job %s", err, id)
+		}
+	}
+	if got, want := swept, 1; got != want {
+		t.Fatalf("swept = %d, want %d", got, want)
+	}
+	got, err := base.Get(context.Background(), success.ID)
+	if err != nil {
+		t.Fatalf("Get(success): %v", err)
+	}
+	if got.Status != streamclips.StatusFailed {
+		t.Errorf("successful record status = %s, want failed", got.Status)
 	}
 }
 
@@ -513,7 +714,7 @@ func TestSweepInterruptedStreamRenderStatesPreservesArtifactData(t *testing.T) {
 				fixtures = append(fixtures, fixture{key: key, before: state, wantFailed: tc.wantFailed})
 			}
 
-			swept, err := sweepInterruptedStreamRenderStates(context.Background(), repo, store)
+			swept, err := sweepInterruptedStreamRenderStates(context.Background(), repo, store, nil)
 			if err != nil {
 				t.Fatalf("sweepInterruptedStreamRenderStates: %v", err)
 			}
@@ -537,5 +738,69 @@ func TestSweepInterruptedStreamRenderStatesPreservesArtifactData(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSweepInterruptedStreamRenderStatesRepairsCorruptDocumentsAndRecordsEachStateOnce(t *testing.T) {
+	repo := newMemoryStreamJobRepository()
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	variants := streamclips.VariantNames()
+	if len(variants) == 0 {
+		t.Fatal("VariantNames is empty")
+	}
+	variant := variants[0]
+	readyParent := seedStreamJob(t, repo, streamclips.StatusReady)
+	renderingParent := seedStreamJob(t, repo, streamclips.StatusRendering)
+	for _, j := range []streamclips.Job{readyParent, renderingParent} {
+		key, err := streamclips.RenderStateKey(j.ID, variant)
+		if err != nil {
+			t.Fatalf("RenderStateKey(%s): %v", j.ID, err)
+		}
+		if err := store.Put(key, strings.NewReader(`{"status":"rendering"`)); err != nil {
+			t.Fatalf("Put corrupt %s: %v", key, err)
+		}
+	}
+	rec, err := obs.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("obs.New: %v", err)
+	}
+
+	stateResult, err := reconcileInterruptedStreamRenderStates(context.Background(), repo, store, rec)
+	if err != nil {
+		t.Fatalf("reconcileInterruptedStreamRenderStates: %v", err)
+	}
+	if got, want := stateResult.Reconciled, 2; got != want {
+		t.Fatalf("swept stream states = %d, want %d", got, want)
+	}
+	if got, want := interruptedObsCount(rec, obs.StageRender), int64(2); got != want {
+		t.Errorf("render interrupted obs after state sweep = %d, want %d", got, want)
+	}
+	for _, j := range []streamclips.Job{readyParent, renderingParent} {
+		key, err := streamclips.RenderStateKey(j.ID, variant)
+		if err != nil {
+			t.Fatalf("RenderStateKey(%s): %v", j.ID, err)
+		}
+		var state streamclips.RenderState
+		readSweepFixture(t, store, key, &state)
+		if state.JobID != j.ID || state.Variant != variant || state.Status != streamclips.StatusFailed || state.Error != interruptedStreamRender {
+			t.Errorf("repaired stream state = %+v, want job=%s variant=%s status=failed", state, j.ID, variant)
+		}
+		if state.ResultKey == "" || state.GalleryKey == "" || state.ArtifactDir == "" {
+			t.Errorf("repaired stream state lacks minimal artifact refs: %+v", state)
+		}
+	}
+
+	jobSwept, err := sweepInterruptedStreamJobsAfterRenderStates(context.Background(), repo, rec, stateResult)
+	if err != nil {
+		t.Fatalf("sweepInterruptedStreamJobs: %v", err)
+	}
+	if got, want := jobSwept, 1; got != want {
+		t.Fatalf("swept stream jobs = %d, want %d", got, want)
+	}
+	if got, want := interruptedObsCount(rec, obs.StageRender), int64(2); got != want {
+		t.Errorf("render interrupted obs after job sweep = %d, want %d", got, want)
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/captions"
 	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/generateintent"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/mediafont"
@@ -35,6 +36,14 @@ import (
 )
 
 const defaultMediaWorkerTimeout = "20m"
+
+// errStreamRenderParentPromotion marks the narrow failure window after every
+// render artifact and the authoritative rendered state are durable, but before
+// the parent stream job can be promoted. The completion state must survive so
+// startup reconciliation can finish that promotion after a restart.
+var errStreamRenderParentPromotion = errors.New("stream render completed but parent status promotion failed")
+
+var errStaleGenerateHandoff = errors.New("generate render handoff no longer owns the active run")
 
 // Bounded fan-out for the render worker's per-short I/O. Probing and localizing
 // run one external/IO op per short; doing them concurrently (capped) turns an
@@ -66,7 +75,8 @@ type statusUpdater interface {
 
 // Enqueuer is the desktop queue contract the record worker uses to chain a
 // render after successful capture. The transition runs atomically with queue
-// admission; a nil Enqueuer disables chaining for the manual record path.
+// admission and receives a later non-nil decision if shutdown discards pending
+// work; a nil Enqueuer disables chaining for the manual record path.
 type Enqueuer interface {
 	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
 	EnqueueWithTransition(*asynq.Task, func(error) error, ...asynq.Option) (*asynq.TaskInfo, error)
@@ -81,12 +91,14 @@ const chainedRenderUniqueTTL = 24 * time.Hour
 // deadline or shutdown (pgxpool.Exec refuses to run on a cancelled context).
 // The secondary error is logged rather than discarded: a job stranded in a
 // non-terminal status is otherwise invisible to operators.
-func markFailed(repo statusUpdater, id uuid.UUID, reason string) {
+func markFailed(repo statusUpdater, id uuid.UUID, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), failureWriteTimeout)
 	defer cancel()
 	if err := repo.UpdateStatus(ctx, id, job.StatusFailed, reason); err != nil {
 		logWorkerError(id, "mark failed", err)
+		return err
 	}
+	return nil
 }
 
 // recordTaskFailure records a job's failure, but only when the current Asynq
@@ -95,14 +107,17 @@ func markFailed(repo statusUpdater, id uuid.UUID, reason string) {
 // left as the in-progress status so the job does not flap StatusFailed<->in
 // progress across retries; the terminal failure is recorded once retries are
 // exhausted.
-func recordTaskFailure(ctx context.Context, repo statusUpdater, id uuid.UUID, taskType string, err error) {
+func recordTaskFailure(ctx context.Context, repo statusUpdater, id uuid.UUID, taskType string, err error) error {
 	if !taskIsTerminal(ctx) {
 		logWorkerError(id, taskType+" will retry", err)
-		return
+		return nil
 	}
-	markFailed(repo, id, err.Error())
+	if markErr := markFailed(repo, id, err.Error()); markErr != nil {
+		return markErr
+	}
 	recordWorkerFailure(id, taskType, err)
 	logWorkerTransition(id, taskType, job.StatusFailed)
+	return nil
 }
 
 // taskIsTerminal reports whether the current Asynq attempt is the last one, so
@@ -212,9 +227,9 @@ type StreamRenderWorkerConfig struct {
 	WhisperModelPath string
 	// XAIAPIKey configures the xAI cloud captions pass
 	// (internal/captions.XAITranscriber). It is the preferred backend when set:
-	// xAI transcribes the whole media file in one request with word-level
-	// timestamps, needing no ffmpeg preprocessing or per-chunk language
-	// detection (see NewStreamRenderWorker).
+	// the worker extracts the selected source-audio range to speech-oriented
+	// WAV, then xAI transcribes it with word-level timestamps (see
+	// NewStreamRenderWorker).
 	XAIAPIKey string
 	//
 	// A render honours EditPlan.Captions.Enabled only when at least one
@@ -227,11 +242,12 @@ type StreamRenderWorkerConfig struct {
 
 // RecordWorker handles the "record:demo" Asynq task.
 type RecordWorker struct {
-	repo     StatusRepository
-	storage  storage.Storage
-	cfg      RecordWorkerConfig
-	runner   commandRunner
-	enqueuer Enqueuer
+	repo            StatusRepository
+	storage         storage.Storage
+	generateIntents *generateintent.Store
+	cfg             RecordWorkerConfig
+	runner          commandRunner
+	enqueuer        Enqueuer
 	// jobLocks serializes recording per job so two reels for the same job (each a
 	// distinct, non-deduped task with different segment ids) never launch the
 	// recorder concurrently or race on the job-level recording result. Process-
@@ -249,11 +265,18 @@ func (w *RecordWorker) lockJob(id uuid.UUID) func() {
 
 func NewRecordWorker(repo StatusRepository, store storage.Storage, cfg RecordWorkerConfig) *RecordWorker {
 	return &RecordWorker{
-		repo:    repo,
-		storage: store,
-		cfg:     cfg,
-		runner:  execCommandRunner{},
+		repo:            repo,
+		storage:         store,
+		generateIntents: generateintent.New(store),
+		cfg:             cfg,
+		runner:          execCommandRunner{},
 	}
+}
+
+// UseGenerateIntentStore shares guided-generate synchronization with the HTTP
+// admission path. It is set once at startup before queue processing begins.
+func (w *RecordWorker) UseGenerateIntentStore(store *generateintent.Store) {
+	w.generateIntents = store
 }
 
 // UseEnqueuer wires the task queue the worker uses to chain a render after a
@@ -268,27 +291,33 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) (ret
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
 	}
+	var (
+		generateIntent    renderplan.GenerateIntent
+		hasGenerateIntent bool
+		err               error
+	)
 	// Once the payload identifies the durable job, every terminal failure must
 	// close that job's active generate/record lifecycle. In particular, early
 	// repository and task-header errors happen before the recorder call and were
 	// previously able to leave a guided generate request pending forever.
 	defer func() {
-		if retErr != nil {
-			recordTaskFailure(ctx, w.repo, payload.JobID, tasks.TypeRecordDemo, retErr)
+		if retErr == nil {
+			return
 		}
+		if hasGenerateIntent && taskIsTerminal(ctx) {
+			_, err := w.generateIntents.Finish(payload.JobID, generateIntent.ActiveRunID, func() error {
+				return recordTaskFailure(ctx, w.repo, payload.JobID, tasks.TypeRecordDemo, retErr)
+			})
+			if err != nil {
+				logWorkerError(payload.JobID, "finish failed generate task", err)
+			}
+			return
+		}
+		_ = recordTaskFailure(ctx, w.repo, payload.JobID, tasks.TypeRecordDemo, retErr)
 	}()
-	generateIntent, hasGenerateIntent, err := tasks.GenerateIntentFromTask(t)
+	generateIntent, hasGenerateIntent, err = tasks.GenerateIntentFromTask(t)
 	if err != nil {
 		return fmt.Errorf("decode record task generate intent: %w", err)
-	}
-	if hasGenerateIntent {
-		defer func() {
-			if retErr != nil && taskIsTerminal(ctx) {
-				if err := w.completeGenerateIntent(payload.JobID, generateIntent.ActiveRunID); err != nil {
-					logWorkerError(payload.JobID, "complete failed generate intent", err)
-				}
-			}
-		}()
 	}
 
 	j, err := w.repo.Get(ctx, payload.JobID)
@@ -330,22 +359,42 @@ func (w *RecordWorker) chainRender(id uuid.UUID, intent renderplan.GenerateInten
 		w.failGenerateHandoff(id, intent, fmt.Errorf("build chained render task: %w", err))
 		return
 	}
+	admitted := false
 	_, err = w.enqueuer.EnqueueWithTransition(task, func(decision error) error {
-		var stateErr error
 		switch {
 		case decision == nil:
-			// Publish queued before the task is visible so a fast render worker
-			// cannot advance to rendering/ready and then be overwritten.
-			stateErr = w.writeQueuedRenderState(id, intent.Variant)
+			// Publish Queued before the task is visible so a crash anywhere in the
+			// handoff remains recoverable by the startup render-state sweep. If
+			// completing the generate marker then fails, compensate Queued to
+			// Failed before rejecting admission so the live UI is not stranded.
+			owned, handoffErr := w.generateIntents.Finish(id, intent.ActiveRunID, func() error {
+				return w.writeQueuedRenderState(id, intent.Variant)
+			})
+			if !owned {
+				return errStaleGenerateHandoff
+			}
+			if handoffErr != nil {
+				failedErr := w.writeFailedRenderState(id, intent.Variant, fmt.Sprintf("accept render handoff: %v", handoffErr))
+				if failedErr != nil {
+					return errors.Join(handoffErr, failedErr)
+				}
+				return errors.Join(handoffErr, w.completeGenerateIntent(id, intent.ActiveRunID))
+			}
+			admitted = true
+			return nil
 		case errors.Is(decision, asynq.ErrDuplicateTask):
 			// Another task owns the render and its state; never downgrade it.
+			_, err := w.generateIntents.Finish(id, intent.ActiveRunID, nil)
+			return err
 		default:
-			stateErr = w.writeFailedRenderState(id, intent.Variant, fmt.Sprintf("enqueue render: %v", decision))
+			if admitted {
+				return w.writeFailedRenderState(id, intent.Variant, fmt.Sprintf("enqueue render: %v", decision))
+			}
+			_, err := w.generateIntents.Finish(id, intent.ActiveRunID, func() error {
+				return w.writeFailedRenderState(id, intent.Variant, fmt.Sprintf("enqueue render: %v", decision))
+			})
+			return err
 		}
-		if stateErr != nil {
-			return stateErr
-		}
-		return w.completeGenerateIntent(id, intent.ActiveRunID)
 	}, asynq.Unique(chainedRenderUniqueTTL))
 	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
@@ -353,10 +402,6 @@ func (w *RecordWorker) chainRender(id uuid.UUID, intent renderplan.GenerateInten
 			return
 		}
 		logWorkerError(id, "enqueue chained render", err)
-		if completeErr := w.completeGenerateIntent(id, intent.ActiveRunID); completeErr != nil {
-			logWorkerError(id, "complete failed generate intent", completeErr)
-			markFailed(w.repo, id, err.Error())
-		}
 		return
 	}
 	logWorkerTransition(id, tasks.TypeRenderVariant, job.StatusRecorded)
@@ -364,46 +409,16 @@ func (w *RecordWorker) chainRender(id uuid.UUID, intent renderplan.GenerateInten
 
 func (w *RecordWorker) failGenerateHandoff(id uuid.UUID, intent renderplan.GenerateIntent, cause error) {
 	logWorkerError(id, "generate render handoff", cause)
-	if err := w.writeFailedRenderState(id, intent.Variant, cause.Error()); err != nil {
-		logWorkerError(id, "write failed generate render state", err)
-	}
-	if err := w.completeGenerateIntent(id, intent.ActiveRunID); err != nil {
-		logWorkerError(id, "complete failed generate intent", err)
-		markFailed(w.repo, id, cause.Error())
+	_, err := w.generateIntents.Finish(id, intent.ActiveRunID, func() error {
+		return w.writeFailedRenderState(id, intent.Variant, cause.Error())
+	})
+	if err != nil {
+		logWorkerError(id, "finish failed generate handoff", err)
 	}
 }
 
 func (w *RecordWorker) completeGenerateIntent(id, runID uuid.UUID) error {
-	if runID == uuid.Nil {
-		return nil
-	}
-	key := artifacts.GenerateIntentKey(id)
-	rc, err := w.storage.Open(key)
-	if err != nil {
-		if storage.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("open generate intent: %w", err)
-	}
-	var current renderplan.GenerateIntent
-	if err := json.NewDecoder(rc).Decode(&current); err != nil {
-		return fmt.Errorf("decode generate intent: %w", errors.Join(err, rc.Close()))
-	}
-	if err := rc.Close(); err != nil {
-		return fmt.Errorf("close generate intent: %w", err)
-	}
-	if current.ActiveRunID != runID {
-		return nil
-	}
-	current.ActiveRunID = uuid.Nil
-	b, err := json.MarshalIndent(current, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal generate intent: %w", err)
-	}
-	if err := w.storage.Put(key, bytes.NewReader(b)); err != nil {
-		return fmt.Errorf("write generate intent: %w", err)
-	}
-	return nil
+	return w.generateIntents.Complete(id, runID)
 }
 
 func (w *RecordWorker) writeQueuedRenderState(id uuid.UUID, variant string) error {
@@ -795,10 +810,10 @@ func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, c
 		cfg:     cfg,
 		runner:  execCommandRunner{},
 	}
-	// Preference order: xAI, then local whisper. xAI transcribes the
-	// whole media file in one request with word-level timestamps, so it needs no
-	// ffmpeg preprocessing and no per-chunk language detection. Local whisper.cpp
-	// remains the offline fallback.
+	// Preference order: xAI, then local whisper. The render worker gives xAI a
+	// speech-oriented WAV extracted from the original selected range; local
+	// whisper.cpp remains the offline fallback and receives the composed clip as
+	// before.
 	w.transcribe = func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error) {
 		switch {
 		case w.cfg.xaiConfigured():
@@ -825,6 +840,10 @@ func (w *StreamRenderWorker) HandleRenderStreamClip(ctx context.Context, t *asyn
 		return fmt.Errorf("load stream job %s: %w", payload.JobID, err)
 	}
 	if err := w.render(ctx, j, payload.Variant); err != nil {
+		if errors.Is(err, errStreamRenderParentPromotion) {
+			logWorkerError(j.ID, tasks.TypeRenderStreamClip, err)
+			return err
+		}
 		markStreamFailed(w.repo, j.ID, err.Error())
 		if stateErr := w.writeStreamState(j.ID, payload.Variant, streamclips.StatusFailed, nil, err.Error(), nil); stateErr != nil {
 			logWorkerError(j.ID, "write failed stream render state", stateErr)
@@ -920,16 +939,27 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		publishPath := outPath
 		publishClipID := clip.ID
 		if plan.Captions.Enabled {
-			captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, j.ID, variant, clip.ID, plan.Captions.Language)
-			if err != nil {
-				return err
-			}
-			switch {
-			case captionedPath != "":
-				publishPath = captionedPath
-				publishClipID = clip.ID + "_captioned"
-			case warning != "":
-				warnings = append(warnings, warning)
+			if cfg.xaiConfigured() && j.Probe.AudioCodec == "" {
+				warnings = append(warnings, fmt.Sprintf("clip %s: source has no audio, publishing without captions", clip.ID))
+			} else {
+				transcriptionPath := outPath
+				if cfg.xaiConfigured() {
+					transcriptionPath, err = w.extractXAICaptionAudio(runCtx, cfg, workDir, sourcePath, clip)
+					if err != nil {
+						return err
+					}
+				}
+				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, j.ID, variant, clip.ID, plan.Captions.Language)
+				if err != nil {
+					return err
+				}
+				switch {
+				case captionedPath != "":
+					publishPath = captionedPath
+					publishClipID = clip.ID + "_captioned"
+				case warning != "":
+					warnings = append(warnings, warning)
+				}
 			}
 		}
 
@@ -965,22 +995,54 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if err := w.writeStreamState(j.ID, variant, streamclips.StatusRendered, warnings, "", videos); err != nil {
 		return err
 	}
-	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendered, ""); err != nil {
-		return fmt.Errorf("mark stream rendered: %w", err)
-	}
 	logWorkerArtifacts(j.ID, tasks.TypeRenderStreamClip, []string{resultKey, galleryKey})
+	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendered, ""); err != nil {
+		return errors.Join(
+			errStreamRenderParentPromotion,
+			fmt.Errorf("mark stream rendered: %w", err),
+		)
+	}
 	return nil
 }
 
-// burnClipCaptions transcribes clipPath with the configured caption backend and burns the resulting
+// extractXAICaptionAudio materializes the selected range from the original
+// stream source as speech-oriented mono PCM WAV. xAI proved materially more
+// reliable on this input than on the already composed/re-encoded vertical MP4,
+// especially when the speaker switches between Spanish and English.
+func (w *StreamRenderWorker) extractXAICaptionAudio(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, sourcePath string, clip streamclips.ClipRange) (string, error) {
+	dir := filepath.Join(workDir, "caption-source-audio")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", fmt.Errorf("create xai caption audio directory: %w", err)
+	}
+	out := filepath.Join(dir, clip.ID+".wav")
+	duration := clip.EndSeconds - clip.StartSeconds
+	args := []string{
+		"-y",
+		"-ss", strconv.FormatFloat(clip.StartSeconds, 'f', 3, 64),
+		"-t", strconv.FormatFloat(duration, 'f', 3, 64),
+		"-i", sourcePath,
+		"-map", "0:a:0",
+		"-vn", "-sn", "-dn",
+		"-c:a", "pcm_s16le",
+		"-ac", "1",
+		"-ar", "16000",
+		out,
+	}
+	if _, err := w.runner.Run(ctx, cfg.FFmpegPath, args...); err != nil {
+		return "", fmt.Errorf("extract source audio for xai captions on clip %s: %w", clip.ID, err)
+	}
+	return out, nil
+}
+
+// burnClipCaptions transcribes transcriptionPath with the configured caption backend and burns the resulting
 // karaoke captions into a second copy, <clipID>_captioned.mp4, next to
 // clipPath. It returns the captioned file's path on success. If the
 // transcript has no words, it returns ("", warning, nil) so the caller
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
 // explicitly requested and a transcription backend is configured.
-func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath string, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
-	cues, err := w.transcribe(ctx, clipPath, workDir, language)
+func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
+	cues, err := w.transcribe(ctx, transcriptionPath, workDir, language)
 	if err != nil {
 		if strings.Contains(err.Error(), "no words") {
 			return "", fmt.Sprintf("clip %s: transcription produced no words, publishing without captions", clipID), nil

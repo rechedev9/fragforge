@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -205,12 +206,15 @@ func newReadyStreamJobWithCaptions(t *testing.T, store *fakeStorage, enabled boo
 func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	plan.Clips[0].StartSeconds = 1.25
+	plan.Clips[0].EndSeconds = 3.25
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := newFakeStreamRepo(streamclips.Job{
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
 	})
 
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -226,13 +230,14 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	}}
 
 	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
-		WorkDir:          t.TempDir(),
-		FFmpegPath:       "ffmpeg",
-		WhisperPath:      "whisper-cli",
-		WhisperModelPath: "model.bin",
+		WorkDir:    t.TempDir(),
+		FFmpegPath: "ffmpeg",
+		XAIAPIKey:  "xai_test",
 	})
 	w.runner = runner
-	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+	var transcriptionPath string
+	w.transcribe = func(_ context.Context, mediaPath, _, _ string) ([]captions.WordCue, error) {
+		transcriptionPath = mediaPath
 		return []captions.WordCue{
 			{Word: "gg", StartSeconds: 0.75, EndSeconds: 1},
 			{Word: "nice", StartSeconds: 0, EndSeconds: 0.5},
@@ -247,10 +252,32 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 		t.Fatalf("HandleRenderStreamClip error = %v", err)
 	}
 
-	if len(runner.calls) != 2 {
-		t.Fatalf("runner calls = %d, want 2 (render + caption burn)", len(runner.calls))
+	if len(runner.calls) != 3 {
+		t.Fatalf("runner calls = %d, want 3 (render + source audio extraction + caption burn)", len(runner.calls))
 	}
-	burnArgs := runner.calls[1].args
+	extractArgs := runner.calls[1].args
+	if got, want := argValue(extractArgs, "-ss"), "1.250"; got != want {
+		t.Fatalf("caption audio -ss = %q, want %q", got, want)
+	}
+	if got, want := argValue(extractArgs, "-t"), "2.000"; got != want {
+		t.Fatalf("caption audio -t = %q, want %q", got, want)
+	}
+	if got, want := argValue(extractArgs, "-map"), "0:a:0"; got != want {
+		t.Fatalf("caption audio -map = %q, want %q", got, want)
+	}
+	if got, want := argValue(extractArgs, "-c:a"), "pcm_s16le"; got != want {
+		t.Fatalf("caption audio codec = %q, want %q", got, want)
+	}
+	if got, want := argValue(extractArgs, "-ac"), "1"; got != want {
+		t.Fatalf("caption audio channels = %q, want %q", got, want)
+	}
+	if got, want := argValue(extractArgs, "-ar"), "16000"; got != want {
+		t.Fatalf("caption audio sample rate = %q, want %q", got, want)
+	}
+	if !strings.HasSuffix(transcriptionPath, "clip-001.wav") {
+		t.Fatalf("transcription path = %q, want original-range WAV", transcriptionPath)
+	}
+	burnArgs := runner.calls[2].args
 	if got := argValue(burnArgs, "-vf"); !strings.HasPrefix(got, "ass=") || !strings.Contains(got, ":fontsdir='") {
 		t.Fatalf("caption burn -vf = %q, want an ass= filter with fontsdir", got)
 	}
@@ -286,6 +313,64 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	}
 	if !strings.Contains(string(store.files[resultKey]), `clip-001_captioned.mp4`) {
 		t.Fatalf("render result does not reference captioned clip: %s", store.files[resultKey])
+	}
+}
+
+func TestStreamRenderWorkerPublishesUncaptionedWhenXAISourceHasNoAudio(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		WorkDir:    t.TempDir(),
+		FFmpegPath: "ffmpeg",
+		XAIAPIKey:  "xai_test",
+	})
+	w.runner = runner
+	transcribeCalled := false
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		transcribeCalled = true
+		return nil, errors.New("unexpected transcription")
+	}
+
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+	if transcribeCalled {
+		t.Fatal("xai transcription ran for a source with no audio")
+	}
+	if got, want := len(runner.calls), 1; got != want {
+		t.Fatalf("runner calls = %d, want %d render call", got, want)
+	}
+	stateKey, err := streamclips.RenderStateKey(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(store.files[stateKey]), "source has no audio") {
+		t.Fatalf("render state missing no-audio warning: %s", store.files[stateKey])
+	}
+	wantKey, err := streamclips.RenderVideoKey(id, streamclips.VariantStreamer4060, "clip-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.files[wantKey]; !ok {
+		t.Fatalf("storage missing uncaptioned video at %s", wantKey)
 	}
 }
 

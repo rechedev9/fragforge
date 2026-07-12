@@ -1497,6 +1497,38 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	}
 }
 
+func TestStartRenderVariantRejectsWhileGuidedGenerateIsActive(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue)
+	if err := h.writeGenerateIntent(j.ID, renderplan.GenerateIntent{
+		Variant:     editor.PresetViral60Clean,
+		Edit:        renderplan.DefaultEditRequest(),
+		ActiveRunID: uuid.New(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0 while guided generate is active", len(queue.enqueued))
+	}
+	if _, ok := store.puts[mustRenderVariantStatusKey(j.ID, editor.PresetViral60Clean)]; ok {
+		t.Fatal("manual render conflict published a queued render state")
+	}
+}
+
 func TestStartRenderVariantPreservesReadyStateWhenTaskIsDuplicate(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()

@@ -205,7 +205,7 @@ func TestInlineQueueDoesNotRetryAfterParentCancellation(t *testing.T) {
 		task:   asynq.NewTask(tasktypes.TypeParseDemo, nil),
 		policy: inlineTaskPolicy{maxRetries: 1},
 	}
-	err, parentCanceled := queue.handle(ctx, queued, func(context.Context, *asynq.Task) error {
+	err, handlerStarted := queue.handle(ctx, queued, func(context.Context, *asynq.Task) error {
 		calls++
 		cancel()
 		return errors.New("parse interrupted")
@@ -213,8 +213,8 @@ func TestInlineQueueDoesNotRetryAfterParentCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("handle() error = nil")
 	}
-	if !parentCanceled {
-		t.Fatal("handle() parentCanceled = false, want true")
+	if !handlerStarted {
+		t.Fatal("handle() handlerStarted = false, want true")
 	}
 	if calls != 1 {
 		t.Fatalf("handler calls = %d, want 1", calls)
@@ -861,7 +861,7 @@ func TestInlineQueueCloseReleasesDiscardedUniqueLeases(t *testing.T) {
 	queue.Shutdown(shutdownCtx)
 }
 
-func TestInlineQueueCloseCompensatesDiscardedTransitionBeforeUniqueLeaseRelease(t *testing.T) {
+func TestInlineQueueCloseCompensatesOutsideUniqueLockBeforeLeaseRelease(t *testing.T) {
 	releaseActive := make(chan struct{})
 	activeStarted := make(chan struct{}, 1)
 	queue := newInlineQueue(map[string]taskHandler{
@@ -879,15 +879,18 @@ func TestInlineQueueCloseCompensatesDiscardedTransitionBeforeUniqueLeaseRelease(
 	<-activeStarted
 
 	var decisions []error
+	discardRanOutsideUniqueLock := false
 	leasePresentDuringDiscard := false
 	_, err := queue.EnqueueWithTransition(
 		asynq.NewTask("render", []byte("pending")),
 		func(decision error) error {
 			decisions = append(decisions, decision)
 			if errors.Is(decision, errInlineQueueDiscarded) {
-				// closePending owns uniqueMu while transitions run, so this
-				// read verifies compensation precedes lease release.
-				leasePresentDuringDiscard = len(queue.uniqueLocks) == 1
+				discardRanOutsideUniqueLock = queue.uniqueMu.TryLock()
+				if discardRanOutsideUniqueLock {
+					leasePresentDuringDiscard = len(queue.uniqueLocks) == 1
+					queue.uniqueMu.Unlock()
+				}
 			}
 			return nil
 		},
@@ -907,6 +910,9 @@ func TestInlineQueueCloseCompensatesDiscardedTransitionBeforeUniqueLeaseRelease(
 	if decisions[1] != errInlineQueueDiscarded {
 		t.Fatalf("discard transition decision = %v, want %v", decisions[1], errInlineQueueDiscarded)
 	}
+	if !discardRanOutsideUniqueLock {
+		t.Fatal("discard transition ran while unique lock was held")
+	}
 	if !leasePresentDuringDiscard {
 		t.Fatal("discard transition ran after unique lease release")
 	}
@@ -920,19 +926,239 @@ func TestInlineQueueCloseCompensatesDiscardedTransitionBeforeUniqueLeaseRelease(
 	queue.Shutdown(shutdownCtx)
 }
 
+func TestInlineQueueConcurrentCloseWaitsForDiscardCompensation(t *testing.T) {
+	releaseActive := make(chan struct{})
+	activeStarted := make(chan struct{}, 1)
+	queue := newInlineQueue(map[string]taskHandler{
+		"render": func(context.Context, *asynq.Task) error {
+			activeStarted <- struct{}{}
+			<-releaseActive
+			return nil
+		},
+	}, 1)
+	queue.Start(context.Background())
+
+	if _, err := queue.Enqueue(asynq.NewTask("render", []byte("active"))); err != nil {
+		t.Fatalf("active Enqueue() error = %v", err)
+	}
+	<-activeStarted
+
+	discardStarted := make(chan struct{})
+	releaseDiscard := make(chan struct{})
+	if _, err := queue.EnqueueWithTransition(
+		asynq.NewTask("render", []byte("pending")),
+		func(decision error) error {
+			if errors.Is(decision, errInlineQueueDiscarded) {
+				close(discardStarted)
+				<-releaseDiscard
+			}
+			return nil
+		},
+	); err != nil {
+		t.Fatalf("pending EnqueueWithTransition() error = %v", err)
+	}
+
+	firstDone := make(chan struct{})
+	go func() {
+		queue.closePending()
+		close(firstDone)
+	}()
+	<-discardStarted
+
+	secondDone := make(chan struct{})
+	go func() {
+		queue.closePending()
+		close(secondDone)
+	}()
+	select {
+	case <-secondDone:
+		close(releaseDiscard)
+		close(releaseActive)
+		t.Fatal("concurrent close returned before discard compensation finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseDiscard)
+	for name, done := range map[string]<-chan struct{}{
+		"first close":  firstDone,
+		"second close": secondDone,
+	} {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			close(releaseActive)
+			t.Fatalf("%s did not finish", name)
+		}
+	}
+
+	close(releaseActive)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	queue.Shutdown(shutdownCtx)
+}
+
+func TestInlineQueueShutdownBoundsDiscardCompensation(t *testing.T) {
+	releaseActive := make(chan struct{})
+	activeStarted := make(chan struct{}, 1)
+	queue := newInlineQueue(map[string]taskHandler{
+		"render": func(context.Context, *asynq.Task) error {
+			activeStarted <- struct{}{}
+			<-releaseActive
+			return nil
+		},
+	}, 1)
+	queue.Start(context.Background())
+
+	if _, err := queue.Enqueue(asynq.NewTask("render", []byte("active"))); err != nil {
+		t.Fatalf("active Enqueue() error = %v", err)
+	}
+	<-activeStarted
+
+	discardStarted := make(chan struct{})
+	releaseDiscard := make(chan struct{})
+	if _, err := queue.EnqueueWithTransition(
+		asynq.NewTask("render", []byte("pending")),
+		func(decision error) error {
+			if errors.Is(decision, errInlineQueueDiscarded) {
+				close(discardStarted)
+				<-releaseDiscard
+			}
+			return nil
+		},
+		asynq.Unique(time.Minute),
+	); err != nil {
+		t.Fatalf("pending EnqueueWithTransition() error = %v", err)
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	started := time.Now()
+	err := queue.Shutdown(shutdownCtx)
+	shutdownCancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Shutdown() error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Shutdown() elapsed = %s, want bounded by context", elapsed)
+	}
+	select {
+	case <-discardStarted:
+	default:
+		t.Fatal("discard transition did not start")
+	}
+	queue.uniqueMu.Lock()
+	remainingLocks := len(queue.uniqueLocks)
+	queue.uniqueMu.Unlock()
+	if remainingLocks != 0 {
+		t.Fatalf("unique locks after timed-out shutdown = %d, want 0", remainingLocks)
+	}
+
+	close(releaseDiscard)
+	close(releaseActive)
+	done := make(chan struct{})
+	go func() {
+		queue.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("workers did not stop after test releases")
+	}
+}
+
+func TestInlineQueueShutdownHonorsCallerDeadlineAfterCancellationStartsClose(t *testing.T) {
+	releaseActive := make(chan struct{})
+	activeStarted := make(chan struct{}, 1)
+	queue := newInlineQueue(map[string]taskHandler{
+		"render": func(context.Context, *asynq.Task) error {
+			activeStarted <- struct{}{}
+			<-releaseActive
+			return nil
+		},
+	}, 1)
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	queue.Start(workerCtx)
+
+	if _, err := queue.Enqueue(asynq.NewTask("render", []byte("active"))); err != nil {
+		t.Fatalf("active Enqueue() error = %v", err)
+	}
+	<-activeStarted
+
+	discardStarted := make(chan struct{})
+	releaseDiscard := make(chan struct{})
+	if _, err := queue.EnqueueWithTransition(
+		asynq.NewTask("render", []byte("pending")),
+		func(decision error) error {
+			if errors.Is(decision, errInlineQueueDiscarded) {
+				close(discardStarted)
+				<-releaseDiscard
+			}
+			return nil
+		},
+	); err != nil {
+		t.Fatalf("pending EnqueueWithTransition() error = %v", err)
+	}
+
+	cancelWorkers()
+	select {
+	case <-discardStarted:
+	case <-time.After(time.Second):
+		close(releaseActive)
+		t.Fatal("cancellation did not start discard compensation")
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	started := time.Now()
+	err := queue.Shutdown(shutdownCtx)
+	shutdownCancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		close(releaseDiscard)
+		close(releaseActive)
+		t.Fatalf("Shutdown() error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		close(releaseDiscard)
+		close(releaseActive)
+		t.Fatalf("Shutdown() elapsed = %s, want bounded by caller context", elapsed)
+	}
+
+	close(releaseDiscard)
+	close(releaseActive)
+	select {
+	case <-queue.closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation-owned close did not finish after test release")
+	}
+	done := make(chan struct{})
+	go func() {
+		queue.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("workers did not stop after test releases")
+	}
+}
+
 func TestInlineQueueCompensatesPoppedTaskCanceledBeforeFirstAttempt(t *testing.T) {
 	queue := newInlineQueue(nil, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	var decisions []error
+	discardRanOutsideUniqueLock := false
 	leasePresentDuringDiscard := false
 	queued := inlineTask{
 		task: asynq.NewTask("render", []byte("popped")),
 		id:   "inline-popped",
 		transition: func(decision error) error {
 			decisions = append(decisions, decision)
-			leasePresentDuringDiscard = len(queue.uniqueLocks) == 1
+			discardRanOutsideUniqueLock = queue.uniqueMu.TryLock()
+			if discardRanOutsideUniqueLock {
+				leasePresentDuringDiscard = len(queue.uniqueLocks) == 1
+				queue.uniqueMu.Unlock()
+			}
 			return nil
 		},
 		unique: true,
@@ -961,11 +1187,58 @@ func TestInlineQueueCompensatesPoppedTaskCanceledBeforeFirstAttempt(t *testing.T
 	if len(decisions) != 1 || decisions[0] != errInlineQueueDiscarded {
 		t.Fatalf("transition decisions = %v, want [%v]", decisions, errInlineQueueDiscarded)
 	}
+	if !discardRanOutsideUniqueLock {
+		t.Fatal("discard transition ran while unique lock was held")
+	}
 	if !leasePresentDuringDiscard {
 		t.Fatal("discard transition ran after unique lease release")
 	}
 	if got := len(queue.uniqueLocks); got != 0 {
 		t.Fatalf("unique locks after compensation = %d, want 0", got)
+	}
+}
+
+func TestInlineQueueDoesNotCompensatePoppedTaskCanceledAfterHandlerStarts(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	wantErr := errors.New("render interrupted")
+	transitionCalls := 0
+	queued := inlineTask{
+		task: asynq.NewTask("render", []byte("popped")),
+		id:   "inline-popped",
+		transition: func(error) error {
+			transitionCalls++
+			return nil
+		},
+		unique: true,
+		uniqueKey: inlineUniqueKey{
+			queue:       inlineDefaultQueue,
+			taskType:    "render",
+			payloadHash: sha256.Sum256([]byte("popped")),
+		},
+	}
+	queue.uniqueLocks[queued.uniqueKey] = inlineUniqueLock{
+		taskID:    queued.id,
+		expiresAt: time.Now().Add(time.Minute),
+	}
+
+	handlerCalls := 0
+	err := queue.process(ctx, queued, func(context.Context, *asynq.Task) error {
+		handlerCalls++
+		cancel()
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("process() error = %v, want %v", err, wantErr)
+	}
+	if handlerCalls != 1 {
+		t.Fatalf("handler calls = %d, want 1", handlerCalls)
+	}
+	if transitionCalls != 0 {
+		t.Fatalf("discard transition calls = %d, want 0", transitionCalls)
+	}
+	if got := len(queue.uniqueLocks); got != 0 {
+		t.Fatalf("unique locks after handler failure = %d, want 0", got)
 	}
 }
 

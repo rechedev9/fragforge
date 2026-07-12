@@ -24,6 +24,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/generateintent"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/moments"
 	"github.com/rechedev9/fragforge/internal/recording"
@@ -41,6 +42,8 @@ const (
 	maxJSONBodyBytes   = 1 << 20              // JSON control documents are small
 	renderUniqueTTL    = 24 * time.Hour
 )
+
+var errGenerateRenderActive = errors.New("a render is already active for this job")
 
 // JobRepository is the subset of *job.Repository used by handlers.
 type JobRepository interface {
@@ -61,7 +64,9 @@ type StreamJobRepository interface {
 }
 
 // Enqueuer is the desktop queue contract used by handlers. A transition runs
-// inside the queue's admission boundary before accepted work becomes visible.
+// inside the queue's admission boundary before accepted work becomes visible;
+// accepted pending work receives a later non-nil transition if shutdown
+// discards it before a handler takes ownership.
 type Enqueuer interface {
 	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
 	EnqueueWithTransition(*asynq.Task, func(error) error, ...asynq.Option) (*asynq.TaskInfo, error)
@@ -72,6 +77,7 @@ type Handlers struct {
 	repo            JobRepository
 	streamRepo      StreamJobRepository
 	storage         storage.Storage
+	generateIntents *generateintent.Store
 	queue           Enqueuer
 	mutationToken   string
 	requireReadAuth bool
@@ -119,6 +125,15 @@ func WithStreamProber(prober streamclips.Prober) Option {
 	}
 }
 
+// WithGenerateIntentStore shares guided-generate synchronization with the
+// record worker. Desktop startup supplies one store to both owners so an old
+// completion cannot race with accepting a newer run.
+func WithGenerateIntentStore(store *generateintent.Store) Option {
+	return func(h *Handlers) {
+		h.generateIntents = store
+	}
+}
+
 // WithCapabilities records which media workers are enabled and the tool paths
 // they use, so GET /api/capabilities can report readiness and the record/
 // generate handlers can reject a capture attempt with a clear 409 instead of
@@ -131,7 +146,12 @@ func WithCapabilities(c Capabilities) Option {
 
 // NewHandlers constructs an HTTP handler set.
 func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts ...Option) *Handlers {
-	h := &Handlers{repo: repo, storage: store, queue: queue}
+	h := &Handlers{
+		repo:            repo,
+		storage:         store,
+		generateIntents: generateintent.New(store),
+		queue:           queue,
+	}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -738,7 +758,9 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 	_, err = h.queue.EnqueueWithTransition(recordTask, func(decision error) error {
 		switch {
 		case decision == nil:
-			if err := h.writeGenerateIntent(j.ID, intent); err != nil {
+			if err := h.generateIntents.Begin(j.ID, intent, func() error {
+				return h.requireGenerateRenderIdle(j.ID)
+			}); err != nil {
 				return err
 			}
 			accepted = true
@@ -754,10 +776,10 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 			return nil
 		default:
 			if accepted {
-				return errors.Join(
-					h.persistJobQueueDecision(j.ID, "generate record", decision),
-					h.completeGenerateIntent(j.ID, intent.ActiveRunID),
-				)
+				_, err := h.generateIntents.Finish(j.ID, intent.ActiveRunID, func() error {
+					return h.persistJobQueueDecision(j.ID, "generate record", decision)
+				})
+				return err
 			}
 			return nil
 		}
@@ -774,6 +796,10 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(err, generateintent.ErrActiveRun) || errors.Is(err, errGenerateRenderActive) {
+			writeError(w, http.StatusConflict, "job already has active generate or render work")
+			return
+		}
 		internalError(w, "enqueue record task", err)
 		return
 	}
@@ -784,40 +810,29 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handlers) writeGenerateIntent(id uuid.UUID, intent renderplan.GenerateIntent) error {
-	b, err := json.MarshalIndent(intent, "", "  ")
-	if err != nil {
-		return err
+func (h *Handlers) requireGenerateRenderIdle(id uuid.UUID) error {
+	for _, loadout := range renderplan.LoadoutCatalog() {
+		state, ok, err := h.readRenderVariantState(id, loadout.Variant)
+		if err != nil {
+			return fmt.Errorf("read %s render state: %w", loadout.Variant, err)
+		}
+		if ok && (state.Status == renderplan.RenderVariantStatusQueued || state.Status == renderplan.RenderVariantStatusRendering) {
+			return fmt.Errorf("%w: %s is %s", errGenerateRenderActive, loadout.Variant, state.Status)
+		}
 	}
-	return h.storage.Put(artifacts.GenerateIntentKey(id), bytes.NewReader(b))
+	return nil
+}
+
+func (h *Handlers) writeGenerateIntent(id uuid.UUID, intent renderplan.GenerateIntent) error {
+	return h.generateIntents.Write(id, intent)
 }
 
 func (h *Handlers) readGenerateIntent(id uuid.UUID) (renderplan.GenerateIntent, bool, error) {
-	rc, err := h.storage.Open(artifacts.GenerateIntentKey(id))
-	if err != nil {
-		if storage.IsNotExist(err) {
-			return renderplan.GenerateIntent{}, false, nil
-		}
-		return renderplan.GenerateIntent{}, false, err
-	}
-	defer rc.Close()
-	var intent renderplan.GenerateIntent
-	if err := json.NewDecoder(rc).Decode(&intent); err != nil {
-		return renderplan.GenerateIntent{}, false, fmt.Errorf("decode generate intent: %w", err)
-	}
-	return intent, true, nil
+	return h.generateIntents.Read(id)
 }
 
 func (h *Handlers) completeGenerateIntent(id, runID uuid.UUID) error {
-	if runID == uuid.Nil {
-		return nil
-	}
-	intent, ok, err := h.readGenerateIntent(id)
-	if err != nil || !ok || intent.ActiveRunID != runID {
-		return err
-	}
-	intent.ActiveRunID = uuid.Nil
-	return h.writeGenerateIntent(id, intent)
+	return h.generateIntents.Complete(id, runID)
 }
 
 // StartComposition handles POST /api/jobs/{id}/compose.
@@ -908,7 +923,9 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 	_, err = h.queue.EnqueueWithTransition(task, func(decision error) error {
 		switch {
 		case decision == nil:
-			return h.writeRenderVariantState(state)
+			return h.generateIntents.WhileIdle(j.ID, func() error {
+				return h.writeRenderVariantState(state)
+			})
 		case errors.Is(decision, asynq.ErrDuplicateTask):
 			existing, ok, readErr := h.readRenderVariantState(j.ID, variant)
 			if readErr != nil {
@@ -942,6 +959,10 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 				"status_key": mustRenderVariantStatusKey(j.ID, variant),
 				"duplicate":  true,
 			})
+			return
+		}
+		if errors.Is(err, generateintent.ErrActiveRun) {
+			writeError(w, http.StatusConflict, "guided generation is active for this job")
 			return
 		}
 		internalError(w, "enqueue render task", err)

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rechedev9/fragforge/internal/generateintent"
 	"github.com/rechedev9/fragforge/internal/httpapi"
 	"github.com/rechedev9/fragforge/internal/obs"
 	"github.com/rechedev9/fragforge/internal/storage"
@@ -23,6 +24,8 @@ type orchestratorStreamJobRepository interface {
 	httpapi.StreamJobRepository
 	streamInterruptSweeper
 }
+
+const gracefulShutdownTimeout = 10 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -61,6 +64,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("storage: %w", err)
 	}
+	generateIntents := generateintent.New(store)
 
 	var repo orchestratorJobRepository
 	var streamRepo orchestratorStreamJobRepository
@@ -90,30 +94,19 @@ func run() error {
 	// Reconcile durable state whose process-local work vanished with the previous
 	// desktop process. Run every sweep before serving traffic so clients never
 	// observe an active state with no queue owner capable of advancing it.
-	if n, err := sweepInterruptedJobs(ctx, repo, obs.Default()); err != nil {
-		log.Printf("startup: sweep interrupted jobs failed: %v", err)
-	} else if n > 0 {
-		log.Printf("startup: marked %d interrupted job(s) as failed", n)
+	reconciled, err := reconcileInterruptedWork(ctx, repo, streamRepo, store, obs.Default())
+	if err != nil {
+		return fmt.Errorf("startup reconciliation: %w", err)
 	}
-	if n, err := sweepInterruptedDemoRenderStates(ctx, repo, store); err != nil {
-		log.Printf("startup: sweep interrupted demo renders failed: %v", err)
-	} else if n > 0 {
-		log.Printf("startup: marked %d interrupted demo render(s) as failed", n)
-	}
-	if n, err := sweepInterruptedGenerateRuns(ctx, repo, store, obs.Default()); err != nil {
-		log.Printf("startup: sweep interrupted generate runs failed: %v", err)
-	} else if n > 0 {
-		log.Printf("startup: marked %d interrupted generate request(s) as failed", n)
-	}
-	if n, err := sweepInterruptedStreamJobs(ctx, streamRepo, obs.Default()); err != nil {
-		log.Printf("startup: sweep interrupted stream jobs failed: %v", err)
-	} else if n > 0 {
-		log.Printf("startup: marked %d interrupted stream job(s) as failed", n)
-	}
-	if n, err := sweepInterruptedStreamRenderStates(ctx, streamRepo, store); err != nil {
-		log.Printf("startup: sweep interrupted stream renders failed: %v", err)
-	} else if n > 0 {
-		log.Printf("startup: marked %d interrupted stream render(s) as failed", n)
+	if reconciled.total() > 0 {
+		log.Printf(
+			"startup: reconciled interrupted work (demo_jobs=%d demo_renders=%d generate_runs=%d stream_jobs=%d stream_renders=%d)",
+			reconciled.DemoJobs,
+			reconciled.DemoRenders,
+			reconciled.GenerateRuns,
+			reconciled.StreamJobs,
+			reconciled.StreamRenderStates,
+		)
 	}
 
 	taskHandlers := map[string]taskHandler{}
@@ -195,6 +188,7 @@ func run() error {
 	// Wire the chaining queue before processing starts so the record worker
 	// never handles a task with a half-set enqueuer.
 	if recordWorker != nil {
+		recordWorker.UseGenerateIntentStore(generateIntents)
 		recordWorker.UseEnqueuer(queue)
 	}
 	// Defense-in-depth gating only kicks in on an exposed (non-loopback) bind;
@@ -215,6 +209,7 @@ func run() error {
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
 		httpapi.WithMusicDir(cfg.MusicDir),
 		httpapi.WithCapabilities(cfg.captureCapabilities(captureSource)),
+		httpapi.WithGenerateIntentStore(generateIntents),
 	)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -242,14 +237,21 @@ func run() error {
 		log.Print("shutdown: received signal, draining")
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	// Stop accepting mutations before canceling workers. Any request already in
 	// flight can finish its atomic admission while the queue is still live;
 	// shutdown then compensates accepted work that remains pending.
-	_ = httpRuntime.Shutdown(shutdownCtx)
+	httpShutdownCtx, cancelHTTPShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	if err := httpRuntime.Shutdown(httpShutdownCtx); err != nil {
+		log.Printf("shutdown: HTTP drain failed: %v", err)
+	}
+	cancelHTTPShutdown()
+
 	cancelWorkers()
-	inline.Shutdown(shutdownCtx)
+	queueShutdownCtx, cancelQueueShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	if err := inline.Shutdown(queueShutdownCtx); err != nil {
+		log.Printf("shutdown: queue drain failed: %v", err)
+	}
+	cancelQueueShutdown()
 	log.Print("shutdown: done")
 	if serveErr != nil {
 		return fmt.Errorf("http: %w", serveErr)

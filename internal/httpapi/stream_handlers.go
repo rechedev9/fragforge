@@ -28,7 +28,6 @@ const (
 	maxStreamVideoBytes     = 8 << 30
 	maxStreamMultipartBytes = maxStreamVideoBytes + 2<<20
 	streamRenderUniqueTTL   = 24 * time.Hour
-	streamAcquireUniqueTTL  = 24 * time.Hour
 	defaultStreamListLimit  = 50
 )
 
@@ -183,11 +182,9 @@ func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request
 	}
 	if _, err := h.queue.EnqueueWithTransition(task, func(decision error) error {
 		return h.persistStreamAcquireQueueDecision(j.ID, decision)
-	}, asynq.MaxRetry(0), asynq.Unique(streamAcquireUniqueTTL)); err != nil {
-		if !errors.Is(err, asynq.ErrDuplicateTask) {
-			internalError(w, "enqueue stream acquire task", err)
-			return
-		}
+	}, asynq.MaxRetry(0)); err != nil {
+		internalError(w, "enqueue stream acquire task", err)
+		return
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -200,7 +197,7 @@ func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request
 // persistStreamAcquireQueueDecision prevents URL-backed jobs from remaining
 // "acquiring" after the process-local queue rejects or discards their task.
 func (h *Handlers) persistStreamAcquireQueueDecision(id uuid.UUID, decision error) error {
-	if decision == nil || errors.Is(decision, asynq.ErrDuplicateTask) {
+	if decision == nil {
 		return nil
 	}
 	markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)

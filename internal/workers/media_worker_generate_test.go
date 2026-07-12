@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,45 @@ type fakeEnqueuer struct {
 type failingRecordGetRepo struct {
 	*fakeRepo
 	err error
+}
+
+type failingRecordGetAndStatusRepo struct {
+	*failingRecordGetRepo
+	statusErr error
+}
+
+func (r *failingRecordGetAndStatusRepo) UpdateStatus(context.Context, uuid.UUID, job.Status, string) error {
+	return r.statusErr
+}
+
+type failOncePutStorage struct {
+	*fakeStorage
+	key   string
+	err   error
+	armed bool
+}
+
+type failNPutStorage struct {
+	*fakeStorage
+	key       string
+	err       error
+	remaining int
+}
+
+func (s *failNPutStorage) Put(key string, r io.Reader) error {
+	if key == s.key && s.remaining > 0 {
+		s.remaining--
+		return s.err
+	}
+	return s.fakeStorage.Put(key, r)
+}
+
+func (s *failOncePutStorage) Put(key string, r io.Reader) error {
+	if key == s.key && s.armed {
+		s.armed = false
+		return s.err
+	}
+	return s.fakeStorage.Put(key, r)
 }
 
 func (r *failingRecordGetRepo) Get(context.Context, uuid.UUID) (job.Job, error) {
@@ -209,6 +249,39 @@ func TestRecordWorkerMarksGuidedGenerateFailedWhenJobLoadFails(t *testing.T) {
 	}
 }
 
+func TestRecordWorkerKeepsRecoveryMarkerWhenTerminalFailureDoesNotPersist(t *testing.T) {
+	store := newFakeStorage()
+	base, id := parsedRecordJob(store)
+	loadErr := errors.New("sqlite read failed")
+	statusErr := errors.New("sqlite write failed")
+	repo := &failingRecordGetAndStatusRepo{
+		failingRecordGetRepo: &failingRecordGetRepo{fakeRepo: base, err: loadErr},
+		statusErr:            statusErr,
+	}
+	w := NewRecordWorker(repo, store, RecordWorkerConfig{})
+	intent := renderplan.GenerateIntent{
+		Variant:     editor.PresetViral60Clean,
+		Edit:        renderplan.DefaultEditRequest(),
+		ActiveRunID: uuid.New(),
+	}
+	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
+
+	err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent))
+	if !errors.Is(err, loadErr) {
+		t.Fatalf("HandleRecordDemo error = %v, want %v", err, loadErr)
+	}
+	var current renderplan.GenerateIntent
+	if err := json.Unmarshal(store.files[artifacts.GenerateIntentKey(id)], &current); err != nil {
+		t.Fatalf("unmarshal current intent: %v", err)
+	}
+	if current.ActiveRunID != intent.ActiveRunID {
+		t.Fatalf("ActiveRunID = %s, want recovery marker %s", current.ActiveRunID, intent.ActiveRunID)
+	}
+	if got := base.jobs[id].Status; got != job.StatusParsed {
+		t.Fatalf("job status = %s, want parsed after injected failure", got)
+	}
+}
+
 func TestRecordWorkerOlderCaptureDoesNotClearNewerActiveRun(t *testing.T) {
 	store := newFakeStorage()
 	repo, id := parsedRecordJob(store)
@@ -221,7 +294,8 @@ func TestRecordWorkerOlderCaptureDoesNotClearNewerActiveRun(t *testing.T) {
 	newIntent.ActiveRunID = uuid.New()
 	putJSON(t, store, artifacts.GenerateIntentKey(id), newIntent)
 	w := newRecordWorkerForTest(repo, store, t)
-	w.UseEnqueuer(&fakeEnqueuer{})
+	enqueuer := &fakeEnqueuer{}
+	w.UseEnqueuer(enqueuer)
 
 	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, oldIntent)); err != nil {
 		t.Fatalf("HandleRecordDemo error = %v", err)
@@ -232,6 +306,12 @@ func TestRecordWorkerOlderCaptureDoesNotClearNewerActiveRun(t *testing.T) {
 	}
 	if got.ActiveRunID != newIntent.ActiveRunID {
 		t.Fatalf("active run = %s, want newer %s preserved", got.ActiveRunID, newIntent.ActiveRunID)
+	}
+	if len(enqueuer.tasks) != 0 {
+		t.Fatalf("stale capture enqueued %d render task(s), want 0", len(enqueuer.tasks))
+	}
+	if _, ok := store.files[mustRenderVariantStatusKey(t, id, oldIntent.Variant)]; ok {
+		t.Fatal("stale capture overwrote the newer run's render state")
 	}
 }
 
@@ -275,6 +355,102 @@ func TestRecordWorkerMarksChainedRenderFailedWhenEnqueueFails(t *testing.T) {
 	}
 	if completed.ActiveRunID != uuid.Nil {
 		t.Fatalf("active run after rejected render admission = %s, want cleared", completed.ActiveRunID)
+	}
+}
+
+func TestRecordWorkerDoesNotStrandQueuedStateWhenAcceptedTransitionFails(t *testing.T) {
+	baseStore := newFakeStorage()
+	repo, id := parsedRecordJob(baseStore)
+	intent := renderplan.GenerateIntent{
+		Variant:     editor.PresetViral60Clean,
+		Edit:        renderplan.DefaultEditRequest(),
+		ActiveRunID: uuid.New(),
+	}
+	putJSON(t, baseStore, artifacts.GenerateIntentKey(id), intent)
+	writeErr := errors.New("intent completion write failed")
+	store := &failOncePutStorage{
+		fakeStorage: baseStore,
+		key:         artifacts.GenerateIntentKey(id),
+		err:         writeErr,
+		armed:       true,
+	}
+	w := NewRecordWorker(repo, store, RecordWorkerConfig{
+		WorkDir:      t.TempDir(),
+		RecorderPath: "zv-recorder",
+		HLAEPath:     "HLAE.exe",
+		CS2Path:      "cs2.exe",
+	})
+	w.runner = recordRunnerWithSegment(t)
+	enqueuer := &fakeEnqueuer{}
+	w.UseEnqueuer(enqueuer)
+
+	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent)); err != nil {
+		t.Fatalf("HandleRecordDemo error = %v", err)
+	}
+	if len(enqueuer.tasks) != 0 {
+		t.Fatalf("accepted tasks = %d, want transition failure to reject handoff", len(enqueuer.tasks))
+	}
+	raw := baseStore.files[mustRenderVariantStatusKey(t, id, intent.Variant)]
+	var state renderplan.RenderVariantState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("unmarshal render state: %v", err)
+	}
+	if state.Status != renderplan.RenderVariantStatusFailed {
+		t.Fatalf("render state status = %q, want failed", state.Status)
+	}
+	if !strings.Contains(state.Error, writeErr.Error()) {
+		t.Fatalf("render state error = %q, want %q", state.Error, writeErr)
+	}
+	var completed renderplan.GenerateIntent
+	if err := json.Unmarshal(baseStore.files[artifacts.GenerateIntentKey(id)], &completed); err != nil {
+		t.Fatalf("unmarshal completed intent: %v", err)
+	}
+	if completed.ActiveRunID != uuid.Nil {
+		t.Fatalf("active run after failed handoff = %s, want cleared", completed.ActiveRunID)
+	}
+}
+
+func TestRecordWorkerKeepsMarkerWhenQueuedAndFailedStateWritesBothFail(t *testing.T) {
+	baseStore := newFakeStorage()
+	repo, id := parsedRecordJob(baseStore)
+	intent := renderplan.GenerateIntent{
+		Variant:     editor.PresetViral60Clean,
+		Edit:        renderplan.DefaultEditRequest(),
+		ActiveRunID: uuid.New(),
+	}
+	putJSON(t, baseStore, artifacts.GenerateIntentKey(id), intent)
+	stateKey := mustRenderVariantStatusKey(t, id, intent.Variant)
+	store := &failNPutStorage{
+		fakeStorage: baseStore,
+		key:         stateKey,
+		err:         errors.New("render state storage unavailable"),
+		remaining:   2,
+	}
+	w := NewRecordWorker(repo, store, RecordWorkerConfig{
+		WorkDir:      t.TempDir(),
+		RecorderPath: "zv-recorder",
+		HLAEPath:     "HLAE.exe",
+		CS2Path:      "cs2.exe",
+	})
+	w.runner = recordRunnerWithSegment(t)
+	enqueuer := &fakeEnqueuer{}
+	w.UseEnqueuer(enqueuer)
+
+	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent)); err != nil {
+		t.Fatalf("HandleRecordDemo error = %v", err)
+	}
+	if len(enqueuer.tasks) != 0 {
+		t.Fatalf("accepted tasks = %d, want 0 after transition failure", len(enqueuer.tasks))
+	}
+	if _, ok := baseStore.files[stateKey]; ok {
+		t.Fatal("render state unexpectedly persisted despite two injected failures")
+	}
+	var current renderplan.GenerateIntent
+	if err := json.Unmarshal(baseStore.files[artifacts.GenerateIntentKey(id)], &current); err != nil {
+		t.Fatalf("unmarshal current intent: %v", err)
+	}
+	if current.ActiveRunID != intent.ActiveRunID {
+		t.Fatalf("ActiveRunID = %s, want recovery marker %s", current.ActiveRunID, intent.ActiveRunID)
 	}
 }
 
