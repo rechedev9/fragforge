@@ -20,7 +20,7 @@ export interface LaunchedProcess {
 export type ProcessLauncher = (
   executable: string,
   args: string[],
-  env: Record<string, string>,
+  env: NodeJS.ProcessEnv,
 ) => ProcessHandle;
 
 export type ProcessTerminator = (process: ProcessHandle) => void;
@@ -63,10 +63,20 @@ export class ProcessSession {
     this.terminateProcess = options.terminateProcess ?? terminateProcessTree;
   }
 
-  launch(label: string, executable: string, args: string[], env: Record<string, string>): LaunchedProcess {
+  launch(label: string, executable: string, args: string[], env: NodeJS.ProcessEnv): LaunchedProcess {
     if (this.stopping) throw new Error('cannot launch a process in a stopped session');
 
-    const handle = this.launchProcess(executable, args, env);
+    const childEnvironment: NodeJS.ProcessEnv = { ...process.env };
+    for (const [name, value] of Object.entries(env)) {
+      for (const inheritedName of Object.keys(childEnvironment)) {
+        const matches = process.platform === 'win32'
+          ? inheritedName.toLowerCase() === name.toLowerCase()
+          : inheritedName === name;
+        if (matches) delete childEnvironment[inheritedName];
+      }
+      if (value !== undefined) childEnvironment[name] = value;
+    }
+    const handle = this.launchProcess(executable, args, childEnvironment);
     this.processes.push({ label, handle });
     const tag = (chunk: Buffer): void => this.logLine(`[${label}] ${String(chunk)}`);
     handle.onStdout(tag);
@@ -129,10 +139,10 @@ export class ProcessSession {
 function launchNodeProcess(
   executable: string,
   args: string[],
-  env: Record<string, string>,
+  env: NodeJS.ProcessEnv,
 ): ProcessHandle {
   const child = spawn(executable, args, {
-    env: { ...process.env, ...env },
+    env,
     windowsHide: true,
   });
   return nodeProcessHandle(child);

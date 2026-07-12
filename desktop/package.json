@@ -1,6 +1,6 @@
 {
   "name": "fragforge-studio",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "private": true,
   "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
   "author": "FragForge",
@@ -9,10 +9,12 @@
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
-    "test:unit": "node --test \"src/**/*.test.ts\"",
+    "test:unit": "node --test \"src/**/*.test.ts\" \"scripts/**/*.test.mjs\"",
     "assemble": "node scripts/assemble.mjs",
+    "assemble:team": "node scripts/assemble.mjs --team-xai-key",
     "start": "npm run build && electron .",
-    "dist": "npm run build && npm run assemble && electron-builder --win nsis"
+    "dist": "node scripts/dist.mjs",
+    "dist:team": "node scripts/dist.mjs --team-xai-key"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -48,6 +50,10 @@
       {
         "from": "build-resources/music",
         "to": "music"
+      },
+      {
+        "from": "build-resources/team/xai-api-key",
+        "to": "team/xai-api-key"
       }
     ],
     "win": {

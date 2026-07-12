@@ -40,6 +40,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+	if err := clearXAIAPIKeyEnvironment(); err != nil {
+		return fmt.Errorf("config: clear xai credential from process environment: %w", err)
+	}
 	// Auto-detect HLAE/CS2/recorder/editor/ffmpeg on the host so capture and
 	// rendering work without the user setting env vars; explicit env still wins.
 	// Best-effort, never fatal.

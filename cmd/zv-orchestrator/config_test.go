@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestLoadConfigAllowsParserOnlyMode(t *testing.T) {
 	clearConfigEnv(t)
@@ -166,6 +170,32 @@ func TestLoadConfigXAIAPIKey(t *testing.T) {
 				t.Fatalf("xaiEnabled() = %v, want %v", got, want)
 			}
 		})
+	}
+}
+
+func TestClearXAIAPIKeyEnvironmentKeepsLoadedConfigOnlyInMemory(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ZV_DATABASE_URL", "memory")
+	t.Setenv("XAI_API_KEY", "xai-team-secret")
+	// On Unix this is a separate variable; on Windows it exercises the native
+	// case-insensitive environment. Either way, no casing variant may survive.
+	t.Setenv("xai_api_key", "lowercase-team-secret")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig error = %v", err)
+	}
+	if err := clearXAIAPIKeyEnvironment(); err != nil {
+		t.Fatalf("clearXAIAPIKeyEnvironment error = %v", err)
+	}
+	if cfg.XAIAPIKey == "" {
+		t.Fatal("XAIAPIKey is empty after load, want the credential retained in config memory")
+	}
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, xaiAPIKeyEnvironmentVariable) {
+			t.Fatalf("environment still contains %q after credential cleanup", name)
+		}
 	}
 }
 
