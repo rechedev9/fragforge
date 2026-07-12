@@ -8,7 +8,7 @@ import (
 )
 
 func TestValidateShortArtifactWarnsWhenTooLongForYouTubeShorts(t *testing.T) {
-	warnings := ValidateShortArtifact(recording.RecordingArtifact{
+	warnings := validateShortArtifact(recording.RecordingArtifact{
 		SegmentID:       "seg-long",
 		Path:            "short.mp4",
 		SizeBytes:       1,
@@ -17,14 +17,14 @@ func TestValidateShortArtifactWarnsWhenTooLongForYouTubeShorts(t *testing.T) {
 		Width:           1080,
 		Height:          1920,
 		FrameRate:       "60/1",
-	})
+	}, DefaultPreset().FPS)
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "want <= 180s for YouTube Shorts") {
 		t.Fatalf("warnings = %#v", warnings)
 	}
 }
 
 func TestValidateShortArtifactAcceptsUploadReadyShort(t *testing.T) {
-	warnings := ValidateShortArtifact(recording.RecordingArtifact{
+	warnings := validateShortArtifact(recording.RecordingArtifact{
 		SegmentID:       "seg-ok",
 		Path:            "short.mp4",
 		SizeBytes:       1,
@@ -33,14 +33,14 @@ func TestValidateShortArtifactAcceptsUploadReadyShort(t *testing.T) {
 		Width:           1080,
 		Height:          1920,
 		FrameRate:       "60/1",
-	})
+	}, DefaultPreset().FPS)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v", warnings)
 	}
 }
 
 func TestValidateShortArtifactAcceptsConfiguredFPS(t *testing.T) {
-	warnings := ValidateShortArtifactForFPS(recording.RecordingArtifact{
+	warnings := validateShortArtifact(recording.RecordingArtifact{
 		SegmentID:       "seg-ok",
 		Path:            "short.mp4",
 		SizeBytes:       1,

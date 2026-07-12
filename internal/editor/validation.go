@@ -12,11 +12,7 @@ import (
 
 const youtubeShortMaxSeconds = 180.0
 
-func ValidateShortArtifact(artifact recording.RecordingArtifact) []string {
-	return ValidateShortArtifactForFPS(artifact, DefaultPreset().FPS)
-}
-
-func ValidateShortArtifactForFPS(artifact recording.RecordingArtifact, fps int) []string {
+func validateShortArtifact(artifact recording.RecordingArtifact, fps int) []string {
 	// Every registered preset shares the same vertical output contract, so
 	// the resolution gate comes from the registry default entry.
 	preset := DefaultPreset()

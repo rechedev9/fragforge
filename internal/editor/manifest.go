@@ -13,14 +13,6 @@ import (
 	"github.com/rechedev9/fragforge/internal/rhythm"
 )
 
-func BuildManifest(result recording.RecordingResult, opts ManifestOptions) Manifest {
-	manifest, err := buildManifest(result, opts)
-	if err != nil {
-		manifest.Warnings = append(manifest.Warnings, err.Error())
-	}
-	return manifest
-}
-
 func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Manifest, error) {
 	clips, warnings, clipErr := composition.SegmentClipsFromRecording(result)
 	if clipErr != nil {
