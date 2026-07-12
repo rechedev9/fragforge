@@ -723,19 +723,32 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	portraitSafeKillfeed := preset.HUDMode == string(recording.HUDModeDeathnotices) && intent.Edit.Format == renderplan.FormatShort9x16
-	recordTask, err := tasks.NewRecordDemoTask(j.ID, preset.HUDMode, req.SegmentIDs, portraitSafeKillfeed)
+	recordTask, err := tasks.NewGenerateRecordDemoTask(j.ID, preset.HUDMode, req.SegmentIDs, portraitSafeKillfeed, intent)
 	if err != nil {
 		internalError(w, "build record task", err)
 		return
 	}
-	// Persist the intent before enqueuing so the worker always finds it, even if
-	// the capture finishes quickly. The job keeps its current status on enqueue
-	// failure so the client can retry once the queue recovers.
-	if err := h.writeGenerateIntent(j.ID, intent); err != nil {
-		internalError(w, "write generate intent", err)
-		return
-	}
-	if _, err := h.queue.Enqueue(recordTask, asynq.MaxRetry(0), asynq.Unique(renderUniqueTTL)); err != nil {
+	// The task header is the worker's immutable source of truth. The job-scoped
+	// artifact is the latest accepted choice shown by the workbench; duplicate
+	// and rejected admissions must not replace the active choice.
+	_, err = h.queue.EnqueueWithTransition(recordTask, func(decision error) error {
+		switch {
+		case decision == nil:
+			return h.writeGenerateIntent(j.ID, intent)
+		case errors.Is(decision, asynq.ErrDuplicateTask):
+			existing, ok, readErr := h.readGenerateIntent(j.ID)
+			if readErr != nil {
+				return readErr
+			}
+			if ok {
+				intent = existing
+			}
+			return nil
+		default:
+			return nil
+		}
+	}, asynq.MaxRetry(0), asynq.Unique(renderUniqueTTL))
+	if err != nil {
 		// A duplicate is success (see StartRecording): a re-drive must not flip a
 		// reel that is already capturing to failed.
 		if errors.Is(err, asynq.ErrDuplicateTask) {
@@ -763,6 +776,22 @@ func (h *Handlers) writeGenerateIntent(id uuid.UUID, intent renderplan.GenerateI
 		return err
 	}
 	return h.storage.Put(artifacts.GenerateIntentKey(id), bytes.NewReader(b))
+}
+
+func (h *Handlers) readGenerateIntent(id uuid.UUID) (renderplan.GenerateIntent, bool, error) {
+	rc, err := h.storage.Open(artifacts.GenerateIntentKey(id))
+	if err != nil {
+		if storage.IsNotExist(err) {
+			return renderplan.GenerateIntent{}, false, nil
+		}
+		return renderplan.GenerateIntent{}, false, err
+	}
+	defer rc.Close()
+	var intent renderplan.GenerateIntent
+	if err := json.NewDecoder(rc).Decode(&intent); err != nil {
+		return renderplan.GenerateIntent{}, false, fmt.Errorf("decode generate intent: %w", err)
+	}
+	return intent, true, nil
 }
 
 // StartComposition handles POST /api/jobs/{id}/compose.
@@ -850,11 +879,34 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "build render state", err)
 		return
 	}
-	if err := h.writeRenderVariantState(state); err != nil {
-		internalError(w, "write render state", err)
-		return
-	}
-	if _, err := h.queue.Enqueue(task, asynq.Unique(renderUniqueTTL)); err != nil {
+	_, err = h.queue.EnqueueWithTransition(task, func(decision error) error {
+		switch {
+		case decision == nil:
+			return h.writeRenderVariantState(state)
+		case errors.Is(decision, asynq.ErrDuplicateTask):
+			existing, ok, readErr := h.readRenderVariantState(j.ID, variant)
+			if readErr != nil {
+				return readErr
+			}
+			if ok {
+				state = *existing
+			}
+			return nil
+		default:
+			failedState, stateErr := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+				JobID:    j.ID,
+				Loadout:  loadout,
+				Status:   renderplan.RenderVariantStatusFailed,
+				Error:    "enqueue render task: " + decision.Error(),
+				Previous: previous,
+			})
+			if stateErr != nil {
+				return stateErr
+			}
+			return h.writeRenderVariantState(failedState)
+		}
+	}, asynq.Unique(renderUniqueTTL))
+	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			writeJSON(w, http.StatusAccepted, map[string]any{
 				"id":         j.ID,
@@ -865,18 +917,6 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 				"duplicate":  true,
 			})
 			return
-		}
-		failedState, stateErr := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
-			JobID:    j.ID,
-			Loadout:  loadout,
-			Status:   renderplan.RenderVariantStatusFailed,
-			Error:    "enqueue render task: " + err.Error(),
-			Previous: &state,
-		})
-		if stateErr == nil {
-			if writeErr := h.writeRenderVariantState(failedState); writeErr != nil {
-				log.Printf("httpapi: write failed render state for %s/%s: %v", j.ID, variant, writeErr)
-			}
 		}
 		internalError(w, "enqueue render task", err)
 		return

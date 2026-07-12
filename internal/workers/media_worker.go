@@ -268,6 +268,10 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
 	}
+	generateIntent, hasGenerateIntent, err := tasks.GenerateIntentFromTask(t)
+	if err != nil {
+		return fmt.Errorf("decode record task generate intent: %w", err)
+	}
 
 	j, err := w.repo.Get(ctx, payload.JobID)
 	if err != nil {
@@ -286,27 +290,18 @@ func (w *RecordWorker) HandleRecordDemo(ctx context.Context, t *asynq.Task) erro
 		return fmt.Errorf("mark recorded: %w", err)
 	}
 	logWorkerTransition(j.ID, tasks.TypeRecordDemo, job.StatusRecorded)
-	// A guided "generate" run leaves an intent behind; chaining the render here
-	// turns the user's single click into capture-then-render. A chaining failure
-	// must not fail the capture (it already succeeded), so it is logged, not
-	// returned: the manual render endpoint remains a fallback.
-	w.chainRender(j.ID)
+	// A guided generate task carries its own immutable render intent, so another
+	// accepted capture cannot change the treatment this capture chains. A
+	// chaining failure must not fail capture; manual render remains a fallback.
+	w.chainRender(j.ID, generateIntent, hasGenerateIntent)
 	return nil
 }
 
-// chainRender enqueues the render described by the job's generate intent, if
-// one exists and an enqueuer is wired. It is best effort: every failure is
-// logged and swallowed so a successful capture is never reported as failed.
-func (w *RecordWorker) chainRender(id uuid.UUID) {
-	if w.enqueuer == nil {
-		return
-	}
-	intent, ok, err := w.readGenerateIntent(id)
-	if err != nil {
-		logWorkerError(id, "read generate intent", err)
-		return
-	}
-	if !ok {
+// chainRender enqueues a generate task's render intent after capture. It is
+// best effort: every failure is logged and swallowed so successful capture is
+// never reported as failed.
+func (w *RecordWorker) chainRender(id uuid.UUID, intent renderplan.GenerateIntent, hasIntent bool) {
+	if w.enqueuer == nil || !hasIntent {
 		return
 	}
 	task, err := tasks.NewRenderVariantTask(id, intent.Variant, intent.MusicKey, intent.Edit)
@@ -332,22 +327,6 @@ func (w *RecordWorker) chainRender(id uuid.UUID) {
 		return
 	}
 	logWorkerTransition(id, tasks.TypeRenderVariant, job.StatusRecorded)
-}
-
-func (w *RecordWorker) readGenerateIntent(id uuid.UUID) (renderplan.GenerateIntent, bool, error) {
-	rc, err := w.storage.Open(artifacts.GenerateIntentKey(id))
-	if err != nil {
-		if storage.IsNotExist(err) {
-			return renderplan.GenerateIntent{}, false, nil
-		}
-		return renderplan.GenerateIntent{}, false, err
-	}
-	defer rc.Close()
-	var intent renderplan.GenerateIntent
-	if err := json.NewDecoder(rc).Decode(&intent); err != nil {
-		return renderplan.GenerateIntent{}, false, fmt.Errorf("decode generate intent: %w", err)
-	}
-	return intent, true, nil
 }
 
 func (w *RecordWorker) writeQueuedRenderState(id uuid.UUID, variant string) error {

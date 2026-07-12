@@ -516,6 +516,30 @@ func TestInlineQueueRejectsDuplicateUntilSuccessfulTaskFinishes(t *testing.T) {
 	}
 }
 
+func TestInlineQueueUniqueIdentityIgnoresTaskHeaders(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	queue := startTestInlineQueue(t, map[string]taskHandler{
+		tasktypes.TypeRecordDemo: func(context.Context, *asynq.Task) error {
+			close(started)
+			<-release
+			return nil
+		},
+	}, 1)
+	payload := []byte(`{"job_id":"same-capture"}`)
+	first := asynq.NewTaskWithHeaders(tasktypes.TypeRecordDemo, payload, map[string]string{"intent": "first"})
+	second := asynq.NewTaskWithHeaders(tasktypes.TypeRecordDemo, payload, map[string]string{"intent": "second"})
+
+	if _, err := queue.Enqueue(first, asynq.Unique(time.Minute)); err != nil {
+		t.Fatalf("first Enqueue() error = %v", err)
+	}
+	<-started
+	if _, err := queue.Enqueue(second, asynq.Unique(time.Minute)); !errors.Is(err, asynq.ErrDuplicateTask) {
+		t.Fatalf("header-only duplicate error = %v, want ErrDuplicateTask", err)
+	}
+	close(release)
+}
+
 func TestInlineQueueAllowsOnlyOneConcurrentUniqueEnqueue(t *testing.T) {
 	release := make(chan struct{})
 	queue := startTestInlineQueue(t, map[string]taskHandler{

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 
 	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/editor"
@@ -91,6 +93,101 @@ func TestStartGenerateEnqueuesRecordAndWritesIntent(t *testing.T) {
 	}
 	if intent != want {
 		t.Fatalf("intent = %#v, want %#v", intent, want)
+	}
+	taskIntent, ok, err := tasks.GenerateIntentFromTask(queue.enqueued[0])
+	if err != nil || !ok {
+		t.Fatalf("GenerateIntentFromTask = (%#v, %v, %v)", taskIntent, ok, err)
+	}
+	if taskIntent != want {
+		t.Fatalf("task intent = %#v, want %#v", taskIntent, want)
+	}
+}
+
+func TestStartGenerateDuplicatePreservesAcceptedIntent(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{err: asynq.ErrDuplicateTask}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+	existing := renderplan.GenerateIntent{
+		Variant:  editor.PresetCleanPOV60,
+		MusicKey: "first-track",
+		Edit:     renderplan.DefaultEditRequest(),
+	}
+	if err := h.writeGenerateIntent(j.ID, existing); err != nil {
+		t.Fatalf("writeGenerateIntent error = %v", err)
+	}
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"clean-pov-60","music":"second-track","edit":{"intro":true}}`)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), `"duplicate":true`) {
+		t.Fatalf("body missing duplicate marker: %s", rw.Body.String())
+	}
+	got, ok, err := h.readGenerateIntent(j.ID)
+	if err != nil || !ok {
+		t.Fatalf("readGenerateIntent = (%#v, %v, %v)", got, ok, err)
+	}
+	if got != existing {
+		t.Fatalf("intent = %#v, want preserved %#v", got, existing)
+	}
+}
+
+func TestStartGenerateEnqueueFailureDoesNotPublishIntent(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{err: errors.New("inline queue is full")}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean"}`)
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rw.Code, rw.Body.String())
+	}
+	if _, ok := store.puts[artifacts.GenerateIntentKey(j.ID)]; ok {
+		t.Fatal("intent published for rejected generate task")
+	}
+}
+
+func TestStartGenerateDistinctCapturesKeepTheirOwnTaskIntent(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	for _, body := range []string{
+		`{"preset":"clean-pov-60","music":"first-track"}`,
+		`{"preset":"viral-60-clean","music":"second-track"}`,
+	} {
+		rw := postGenerate(t, h, j.ID, body)
+		if rw.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+		}
+	}
+	if len(queue.enqueued) != 2 {
+		t.Fatalf("enqueued = %d, want 2", len(queue.enqueued))
+	}
+	first, ok, err := tasks.GenerateIntentFromTask(queue.enqueued[0])
+	if err != nil || !ok {
+		t.Fatalf("first task intent = (%#v, %v, %v)", first, ok, err)
+	}
+	second, ok, err := tasks.GenerateIntentFromTask(queue.enqueued[1])
+	if err != nil || !ok {
+		t.Fatalf("second task intent = (%#v, %v, %v)", second, ok, err)
+	}
+	if first.MusicKey != "first-track" || second.MusicKey != "second-track" {
+		t.Fatalf("task music = %q/%q, want first-track/second-track", first.MusicKey, second.MusicKey)
+	}
+	if first.Variant == second.Variant {
+		t.Fatalf("task variants = %q/%q, want distinct", first.Variant, second.Variant)
 	}
 }
 

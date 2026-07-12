@@ -104,6 +104,15 @@ func newRecordWorkerForTest(repo *fakeRepo, store *fakeStorage, t *testing.T) *R
 	return w
 }
 
+func generateRecordTask(t *testing.T, id uuid.UUID, intent renderplan.GenerateIntent) *asynq.Task {
+	t.Helper()
+	task, err := tasks.NewGenerateRecordDemoTask(id, "", nil, false, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return task
+}
+
 func TestRecordWorkerChainsRenderFromGenerateIntent(t *testing.T) {
 	store := newFakeStorage()
 	repo, id := parsedRecordJob(store)
@@ -114,13 +123,11 @@ func TestRecordWorkerChainsRenderFromGenerateIntent(t *testing.T) {
 		Intro:      true,
 	}
 	intent := renderplan.GenerateIntent{Variant: editor.PresetCleanPOV60, MusicKey: "phonk-01", Edit: edit}
-	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
-
 	enq := &fakeEnqueuer{}
 	w := newRecordWorkerForTest(repo, store, t)
 	w.UseEnqueuer(enq)
 
-	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent)); err != nil {
 		t.Fatalf("HandleRecordDemo error = %v", err)
 	}
 	if repo.jobs[id].Status != job.StatusRecorded {
@@ -162,13 +169,11 @@ func TestRecordWorkerMarksChainedRenderFailedWhenEnqueueFails(t *testing.T) {
 		Variant: editor.PresetViral60Clean,
 		Edit:    renderplan.DefaultEditRequest(),
 	}
-	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
-
 	enqueueErr := errors.New("inline queue is full")
 	w := newRecordWorkerForTest(repo, store, t)
 	w.UseEnqueuer(&fakeEnqueuer{err: enqueueErr})
 
-	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent)); err != nil {
 		t.Fatalf("HandleRecordDemo error = %v", err)
 	}
 	if repo.jobs[id].Status != job.StatusRecorded {
@@ -197,15 +202,13 @@ func TestRecordWorkerKeepsChainedRenderQueuedWhenTaskIsDuplicate(t *testing.T) {
 		Variant: editor.PresetViral60Clean,
 		Edit:    renderplan.DefaultEditRequest(),
 	}
-	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
-
 	w := newRecordWorkerForTest(repo, store, t)
 	if err := w.writeQueuedRenderState(id, intent.Variant); err != nil {
 		t.Fatalf("writeQueuedRenderState error = %v", err)
 	}
 	w.UseEnqueuer(&fakeEnqueuer{err: asynq.ErrDuplicateTask})
 
-	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent)); err != nil {
 		t.Fatalf("HandleRecordDemo error = %v", err)
 	}
 	raw, ok := store.files[mustRenderVariantStatusKey(t, id, intent.Variant)]
@@ -228,7 +231,6 @@ func TestRecordWorkerPreservesReadyStateWhenFinishedTaskIsStillDuplicate(t *test
 		Variant: editor.PresetViral60Clean,
 		Edit:    renderplan.DefaultEditRequest(),
 	}
-	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
 	loadout, err := renderplan.LoadoutForVariant(intent.Variant)
 	if err != nil {
 		t.Fatalf("LoadoutForVariant error = %v", err)
@@ -245,7 +247,7 @@ func TestRecordWorkerPreservesReadyStateWhenFinishedTaskIsStillDuplicate(t *test
 
 	w := newRecordWorkerForTest(repo, store, t)
 	w.UseEnqueuer(&fakeEnqueuer{err: asynq.ErrDuplicateTask})
-	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent)); err != nil {
 		t.Fatalf("HandleRecordDemo error = %v", err)
 	}
 
@@ -277,17 +279,36 @@ func TestRecordWorkerWithoutIntentDoesNotChain(t *testing.T) {
 	}
 }
 
-func TestRecordWorkerNilEnqueuerSkipsChaining(t *testing.T) {
+func TestRecordWorkerPlainRecordIgnoresStaleGenerateArtifact(t *testing.T) {
 	store := newFakeStorage()
 	repo, id := parsedRecordJob(store)
 	putJSON(t, store, artifacts.GenerateIntentKey(id), renderplan.GenerateIntent{
 		Variant: editor.PresetViral60Clean,
 		Edit:    renderplan.DefaultEditRequest(),
 	})
+	enq := &fakeEnqueuer{}
+	w := newRecordWorkerForTest(repo, store, t)
+	w.UseEnqueuer(enq)
+
+	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+		t.Fatalf("HandleRecordDemo error = %v", err)
+	}
+	if len(enq.tasks) != 0 {
+		t.Fatalf("chained tasks = %d, want 0 for plain record with stale artifact", len(enq.tasks))
+	}
+}
+
+func TestRecordWorkerNilEnqueuerSkipsChaining(t *testing.T) {
+	store := newFakeStorage()
+	repo, id := parsedRecordJob(store)
+	intent := renderplan.GenerateIntent{
+		Variant: editor.PresetViral60Clean,
+		Edit:    renderplan.DefaultEditRequest(),
+	}
 	// No UseEnqueuer: a worker built without a queue must skip chaining cleanly.
 	w := newRecordWorkerForTest(repo, store, t)
 
-	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+	if err := w.HandleRecordDemo(context.Background(), generateRecordTask(t, id, intent)); err != nil {
 		t.Fatalf("HandleRecordDemo error = %v", err)
 	}
 	if repo.jobs[id].Status != job.StatusRecorded {

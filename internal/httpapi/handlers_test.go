@@ -1438,6 +1438,79 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	}
 }
 
+func TestStartRenderVariantPreservesReadyStateWhenTaskIsDuplicate(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{err: asynq.ErrDuplicateTask}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue)
+	loadout, err := renderplan.LoadoutForVariant(editor.PresetViral60Clean)
+	if err != nil {
+		t.Fatalf("LoadoutForVariant error = %v", err)
+	}
+	ready, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:   j.ID,
+		Loadout: loadout,
+		Status:  renderplan.RenderVariantStatusReady,
+	})
+	if err != nil {
+		t.Fatalf("NewRenderVariantStateForLoadout error = %v", err)
+	}
+	if err := h.writeRenderVariantState(ready); err != nil {
+		t.Fatalf("writeRenderVariantState error = %v", err)
+	}
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), `"status":"ready"`) {
+		t.Fatalf("duplicate response did not preserve ready state: %s", rw.Body.String())
+	}
+	state, ok, err := h.readRenderVariantState(j.ID, editor.PresetViral60Clean)
+	if err != nil || !ok {
+		t.Fatalf("readRenderVariantState = (%v, %v, %v)", state, ok, err)
+	}
+	if state.Status != renderplan.RenderVariantStatusReady {
+		t.Fatalf("state status = %q, want ready", state.Status)
+	}
+}
+
+func TestStartRenderVariantMarksStateFailedWhenEnqueueFails(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{err: errors.New("inline queue is full")}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rw.Code, rw.Body.String())
+	}
+	state, ok, err := h.readRenderVariantState(j.ID, editor.PresetViral60Clean)
+	if err != nil || !ok {
+		t.Fatalf("readRenderVariantState = (%v, %v, %v)", state, ok, err)
+	}
+	if state.Status != renderplan.RenderVariantStatusFailed {
+		t.Fatalf("state status = %q, want failed", state.Status)
+	}
+	if state.Error != "enqueue render task: inline queue is full" {
+		t.Fatalf("state error = %q", state.Error)
+	}
+}
+
 func TestStartRenderVariantRejectsOverlongBookendText(t *testing.T) {
 	repo := newFakeRepo()
 	queue := &fakeQueue{}

@@ -47,6 +47,8 @@ const (
 
 var renderVariantPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
+const generateIntentHeader = "fragforge-generate-intent"
+
 // ParseDemoPayload carries the inputs the worker needs to fetch from the DB.
 type ParseDemoPayload struct {
 	JobID uuid.UUID `json:"job_id"`
@@ -130,6 +132,27 @@ func NewScanRosterTask(id uuid.UUID) (*asynq.Task, error) {
 // job's kill plan); empty records every segment. Because the ids are part of the
 // payload, asynq dedup treats a task for one segment as distinct from another.
 func NewRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portraitSafeKillfeed bool) (*asynq.Task, error) {
+	return newRecordDemoTask(id, hudMode, segmentIDs, portraitSafeKillfeed, nil)
+}
+
+// NewGenerateRecordDemoTask returns a record task carrying the immutable render
+// intent for that capture. The intent lives in task headers so uniqueness stays
+// keyed by the capture payload (job, HUD, segments, and killfeed geometry).
+func NewGenerateRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portraitSafeKillfeed bool, intent renderplan.GenerateIntent) (*asynq.Task, error) {
+	intent = intent.Normalize()
+	if err := intent.Validate(); err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(intent)
+	if err != nil {
+		return nil, err
+	}
+	return newRecordDemoTask(id, hudMode, segmentIDs, portraitSafeKillfeed, map[string]string{
+		generateIntentHeader: string(b),
+	})
+}
+
+func newRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portraitSafeKillfeed bool, headers map[string]string) (*asynq.Task, error) {
 	switch hudMode {
 	case "", "gameplay", "clean", "deathnotices":
 	default:
@@ -144,7 +167,30 @@ func NewRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portra
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeRecordDemo, payload), nil
+	if len(headers) == 0 {
+		return asynq.NewTask(TypeRecordDemo, payload), nil
+	}
+	return asynq.NewTaskWithHeaders(TypeRecordDemo, payload, headers), nil
+}
+
+// GenerateIntentFromTask returns the immutable one-click render intent carried
+// by a generate record task. Plain record tasks return ok=false.
+func GenerateIntentFromTask(task *asynq.Task) (intent renderplan.GenerateIntent, ok bool, err error) {
+	if task == nil {
+		return renderplan.GenerateIntent{}, false, fmt.Errorf("record task is nil")
+	}
+	raw, ok := task.Headers()[generateIntentHeader]
+	if !ok || raw == "" {
+		return renderplan.GenerateIntent{}, false, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
+		return renderplan.GenerateIntent{}, false, fmt.Errorf("decode generate intent header: %w", err)
+	}
+	intent = intent.Normalize()
+	if err := intent.Validate(); err != nil {
+		return renderplan.GenerateIntent{}, false, fmt.Errorf("validate generate intent header: %w", err)
+	}
+	return intent, true, nil
 }
 
 func NewComposeFinalTask(id uuid.UUID) (*asynq.Task, error) {
