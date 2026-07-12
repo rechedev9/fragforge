@@ -93,7 +93,6 @@ func workflowDocs() []workflowDoc {
 				"./bin/zv workflows run analysis-viewer",
 				"./bin/zv workflows run gallery-open",
 				"./bin/zv workflows run serve",
-				"./bin/zv workflows run pipeline",
 				"./bin/zv workflows run skills-check",
 				"./bin/zv workflows run workflows-check",
 				"./bin/zv workflows run project-check",

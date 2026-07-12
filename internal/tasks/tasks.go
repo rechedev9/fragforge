@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -46,23 +45,9 @@ const (
 	TypeStreamAcquire = "stream:acquire"
 )
 
-const (
-	// parseDemoTimeout bounds how long a single demo parse may run before Asynq
-	// cancels the task context. Parsing a legitimate CS2 demo finishes in
-	// seconds; this generous ceiling stops a corrupt or pathological demo from
-	// pinning a worker slot indefinitely. The parser worker threads this context
-	// into demoinfocs via parser.RunWithContext, so an exceeded deadline aborts
-	// ParseToEnd instead of running forever.
-	parseDemoTimeout = 15 * time.Minute
-
-	// parseDemoMaxRetry caps retries for a parse task. Parsing is deterministic:
-	// a demo that fails (corrupt, target-not-found, or timed out) fails the same
-	// way every time, so the default 25 retries only waste worker slots. One
-	// retry still absorbs a transient infrastructure blip (Redis/temp-file).
-	parseDemoMaxRetry = 1
-)
-
 var renderVariantPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+const generateIntentHeader = "fragforge-generate-intent"
 
 // ParseDemoPayload carries the inputs the worker needs to fetch from the DB.
 type ParseDemoPayload struct {
@@ -128,24 +113,16 @@ func NewParseDemoTask(id uuid.UUID) (*asynq.Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeParseDemo, payload,
-		asynq.Timeout(parseDemoTimeout),
-		asynq.MaxRetry(parseDemoMaxRetry),
-	), nil
+	return asynq.NewTask(TypeParseDemo, payload), nil
 }
 
-// NewScanRosterTask mirrors NewParseDemoTask: a roster scan is a single
-// deterministic pass over the same demo, so it reuses the parse timeout and
-// max-retry ceiling.
+// NewScanRosterTask returns a task for the deterministic roster scan pass.
 func NewScanRosterTask(id uuid.UUID) (*asynq.Task, error) {
 	payload, err := json.Marshal(ScanRosterPayload{JobID: id})
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeScanRoster, payload,
-		asynq.Timeout(parseDemoTimeout),
-		asynq.MaxRetry(parseDemoMaxRetry),
-	), nil
+	return asynq.NewTask(TypeScanRoster, payload), nil
 }
 
 // NewRecordDemoTask returns an Asynq task for recording a job. hudMode is
@@ -155,6 +132,27 @@ func NewScanRosterTask(id uuid.UUID) (*asynq.Task, error) {
 // job's kill plan); empty records every segment. Because the ids are part of the
 // payload, asynq dedup treats a task for one segment as distinct from another.
 func NewRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portraitSafeKillfeed bool) (*asynq.Task, error) {
+	return newRecordDemoTask(id, hudMode, segmentIDs, portraitSafeKillfeed, nil)
+}
+
+// NewGenerateRecordDemoTask returns a record task carrying the immutable render
+// intent for that capture. The intent lives in task headers so uniqueness stays
+// keyed by the capture payload (job, HUD, segments, and killfeed geometry).
+func NewGenerateRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portraitSafeKillfeed bool, intent renderplan.GenerateIntent) (*asynq.Task, error) {
+	intent = intent.Normalize()
+	if err := intent.Validate(); err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(intent)
+	if err != nil {
+		return nil, err
+	}
+	return newRecordDemoTask(id, hudMode, segmentIDs, portraitSafeKillfeed, map[string]string{
+		generateIntentHeader: string(b),
+	})
+}
+
+func newRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portraitSafeKillfeed bool, headers map[string]string) (*asynq.Task, error) {
 	switch hudMode {
 	case "", "gameplay", "clean", "deathnotices":
 	default:
@@ -169,7 +167,30 @@ func NewRecordDemoTask(id uuid.UUID, hudMode string, segmentIDs []string, portra
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeRecordDemo, payload), nil
+	if len(headers) == 0 {
+		return asynq.NewTask(TypeRecordDemo, payload), nil
+	}
+	return asynq.NewTaskWithHeaders(TypeRecordDemo, payload, headers), nil
+}
+
+// GenerateIntentFromTask returns the immutable one-click render intent carried
+// by a generate record task. Plain record tasks return ok=false.
+func GenerateIntentFromTask(task *asynq.Task) (intent renderplan.GenerateIntent, ok bool, err error) {
+	if task == nil {
+		return renderplan.GenerateIntent{}, false, fmt.Errorf("record task is nil")
+	}
+	raw, ok := task.Headers()[generateIntentHeader]
+	if !ok || raw == "" {
+		return renderplan.GenerateIntent{}, false, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
+		return renderplan.GenerateIntent{}, false, fmt.Errorf("decode generate intent header: %w", err)
+	}
+	intent = intent.Normalize()
+	if err := intent.Validate(); err != nil {
+		return renderplan.GenerateIntent{}, false, fmt.Errorf("validate generate intent header: %w", err)
+	}
+	return intent, true, nil
 }
 
 func NewComposeFinalTask(id uuid.UUID) (*asynq.Task, error) {

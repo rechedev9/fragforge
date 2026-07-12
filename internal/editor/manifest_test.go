@@ -10,10 +10,19 @@ import (
 	"github.com/rechedev9/fragforge/internal/recording"
 )
 
+func mustBuildManifest(t *testing.T, result recording.RecordingResult, opts ManifestOptions) Manifest {
+	t.Helper()
+	manifest, err := buildManifest(result, opts)
+	if err != nil {
+		t.Fatalf("build manifest: %v", err)
+	}
+	return manifest
+}
+
 func TestBuildManifestUsesSegmentOrderAndKillTimes(t *testing.T) {
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
-	manifest := BuildManifest(result, testManifestOptions(dir, nil))
+	manifest := mustBuildManifest(t, result, testManifestOptions(dir, nil))
 
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
@@ -82,7 +91,7 @@ func TestBuildManifestSanitizesSegmentIDInOutputPaths(t *testing.T) {
 	result.Artifacts[1].SegmentID = evil // the seg-001 clip
 
 	opts := testManifestOptions(dir, nil)
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 
 	idx := -1
 	for i, s := range manifest.Shorts {
@@ -120,7 +129,7 @@ func TestBuildManifestSupportsSegmentFilterAndLimit(t *testing.T) {
 	opts.Limit = 1
 	opts.SkipExisting = true
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if got := manifest.SegmentFilter; len(got) != 2 || got[0] != "seg-002" || got[1] != "seg-missing" {
 		t.Fatalf("segment filter = %#v", got)
 	}
@@ -149,7 +158,7 @@ func TestBuildManifestUsesKillPlanMapWhenRecordingMapMissing(t *testing.T) {
 	kp := killplan.NewPlan()
 	kp.Demo.Map = "de_ancient"
 
-	manifest := BuildManifest(result, testManifestOptions(dir, &kp))
+	manifest := mustBuildManifest(t, result, testManifestOptions(dir, &kp))
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -390,7 +399,7 @@ func TestBuildManifestUsesVideoEncodingOptions(t *testing.T) {
 	opts.VideoCRF = 16
 	opts.VideoPreset = "slow"
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -416,7 +425,7 @@ func TestBuildManifestCarriesMusicRhythmAndOutputFPS(t *testing.T) {
 	opts.MusicPath = filepath.Join(dir, "music", "brightmelodicskippyedm.wav")
 	opts.OutputFPS = 24
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -459,7 +468,7 @@ func TestBuildManifestUsesLandscapeOutputFormat(t *testing.T) {
 	opts := testManifestOptions(dir, nil)
 	opts.OutputFormat = OutputFormatLandscape16x9
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -490,7 +499,7 @@ func TestBuildManifestAppliesExplicitEditOptions(t *testing.T) {
 	opts.Intro = true
 	opts.Outro = true
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -530,7 +539,7 @@ func TestBuildManifestCompileSegmentsCreatesOneShort(t *testing.T) {
 	opts.MusicPath = filepath.Join(dir, "music", "brightmelodicskippyedm.wav")
 	opts.OutputFPS = 24
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -577,7 +586,7 @@ func TestBuildManifestAppliesRhythmSyncToCompiledParts(t *testing.T) {
 	opts.RhythmPath = rhythmPath
 	opts.OutputFPS = 24
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -652,7 +661,7 @@ func TestBuildManifestWarnsOnUnexpectedSourceFormat(t *testing.T) {
 	result.Artifacts[1].Height = 720
 	result.Artifacts[1].FrameRate = "30/1"
 
-	manifest := BuildManifest(result, testManifestOptions(dir, nil))
+	manifest := mustBuildManifest(t, result, testManifestOptions(dir, nil))
 	joined := strings.Join(manifest.Warnings, "\n")
 	for _, want := range []string{
 		"source seg-001 resolution = 1280x720, want 1920x1080",
@@ -845,7 +854,7 @@ func TestBuildManifestAppliesRetentionOverlaysAndTailTrim(t *testing.T) {
 	opts.KillfeedOverlay = true
 	opts.TailTrimSeconds = 1.5
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -892,7 +901,7 @@ func TestBuildManifestKillfeedOverlayRequiresKillfeedSourcePreset(t *testing.T) 
 	opts.HookText = true
 	opts.KillfeedOverlay = true
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	first := manifest.Shorts[0]
 	if first.KillfeedOverlay {
 		t.Fatal("KillfeedOverlay = true, want disabled for clean-pov capture")
@@ -921,7 +930,7 @@ func TestBuildManifestKeepsPortraitSafeDeathnoticesNative(t *testing.T) {
 	opts := testManifestOptions(dir, nil)
 	opts.KillfeedOverlay = true
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -946,7 +955,7 @@ func TestBuildManifestLandscapeNeverDuplicatesNativeKillfeed(t *testing.T) {
 	opts.OutputFormat = OutputFormatLandscape16x9
 	opts.KillfeedOverlay = true
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if manifest.Shorts[0].KillfeedOverlay {
 		t.Fatal("KillfeedOverlay = true, want native landscape HUD")
 	}
@@ -964,7 +973,7 @@ func TestBuildManifestCompiledTailTrimsParts(t *testing.T) {
 	opts.CompileSegments = true
 	opts.TailTrimSeconds = 1.5
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	if len(manifest.Warnings) != 0 {
 		t.Fatalf("warnings = %v", manifest.Warnings)
 	}
@@ -1004,7 +1013,7 @@ func TestBuildManifestCompiledRhythmSkipsTailTrim(t *testing.T) {
 	opts.RhythmPath = rhythmPath
 	opts.TailTrimSeconds = 1.5
 
-	manifest := BuildManifest(result, opts)
+	manifest := mustBuildManifest(t, result, opts)
 	found := false
 	for _, warning := range manifest.Warnings {
 		if strings.Contains(warning, "tail trim skipped") {

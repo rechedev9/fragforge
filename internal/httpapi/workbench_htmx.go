@@ -416,7 +416,15 @@ func (h *Handlers) workbenchJobView(r *http.Request, id uuid.UUID) (workbenchJob
 		variant = editor.DefaultPreset().Name
 	}
 
-	renderState, renderErr := h.workbenchRenderState(j.ID, variant)
+	// A non-zero run id means a newly accepted capture still owns the guided
+	// handoff. Ignore any job+variant render state from an older run until the
+	// record worker clears the marker atomically with publishing the new state.
+	activeGenerate := intentExists && intent.ActiveRunID != uuid.Nil
+	var renderState *renderplan.RenderVariantState
+	var renderErr error
+	if !activeGenerate {
+		renderState, renderErr = h.workbenchRenderState(j.ID, variant)
+	}
 	roster, rosterErr := h.workbenchRoster(j.ID)
 	momentRows, momentsErr := h.workbenchMoments(j)
 
@@ -427,7 +435,7 @@ func (h *Handlers) workbenchJobView(r *http.Request, id uuid.UUID) (workbenchJob
 	// Between clicking Generate and the worker flipping to recording (and during
 	// the record->render handoff) the job sits in parsed/recorded with no render
 	// state yet; an existing intent marks that window as "generating".
-	intentPending := intentExists && renderState == nil && (j.Status == job.StatusParsed || j.Status == job.StatusRecorded)
+	intentPending := activeGenerate && (j.Status == job.StatusParsed || j.Status == job.StatusRecorded)
 	generating := !ready && !failed && (captureActive || renderActive || intentPending)
 
 	selectedVariant := editor.DefaultPreset().Name

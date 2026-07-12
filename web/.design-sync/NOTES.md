@@ -29,9 +29,8 @@ The bundle must stand alone outside Next's runtime. `tsconfig.bundle.json`
 - `next/link` → `shims/next-link.tsx` (plain `<a>`)
 - `next/navigation` → `shims/next-navigation.ts` (no-op router/hooks)
 - `next-themes` → `shims/next-themes.tsx` (fixed dark theme, passthrough provider)
-- `@/lib/api` → `shims/lib-api.ts` (always MockApiClient — the real index reads
-  `process.env.NEXT_PUBLIC_API_BASE` at module load, which is `process is not
-  defined` in the browser and kills the whole IIFE).
+- `@/lib/api` → `shims/lib-api.ts` (always MockApiClient so standalone design
+  previews use deterministic fixtures without a running local orchestrator).
 
 The `@/*` alias is intentionally NOT in `tsconfig.bundle.json` — esbuild's
 native discovery of `web/tsconfig.json` resolves `@/` (the plugin's `''`-ext

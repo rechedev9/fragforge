@@ -4,7 +4,7 @@ export const runtime = 'nodejs';
 
 /**
  * GET /api/demos/{jobId}/roster — proxy the roster scan result from the local
- * orchestrator. Local-mode route: cloud mode reads the loopback directly.
+ * desktop orchestrator through the same-origin server boundary.
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ jobId: string }> }): Promise<Response> {
   const { jobId } = await params;

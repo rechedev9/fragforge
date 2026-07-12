@@ -1,15 +1,23 @@
 package renderplan
 
-// GenerateIntent is the durable, job-scoped capture of a one-click "generate a
-// short" request: the preset variant the user picked (which selects both the
-// recording HUD and the render variant), an optional music track, and the edit
-// treatment. The record worker reads it after a successful capture to enqueue
-// the matching render without a second user action, so the choice survives the
-// orchestrator restarting mid-capture.
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// GenerateIntent is the normalized choice behind a one-click "generate a
+// short" request: preset variant, optional music, and edit treatment. Each
+// accepted record task carries an immutable copy, while the job-scoped artifact
+// fences overlapping capture/render work and mirrors the current choice for
+// workbench display. ActiveRunID is non-zero only while that accepted capture
+// still owns the guided-flow handoff to a render task.
 type GenerateIntent struct {
-	Variant  string      `json:"variant"`
-	MusicKey string      `json:"music_key,omitempty"`
-	Edit     EditRequest `json:"edit"`
+	Variant     string      `json:"variant"`
+	MusicKey    string      `json:"music_key,omitempty"`
+	Edit        EditRequest `json:"edit"`
+	ActiveRunID uuid.UUID   `json:"active_run_id,omitzero"`
+	AcceptedAt  time.Time   `json:"accepted_at,omitzero"`
 }
 
 // Normalize fills unset edit fields with their defaults and returns the result.

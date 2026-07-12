@@ -2,12 +2,9 @@ import { NextResponse } from 'next/server';
 import { orchestratorUrl, mutationHeaders, forwardError, callOrchestrator, serviceUnavailable, jobUrl } from './_lib';
 
 /**
- * Local-mode `/api/demos/*` handlers. In local mode the web is a thin proxy to a
- * local orchestrator (`zv serve`) on the same machine, which owns the whole
- * pipeline (scan, parse, record with HLAE/CS2, render). Cloud mode never reaches
- * these routes: the browser talks straight to the paired agent's loopback, so
- * the whole /api/demos/* surface is now a pure same-origin proxy. Everything runs
- * server-side so the orchestrator URL and token never reach the browser.
+ * Server-side `/api/demos/*` proxy handlers for the desktop-bundled local
+ * orchestrator. The orchestrator owns the whole pipeline (scan, parse, HLAE/CS2
+ * capture, render), while its URL and optional token stay out of the browser.
  */
 
 // Matches the orchestrator's 500 MiB MaxBytesReader cap. Enforced here too so a

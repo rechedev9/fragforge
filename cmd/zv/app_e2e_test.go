@@ -96,7 +96,7 @@ func TestZVBinaryHelpCoversWorkflowCatalogEndToEnd(t *testing.T) {
 		if !ok || len(fields) < 2 || fields[0] != "zv" {
 			t.Fatalf("workflow %q command stem %q is not a zv command", workflow.Name, stem)
 		}
-		if fields[1] == "record" || fields[1] == "pipeline" {
+		if fields[1] == "record" {
 			continue
 		}
 		if groupStems[fields[1]] == nil {

@@ -1,0 +1,147 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { provisionMusicLibrary } from './music-library.ts';
+
+function temporaryLibrary(t: test.TestContext): {
+  bundledMusicDir: string;
+  musicDir: string;
+} {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-music-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  return {
+    bundledMusicDir: path.join(root, 'bundled'),
+    musicDir: path.join(root, 'library'),
+  };
+}
+
+test('does nothing when the bundled catalog is absent', async (t) => {
+  const paths = temporaryLibrary(t);
+
+  await provisionMusicLibrary({
+    ...paths,
+    signal: new AbortController().signal,
+    logLine: () => {},
+  });
+
+  assert.equal(fs.existsSync(paths.musicDir), false);
+});
+
+test('copies bundled tracks and downloads remote tracks sequentially', async (t) => {
+  const paths = temporaryLibrary(t);
+  fs.mkdirSync(paths.bundledMusicDir, { recursive: true });
+  fs.mkdirSync(paths.musicDir, { recursive: true });
+  fs.writeFileSync(path.join(paths.bundledMusicDir, 'local.mp3'), 'bundled audio');
+  fs.writeFileSync(path.join(paths.musicDir, 'existing.mp3'), 'keep me');
+  const catalog = {
+    tracks: [
+      { id: 'existing', ext: 'mp3', downloadUrl: 'https://example.test/existing' },
+      { id: 'local', ext: 'mp3' },
+      { id: 'missing-local', ext: 'ogg' },
+      { id: 'first', ext: 'mp3', downloadUrl: 'https://example.test/first' },
+      { id: 'broken', ext: 'mp3', downloadUrl: 'https://example.test/broken' },
+      { id: 'last', ext: 'wav', downloadUrl: 'https://example.test/last' },
+      { id: '', ext: 'mp3', downloadUrl: 'https://example.test/invalid' },
+      'not a track',
+    ],
+  };
+  fs.writeFileSync(path.join(paths.bundledMusicDir, 'catalog.json'), JSON.stringify(catalog));
+  const downloads: string[] = [];
+  const logs: string[] = [];
+  let activeDownloads = 0;
+  let maximumConcurrentDownloads = 0;
+
+  await provisionMusicLibrary({
+    ...paths,
+    signal: new AbortController().signal,
+    logLine: (line) => logs.push(line),
+    download: async (url, destination) => {
+      downloads.push(url);
+      activeDownloads += 1;
+      maximumConcurrentDownloads = Math.max(maximumConcurrentDownloads, activeDownloads);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      try {
+        if (url.endsWith('/broken')) throw new Error('offline');
+        fs.writeFileSync(destination, url);
+        return 'test-sha256';
+      } finally {
+        activeDownloads -= 1;
+      }
+    },
+  });
+
+  assert.deepEqual(downloads, [
+    'https://example.test/first',
+    'https://example.test/broken',
+    'https://example.test/last',
+  ]);
+  assert.equal(maximumConcurrentDownloads, 1);
+  assert.equal(fs.readFileSync(path.join(paths.musicDir, 'existing.mp3'), 'utf8'), 'keep me');
+  assert.equal(fs.readFileSync(path.join(paths.musicDir, 'local.mp3'), 'utf8'), 'bundled audio');
+  assert.equal(
+    fs.readFileSync(path.join(paths.musicDir, 'first.mp3'), 'utf8'),
+    'https://example.test/first',
+  );
+  assert.equal(
+    fs.readFileSync(path.join(paths.musicDir, 'last.wav'), 'utf8'),
+    'https://example.test/last',
+  );
+  assert.equal(fs.existsSync(path.join(paths.musicDir, 'broken.mp3')), false);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(paths.musicDir, 'catalog.json'), 'utf8')),
+    catalog,
+  );
+  assert.deepEqual(logs, [
+    '[music] copied bundled local.mp3\n',
+    '[music] skip missing-local: no downloadUrl and no bundled audio\n',
+    '[music] downloaded first.mp3\n',
+    '[music] skip broken: Error: offline\n',
+    '[music] downloaded last.wav\n',
+  ]);
+});
+
+test('stops before the next track when boot is cancelled', async (t) => {
+  const paths = temporaryLibrary(t);
+  fs.mkdirSync(paths.bundledMusicDir, { recursive: true });
+  fs.writeFileSync(path.join(paths.bundledMusicDir, 'catalog.json'), JSON.stringify({
+    tracks: [
+      { id: 'first', ext: 'mp3', downloadUrl: 'https://example.test/first' },
+      { id: 'second', ext: 'mp3', downloadUrl: 'https://example.test/second' },
+    ],
+  }));
+  const controller = new AbortController();
+  const downloads: string[] = [];
+
+  await provisionMusicLibrary({
+    ...paths,
+    signal: controller.signal,
+    logLine: () => {},
+    download: async (url, destination) => {
+      downloads.push(url);
+      fs.writeFileSync(destination, url);
+      controller.abort();
+      return 'test-sha256';
+    },
+  });
+
+  assert.deepEqual(downloads, ['https://example.test/first']);
+  assert.equal(fs.existsSync(path.join(paths.musicDir, 'second.mp3')), false);
+});
+
+test('logs an invalid catalog without blocking startup', async (t) => {
+  const paths = temporaryLibrary(t);
+  fs.mkdirSync(paths.bundledMusicDir, { recursive: true });
+  fs.writeFileSync(path.join(paths.bundledMusicDir, 'catalog.json'), '{');
+  const logs: string[] = [];
+
+  await provisionMusicLibrary({
+    ...paths,
+    signal: new AbortController().signal,
+    logLine: (line) => logs.push(line),
+  });
+
+  assert.equal(logs.length, 1);
+  assert.match(logs[0] ?? '', /^\[music\] bad catalog\.json:/);
+});

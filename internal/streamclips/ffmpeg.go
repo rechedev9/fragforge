@@ -145,12 +145,9 @@ func buildFilterGraph(layout LayoutVariant, plan EditPlan, bannerFontPath string
 // streamerBannerFilter builds the strip independently and overlays it on the
 // completed layout so the entire banner can move as one unit.
 func streamerBannerFilter(layout LayoutVariant, banner StreamerBannerPlan, fontPath string, duration float64) string {
-	centerY := layout.FaceOutputHeight
-	if layout.FullFrame {
-		centerY = layout.GameOutputHeight / 5
-	}
+	outputHeight := layout.FaceOutputHeight + layout.GameOutputHeight
+	centerY := int(math.Round(layout.DefaultBannerPositionY * float64(outputHeight)))
 	if banner.PositionY != nil {
-		outputHeight := layout.FaceOutputHeight + layout.GameOutputHeight
 		centerY = int(math.Round(*banner.PositionY * float64(outputHeight)))
 	}
 	top := centerY - bannerHeight/2

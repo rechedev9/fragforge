@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 
 	"github.com/rechedev9/fragforge/internal/renderplan"
 )
@@ -102,6 +103,46 @@ func TestNewRecordDemoTaskRoundtripWithSegmentIDs(t *testing.T) {
 		if payload.SegmentIDs[i] != want[i] {
 			t.Errorf("SegmentIDs[%d] = %q, want %q", i, payload.SegmentIDs[i], want[i])
 		}
+	}
+}
+
+func TestNewGenerateRecordDemoTaskCarriesIntentOutsideUniquePayload(t *testing.T) {
+	id := uuid.New()
+	want := renderplan.GenerateIntent{
+		Variant:  testRenderVariant,
+		MusicKey: "track-01",
+		Edit:     renderplan.DefaultEditRequest(),
+	}
+	task, err := NewGenerateRecordDemoTask(id, "deathnotices", []string{"seg-001"}, true, want)
+	if err != nil {
+		t.Fatalf("NewGenerateRecordDemoTask error = %v", err)
+	}
+	got, ok, err := GenerateIntentFromTask(task)
+	if err != nil {
+		t.Fatalf("GenerateIntentFromTask error = %v", err)
+	}
+	if !ok || got != want {
+		t.Fatalf("GenerateIntentFromTask = (%#v, %v), want (%#v, true)", got, ok, want)
+	}
+
+	plain, err := NewRecordDemoTask(id, "deathnotices", []string{"seg-001"}, true)
+	if err != nil {
+		t.Fatalf("NewRecordDemoTask error = %v", err)
+	}
+	if string(task.Payload()) != string(plain.Payload()) {
+		t.Fatalf("generate payload = %s, want capture-only payload %s", task.Payload(), plain.Payload())
+	}
+	if _, ok, err := GenerateIntentFromTask(plain); err != nil || ok {
+		t.Fatalf("plain GenerateIntentFromTask = (_, %v, %v), want (_, false, nil)", ok, err)
+	}
+}
+
+func TestGenerateIntentFromTaskRejectsInvalidHeader(t *testing.T) {
+	task := asynq.NewTaskWithHeaders(TypeRecordDemo, nil, map[string]string{
+		generateIntentHeader: `{"variant":"missing"}`,
+	})
+	if _, _, err := GenerateIntentFromTask(task); err == nil {
+		t.Fatal("GenerateIntentFromTask error = nil, want invalid intent error")
 	}
 }
 

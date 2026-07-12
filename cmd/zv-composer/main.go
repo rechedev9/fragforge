@@ -48,7 +48,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	clips, warnings, clipErr := composition.SegmentClipsFromRecording(recordingResult)
+	clips, warnings, clipErr := recording.ResolveSegmentClips(recordingResult)
 	result := composition.Result{
 		RecordingResult: absRecordingResult,
 		Output:          absOut,

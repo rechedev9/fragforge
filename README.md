@@ -60,8 +60,9 @@ own Windows + GPU PC, capture included:
 .\scripts\local-studio.ps1
 ```
 
-It starts the orchestrator (memory mode, HLAE/CS2 auto-detected) and the web UI
-in local mode, then opens `http://localhost:3000/upload`.
+It starts the orchestrator with a persistent local SQLite job database and an
+in-process queue (HLAE/CS2 auto-detected), then starts the web UI and opens
+`http://localhost:3000/upload`.
 The flow is: upload a demo -> pick a player -> pick specific kills -> create the
 reel, at which point HLAE + CS2 open to capture and the edit is applied.
 
@@ -197,11 +198,10 @@ scripted use:
 ```
 
 Other command groups: `zv utility audit` (lineup catalogs), `zv analysis`
-(tactical data and viewers), `zv gallery open`, `zv pipeline` (recorder ->
-composer runner), `zv skills` and `zv workflows` (repo-local agent skills and
-the cataloged workflow contract; both support `--format json`). Legacy binaries
-stay reachable through pass-throughs such as `zv parser`, `zv editor`,
-`zv recorder`, `zv composer`, and `zv orchestrator`.
+(tactical data and viewers), `zv gallery open`, `zv skills` and `zv workflows`
+(repo-local agent skills and the cataloged workflow contract; both support
+`--format json`). Legacy binaries stay reachable through pass-throughs such as
+`zv parser`, `zv editor`, `zv recorder`, `zv composer`, and `zv orchestrator`.
 
 `zv shorts render` options worth knowing:
 
@@ -248,7 +248,7 @@ run. Never commit generated video/audio/image artifacts to git.
 ## Repository layout
 
 - `cmd/` — thin CLI entrypoints (`zv`, `zv-parser`, `zv-recorder`,
-  `zv-composer`, `zv-editor`, `zv-pipeline`, `zv-orchestrator`, ...).
+  `zv-composer`, `zv-editor`, `zv-orchestrator`, ...).
 - `internal/parser` — `.dem` parsing and segment extraction.
 - `internal/killplan` — shared kill/segment plan types.
 - `internal/moments` — scored, reviewable clip candidates from kill plans.

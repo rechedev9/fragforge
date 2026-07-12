@@ -1,6 +1,5 @@
-// Package storage abstracts where the orchestrator keeps demo files and
-// other artifacts. V1 ships a Local filesystem implementation; future
-// slices can add an S3/MinIO backend behind the same interface.
+// Package storage owns the local artifact boundary used by the desktop
+// orchestrator for demos, plans, render state, and generated media.
 package storage
 
 import (

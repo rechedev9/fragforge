@@ -54,6 +54,31 @@ func TestVariant4060Geometry(t *testing.T) {
 	if v.FullFrame {
 		t.Fatal("streamer-vertical-stack-40-60 must not be full frame")
 	}
+	if v.DefaultBannerPositionY != 0.374 {
+		t.Fatalf("DefaultBannerPositionY = %v, want 0.374", v.DefaultBannerPositionY)
+	}
+}
+
+func TestVariantBannerDefaults(t *testing.T) {
+	tests := []struct {
+		name string
+		want float64
+	}{
+		{name: VariantStreamer4060, want: 0.374},
+		{name: VariantStreamerVerticalStack, want: 520.0 / 1920.0},
+		{name: VariantStreamerFullframeNoCam, want: 0.2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			variant, ok := VariantByName(tt.name)
+			if !ok {
+				t.Fatalf("VariantByName(%q) ok = false", tt.name)
+			}
+			if variant.DefaultBannerPositionY != tt.want {
+				t.Fatalf("DefaultBannerPositionY = %v, want %v", variant.DefaultBannerPositionY, tt.want)
+			}
+		})
+	}
 }
 
 func TestVariantLegacyGeometryUnchanged(t *testing.T) {

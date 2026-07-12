@@ -24,6 +24,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/composition"
 	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/generateintent"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/moments"
 	"github.com/rechedev9/fragforge/internal/recording"
@@ -41,6 +42,8 @@ const (
 	maxJSONBodyBytes   = 1 << 20              // JSON control documents are small
 	renderUniqueTTL    = 24 * time.Hour
 )
+
+var errGenerateRenderActive = errors.New("a render is already active for this job")
 
 // JobRepository is the subset of *job.Repository used by handlers.
 type JobRepository interface {
@@ -60,9 +63,13 @@ type StreamJobRepository interface {
 	SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error
 }
 
-// Enqueuer is the subset of *asynq.Client used by handlers.
+// Enqueuer is the desktop queue contract used by handlers. A transition runs
+// inside the queue's admission boundary before accepted work becomes visible;
+// accepted pending work receives a later non-nil transition if shutdown
+// discards it before a handler takes ownership.
 type Enqueuer interface {
 	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
+	EnqueueWithTransition(*asynq.Task, func(error) error, ...asynq.Option) (*asynq.TaskInfo, error)
 }
 
 // Handlers bundles the dependencies needed by every endpoint.
@@ -70,6 +77,7 @@ type Handlers struct {
 	repo            JobRepository
 	streamRepo      StreamJobRepository
 	storage         storage.Storage
+	generateIntents *generateintent.Store
 	queue           Enqueuer
 	mutationToken   string
 	requireReadAuth bool
@@ -117,6 +125,15 @@ func WithStreamProber(prober streamclips.Prober) Option {
 	}
 }
 
+// WithGenerateIntentStore shares guided-generate synchronization with the
+// record worker. Desktop startup supplies one store to both owners so an old
+// completion cannot race with accepting a newer run.
+func WithGenerateIntentStore(store *generateintent.Store) Option {
+	return func(h *Handlers) {
+		h.generateIntents = store
+	}
+}
+
 // WithCapabilities records which media workers are enabled and the tool paths
 // they use, so GET /api/capabilities can report readiness and the record/
 // generate handlers can reject a capture attempt with a clear 409 instead of
@@ -129,7 +146,12 @@ func WithCapabilities(c Capabilities) Option {
 
 // NewHandlers constructs an HTTP handler set.
 func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts ...Option) *Handlers {
-	h := &Handlers{repo: repo, storage: store, queue: queue}
+	h := &Handlers{
+		repo:            repo,
+		storage:         store,
+		generateIntents: generateintent.New(store),
+		queue:           queue,
+	}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -250,17 +272,9 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "build "+taskKind+" task", err)
 		return
 	}
-	if _, err := h.queue.Enqueue(task); err != nil {
-		// The job row and demo blob are already persisted. Mark the job failed
-		// so it is not stranded in "queued" with no task to advance it; the row
-		// stays visible and auditable instead of silently orphaned. Use a fresh,
-		// short-lived context so the compensating write lands even if the request
-		// context is already cancelled (client disconnect or proxy deadline).
-		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if uerr := h.repo.UpdateStatus(markCtx, j.ID, job.StatusFailed, "enqueue "+taskKind+" task: "+err.Error()); uerr != nil {
-			log.Printf("httpapi: mark job %s failed after enqueue error: %v", j.ID, uerr)
-		}
-		markCancel()
+	if _, err := h.queue.EnqueueWithTransition(task, func(decision error) error {
+		return h.persistJobQueueDecision(j.ID, taskKind, decision)
+	}); err != nil {
 		internalError(w, "enqueue "+taskKind+" task", err)
 		return
 	}
@@ -517,15 +531,9 @@ func (h *Handlers) StartParse(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "build parse task", err)
 		return
 	}
-	if _, err := h.queue.Enqueue(task); err != nil {
-		// Inputs are persisted; mark the job failed so it is not stranded with no
-		// task to advance it. Use a fresh context so the write survives a
-		// cancelled request context (client disconnect or proxy deadline).
-		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if uerr := h.repo.UpdateStatus(markCtx, j.ID, job.StatusFailed, "enqueue parse task: "+err.Error()); uerr != nil {
-			log.Printf("httpapi: mark job %s failed after enqueue error: %v", j.ID, uerr)
-		}
-		markCancel()
+	if _, err := h.queue.EnqueueWithTransition(task, func(decision error) error {
+		return h.persistJobQueueDecision(j.ID, "parse", decision)
+	}); err != nil {
 		internalError(w, "enqueue parse task", err)
 		return
 	}
@@ -534,6 +542,21 @@ func (h *Handlers) StartParse(w http.ResponseWriter, r *http.Request) {
 		"id":     j.ID,
 		"status": job.StatusParsing,
 	})
+}
+
+// persistJobQueueDecision keeps a persisted active-looking job state aligned
+// with ownership by the process-local queue. The queue calls it once during
+// admission and again if accepted pending work is discarded during shutdown.
+func (h *Handlers) persistJobQueueDecision(id uuid.UUID, taskKind string, decision error) error {
+	if decision == nil {
+		return nil
+	}
+	markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer markCancel()
+	if err := h.repo.UpdateStatus(markCtx, id, job.StatusFailed, "enqueue "+taskKind+" task: "+decision.Error()); err != nil {
+		return fmt.Errorf("mark job failed after %s queue decision: %w", taskKind, err)
+	}
+	return nil
 }
 
 // GetFinal handles GET /api/jobs/{id}/final.
@@ -706,9 +729,11 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	intent := renderplan.GenerateIntent{
-		Variant:  preset.Name,
-		MusicKey: req.Music,
-		Edit:     renderplan.NormalizeEditRequest(req.Edit),
+		Variant:     preset.Name,
+		MusicKey:    req.Music,
+		Edit:        renderplan.NormalizeEditRequest(req.Edit),
+		ActiveRunID: uuid.New(),
+		AcceptedAt:  time.Now().UTC(),
 	}
 	if err := intent.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -721,19 +746,45 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	portraitSafeKillfeed := preset.HUDMode == string(recording.HUDModeDeathnotices) && intent.Edit.Format == renderplan.FormatShort9x16
-	recordTask, err := tasks.NewRecordDemoTask(j.ID, preset.HUDMode, req.SegmentIDs, portraitSafeKillfeed)
+	recordTask, err := tasks.NewGenerateRecordDemoTask(j.ID, preset.HUDMode, req.SegmentIDs, portraitSafeKillfeed, intent)
 	if err != nil {
 		internalError(w, "build record task", err)
 		return
 	}
-	// Persist the intent before enqueuing so the worker always finds it, even if
-	// the capture finishes quickly. The job keeps its current status on enqueue
-	// failure so the client can retry once the queue recovers.
-	if err := h.writeGenerateIntent(j.ID, intent); err != nil {
-		internalError(w, "write generate intent", err)
-		return
-	}
-	if _, err := h.queue.Enqueue(recordTask, asynq.MaxRetry(0), asynq.Unique(renderUniqueTTL)); err != nil {
+	// The task header is the worker's immutable source of truth. The job-scoped
+	// artifact is the latest accepted choice shown by the workbench; duplicate
+	// and rejected admissions must not replace the active choice.
+	accepted := false
+	_, err = h.queue.EnqueueWithTransition(recordTask, func(decision error) error {
+		switch {
+		case decision == nil:
+			if err := h.generateIntents.Begin(j.ID, intent, func() error {
+				return h.requireGenerateRenderIdle(j.ID)
+			}); err != nil {
+				return err
+			}
+			accepted = true
+			return nil
+		case errors.Is(decision, asynq.ErrDuplicateTask):
+			existing, ok, readErr := h.readGenerateIntent(j.ID)
+			if readErr != nil {
+				return readErr
+			}
+			if ok {
+				intent = existing
+			}
+			return nil
+		default:
+			if accepted {
+				_, err := h.generateIntents.Finish(j.ID, intent.ActiveRunID, func() error {
+					return h.persistJobQueueDecision(j.ID, "generate record", decision)
+				})
+				return err
+			}
+			return nil
+		}
+	}, asynq.MaxRetry(0), asynq.Unique(renderUniqueTTL))
+	if err != nil {
 		// A duplicate is success (see StartRecording): a re-drive must not flip a
 		// reel that is already capturing to failed.
 		if errors.Is(err, asynq.ErrDuplicateTask) {
@@ -743,6 +794,10 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 				"variant":   intent.Variant,
 				"duplicate": true,
 			})
+			return
+		}
+		if errors.Is(err, generateintent.ErrActiveRun) || errors.Is(err, errGenerateRenderActive) {
+			writeError(w, http.StatusConflict, "job already has active generate or render work")
 			return
 		}
 		internalError(w, "enqueue record task", err)
@@ -755,12 +810,29 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handlers) writeGenerateIntent(id uuid.UUID, intent renderplan.GenerateIntent) error {
-	b, err := json.MarshalIndent(intent, "", "  ")
-	if err != nil {
-		return err
+func (h *Handlers) requireGenerateRenderIdle(id uuid.UUID) error {
+	for _, loadout := range renderplan.LoadoutCatalog() {
+		state, ok, err := h.readRenderVariantState(id, loadout.Variant)
+		if err != nil {
+			return fmt.Errorf("read %s render state: %w", loadout.Variant, err)
+		}
+		if ok && (state.Status == renderplan.RenderVariantStatusQueued || state.Status == renderplan.RenderVariantStatusRendering) {
+			return fmt.Errorf("%w: %s is %s", errGenerateRenderActive, loadout.Variant, state.Status)
+		}
 	}
-	return h.storage.Put(artifacts.GenerateIntentKey(id), bytes.NewReader(b))
+	return nil
+}
+
+func (h *Handlers) writeGenerateIntent(id uuid.UUID, intent renderplan.GenerateIntent) error {
+	return h.generateIntents.Write(id, intent)
+}
+
+func (h *Handlers) readGenerateIntent(id uuid.UUID) (renderplan.GenerateIntent, bool, error) {
+	return h.generateIntents.Read(id)
+}
+
+func (h *Handlers) completeGenerateIntent(id, runID uuid.UUID) error {
+	return h.generateIntents.Complete(id, runID)
 }
 
 // StartComposition handles POST /api/jobs/{id}/compose.
@@ -848,11 +920,36 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "build render state", err)
 		return
 	}
-	if err := h.writeRenderVariantState(state); err != nil {
-		internalError(w, "write render state", err)
-		return
-	}
-	if _, err := h.queue.Enqueue(task, asynq.Unique(renderUniqueTTL)); err != nil {
+	_, err = h.queue.EnqueueWithTransition(task, func(decision error) error {
+		switch {
+		case decision == nil:
+			return h.generateIntents.WhileIdle(j.ID, func() error {
+				return h.writeRenderVariantState(state)
+			})
+		case errors.Is(decision, asynq.ErrDuplicateTask):
+			existing, ok, readErr := h.readRenderVariantState(j.ID, variant)
+			if readErr != nil {
+				return readErr
+			}
+			if ok {
+				state = *existing
+			}
+			return nil
+		default:
+			failedState, stateErr := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+				JobID:    j.ID,
+				Loadout:  loadout,
+				Status:   renderplan.RenderVariantStatusFailed,
+				Error:    "enqueue render task: " + decision.Error(),
+				Previous: &state,
+			})
+			if stateErr != nil {
+				return stateErr
+			}
+			return h.writeRenderVariantState(failedState)
+		}
+	}, asynq.Unique(renderUniqueTTL))
+	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			writeJSON(w, http.StatusAccepted, map[string]any{
 				"id":         j.ID,
@@ -864,17 +961,9 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		failedState, stateErr := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
-			JobID:    j.ID,
-			Loadout:  loadout,
-			Status:   renderplan.RenderVariantStatusFailed,
-			Error:    "enqueue render task: " + err.Error(),
-			Previous: &state,
-		})
-		if stateErr == nil {
-			if writeErr := h.writeRenderVariantState(failedState); writeErr != nil {
-				log.Printf("httpapi: write failed render state for %s/%s: %v", j.ID, variant, writeErr)
-			}
+		if errors.Is(err, generateintent.ErrActiveRun) {
+			writeError(w, http.StatusConflict, "guided generation is active for this job")
+			return
 		}
 		internalError(w, "enqueue render task", err)
 		return

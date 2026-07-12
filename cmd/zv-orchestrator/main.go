@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/rechedev9/fragforge/internal/generateintent"
 	"github.com/rechedev9/fragforge/internal/httpapi"
 	"github.com/rechedev9/fragforge/internal/obs"
 	"github.com/rechedev9/fragforge/internal/storage"
@@ -17,10 +20,24 @@ import (
 	"github.com/rechedev9/fragforge/internal/workers"
 )
 
+type orchestratorStreamJobRepository interface {
+	httpapi.StreamJobRepository
+	streamInterruptSweeper
+}
+
+const gracefulShutdownTimeout = 10 * time.Second
+
 func main() {
+	if err := run(); err != nil {
+		log.Printf("fatal: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		return fmt.Errorf("config: %w", err)
 	}
 	// Auto-detect HLAE/CS2/recorder/editor/ffmpeg on the host so capture and
 	// rendering work without the user setting env vars; explicit env still wins.
@@ -45,11 +62,12 @@ func main() {
 
 	store, err := storage.NewLocal(cfg.DataDir)
 	if err != nil {
-		log.Fatalf("storage: %v", err)
+		return fmt.Errorf("storage: %w", err)
 	}
+	generateIntents := generateintent.New(store)
 
 	var repo orchestratorJobRepository
-	var streamRepo httpapi.StreamJobRepository
+	var streamRepo orchestratorStreamJobRepository
 	switch {
 	case cfg.DatabaseURL == databaseURLMemory:
 		repo = newMemoryJobRepository()
@@ -59,29 +77,36 @@ func main() {
 		path := sqlitePath(cfg.DatabaseURL, cfg.DataDir)
 		sqliteRepo, err := newSQLiteJobRepository(path)
 		if err != nil {
-			log.Fatalf("sqlite: %v", err)
+			return fmt.Errorf("sqlite: %w", err)
 		}
 		defer func() { _ = sqliteRepo.Close() }()
 		repo = sqliteRepo
 		sqliteStreamRepo, err := newSQLiteStreamJobRepository(sqliteRepo.db)
 		if err != nil {
-			log.Fatalf("sqlite stream jobs: %v", err)
+			return fmt.Errorf("sqlite stream jobs: %w", err)
 		}
 		streamRepo = sqliteStreamRepo
 		log.Printf("jobs: using sqlite repository at %s", path)
 	default:
-		log.Fatalf("unsupported ZV_DATABASE_URL %q: fragforge desktop only supports %q or %q", cfg.DatabaseURL, databaseURLMemory, databaseURLSQLite)
+		return fmt.Errorf("unsupported ZV_DATABASE_URL %q: fragforge desktop only supports %q or %q", cfg.DatabaseURL, databaseURLMemory, databaseURLSQLite)
 	}
 
-	// Reconcile jobs stranded in a transient in-flight status by a previous
-	// process that crashed or was quit mid-stage. Do it after the repo is ready
-	// and before serving traffic, so the UI never shows a forever-"recording"
-	// card for a job whose worker died. Covers the memory and sqlite repos
-	// alike (both implement ListByStatus/UpdateStatus).
-	if n, err := sweepInterruptedJobs(ctx, repo, obs.Default()); err != nil {
-		log.Printf("startup: sweep interrupted jobs failed: %v", err)
-	} else if n > 0 {
-		log.Printf("startup: marked %d interrupted job(s) as failed", n)
+	// Reconcile durable state whose process-local work vanished with the previous
+	// desktop process. Run every sweep before serving traffic so clients never
+	// observe an active state with no queue owner capable of advancing it.
+	reconciled, err := reconcileInterruptedWork(ctx, repo, streamRepo, store, obs.Default())
+	if err != nil {
+		return fmt.Errorf("startup reconciliation: %w", err)
+	}
+	if reconciled.total() > 0 {
+		log.Printf(
+			"startup: reconciled interrupted work (demo_jobs=%d demo_renders=%d generate_runs=%d stream_jobs=%d stream_renders=%d)",
+			reconciled.DemoJobs,
+			reconciled.DemoRenders,
+			reconciled.GenerateRuns,
+			reconciled.StreamJobs,
+			reconciled.StreamRenderStates,
+		)
 	}
 
 	taskHandlers := map[string]taskHandler{}
@@ -163,11 +188,9 @@ func main() {
 	// Wire the chaining queue before processing starts so the record worker
 	// never handles a task with a half-set enqueuer.
 	if recordWorker != nil {
+		recordWorker.UseGenerateIntentStore(generateIntents)
 		recordWorker.UseEnqueuer(queue)
 	}
-	inline.Start(ctx)
-	log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
-
 	// Defense-in-depth gating only kicks in on an exposed (non-loopback) bind;
 	// the loopback default stays unauthenticated and unthrottled for the local
 	// UI and e2e.
@@ -186,27 +209,52 @@ func main() {
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
 		httpapi.WithMusicDir(cfg.MusicDir),
 		httpapi.WithCapabilities(cfg.captureCapabilities(captureSource)),
+		httpapi.WithGenerateIntentStore(generateIntents),
 	)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           httpapi.Routes(handlers),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	httpRuntime, err := prepareHTTPServer(srv)
+	if err != nil {
+		return fmt.Errorf("http: %w", err)
+	}
 
-	// Start HTTP
-	go func() {
-		log.Printf("http: listening on %s", cfg.HTTPAddr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("http: %v", err)
-		}
-	}()
+	// The address is reserved now, so workers cannot start behind a server that
+	// already failed to bind.
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	defer cancelWorkers()
+	inline.Start(workerCtx)
+	log.Printf("queue: inline mode enabled (concurrency=%d)", cfg.WorkerConcurrency)
+	httpRuntime.Start()
+	log.Printf("http: listening on %s", httpRuntime.Addr())
 
-	<-ctx.Done()
-	log.Print("shutdown: received signal, draining")
+	serveErr := waitAndCancelOnHTTPFailure(ctx, stop, httpRuntime)
+	if serveErr != nil {
+		log.Printf("shutdown: http server failed, draining: %v", serveErr)
+	} else {
+		log.Print("shutdown: received signal, draining")
+	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
-	inline.Shutdown(shutdownCtx)
+	// Stop accepting mutations before canceling workers. Any request already in
+	// flight can finish its atomic admission while the queue is still live;
+	// shutdown then compensates accepted work that remains pending.
+	httpShutdownCtx, cancelHTTPShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	if err := httpRuntime.Shutdown(httpShutdownCtx); err != nil {
+		log.Printf("shutdown: HTTP drain failed: %v", err)
+	}
+	cancelHTTPShutdown()
+
+	cancelWorkers()
+	queueShutdownCtx, cancelQueueShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	if err := inline.Shutdown(queueShutdownCtx); err != nil {
+		log.Printf("shutdown: queue drain failed: %v", err)
+	}
+	cancelQueueShutdown()
 	log.Print("shutdown: done")
+	if serveErr != nil {
+		return fmt.Errorf("http: %w", serveErr)
+	}
+	return nil
 }

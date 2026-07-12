@@ -12,54 +12,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/recording"
 )
 
-// SegmentClipsFromRecording resolves the composed input clip for each planned
-// segment, in plan order. The two failure modes have different severities, so
-// they are reported through different channels: a segment with no composed clip
-// is fatal and surfaces via the returned error, while a segment with multiple
-// composed clips is benign (the lexicographically first is used deterministically)
-// and surfaces as a warning. Callers decide their own policy from there.
-func SegmentClipsFromRecording(result recording.RecordingResult) ([]SegmentClip, []string, error) {
-	bySegment := map[string][]recording.RecordingArtifact{}
-	for _, artifact := range result.Artifacts {
-		if artifact.Role == "segment" && artifact.Type == "video" && artifact.SegmentID != "" {
-			bySegment[artifact.SegmentID] = append(bySegment[artifact.SegmentID], artifact)
-		}
-	}
-
-	var warnings []string
-	var missing []string
-	clips := make([]SegmentClip, 0, len(result.Plan.Segments))
-	for _, segment := range result.Plan.Segments {
-		artifacts := bySegment[segment.ID]
-		if len(artifacts) == 0 {
-			missing = append(missing, segment.ID)
-			continue
-		}
-		// Only the lexicographically-first clip is used, so scan for the minimum
-		// instead of sorting the whole slice.
-		chosen := artifacts[0]
-		for _, a := range artifacts[1:] {
-			if a.Path < chosen.Path {
-				chosen = a
-			}
-		}
-		if len(artifacts) > 1 {
-			warnings = append(warnings, fmt.Sprintf("segment %s has %d composed input clips; using %s", segment.ID, len(artifacts), chosen.Path))
-		}
-		clips = append(clips, SegmentClip{
-			SegmentID:       segment.ID,
-			Path:            chosen.Path,
-			DurationSeconds: chosen.DurationSeconds,
-			Artifact:        chosen,
-		})
-	}
-	if len(missing) > 0 {
-		return clips, warnings, fmt.Errorf("recording result missing composed clips for segments: %s", strings.Join(missing, ", "))
-	}
-	return clips, warnings, nil
-}
-
-func ComposeConcat(ctx context.Context, ffmpegPath string, clips []SegmentClip, outputPath, workDir string) error {
+func ComposeConcat(ctx context.Context, ffmpegPath string, clips []recording.SegmentClip, outputPath, workDir string) error {
 	if ffmpegPath == "" {
 		return fmt.Errorf("ffmpeg path is required")
 	}
@@ -106,7 +59,7 @@ func ComposeConcat(ctx context.Context, ffmpegPath string, clips []SegmentClip, 
 	return nil
 }
 
-func ConcatList(clips []SegmentClip) string {
+func ConcatList(clips []recording.SegmentClip) string {
 	var sb strings.Builder
 	for _, clip := range clips {
 		sb.WriteString("file '")
@@ -149,7 +102,7 @@ func ValidateFinalArtifact(artifact recording.RecordingArtifact, width, height, 
 	return warnings
 }
 
-func ClipDurationSum(clips []SegmentClip) float64 {
+func ClipDurationSum(clips []recording.SegmentClip) float64 {
 	var total float64
 	for _, clip := range clips {
 		total += clip.DurationSeconds

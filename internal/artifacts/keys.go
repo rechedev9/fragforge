@@ -58,8 +58,8 @@ func RosterKey(id uuid.UUID) string {
 }
 
 // GenerateIntentKey is the storage key for a job's one-click generate intent:
-// the preset, music, and edit captured when the user starts a guided run. The
-// record worker reads it to chain the matching render after a capture.
+// the latest accepted preset, music, and edit shown by the workbench. Record
+// tasks carry their own immutable intent rather than reading this mutable view.
 func GenerateIntentKey(id uuid.UUID) string {
 	return path.Join(JobPrefix(id), "generate-intent.json")
 }

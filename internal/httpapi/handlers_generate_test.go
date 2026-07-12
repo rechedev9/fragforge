@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 
 	"github.com/rechedev9/fragforge/internal/artifacts"
 	"github.com/rechedev9/fragforge/internal/editor"
@@ -33,6 +36,15 @@ func postGenerate(t *testing.T, h *Handlers, id uuid.UUID, body string) *httptes
 	rw := httptest.NewRecorder()
 	generateRouter(h).ServeHTTP(rw, req)
 	return rw
+}
+
+type failingGenerateUpdateRepo struct {
+	*fakeRepo
+	err error
+}
+
+func (r failingGenerateUpdateRepo) UpdateStatus(context.Context, uuid.UUID, job.Status, string) error {
+	return r.err
 }
 
 func TestStartGenerateEnqueuesRecordAndWritesIntent(t *testing.T) {
@@ -89,8 +101,205 @@ func TestStartGenerateEnqueuesRecordAndWritesIntent(t *testing.T) {
 			Intro:      true,
 		},
 	}
+	if intent.ActiveRunID == uuid.Nil || intent.AcceptedAt.IsZero() {
+		t.Fatalf("active generate marker = run %s accepted %s, want populated", intent.ActiveRunID, intent.AcceptedAt)
+	}
+	want.ActiveRunID = intent.ActiveRunID
+	want.AcceptedAt = intent.AcceptedAt
 	if intent != want {
 		t.Fatalf("intent = %#v, want %#v", intent, want)
+	}
+	taskIntent, ok, err := tasks.GenerateIntentFromTask(queue.enqueued[0])
+	if err != nil || !ok {
+		t.Fatalf("GenerateIntentFromTask = (%#v, %v, %v)", taskIntent, ok, err)
+	}
+	if taskIntent != want {
+		t.Fatalf("task intent = %#v, want %#v", taskIntent, want)
+	}
+}
+
+func TestStartGenerateDuplicatePreservesAcceptedIntent(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{err: asynq.ErrDuplicateTask}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+	existing := renderplan.GenerateIntent{
+		Variant:  editor.PresetCleanPOV60,
+		MusicKey: "first-track",
+		Edit:     renderplan.DefaultEditRequest(),
+	}
+	if err := h.writeGenerateIntent(j.ID, existing); err != nil {
+		t.Fatalf("writeGenerateIntent error = %v", err)
+	}
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"clean-pov-60","music":"second-track","edit":{"intro":true}}`)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), `"duplicate":true`) {
+		t.Fatalf("body missing duplicate marker: %s", rw.Body.String())
+	}
+	got, ok, err := h.readGenerateIntent(j.ID)
+	if err != nil || !ok {
+		t.Fatalf("readGenerateIntent = (%#v, %v, %v)", got, ok, err)
+	}
+	if got != existing {
+		t.Fatalf("intent = %#v, want preserved %#v", got, existing)
+	}
+}
+
+func TestStartGenerateEnqueueFailureDoesNotPublishIntent(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{err: errors.New("inline queue is full")}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean"}`)
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rw.Code, rw.Body.String())
+	}
+	if _, ok := store.puts[artifacts.GenerateIntentKey(j.ID)]; ok {
+		t.Fatal("intent published for rejected generate task")
+	}
+}
+
+func TestStartGenerateMarksAcceptedPendingJobFailedWhenQueueDiscardsIt(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean"}`)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.transitions) != 1 {
+		t.Fatalf("queue transitions = %d, want 1", len(queue.transitions))
+	}
+	if err := queue.transitions[0](errors.New("inline queue task discarded during shutdown")); err != nil {
+		t.Fatalf("discard transition error = %v", err)
+	}
+	got := repo.jobs[j.ID]
+	if got.Status != job.StatusFailed || !strings.Contains(got.FailureReason, "discarded during shutdown") {
+		t.Fatalf("job after discard = status %s, reason %q; want failed discard reason", got.Status, got.FailureReason)
+	}
+	intent, ok, err := h.readGenerateIntent(j.ID)
+	if err != nil || !ok {
+		t.Fatalf("readGenerateIntent = (%#v, %v, %v)", intent, ok, err)
+	}
+	if intent.ActiveRunID != uuid.Nil {
+		t.Fatalf("active run after discard = %s, want cleared", intent.ActiveRunID)
+	}
+}
+
+func TestStartGenerateDiscardKeepsRecoveryMarkerWhenFailureStatusDoesNotPersist(t *testing.T) {
+	base := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	base.jobs[j.ID] = j
+	repo := failingGenerateUpdateRepo{fakeRepo: base, err: errors.New("sqlite write failed")}
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean"}`)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if got := len(queue.transitions); got != 1 {
+		t.Fatalf("transitions = %d, want 1", got)
+	}
+	if err := queue.transitions[0](errors.New("shutdown discard")); err == nil {
+		t.Fatal("discard transition error = nil, want durable status failure")
+	}
+	intent, ok, err := h.readGenerateIntent(j.ID)
+	if err != nil || !ok {
+		t.Fatalf("readGenerateIntent = (%#v, %v, %v)", intent, ok, err)
+	}
+	if intent.ActiveRunID == uuid.Nil {
+		t.Fatal("discard cleared ActiveRunID without persisting failed job status")
+	}
+	if got := base.jobs[j.ID].Status; got != job.StatusParsed {
+		t.Fatalf("job status = %s, want parsed after injected write failure", got)
+	}
+}
+
+func TestStartGenerateRejectsOverlappingCaptureBeforeItCanReplaceIntent(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+
+	firstResponse := postGenerate(t, h, j.ID, `{"preset":"clean-pov-60","music":"first-track"}`)
+	if firstResponse.Code != http.StatusAccepted {
+		t.Fatalf("first status = %d, want 202; body=%s", firstResponse.Code, firstResponse.Body.String())
+	}
+	secondResponse := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean","music":"second-track"}`)
+	if secondResponse.Code != http.StatusConflict {
+		t.Fatalf("second status = %d, want 409; body=%s", secondResponse.Code, secondResponse.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want only the first capture", len(queue.enqueued))
+	}
+
+	first, ok, err := tasks.GenerateIntentFromTask(queue.enqueued[0])
+	if err != nil || !ok {
+		t.Fatalf("first task intent = (%#v, %v, %v)", first, ok, err)
+	}
+	current, ok, err := h.readGenerateIntent(j.ID)
+	if err != nil || !ok {
+		t.Fatalf("current intent = (%#v, %v, %v)", current, ok, err)
+	}
+	if first.MusicKey != "first-track" || current.ActiveRunID != first.ActiveRunID || current.MusicKey != first.MusicKey {
+		t.Fatalf("active intent changed after rejected overlap: task=%+v current=%+v", first, current)
+	}
+}
+
+func TestStartGenerateRejectsWhileRenderStateIsActive(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+	loadout, err := renderplan.LoadoutForVariant(editor.PresetViral60Clean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:   j.ID,
+		Loadout: loadout,
+		Status:  renderplan.RenderVariantStatusRendering,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.writeRenderVariantState(state); err != nil {
+		t.Fatal(err)
+	}
+
+	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean"}`)
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0 while render is active", len(queue.enqueued))
+	}
+	if _, ok := store.puts[artifacts.GenerateIntentKey(j.ID)]; ok {
+		t.Fatal("active render rejection published a generate intent")
 	}
 }
 
@@ -317,6 +526,49 @@ func TestWorkbenchGenerateAdapterEnqueuesAndShowsProgress(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("fragment missing %q: %s", want, body)
 		}
+	}
+}
+
+func TestWorkbenchNewGenerateIgnoresReadyStateFromPriorRun(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	plan := killplan.NewPlan()
+	plan.Segments = []killplan.Segment{{ID: "seg-001", TickStart: 1, TickEnd: 2}}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+	loadout, err := renderplan.LoadoutForVariant(editor.PresetViral60Clean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:   j.ID,
+		Loadout: loadout,
+		Status:  renderplan.RenderVariantStatusReady,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.writeRenderVariantState(ready); err != nil {
+		t.Fatal(err)
+	}
+	r := Routes(h)
+
+	form := "preset=viral-60-clean&format=short-9x16&kill_effect=punch-in&transition=flash"
+	req := httptest.NewRequest(http.MethodPost, "/ui/jobs/"+j.ID.String()+"/generate", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), "Starting capture") {
+		t.Fatalf("new run did not replace prior ready phase: %s", rw.Body.String())
+	}
+	if strings.Contains(rw.Body.String(), "Short ready") {
+		t.Fatalf("new run exposed prior ready state: %s", rw.Body.String())
 	}
 }
 

@@ -2,6 +2,7 @@ package captions
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sampleXAIJSON exercises the response mapping and the drop rules: a
@@ -258,6 +260,204 @@ func TestXAITranscriber_Transcribe_NonSuccessStatus(t *testing.T) {
 	if !strings.Contains(err.Error(), "500") {
 		t.Fatalf("got error %q, want it to mention the 500 status", err.Error())
 	}
+}
+
+func TestXAITranscriber_RetriesPartialBilingualTranscript(t *testing.T) {
+	partial := `{
+  "duration": 20,
+  "language": "English",
+  "words": [
+    {"text":"Good","start":15.4,"end":15.8},
+    {"text":"round.","start":15.8,"end":16.2},
+    {"text":"Rush","start":18.0,"end":18.4}
+  ]
+}`
+	complete := `{
+  "duration": 20,
+  "language": "Spanish",
+  "words": [
+    {"text":"Medianamente","start":0.1,"end":0.8},
+    {"text":"decente.","start":0.8,"end":1.3},
+    {"text":"Good","start":15.4,"end":15.8},
+    {"text":"round.","start":15.8,"end":16.2},
+    {"text":"Rush","start":19.0,"end":19.6}
+  ]
+}`
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			_, _ = w.Write([]byte(partial))
+			return
+		}
+		_, _ = w.Write([]byte(complete))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "bilingual.mp4")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cues, err := (XAITranscriber{APIKey: "secret-key", BaseURL: server.URL}).Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if got, want := len(cues), 5; got != want {
+		t.Fatalf("cues = %d, want %d: %+v", got, want, cues)
+	}
+	if got, want := cues[0].Word, "Medianamente"; got != want {
+		t.Fatalf("first cue = %q, want %q", got, want)
+	}
+	if got, want := cues[len(cues)-1].Word, "Rush"; got != want {
+		t.Fatalf("last cue = %q, want %q", got, want)
+	}
+}
+
+func TestXAITranscriber_KeepsBestPartialTranscriptAfterRetries(t *testing.T) {
+	responses := []string{
+		`{"duration":20,"words":[{"text":"late","start":15,"end":19}]}`,
+		`{"duration":20,"words":[{"text":"middle","start":8,"end":16}]}`,
+		`{"duration":20,"words":[{"text":"short","start":18,"end":19}]}`,
+	}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responses[requests]))
+		requests++
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "sparse.mp4")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cues, err := (XAITranscriber{APIKey: "secret-key", BaseURL: server.URL}).Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != xaiMaxTranscriptionAttempts {
+		t.Fatalf("requests = %d, want %d", requests, xaiMaxTranscriptionAttempts)
+	}
+	if got, want := cues[0].Word, "middle"; got != want {
+		t.Fatalf("selected cue = %q, want %q", got, want)
+	}
+}
+
+func TestXAITranscriber_ReturnsBestPartialWhenLaterAttemptFails(t *testing.T) {
+	partial := `{"duration":20,"words":[{"text":"usable","start":15,"end":19}]}`
+	tests := []struct {
+		name         string
+		secondStatus int
+		secondBody   string
+		secondErr    error
+	}{
+		{name: "api 500", secondStatus: http.StatusInternalServerError, secondBody: `{"error":"temporary failure"}`},
+		{name: "invalid json", secondStatus: http.StatusOK, secondBody: `{not-json`},
+		{name: "transport error", secondErr: errors.New("connection reset")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &scriptedXAITransport{
+				firstBody:    partial,
+				secondStatus: tt.secondStatus,
+				secondBody:   tt.secondBody,
+				secondErr:    tt.secondErr,
+			}
+			dir := t.TempDir()
+			mediaPath := filepath.Join(dir, "partial.wav")
+			if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cues, err := (XAITranscriber{
+				APIKey:     "secret-key",
+				BaseURL:    "https://xai.invalid/v1",
+				HTTPClient: &http.Client{Transport: transport},
+			}).Transcribe(context.Background(), mediaPath, dir)
+			if err != nil {
+				t.Fatalf("Transcribe returned error: %v", err)
+			}
+			if got, want := transport.calls, 2; got != want {
+				t.Fatalf("requests = %d, want %d", got, want)
+			}
+			if got, want := len(cues), 1; got != want || cues[0].Word != "usable" {
+				t.Fatalf("cues = %+v, want one usable partial cue", cues)
+			}
+		})
+	}
+}
+
+func TestXAITranscriber_CompleteFirstResponseUsesOneRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"duration":20,"words":[{"text":"start","start":0.1,"end":0.5},{"text":"finish","start":19,"end":19.5}]}`))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "complete.wav")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cues, err := (XAITranscriber{APIKey: "secret-key", BaseURL: server.URL}).Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	if got, want := len(cues), 2; got != want {
+		t.Fatalf("cues = %d, want %d", got, want)
+	}
+}
+
+func TestWaitForXAIRetryHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	err := waitForXAIRetry(ctx, 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForXAIRetry error = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(started); elapsed >= xaiRetryInitialBackoff {
+		t.Fatalf("waitForXAIRetry elapsed = %s, want less than %s", elapsed, xaiRetryInitialBackoff)
+	}
+}
+
+type scriptedXAITransport struct {
+	firstBody    string
+	secondStatus int
+	secondBody   string
+	secondErr    error
+	calls        int
+}
+
+func (t *scriptedXAITransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+		_ = req.Body.Close()
+	}
+	t.calls++
+	if t.calls == 1 {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(t.firstBody)),
+		}, nil
+	}
+	if t.secondErr != nil {
+		return nil, t.secondErr
+	}
+	return &http.Response{
+		StatusCode: t.secondStatus,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(t.secondBody)),
+	}, nil
 }
 
 func TestReadLimitedXAIResponse(t *testing.T) {

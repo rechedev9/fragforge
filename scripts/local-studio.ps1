@@ -3,13 +3,13 @@
 # One command to run the whole product on the user's own Windows + GPU PC: the
 # orchestrator (parse + HLAE/CS2 capture + render) and the web UI, wired so the
 # browser flow (upload -> pick player -> pick kills -> create reel) actually
-# drives local capture. Everything runs on this machine: no Supabase, no
-# paired agent, no hosted control plane.
+# drives local capture. Everything runs on this machine.
 #
 # What it does:
-#   1. Starts `zv serve` in memory mode (in-memory jobs + inline queue, no
-#      Postgres/Redis). The orchestrator auto-detects HLAE, CS2, and zv-recorder
-#      on startup, so capture works without setting any tool-path env vars.
+#   1. Starts `zv serve` with an on-disk SQLite job database and inline queue
+#      (no external database or queue service). The orchestrator auto-detects
+#      HLAE, CS2, and zv-recorder on startup, so capture works without setting
+#      any tool-path env vars.
 #   2. Starts the Next.js web UI, whose /api/demos/* routes proxy the full
 #      pipeline to the local orchestrator.
 #   3. Opens the browser at the upload page.
@@ -49,11 +49,11 @@ if (-not (Test-Path (Join-Path $webDir "node_modules"))) {
 
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 
-Write-Host "[local-studio] starting orchestrator (memory mode, capture auto-detected)..."
+Write-Host "[local-studio] starting orchestrator (SQLite jobs, capture auto-detected)..."
 # Set in the session so the orchestrator child inherits them (works on both
 # Windows PowerShell 5.1 and PowerShell 7; Start-Process -Environment is 7.4+).
-# sqlite = on-disk job repo (<dataDir>/jobs.db) + inline queue, no Postgres/Redis,
-# so jobs survive a restart.
+# sqlite = on-disk job repo (<dataDir>/jobs.db) + inline queue, with no external
+# services, so jobs survive a restart.
 $env:ZV_DATABASE_URL = "sqlite"
 $env:ZV_DATA_DIR = $dataDir
 $orchestrator = Start-Process -FilePath $binZv -ArgumentList "serve" -PassThru -NoNewWindow

@@ -67,8 +67,6 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 			return exitInvalidArgs
 		}
 		return runDelegate("zv-orchestrator", args[1:], stdout, stderr, stdin, runner)
-	case "pipeline":
-		return runCanonicalDelegate(args, "zv-pipeline", args[1:], stdout, stderr, stdin, runner)
 	default:
 		if passThrough, ok := findLegacyPassThrough(args[0]); ok {
 			return runDelegate(passThrough.Binary, args[1:], stdout, stderr, stdin, runner)

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -27,7 +28,6 @@ const (
 	maxStreamVideoBytes     = 8 << 30
 	maxStreamMultipartBytes = maxStreamVideoBytes + 2<<20
 	streamRenderUniqueTTL   = 24 * time.Hour
-	streamAcquireUniqueTTL  = 24 * time.Hour
 	defaultStreamListLimit  = 50
 )
 
@@ -180,17 +180,11 @@ func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request
 		internalError(w, "build stream acquire task", err)
 		return
 	}
-	if _, err := h.queue.Enqueue(task, asynq.MaxRetry(0), asynq.Unique(streamAcquireUniqueTTL)); err != nil {
-		if !errors.Is(err, asynq.ErrDuplicateTask) {
-			// The job row is already persisted; mark it failed so it is not
-			// stranded in "acquiring" with no task to advance it.
-			if uerr := h.streamRepo.UpdateStatus(r.Context(), j.ID, streamclips.StatusFailed, "enqueue stream acquire task: "+err.Error()); uerr != nil {
-				internalError(w, "mark stream job failed after enqueue error", uerr)
-				return
-			}
-			internalError(w, "enqueue stream acquire task", err)
-			return
-		}
+	if _, err := h.queue.EnqueueWithTransition(task, func(decision error) error {
+		return h.persistStreamAcquireQueueDecision(j.ID, decision)
+	}, asynq.MaxRetry(0)); err != nil {
+		internalError(w, "enqueue stream acquire task", err)
+		return
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -198,6 +192,20 @@ func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request
 		"status": j.Status,
 		"probe":  j.Probe,
 	})
+}
+
+// persistStreamAcquireQueueDecision prevents URL-backed jobs from remaining
+// "acquiring" after the process-local queue rejects or discards their task.
+func (h *Handlers) persistStreamAcquireQueueDecision(id uuid.UUID, decision error) error {
+	if decision == nil {
+		return nil
+	}
+	markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer markCancel()
+	if err := h.streamRepo.UpdateStatus(markCtx, id, streamclips.StatusFailed, "enqueue stream acquire task: "+decision.Error()); err != nil {
+		return fmt.Errorf("mark stream job failed after acquire queue decision: %w", err)
+	}
+	return nil
 }
 
 // isJSONContentType reports whether the request's Content-Type is (or starts
@@ -365,11 +373,28 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.writeStreamRenderState(state); err != nil {
-		internalError(w, "write stream render state", err)
-		return
-	}
-	if _, err := h.queue.Enqueue(task, asynq.Unique(streamRenderUniqueTTL)); err != nil {
+	_, err = h.queue.EnqueueWithTransition(task, func(decision error) error {
+		switch {
+		case decision == nil:
+			return h.writeStreamRenderState(state)
+		case errors.Is(decision, asynq.ErrDuplicateTask):
+			existing, ok, readErr := h.readStreamRenderState(j.ID, variant)
+			if readErr != nil {
+				return readErr
+			}
+			if ok {
+				state = existing
+			}
+			return nil
+		default:
+			failedState, stateErr := streamclips.NewRenderState(j.ID, variant, streamclips.StatusFailed, state.Warnings, "enqueue render: "+decision.Error(), state.Videos)
+			if stateErr != nil {
+				return stateErr
+			}
+			return h.writeStreamRenderState(failedState)
+		}
+	}, asynq.Unique(streamRenderUniqueTTL))
+	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			writeJSON(w, http.StatusAccepted, map[string]any{
 				"id":        j.ID,
@@ -533,6 +558,26 @@ func (h *Handlers) writeStreamRenderState(state streamclips.RenderState) error {
 		return err
 	}
 	return h.storage.Put(key, bytes.NewReader(append(b, '\n')))
+}
+
+func (h *Handlers) readStreamRenderState(id uuid.UUID, variant string) (streamclips.RenderState, bool, error) {
+	key, err := streamclips.RenderStateKey(id, variant)
+	if err != nil {
+		return streamclips.RenderState{}, false, err
+	}
+	rc, err := h.storage.Open(key)
+	if err != nil {
+		if storageNotExist(err) {
+			return streamclips.RenderState{}, false, nil
+		}
+		return streamclips.RenderState{}, false, err
+	}
+	defer rc.Close()
+	var state streamclips.RenderState
+	if err := json.NewDecoder(rc).Decode(&state); err != nil {
+		return streamclips.RenderState{}, false, fmt.Errorf("decode stream render state: %w", err)
+	}
+	return state, true, nil
 }
 
 func storageNotExist(err error) bool {

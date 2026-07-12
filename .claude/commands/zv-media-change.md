@@ -30,7 +30,6 @@ Process:
    - `go test ./internal/editor -count=1`
    - `go test ./internal/recording -count=1`
    - `go test ./internal/composition -count=1`
-   - `go test ./internal/pipeline -count=1`
 9. If the change is broad, run `scripts/go-gate.sh --no-format` after targeted
    tests pass; it includes `zv check`.
 10. Summarize exact media behavior changed, tests run, and remaining visual or
