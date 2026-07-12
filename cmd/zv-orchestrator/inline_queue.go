@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/hibiken/asynq"
+
+	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
 type taskHandler func(context.Context, *asynq.Task) error
@@ -20,13 +22,36 @@ const inlineDefaultQueue = "inline"
 
 const inlineMinimumPendingTasks = 1024
 
+const inlineParseAttemptTimeout = 15 * time.Minute
+
 var errInlineQueueFull = errors.New("inline queue is full")
 
 type inlineTask struct {
 	task      *asynq.Task
 	id        string
+	policy    inlineTaskPolicy
 	uniqueKey inlineUniqueKey
 	unique    bool
+}
+
+// inlineTaskPolicy describes work the desktop queue owns after a task leaves
+// the FIFO. Only deterministic parser work is safe to retry automatically;
+// recording and other media work remain terminal after one attempt.
+type inlineTaskPolicy struct {
+	attemptTimeout time.Duration
+	maxRetries     int
+}
+
+func defaultInlineTaskPolicy(taskType string) inlineTaskPolicy {
+	switch taskType {
+	case tasks.TypeParseDemo, tasks.TypeScanRoster:
+		return inlineTaskPolicy{
+			attemptTimeout: inlineParseAttemptTimeout,
+			maxRetries:     1,
+		}
+	default:
+		return inlineTaskPolicy{}
+	}
 }
 
 type inlineUniqueKey struct {
@@ -158,7 +183,14 @@ func (q *inlineQueue) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.Ta
 		return nil, err
 	}
 	id := fmt.Sprintf("inline-%d", q.nextID.Add(1))
-	queued := inlineTask{task: task, id: id}
+	policy := defaultInlineTaskPolicy(task.Type())
+	if options.maxRetry != nil && *options.maxRetry != policy.maxRetries {
+		return nil, fmt.Errorf(
+			"inline queue retry policy for %s is %d, got %d",
+			task.Type(), policy.maxRetries, *options.maxRetry,
+		)
+	}
+	queued := inlineTask{task: task, id: id, policy: policy}
 	if options.uniqueTTL > 0 {
 		queued.unique = true
 		queued.uniqueKey = inlineUniqueKey{
@@ -178,7 +210,8 @@ func (q *inlineQueue) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.Ta
 		Headers:   task.Headers(),
 		State:     asynq.TaskStatePending,
 		Retried:   0,
-		MaxRetry:  0,
+		MaxRetry:  policy.maxRetries,
+		Timeout:   policy.attemptTimeout,
 		Retention: 0,
 	}, nil
 }
@@ -223,10 +256,11 @@ func (q *inlineQueue) run(ctx context.Context) {
 			log.Printf("inline queue: no handler for %s", task.Type())
 			continue
 		}
-		err := handler(ctx, task)
-		// The inline queue has no automatic retry/archive stage. Once the
-		// handler returns it no longer owns work, even on failure, and the
-		// desktop's explicit Retry action must be able to enqueue it again.
+		err := q.handle(ctx, queued, handler)
+		// The uniqueness lease belongs to the logical task, including all of
+		// its attempts. Release it only after success, retry exhaustion, or
+		// parent cancellation so the desktop's explicit Retry action can enqueue
+		// the task again after the queue no longer owns it.
 		q.releaseUnique(queued)
 		if err != nil {
 			log.Printf("inline queue: %s failed: %v", task.Type(), err)
@@ -234,9 +268,38 @@ func (q *inlineQueue) run(ctx context.Context) {
 	}
 }
 
+func (q *inlineQueue) handle(ctx context.Context, queued inlineTask, handler taskHandler) error {
+	var err error
+	for attempt := 0; attempt <= queued.policy.maxRetries; attempt++ {
+		if parentErr := ctx.Err(); parentErr != nil {
+			return parentErr
+		}
+
+		attemptCtx := tasks.WithTaskAttempt(ctx, attempt, queued.policy.maxRetries)
+		cancel := func() {}
+		if queued.policy.attemptTimeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(attemptCtx, queued.policy.attemptTimeout)
+		}
+		err = handler(attemptCtx, queued.task)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil || attempt == queued.policy.maxRetries {
+			return err
+		}
+		log.Printf(
+			"inline queue: %s attempt %d failed, retrying: %v",
+			queued.task.Type(), attempt+1, err,
+		)
+	}
+	return err
+}
+
 type inlineEnqueueOptions struct {
 	queue     string
 	uniqueTTL time.Duration
+	maxRetry  *int
 }
 
 func parseInlineEnqueueOptions(opts []asynq.Option) (inlineEnqueueOptions, error) {
@@ -272,9 +335,7 @@ func parseInlineEnqueueOptions(opts []asynq.Option) (inlineEnqueueOptions, error
 			if !ok {
 				return inlineEnqueueOptions{}, fmt.Errorf("inline queue option %s has invalid retry value", opt.String())
 			}
-			if retries != 0 {
-				return inlineEnqueueOptions{}, fmt.Errorf("inline queue does not support retries")
-			}
+			result.maxRetry = &retries
 		default:
 			return inlineEnqueueOptions{}, fmt.Errorf("inline queue does not support option %s", opt.String())
 		}

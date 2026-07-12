@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -44,22 +43,6 @@ const (
 	// source video from a URL (Twitch clip/VOD or any yt-dlp-supported site)
 	// before it can be edited and rendered.
 	TypeStreamAcquire = "stream:acquire"
-)
-
-const (
-	// parseDemoTimeout bounds how long a single demo parse may run before Asynq
-	// cancels the task context. Parsing a legitimate CS2 demo finishes in
-	// seconds; this generous ceiling stops a corrupt or pathological demo from
-	// pinning a worker slot indefinitely. The parser worker threads this context
-	// into demoinfocs via parser.RunWithContext, so an exceeded deadline aborts
-	// ParseToEnd instead of running forever.
-	parseDemoTimeout = 15 * time.Minute
-
-	// parseDemoMaxRetry caps retries for a parse task. Parsing is deterministic:
-	// a demo that fails (corrupt, target-not-found, or timed out) fails the same
-	// way every time, so the default 25 retries only waste worker slots. One
-	// retry still absorbs a transient infrastructure blip (Redis/temp-file).
-	parseDemoMaxRetry = 1
 )
 
 var renderVariantPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -128,24 +111,16 @@ func NewParseDemoTask(id uuid.UUID) (*asynq.Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeParseDemo, payload,
-		asynq.Timeout(parseDemoTimeout),
-		asynq.MaxRetry(parseDemoMaxRetry),
-	), nil
+	return asynq.NewTask(TypeParseDemo, payload), nil
 }
 
-// NewScanRosterTask mirrors NewParseDemoTask: a roster scan is a single
-// deterministic pass over the same demo, so it reuses the parse timeout and
-// max-retry ceiling.
+// NewScanRosterTask returns a task for the deterministic roster scan pass.
 func NewScanRosterTask(id uuid.UUID) (*asynq.Task, error) {
 	payload, err := json.Marshal(ScanRosterPayload{JobID: id})
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeScanRoster, payload,
-		asynq.Timeout(parseDemoTimeout),
-		asynq.MaxRetry(parseDemoMaxRetry),
-	), nil
+	return asynq.NewTask(TypeScanRoster, payload), nil
 }
 
 // NewRecordDemoTask returns an Asynq task for recording a job. hudMode is

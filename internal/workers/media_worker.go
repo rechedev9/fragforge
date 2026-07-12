@@ -109,6 +109,9 @@ func recordTaskFailure(ctx context.Context, repo statusUpdater, id uuid.UUID, ta
 // task context (e.g. direct unit tests) it returns true so a failure is still
 // recorded.
 func taskIsTerminal(ctx context.Context) bool {
+	if retried, maxRetry, ok := tasks.TaskAttempt(ctx); ok {
+		return isTerminalAttempt(retried, maxRetry, true)
+	}
 	retried, ok1 := asynq.GetRetryCount(ctx)
 	maxRetry, ok2 := asynq.GetMaxRetry(ctx)
 	return isTerminalAttempt(retried, maxRetry, ok1 && ok2)

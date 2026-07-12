@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/hibiken/asynq"
+
+	tasktypes "github.com/rechedev9/fragforge/internal/tasks"
 )
 
 func startTestInlineQueue(t *testing.T, handlers map[string]taskHandler, concurrency int) *inlineQueue {
@@ -24,6 +27,266 @@ func startTestInlineQueue(t *testing.T, handlers map[string]taskHandler, concurr
 		queue.Shutdown(shutdownCtx)
 	})
 	return queue
+}
+
+func TestDefaultInlineTaskPolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		taskType    string
+		wantTimeout time.Duration
+		wantRetries int
+	}{
+		{name: "parse demo", taskType: tasktypes.TypeParseDemo, wantTimeout: 15 * time.Minute, wantRetries: 1},
+		{name: "scan roster", taskType: tasktypes.TypeScanRoster, wantTimeout: 15 * time.Minute, wantRetries: 1},
+		{name: "record demo", taskType: tasktypes.TypeRecordDemo},
+		{name: "compose final", taskType: tasktypes.TypeComposeFinal},
+		{name: "render variant", taskType: tasktypes.TypeRenderVariant},
+		{name: "codex agent", taskType: tasktypes.TypeCodexAgent},
+		{name: "render stream clip", taskType: tasktypes.TypeRenderStreamClip},
+		{name: "stream acquire", taskType: tasktypes.TypeStreamAcquire},
+		{name: "unknown", taskType: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := defaultInlineTaskPolicy(tt.taskType)
+			if got.attemptTimeout != tt.wantTimeout {
+				t.Errorf("attemptTimeout = %v, want %v", got.attemptTimeout, tt.wantTimeout)
+			}
+			if got.maxRetries != tt.wantRetries {
+				t.Errorf("maxRetries = %d, want %d", got.maxRetries, tt.wantRetries)
+			}
+		})
+	}
+}
+
+func TestInlineQueueReportsTaskTypePolicy(t *testing.T) {
+	handled := make(chan struct{}, 1)
+	queue := startTestInlineQueue(t, map[string]taskHandler{
+		tasktypes.TypeParseDemo: func(context.Context, *asynq.Task) error {
+			handled <- struct{}{}
+			return nil
+		},
+	}, 1)
+
+	info, err := queue.Enqueue(asynq.NewTask(tasktypes.TypeParseDemo, nil), asynq.MaxRetry(1))
+	if err != nil {
+		t.Fatalf("Enqueue() error = %v", err)
+	}
+	if info.MaxRetry != 1 {
+		t.Errorf("TaskInfo.MaxRetry = %d, want 1", info.MaxRetry)
+	}
+	if info.Timeout != 15*time.Minute {
+		t.Errorf("TaskInfo.Timeout = %v, want 15m", info.Timeout)
+	}
+	<-handled
+}
+
+func TestInlineQueueRetriesPureTaskOnceAfterFailure(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	var calls int
+	queued := inlineTask{
+		task: asynq.NewTask(tasktypes.TypeParseDemo, nil),
+		policy: inlineTaskPolicy{
+			attemptTimeout: time.Minute,
+			maxRetries:     1,
+		},
+	}
+	err := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
+		calls++
+		if calls == 1 {
+			return errors.New("transient parse failure")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handle() error = %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2", calls)
+	}
+}
+
+func TestInlineQueueProvidesAttemptMetadataToHandlers(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	queued := inlineTask{
+		task: asynq.NewTask(tasktypes.TypeParseDemo, nil),
+		policy: inlineTaskPolicy{
+			attemptTimeout: time.Minute,
+			maxRetries:     1,
+		},
+	}
+	type attempt struct {
+		retried  int
+		maxRetry int
+	}
+	var got []attempt
+	err := queue.handle(context.Background(), queued, func(ctx context.Context, _ *asynq.Task) error {
+		retried, maxRetry, ok := tasktypes.TaskAttempt(ctx)
+		if !ok {
+			t.Fatal("TaskAttempt metadata missing")
+		}
+		got = append(got, attempt{retried: retried, maxRetry: maxRetry})
+		if retried == 0 {
+			return errors.New("retry parse")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handle() error = %v", err)
+	}
+	want := []attempt{{retried: 0, maxRetry: 1}, {retried: 1, maxRetry: 1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("attempt metadata = %#v, want %#v", got, want)
+	}
+}
+
+func TestInlineQueueStopsAfterPureTaskRetryIsExhausted(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	var calls int
+	wantErr := errors.New("persistent parse failure")
+	queued := inlineTask{
+		task:   asynq.NewTask(tasktypes.TypeScanRoster, nil),
+		policy: inlineTaskPolicy{maxRetries: 1},
+	}
+	err := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
+		calls++
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("handle() error = %v, want %v", err, wantErr)
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2", calls)
+	}
+}
+
+func TestInlineQueueAppliesDeadlineToEachPureTaskAttempt(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	const attemptTimeout = 50 * time.Millisecond
+	queued := inlineTask{
+		task: asynq.NewTask(tasktypes.TypeParseDemo, nil),
+		policy: inlineTaskPolicy{
+			attemptTimeout: attemptTimeout,
+			maxRetries:     1,
+		},
+	}
+	started := time.Now()
+	var calls int
+	err := queue.handle(context.Background(), queued, func(ctx context.Context, _ *asynq.Task) error {
+		calls++
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("handler context has no deadline")
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 || remaining > attemptTimeout {
+			t.Fatalf("handler deadline remaining = %v, want (0, %v]", remaining, attemptTimeout)
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("handle() error = %v, want context.DeadlineExceeded", err)
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d, want 2", calls)
+	}
+	if elapsed := time.Since(started); elapsed < 2*attemptTimeout {
+		t.Fatalf("handler elapsed = %v, want at least %v", elapsed, 2*attemptTimeout)
+	}
+}
+
+func TestInlineQueueDoesNotRetryAfterParentCancellation(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls int
+	queued := inlineTask{
+		task:   asynq.NewTask(tasktypes.TypeParseDemo, nil),
+		policy: inlineTaskPolicy{maxRetries: 1},
+	}
+	err := queue.handle(ctx, queued, func(context.Context, *asynq.Task) error {
+		calls++
+		cancel()
+		return errors.New("parse interrupted")
+	})
+	if err == nil {
+		t.Fatal("handle() error = nil")
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+}
+
+func TestInlineQueueDoesNotRetryMediaTasks(t *testing.T) {
+	queue := newInlineQueue(nil, 1)
+	var calls int
+	wantErr := errors.New("recording failed")
+	queued := inlineTask{
+		task:   asynq.NewTask(tasktypes.TypeRecordDemo, nil),
+		policy: defaultInlineTaskPolicy(tasktypes.TypeRecordDemo),
+	}
+	err := queue.handle(context.Background(), queued, func(context.Context, *asynq.Task) error {
+		calls++
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("handle() error = %v, want %v", err, wantErr)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+}
+
+func TestInlineQueueKeepsUniqueLeaseAcrossAutomaticRetry(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	retryStarted := make(chan struct{})
+	releaseRetry := make(chan struct{})
+	var calls atomic.Int32
+	queue := startTestInlineQueue(t, map[string]taskHandler{
+		tasktypes.TypeParseDemo: func(context.Context, *asynq.Task) error {
+			switch calls.Add(1) {
+			case 1:
+				close(firstStarted)
+				<-releaseFirst
+				return errors.New("retry parse")
+			case 2:
+				close(retryStarted)
+				<-releaseRetry
+			}
+			return nil
+		},
+	}, 1)
+	task := asynq.NewTask(tasktypes.TypeParseDemo, []byte("same payload"))
+
+	if _, err := queue.Enqueue(task, asynq.Unique(time.Minute)); err != nil {
+		t.Fatalf("first Enqueue() error = %v", err)
+	}
+	<-firstStarted
+	if _, err := queue.Enqueue(task, asynq.Unique(time.Minute)); !errors.Is(err, asynq.ErrDuplicateTask) {
+		t.Fatalf("duplicate during first attempt error = %v, want ErrDuplicateTask", err)
+	}
+	close(releaseFirst)
+	<-retryStarted
+	if _, err := queue.Enqueue(task, asynq.Unique(time.Minute)); !errors.Is(err, asynq.ErrDuplicateTask) {
+		t.Fatalf("duplicate during retry error = %v, want ErrDuplicateTask", err)
+	}
+	close(releaseRetry)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		_, err := queue.Enqueue(task, asynq.Unique(time.Minute))
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, asynq.ErrDuplicateTask) {
+			t.Fatalf("Enqueue() after retry success error = %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("unique lease remained after retry success: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func TestInlineQueueRejectsDuplicateUntilSuccessfulTaskFinishes(t *testing.T) {

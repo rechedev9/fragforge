@@ -1037,6 +1037,26 @@ func TestIsTerminalAttempt(t *testing.T) {
 	}
 }
 
+func TestTaskIsTerminalUsesInlineAttemptContext(t *testing.T) {
+	tests := []struct {
+		name     string
+		retried  int
+		maxRetry int
+		want     bool
+	}{
+		{name: "intermediate attempt", retried: 0, maxRetry: 1, want: false},
+		{name: "final attempt", retried: 1, maxRetry: 1, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := tasks.WithTaskAttempt(context.Background(), tt.retried, tt.maxRetry)
+			if got := taskIsTerminal(ctx); got != tt.want {
+				t.Errorf("taskIsTerminal() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func minimalKillPlan() killplan.Plan {
 	plan := killplan.NewPlan()
 	plan.Demo.Tickrate = 64
