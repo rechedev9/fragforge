@@ -10,10 +10,8 @@
 // (or a stray process) never collide on a fixed port.
 
 import { app, BrowserWindow, shell, session } from 'electron';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import * as http from 'node:http';
 import * as net from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { escapeHtml } from './escaping';
@@ -21,6 +19,8 @@ import { downloadFile } from './http-download';
 import { validateWindowState, type WindowState } from './window-state';
 import { lastLines } from './log-tail';
 import { provisionRuntimeTools, RUNTIME_TOOL_LABELS } from './runtime-tools';
+import { ProcessSession, type LaunchedProcess } from './process-session';
+import { waitForDesktopServices } from './service-health';
 
 // Every loopback server and health check binds/targets this host; named once so
 // the value that couples all the URLs below is not a scattered magic string.
@@ -104,7 +104,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * orchestrator rescans the dir on every /api/songs request, so tracks appear
  * as they land.
  */
-async function provisionMusic(): Promise<void> {
+async function provisionMusic(signal: AbortSignal): Promise<void> {
   const bundledCatalog = resourcePath('music', 'catalog.json');
   if (!fs.existsSync(bundledCatalog)) return;
   fs.mkdirSync(musicDir, { recursive: true });
@@ -122,6 +122,7 @@ async function provisionMusic(): Promise<void> {
   // original sequential loop, and the orchestrator picks up tracks as they land,
   // so there is no need to hammer several release hosts at once during boot.
   for (const track of tracks) {
+    if (signal.aborted) return;
     if (!isRecord(track)) continue;
     const { id, ext, downloadUrl } = track;
     if (typeof id !== 'string' || !id || typeof ext !== 'string' || !ext) continue;
@@ -142,9 +143,10 @@ async function provisionMusic(): Promise<void> {
     // downloadFile stages through a temp name and renames on success, so a
     // half-written file never shows up as a playable track.
     try {
-      await downloadFile(downloadUrl, dest);
+      await downloadFile(downloadUrl, dest, { signal });
       logLine(`[music] downloaded ${id}.${ext}\n`);
     } catch (err) {
+      if (signal.aborted) return;
       logLine(`[music] skip ${id}: ${String(err)}\n`);
     }
   }
@@ -215,77 +217,6 @@ async function stablePort(key: string): Promise<number> {
     logLine(`[ports] could not persist ${key} port: ${String(err)}\n`);
   }
   return port;
-}
-
-// Per-attempt socket timeout and delay between polls for waitForHttp; short
-// relative to the overall deadline the caller passes in, so a single slow
-// attempt never eats a meaningful chunk of the boot budget.
-const HEALTH_REQUEST_TIMEOUT_MS = 2000;
-const HEALTH_POLL_INTERVAL_MS = 400;
-
-/** Polls an HTTP URL until it answers 2xx/3xx or the timeout elapses. */
-function waitForHttp(url: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve, reject) => {
-    const attempt = (): void => {
-      const req = http.get(url, (res) => {
-        res.resume();
-        if (res.statusCode && res.statusCode < 400) {
-          resolve();
-          return;
-        }
-        retry();
-      });
-      req.on('error', retry);
-      req.setTimeout(HEALTH_REQUEST_TIMEOUT_MS, () => req.destroy());
-    };
-    const retry = (): void => {
-      if (Date.now() > deadline) {
-        reject(new Error(`timed out waiting for ${url}`));
-        return;
-      }
-      setTimeout(attempt, HEALTH_POLL_INTERVAL_MS);
-    };
-    attempt();
-  });
-}
-
-const children: ChildProcess[] = [];
-
-interface Launched {
-  child: ChildProcess;
-  // Rejects the moment the child dies or fails to spawn; never resolves.
-  exited: Promise<never>;
-}
-
-/**
- * Spawns a child, tracks it for shutdown, and prefixes its logs (mirrored to
- * studio.log). The returned exited promise rejects the moment the child dies
- * or fails to spawn, so boot() can fail fast with the real cause (an AV
- * quarantine or a crashing backend exits in milliseconds) instead of sitting
- * out the full healthz timeout and reporting a useless "timed out".
- */
-function launch(label: string, exe: string, args: string[], env: Record<string, string>): Launched {
-  const child = spawn(exe, args, { env: { ...process.env, ...env }, windowsHide: true });
-  children.push(child);
-  const tag = (buf: Buffer): void => logLine(`[${label}] ${String(buf)}`);
-  child.stdout?.on('data', tag);
-  child.stderr?.on('data', tag);
-  const exited = new Promise<never>((_resolve, reject) => {
-    child.on('error', (err) => {
-      logLine(`[${label}] failed to start: ${String(err)}\n`);
-      // User-facing strings (here and in the loading/error screens) are in
-      // Spanish: FragForge Studio targets the Spanish-speaking CS2
-      // content-creator market, so the desktop chrome speaks their language.
-      reject(new Error(`${label} no pudo iniciarse: ${err.message}`));
-    });
-    child.on('exit', (code) => {
-      logLine(`[${label}] exited (${code})\n`);
-      reject(new Error(`${label} terminó inesperadamente (código ${code})`));
-    });
-  });
-  exited.catch(() => {}); // observed selectively during boot; never unhandled
-  return { child, exited };
 }
 
 /** Last lines of studio.log, HTML-escaped for the error screen. */
@@ -386,7 +317,7 @@ let renderProcessGoneResetTimer: NodeJS.Timeout | null = null;
 // crash sending it straight to the error screen.
 const RENDER_CRASH_RESET_DELAY_MS = 60_000;
 
-function createWindow(loadingOnly: boolean): BrowserWindow {
+function createWindow(): BrowserWindow {
   const { bounds, isMaximized } = loadWindowState();
   const win = new BrowserWindow({
     ...bounds,
@@ -472,7 +403,6 @@ function createWindow(loadingOnly: boolean): BrowserWindow {
     );
   });
 
-  if (loadingOnly) win.loadFile(loadingHtmlPath);
   return win;
 }
 
@@ -518,78 +448,93 @@ function showErrorScreen(err: unknown, title?: string, hint?: string): void {
   // target; drop whatever the previous error screen (if any) allowed.
   allowedInternalUrls.clear();
   allowedInternalUrls.add(url);
-  win.loadURL(url);
+  void win.loadURL(url).catch((loadErr: unknown) => {
+    logLine(`[window] could not load error screen: ${String(loadErr)}\n`);
+  });
 }
 
-// Web port of the server spawned by the boot currently in flight, set at the
-// top of boot() as soon as it's known. loadMatches() (invoked later, after the
-// boot's own local variables are out of scope) needs it to know where
-// "/matches" is.
-let currentWebPort: number | null = null;
+interface BootAttempt {
+  controller: AbortController;
+  processes: ProcessSession;
+}
+
+interface BootFailureDetails {
+  title?: string;
+  hint?: string;
+  logLabel?: string;
+}
+
+let activeBootAttempt: BootAttempt | null = null;
 
 /** Sends the window to the app shell once boot is done. */
-function loadMatches(): void {
+async function loadMatches(webPort: number): Promise<void> {
   loadingScreenShowing = false;
   const win = aliveWindow();
-  if (currentWebPort !== null && win !== null) {
-    win.loadURL(`http://${LOOPBACK_HOST}:${currentWebPort}/matches`);
-  }
+  if (win === null) throw new Error('main window is unavailable');
+  await win.loadURL(`http://${LOOPBACK_HOST}:${webPort}/matches`);
 }
 
-// Generous overall deadline for each server to answer its health check: a
-// first-ever boot can still be mid-way through provisioning a stalled tool
-// download inside its own per-tool timeout, so this only needs to bound how
-// long a genuinely wedged/crash-looping child is waited on.
+// Generous overall deadline for each server to answer its health check.
 const BOOT_HEALTH_TIMEOUT_MS = 60_000;
 
 async function boot(): Promise<void> {
-  // Reuse the existing window on a retry (see retryBoot()) instead of
-  // spawning a second BrowserWindow on top of the one showing the error
-  // screen; only the very first boot (or a fresh boot after the window was
-  // fully closed) needs to create one.
-  const existing = aliveWindow();
-  if (existing !== null) {
-    existing.loadFile(loadingHtmlPath);
-  } else {
-    createWindow(true);
+  if (quitting) return;
+  if (activeBootAttempt !== null) throw new Error('cannot start a boot while another attempt is active');
+  const attempt: BootAttempt = {
+    controller: new AbortController(),
+    processes: new ProcessSession({ logLine }),
+  };
+  activeBootAttempt = attempt;
+
+  try {
+    await runBootAttempt(attempt);
+  } catch (err) {
+    if (quitting || attempt.controller.signal.aborted || activeBootAttempt !== attempt) return;
+    failBootAttempt(attempt, err);
   }
+}
+
+async function runBootAttempt(attempt: BootAttempt): Promise<void> {
+  assertBootAttemptActive(attempt);
+  // Reuse the existing window on retry instead of opening another one over the
+  // error screen from the failed attempt.
+  const existing = aliveWindow();
+  const bootWindow = existing ?? createWindow();
+  await bootWindow.loadFile(loadingHtmlPath);
+  assertBootAttemptActive(attempt);
   loadingScreenShowing = true;
+  allowedOrigins.clear();
+  allowedInternalUrls.clear();
 
   setLoadingStatus('Eligiendo puertos libres…');
-  // Sequential, not Promise.all: both calls read and rewrite the same
-  // ports.json ({...saved, [key]: port}), so running them concurrently would
-  // race on that file and drop one service's saved port.
+  // Sequential because both calls read and rewrite the same ports.json file.
   const orchPort = await stablePort('orchestrator');
+  assertBootAttemptActive(attempt);
   const webPort = await stablePort('web');
+  assertBootAttemptActive(attempt);
   const orchestratorUrl = `http://${LOOPBACK_HOST}:${orchPort}`;
-  currentWebPort = webPort;
-  // Ports are only known now, so this is the earliest point the navigation
-  // guards in createWindow() have anything real to allow.
   allowedOrigins.add(`http://${LOOPBACK_HOST}:${orchPort}`);
   allowedOrigins.add(`http://${LOOPBACK_HOST}:${webPort}`);
 
-  // Fire-and-forget: tracks land while the app boots (and even mid-session);
-  // /api/songs rescans the dir per request.
-  provisionMusic().catch((err: unknown) => logLine(`[music] provision failed: ${String(err)}\n`));
+  // Tracks can land in the background; the API rescans the music dir per request.
+  provisionMusic(attempt.controller.signal).catch((err: unknown) => {
+    if (!attempt.controller.signal.aborted) logLine(`[music] provision failed: ${String(err)}\n`);
+  });
 
-  // Runtime tools (HLAE, FFmpeg, yt-dlp) must be resolved before the
-  // orchestrator spawns (tool paths are read once at startup). First boot
-  // downloads ~110 MB total; later boots return the cached installs instantly.
-  // Each tool has its own timeout, so worst case the app boots without one and
-  // the UI says which feature is unconfigured.
   setLoadingStatus('Descargando herramientas (~110 MB, solo el primer arranque)…');
   const toolEnv = await provisionRuntimeTools(
-    { toolsDir: path.join(app.getPath('userData'), 'tools'), logLine },
+    {
+      toolsDir: path.join(app.getPath('userData'), 'tools'),
+      logLine,
+      signal: attempt.controller.signal,
+    },
     (name, detail) =>
       setLoadingStatus(`Descargando ${RUNTIME_TOOL_LABELS[name]}${detail ? ` (${detail})` : ''}…`),
   );
+  assertBootAttemptActive(attempt);
 
-  // The orchestrator: SQLite job repo on disk (so reels survive an app restart)
-  // + inline queue, capture and render tools from the provisioned env above,
-  // anything missing auto-detected (CS2/recorder/editor). "sqlite" with no
-  // path stores <dataDir>/jobs.db. Loopback bind needs no mutation token.
   setLoadingStatus('Iniciando el orquestador…');
-  const orch = launch('orchestrator', orchestratorExe, [], {
+  const orch = attempt.processes.launch('orchestrator', orchestratorExe, [], {
     ZV_DATABASE_URL: 'sqlite',
     ZV_DATA_DIR: dataDir,
     ZV_HTTP_ADDR: `${LOOPBACK_HOST}:${orchPort}`,
@@ -597,11 +542,8 @@ async function boot(): Promise<void> {
     ...toolEnv,
   });
 
-  // The Next.js standalone server, run by Electron's own Node (no separate Node
-  // runtime shipped). NEXT_PUBLIC_FRAGFORGE_MODE is baked into the client bundle
-  // at build time; it is set here too for the server route handlers.
   setLoadingStatus('Iniciando el servidor web…');
-  const web = launch('web', process.execPath, [nextServer], {
+  const web = attempt.processes.launch('web', process.execPath, [nextServer], {
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
     PORT: String(webPort),
@@ -610,50 +552,70 @@ async function boot(): Promise<void> {
     ORCHESTRATOR_URL: orchestratorUrl,
   });
 
-  try {
-    // Racing against child exit turns "timed out waiting for healthz" into the
-    // real cause when a backend dies at startup instead of coming up slowly.
-    await Promise.race([waitForHttp(`${orchestratorUrl}/healthz`, BOOT_HEALTH_TIMEOUT_MS), orch.exited]);
-    await Promise.race([waitForHttp(`http://${LOOPBACK_HOST}:${webPort}/`, BOOT_HEALTH_TIMEOUT_MS), web.exited]);
-  } catch (err) {
-    logLine(`[boot] failed: ${String(err)}\n`);
-    showErrorScreen(err);
-    return;
-  }
+  // Either child dying is terminal during either health wait. Cancelling the
+  // attempt also tears down whichever HTTP poll loses the race.
+  const childExited = Promise.race([orch.exited, web.exited]);
+  await waitForDesktopServices({
+    orchestratorUrl,
+    webUrl: `http://${LOOPBACK_HOST}:${webPort}/`,
+    timeoutMs: BOOT_HEALTH_TIMEOUT_MS,
+    signal: attempt.controller.signal,
+    childExited,
+  });
+  assertBootAttemptActive(attempt);
 
-  // Boot succeeded, but the children can still die later (the orchestrator
-  // loses its capture device, Next.js hits a fatal error, etc.); watch both
-  // for the rest of the session so a post-boot crash shows the same error
-  // screen instead of leaving the window frozen on stale content.
-  const watchPostBoot = (child: Launched): void => {
-    child.exited.catch((err: unknown) => {
-      if (quitting) return;
-      logLine(`[boot] post-boot crash: ${String(err)}\n`);
-      showErrorScreen(
-        err,
-        'FragForge Studio se ha detenido',
-        'El backend se detuvo de forma inesperada. Cierra y vuelve a abrir la app.',
-      );
+  const watchPostBoot = (child: LaunchedProcess): void => {
+    attempt.processes.watchUnexpectedExit(child, (err: unknown) => {
+      if (quitting || activeBootAttempt !== attempt) return;
+      failBootAttempt(attempt, err, {
+        title: 'FragForge Studio se ha detenido',
+        hint: 'El backend se detuvo de forma inesperada. Cierra y vuelve a abrir la app.',
+        logLabel: 'post-boot crash',
+      });
     });
   };
   watchPostBoot(orch);
   watchPostBoot(web);
 
-  // Land on the dashboard (the app shell), not a single flow: Studio has both
-  // the demo-upload flow and the Twitch stream-clips flow, and the sidebar is
-  // the only place that offers both.
   setLoadingStatus('Abriendo la interfaz…');
-  loadMatches();
+  allowedInternalUrls.clear();
+  await loadMatches(webPort);
+  assertBootAttemptActive(attempt);
 }
 
-// Guards against overlapping boot() runs: the initial app.whenReady() boot
-// and a user mashing the error screen's retry button both go through
-// runBoot(), which is a no-op while a boot is already in flight.
+function failBootAttempt(attempt: BootAttempt, err: unknown, details: BootFailureDetails = {}): void {
+  if (activeBootAttempt !== attempt) return;
+  attempt.controller.abort();
+  const stopped = attempt.processes.stop();
+  if (stopped) activeBootAttempt = null;
+  allowedOrigins.clear();
+  allowedInternalUrls.clear();
+  logLine(`[boot] ${details.logLabel ?? 'failed'}: ${String(err)}\n`);
+  if (!quitting) showErrorScreen(err, details.title, details.hint);
+}
+
+function assertBootAttemptActive(attempt: BootAttempt): void {
+  if (quitting || attempt.controller.signal.aborted || activeBootAttempt !== attempt) {
+    throw new Error('boot attempt cancelled');
+  }
+}
+
+function stopActiveBootAttempt(): boolean {
+  const attempt = activeBootAttempt;
+  allowedOrigins.clear();
+  allowedInternalUrls.clear();
+  if (attempt === null) return true;
+  attempt.controller.abort();
+  const stopped = attempt.processes.stop();
+  if (stopped && activeBootAttempt === attempt) activeBootAttempt = null;
+  return stopped;
+}
+
+// Guards against overlapping boot() runs from startup and Retry.
 let booting = false;
 
-/** Runs boot(), refusing to start a second one concurrently (ports/children would race). */
 function runBoot(): void {
-  if (booting) return;
+  if (booting || quitting) return;
   booting = true;
   boot()
     .catch((err: unknown) => logLine(`[boot] unexpected error: ${String(err)}\n`))
@@ -662,41 +624,20 @@ function runBoot(): void {
     });
 }
 
-/**
- * Retry handler for the error screen's "Reintentar" button (wired through
- * will-navigate, see createWindow()). Kills off whatever children the failed
- * attempt left running, drops them from the tracking list, and re-enters
- * boot() from the top on the same window.
- */
 function retryBoot(): void {
-  if (booting) return;
-  for (const child of children) killTree(child);
-  children.length = 0;
+  if (booting || quitting) return;
+  if (!stopActiveBootAttempt()) {
+    logLine('[boot] retry deferred because an existing process tree could not be stopped\n');
+    return;
+  }
   runBoot();
 }
 
-// Set in 'before-quit' so post-boot crash watching (above) and
-// render-process-gone (in createWindow) don't fight an intentional shutdown
-// by throwing up an error screen or reloading a window that's going away.
+// Prevent crash watchers and retries from fighting an intentional shutdown.
 let quitting = false;
 
-/** Kills one tracked child and, on Windows, its whole descendant tree (the orchestrator spawns zv-recorder -> HLAE -> cs2.exe). */
-function killTree(child: ChildProcess | null): void {
-  if (!child || !child.pid) return;
-  if (child.killed || child.exitCode !== null) return;
-  if (process.platform === 'win32') {
-    // child.kill() only signals the direct process; grandchildren would
-    // survive as orphans holding the GPU/capture device, so ask Windows to
-    // tear down the whole process tree instead. Synchronous so this finishes
-    // before 'before-quit'/'exit' lets the app close.
-    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
-  } else {
-    child.kill();
-  }
-}
-
 function shutdown(): void {
-  for (const child of children) killTree(child);
+  stopActiveBootAttempt();
 }
 
 app.on('second-instance', () => {

@@ -13,6 +13,7 @@ export interface RuntimeToolProvisioningOptions {
   toolsDir: string;
   logLine: (text: string) => void;
   platform?: NodeJS.Platform;
+  signal?: AbortSignal;
   maxInstallTimeMs?: number;
   download?: typeof downloadFile;
   extractArchive?: (archive: string, destination: string, signal: AbortSignal) => Promise<void>;
@@ -92,12 +93,14 @@ export async function provisionRuntimeTools(
   onStatus?: RuntimeToolStatusReporter,
 ): Promise<RuntimeToolEnvironment> {
   if ((options.platform ?? process.platform) !== 'win32') return {};
+  throwIfProvisioningAborted(options.signal);
 
   const [hlae, ffmpeg, ytdlp] = await Promise.all([
     provisionRuntimeTool(options, 'hlae', onStatus),
     provisionRuntimeTool(options, 'ffmpeg', onStatus),
     provisionRuntimeTool(options, 'ytdlp', onStatus),
   ]);
+  throwIfProvisioningAborted(options.signal);
   return runtimeToolEnvironment({ hlae, ffmpeg, ytdlp });
 }
 
@@ -123,6 +126,7 @@ async function provisionRuntimeTool(
   const installDir = path.join(options.toolsDir, name, tool.version);
   const executable = path.join(installDir, tool.exeRel);
   let legacyFallback = false;
+  throwIfProvisioningAborted(options.signal);
   try {
     restoreInterruptedPromotion(installDir);
     cleanupStagingInstall(installDir, options.logLine);
@@ -142,6 +146,8 @@ async function provisionRuntimeTool(
 
   onStatus?.(name);
   const controller = new AbortController();
+  const abortFromCaller = (): void => controller.abort();
+  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
   const timeoutMs = Math.max(1, Math.min(tool.timeoutMs, options.maxInstallTimeMs ?? tool.timeoutMs));
   let timedOut = false;
   const timeout = setTimeout(() => {
@@ -159,6 +165,7 @@ async function provisionRuntimeTool(
       progressReporter(name, onStatus),
     );
   } catch (err) {
+    if (options.signal?.aborted) throw new Error('runtime tool provisioning aborted');
     const reason = timedOut ? `timed out after ${timeoutMs}ms` : String(err);
     if (legacyFallback) {
       options.logLine(
@@ -172,7 +179,12 @@ async function provisionRuntimeTool(
     return '';
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
   }
+}
+
+function throwIfProvisioningAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('runtime tool provisioning aborted');
 }
 
 function progressReporter(

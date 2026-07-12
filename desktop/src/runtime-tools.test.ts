@@ -249,6 +249,41 @@ test('aborts and cleans an installation that exceeds its time budget', async (t)
   assert.match(logs.join(''), /timed out after 5ms/);
 });
 
+test('caller cancellation aborts work instead of activating legacy fallbacks', async (t) => {
+  const toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-tools-'));
+  t.after(() => fs.rmSync(toolsDir, { recursive: true, force: true }));
+  seedLegacyHLAE(toolsDir);
+  seedLegacyFFmpeg(toolsDir);
+  seedLegacyYtdlp(toolsDir);
+  const controller = new AbortController();
+
+  const provisioning = provisionRuntimeTools({
+    toolsDir,
+    logLine: () => {},
+    platform: 'win32',
+    signal: controller.signal,
+    download: async (_url, _destination, { signal } = {}) =>
+      new Promise<string>((_resolve, reject) => {
+        if (!signal) {
+          reject(new Error('missing abort signal'));
+          return;
+        }
+        const abort = (): void => reject(new Error('download aborted'));
+        if (signal.aborted) {
+          abort();
+        } else {
+          signal.addEventListener('abort', abort, { once: true });
+        }
+      }),
+  });
+  controller.abort();
+
+  await assert.rejects(provisioning, /runtime tool provisioning aborted/);
+  for (const [name, version] of Object.entries({ hlae: '2.191.0', ffmpeg: 'n8.1.2', ytdlp: '2026.06.09' })) {
+    assert.equal(fs.existsSync(path.join(toolsDir, name, `${version}.installing`)), false);
+  }
+});
+
 test('restores an install interrupted during atomic publication', async (t) => {
   const toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-tools-'));
   t.after(() => fs.rmSync(toolsDir, { recursive: true, force: true }));
