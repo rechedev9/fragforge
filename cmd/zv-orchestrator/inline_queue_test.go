@@ -289,6 +289,188 @@ func TestInlineQueueKeepsUniqueLeaseAcrossAutomaticRetry(t *testing.T) {
 	}
 }
 
+func TestInlineQueueRunsAcceptedTransitionBeforeTaskIsVisible(t *testing.T) {
+	transitionComplete := atomic.Bool{}
+	handled := make(chan bool, 1)
+	queue := startTestInlineQueue(t, map[string]taskHandler{
+		"render": func(context.Context, *asynq.Task) error {
+			handled <- transitionComplete.Load()
+			return nil
+		},
+	}, 1)
+
+	_, err := queue.EnqueueWithTransition(asynq.NewTask("render", nil), func(decision error) error {
+		if decision != nil {
+			t.Fatalf("transition decision = %v, want accepted", decision)
+		}
+		transitionComplete.Store(true)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("EnqueueWithTransition() error = %v", err)
+	}
+	if visibleAfterTransition := <-handled; !visibleAfterTransition {
+		t.Fatal("handler observed task before accepted transition completed")
+	}
+}
+
+func TestInlineQueueTransitionFailurePreventsTaskPublication(t *testing.T) {
+	handled := make(chan struct{}, 1)
+	queue := startTestInlineQueue(t, map[string]taskHandler{
+		"render": func(context.Context, *asynq.Task) error {
+			handled <- struct{}{}
+			return nil
+		},
+	}, 1)
+	wantErr := errors.New("persist queued state")
+	task := asynq.NewTask("render", []byte("same"))
+
+	_, err := queue.EnqueueWithTransition(task, func(error) error {
+		return wantErr
+	}, asynq.Unique(time.Minute))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("EnqueueWithTransition() error = %v, want %v", err, wantErr)
+	}
+	select {
+	case <-handled:
+		t.Fatal("handler received task after accepted transition failed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if _, err := queue.Enqueue(task, asynq.Unique(time.Minute)); err != nil {
+		t.Fatalf("Enqueue() after transition failure error = %v", err)
+	}
+	<-handled
+}
+
+func TestInlineQueueDuplicateTransitionObservesActiveTerminalState(t *testing.T) {
+	state := "queued"
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	queue := startTestInlineQueue(t, map[string]taskHandler{
+		"render": func(context.Context, *asynq.Task) error {
+			state = "ready"
+			close(ready)
+			<-release
+			return nil
+		},
+	}, 1)
+	task := asynq.NewTask("render", []byte("same"))
+	if _, err := queue.EnqueueWithTransition(task, func(decision error) error {
+		if decision != nil {
+			t.Fatalf("first transition decision = %v", decision)
+		}
+		state = "queued"
+		return nil
+	}, asynq.Unique(time.Minute)); err != nil {
+		t.Fatalf("first EnqueueWithTransition() error = %v", err)
+	}
+	<-ready
+
+	seen := ""
+	_, err := queue.EnqueueWithTransition(task, func(decision error) error {
+		if !errors.Is(decision, asynq.ErrDuplicateTask) {
+			t.Fatalf("duplicate transition decision = %v", decision)
+		}
+		seen = state
+		return nil
+	}, asynq.Unique(time.Minute))
+	if !errors.Is(err, asynq.ErrDuplicateTask) {
+		t.Fatalf("duplicate EnqueueWithTransition() error = %v", err)
+	}
+	if seen != "ready" || state != "ready" {
+		t.Fatalf("duplicate transition saw/state = %q/%q, want ready/ready", seen, state)
+	}
+	close(release)
+}
+
+func TestInlineQueueRunsFullTransitionBeforeReturning(t *testing.T) {
+	queue := newInlineQueue(map[string]taskHandler{
+		"render": func(context.Context, *asynq.Task) error { return nil },
+	}, 1)
+	queue.ctx = context.Background()
+	queue.tasks.max = 1
+	queue.tasks.tasks = append(queue.tasks.tasks, inlineTask{id: "filler"})
+	transitionCalled := false
+
+	_, err := queue.EnqueueWithTransition(asynq.NewTask("render", nil), func(decision error) error {
+		if !errors.Is(decision, errInlineQueueFull) {
+			t.Fatalf("transition decision = %v, want errInlineQueueFull", decision)
+		}
+		transitionCalled = true
+		return nil
+	}, asynq.Unique(time.Minute))
+	if !errors.Is(err, errInlineQueueFull) {
+		t.Fatalf("EnqueueWithTransition() error = %v, want errInlineQueueFull", err)
+	}
+	if !transitionCalled {
+		t.Fatal("full transition was not called")
+	}
+	queue.closePending()
+}
+
+func TestInlineQueueRunsTransitionForPreAdmissionRejections(t *testing.T) {
+	tests := []struct {
+		name  string
+		queue *inlineQueue
+		task  *asynq.Task
+		opts  []asynq.Option
+	}{
+		{
+			name:  "nil task",
+			queue: newInlineQueue(map[string]taskHandler{"render": func(context.Context, *asynq.Task) error { return nil }}, 1),
+		},
+		{
+			name:  "missing handler",
+			queue: newInlineQueue(map[string]taskHandler{}, 1),
+			task:  asynq.NewTask("render", nil),
+		},
+		{
+			name: "not started",
+			queue: newInlineQueue(map[string]taskHandler{
+				"render": func(context.Context, *asynq.Task) error { return nil },
+			}, 1),
+			task: asynq.NewTask("render", nil),
+		},
+		{
+			name: "unsupported option",
+			queue: newInlineQueue(map[string]taskHandler{
+				"render": func(context.Context, *asynq.Task) error { return nil },
+			}, 1),
+			task: asynq.NewTask("render", nil),
+			opts: []asynq.Option{asynq.Timeout(time.Minute)},
+		},
+		{
+			name: "retry policy mismatch",
+			queue: newInlineQueue(map[string]taskHandler{
+				"render": func(context.Context, *asynq.Task) error { return nil },
+			}, 1),
+			task: asynq.NewTask("render", nil),
+			opts: []asynq.Option{asynq.MaxRetry(1)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.name != "not started" && tt.name != "nil task" {
+				tt.queue.ctx = context.Background()
+			}
+			called := false
+			_, err := tt.queue.EnqueueWithTransition(tt.task, func(decision error) error {
+				if decision == nil {
+					t.Fatal("transition decision = nil, want rejection")
+				}
+				called = true
+				return nil
+			}, tt.opts...)
+			if err == nil {
+				t.Fatal("EnqueueWithTransition() error = nil")
+			}
+			if !called {
+				t.Fatal("rejection transition was not called")
+			}
+		})
+	}
+}
+
 func TestInlineQueueRejectsDuplicateUntilSuccessfulTaskFinishes(t *testing.T) {
 	started := make(chan struct{}, 2)
 	release := make(chan struct{})
@@ -542,19 +724,19 @@ func TestInlineQueueValidatesSupportedOptions(t *testing.T) {
 func TestInlineTaskQueueBoundsPendingWorkWithoutBlocking(t *testing.T) {
 	queue := newInlineTaskQueue(2)
 	ctx := context.Background()
-	if err := queue.push(ctx, inlineTask{id: "one"}); err != nil {
+	if err := queue.push(ctx, inlineTask{id: "one"}, nil); err != nil {
 		t.Fatalf("first push() error = %v", err)
 	}
-	if err := queue.push(ctx, inlineTask{id: "two"}); err != nil {
+	if err := queue.push(ctx, inlineTask{id: "two"}, nil); err != nil {
 		t.Fatalf("second push() error = %v", err)
 	}
-	if err := queue.push(ctx, inlineTask{id: "three"}); !errors.Is(err, errInlineQueueFull) {
+	if err := queue.push(ctx, inlineTask{id: "three"}, nil); !errors.Is(err, errInlineQueueFull) {
 		t.Fatalf("full push() error = %v, want errInlineQueueFull", err)
 	}
 	if task, ok := queue.pop(); !ok || task.id != "one" {
 		t.Fatalf("pop() = (%q, %t), want (one, true)", task.id, ok)
 	}
-	if err := queue.push(ctx, inlineTask{id: "three"}); err != nil {
+	if err := queue.push(ctx, inlineTask{id: "three"}, nil); err != nil {
 		t.Fatalf("push() after pop error = %v", err)
 	}
 }

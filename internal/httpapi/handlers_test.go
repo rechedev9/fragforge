@@ -209,6 +209,19 @@ type fakeQueue struct {
 }
 
 func (q *fakeQueue) Enqueue(t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	return q.enqueue(t, nil, opts...)
+}
+
+func (q *fakeQueue) EnqueueWithTransition(t *asynq.Task, transition func(error) error, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	return q.enqueue(t, transition, opts...)
+}
+
+func (q *fakeQueue) enqueue(t *asynq.Task, transition func(error) error, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	if transition != nil {
+		if err := transition(q.err); err != nil {
+			return nil, err
+		}
+	}
 	if q.err != nil {
 		return nil, q.err
 	}
@@ -2695,6 +2708,118 @@ func TestStartStreamRenderAcceptsRegistryVariantsAndRejectsUnknown(t *testing.T)
 			}
 		}
 	})
+}
+
+func TestStartStreamRenderMarksStateFailedWhenEnqueueFails(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	store := newFakeStorage()
+	id := uuid.New()
+	variant := streamclips.DefaultVariant().Name
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+	queue := &fakeQueue{err: errors.New("inline queue is full")}
+	h := NewHandlers(newFakeRepo(), store, queue, WithStreamRepository(streamRepo))
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+variant, nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rw.Code, rw.Body.String())
+	}
+	key, err := streamclips.RenderStateKey(id, variant)
+	if err != nil {
+		t.Fatalf("RenderStateKey error = %v", err)
+	}
+	raw, ok := store.puts[key]
+	if !ok {
+		t.Fatal("failed stream render state not written")
+	}
+	var state streamclips.RenderState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("unmarshal render state: %v", err)
+	}
+	if state.Status != streamclips.StatusFailed {
+		t.Fatalf("render state status = %q, want failed", state.Status)
+	}
+	if state.Error != "enqueue render: inline queue is full" {
+		t.Fatalf("render state error = %q", state.Error)
+	}
+}
+
+func TestStartStreamRenderKeepsRenderingStateWhenTaskIsDuplicate(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	store := newFakeStorage()
+	id := uuid.New()
+	variant := streamclips.DefaultVariant().Name
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+	h := NewHandlers(newFakeRepo(), store, &fakeQueue{err: asynq.ErrDuplicateTask}, WithStreamRepository(streamRepo))
+	existing, err := streamclips.NewRenderState(id, variant, streamclips.StatusRendering, nil, "", nil)
+	if err != nil {
+		t.Fatalf("NewRenderState error = %v", err)
+	}
+	if err := h.writeStreamRenderState(existing); err != nil {
+		t.Fatalf("writeStreamRenderState error = %v", err)
+	}
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+variant, nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	key, err := streamclips.RenderStateKey(id, variant)
+	if err != nil {
+		t.Fatalf("RenderStateKey error = %v", err)
+	}
+	raw, ok := store.puts[key]
+	if !ok {
+		t.Fatal("rendering stream state not written")
+	}
+	var state streamclips.RenderState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("unmarshal render state: %v", err)
+	}
+	if state.Status != streamclips.StatusRendering || state.Error != "" {
+		t.Fatalf("render state = status %q, error %q; want rendering without error", state.Status, state.Error)
+	}
+}
+
+func TestStartStreamRenderPreservesRenderedStateWhenFinishedTaskIsStillDuplicate(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	store := newFakeStorage()
+	id := uuid.New()
+	variant := streamclips.DefaultVariant().Name
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusRendered, SourcePath: streamclips.SourceKey(id)}
+	h := NewHandlers(newFakeRepo(), store, &fakeQueue{err: asynq.ErrDuplicateTask}, WithStreamRepository(streamRepo))
+	previous, err := streamclips.NewRenderState(id, variant, streamclips.StatusRendered, nil, "", nil)
+	if err != nil {
+		t.Fatalf("NewRenderState error = %v", err)
+	}
+	if err := h.writeStreamRenderState(previous); err != nil {
+		t.Fatalf("writeStreamRenderState error = %v", err)
+	}
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+variant, nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	key, err := streamclips.RenderStateKey(id, variant)
+	if err != nil {
+		t.Fatalf("RenderStateKey error = %v", err)
+	}
+	var state streamclips.RenderState
+	if err := json.Unmarshal(store.puts[key], &state); err != nil {
+		t.Fatalf("unmarshal render state: %v", err)
+	}
+	if state.Status != streamclips.StatusRendered {
+		t.Fatalf("render state status = %q, want rendered", state.Status)
+	}
 }
 
 func TestStartStreamRenderRejectsCaptionsWithoutWhisper(t *testing.T) {

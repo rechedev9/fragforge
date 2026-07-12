@@ -79,17 +79,20 @@ func newInlineTaskQueue(maxPending int) *inlineTaskQueue {
 	return queue
 }
 
-func (q *inlineTaskQueue) push(ctx context.Context, task inlineTask) error {
+func (q *inlineTaskQueue) push(ctx context.Context, task inlineTask, transition func(error) error) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return err
+		return applyInlineEnqueueTransition(transition, err)
 	}
 	if q.closed {
-		return fmt.Errorf("inline queue is shut down")
+		return applyInlineEnqueueTransition(transition, fmt.Errorf("inline queue is shut down"))
 	}
 	if len(q.tasks) >= q.max {
-		return errInlineQueueFull
+		return applyInlineEnqueueTransition(transition, errInlineQueueFull)
+	}
+	if err := applyInlineEnqueueTransition(transition, nil); err != nil {
+		return err
 	}
 	q.tasks = append(q.tasks, task)
 	q.ready.Signal()
@@ -169,26 +172,38 @@ func (q *inlineQueue) Start(ctx context.Context) {
 }
 
 func (q *inlineQueue) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	return q.enqueue(task, nil, opts...)
+}
+
+// EnqueueWithTransition serializes a caller-owned state transition with the
+// queue's admission decision. The callback receives nil for accepted work or
+// the rejection error for duplicate/full/shutdown decisions. Accepted work is
+// not visible to workers until the callback succeeds.
+func (q *inlineQueue) EnqueueWithTransition(task *asynq.Task, transition func(error) error, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	return q.enqueue(task, transition, opts...)
+}
+
+func (q *inlineQueue) enqueue(task *asynq.Task, transition func(error) error, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	if task == nil {
-		return nil, fmt.Errorf("inline queue cannot enqueue nil task")
+		return nil, applyInlineEnqueueTransition(transition, fmt.Errorf("inline queue cannot enqueue nil task"))
 	}
 	if handler, ok := q.handlers[task.Type()]; !ok || handler == nil {
-		return nil, fmt.Errorf("inline queue handler is not configured for %s", task.Type())
+		return nil, applyInlineEnqueueTransition(transition, fmt.Errorf("inline queue handler is not configured for %s", task.Type()))
 	}
 	if q.ctx == nil {
-		return nil, fmt.Errorf("inline queue is not started")
+		return nil, applyInlineEnqueueTransition(transition, fmt.Errorf("inline queue is not started"))
 	}
 	options, err := parseInlineEnqueueOptions(opts)
 	if err != nil {
-		return nil, err
+		return nil, applyInlineEnqueueTransition(transition, err)
 	}
 	id := fmt.Sprintf("inline-%d", q.nextID.Add(1))
 	policy := defaultInlineTaskPolicy(task.Type())
 	if options.maxRetry != nil && *options.maxRetry != policy.maxRetries {
-		return nil, fmt.Errorf(
+		return nil, applyInlineEnqueueTransition(transition, fmt.Errorf(
 			"inline queue retry policy for %s is %d, got %d",
 			task.Type(), policy.maxRetries, *options.maxRetry,
-		)
+		))
 	}
 	queued := inlineTask{task: task, id: id, policy: policy}
 	if options.uniqueTTL > 0 {
@@ -199,7 +214,7 @@ func (q *inlineQueue) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.Ta
 			payloadHash: sha256.Sum256(task.Payload()),
 		}
 	}
-	if err := q.push(queued, options.uniqueTTL); err != nil {
+	if err := q.push(queued, options.uniqueTTL, transition); err != nil {
 		return nil, err
 	}
 	return &asynq.TaskInfo{
@@ -343,18 +358,18 @@ func parseInlineEnqueueOptions(opts []asynq.Option) (inlineEnqueueOptions, error
 	return result, nil
 }
 
-func (q *inlineQueue) push(task inlineTask, uniqueTTL time.Duration) error {
+func (q *inlineQueue) push(task inlineTask, uniqueTTL time.Duration, transition func(error) error) error {
 	if !task.unique {
-		return q.tasks.push(q.ctx, task)
+		return q.tasks.push(q.ctx, task, transition)
 	}
 	q.uniqueMu.Lock()
 	defer q.uniqueMu.Unlock()
 
 	now := q.now()
 	if lock, ok := q.uniqueLocks[task.uniqueKey]; ok && now.Before(lock.expiresAt) {
-		return asynq.ErrDuplicateTask
+		return applyInlineEnqueueTransition(transition, asynq.ErrDuplicateTask)
 	}
-	if err := q.tasks.push(q.ctx, task); err != nil {
+	if err := q.tasks.push(q.ctx, task, transition); err != nil {
 		return err
 	}
 	q.uniqueLocks[task.uniqueKey] = inlineUniqueLock{
@@ -362,6 +377,19 @@ func (q *inlineQueue) push(task inlineTask, uniqueTTL time.Duration) error {
 		expiresAt: now.Add(uniqueTTL),
 	}
 	return nil
+}
+
+func applyInlineEnqueueTransition(transition func(error) error, decision error) error {
+	if transition == nil {
+		return decision
+	}
+	if err := transition(decision); err != nil {
+		if decision == nil {
+			return fmt.Errorf("apply accepted inline queue transition: %w", err)
+		}
+		return fmt.Errorf("apply rejected inline queue transition after %v: %w", decision, err)
+	}
+	return decision
 }
 
 func (q *inlineQueue) releaseUnique(task inlineTask) {

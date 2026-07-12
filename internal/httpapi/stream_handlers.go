@@ -365,11 +365,28 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.writeStreamRenderState(state); err != nil {
-		internalError(w, "write stream render state", err)
-		return
-	}
-	if _, err := h.queue.Enqueue(task, asynq.Unique(streamRenderUniqueTTL)); err != nil {
+	_, err = h.queue.EnqueueWithTransition(task, func(decision error) error {
+		switch {
+		case decision == nil:
+			return h.writeStreamRenderState(state)
+		case errors.Is(decision, asynq.ErrDuplicateTask):
+			existing, ok, readErr := h.readStreamRenderState(j.ID, variant)
+			if readErr != nil {
+				return readErr
+			}
+			if ok {
+				state = existing
+			}
+			return nil
+		default:
+			failedState, stateErr := streamclips.NewRenderState(j.ID, variant, streamclips.StatusFailed, nil, "enqueue render: "+decision.Error(), nil)
+			if stateErr != nil {
+				return stateErr
+			}
+			return h.writeStreamRenderState(failedState)
+		}
+	}, asynq.Unique(streamRenderUniqueTTL))
+	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			writeJSON(w, http.StatusAccepted, map[string]any{
 				"id":        j.ID,
@@ -533,6 +550,26 @@ func (h *Handlers) writeStreamRenderState(state streamclips.RenderState) error {
 		return err
 	}
 	return h.storage.Put(key, bytes.NewReader(append(b, '\n')))
+}
+
+func (h *Handlers) readStreamRenderState(id uuid.UUID, variant string) (streamclips.RenderState, bool, error) {
+	key, err := streamclips.RenderStateKey(id, variant)
+	if err != nil {
+		return streamclips.RenderState{}, false, err
+	}
+	rc, err := h.storage.Open(key)
+	if err != nil {
+		if storageNotExist(err) {
+			return streamclips.RenderState{}, false, nil
+		}
+		return streamclips.RenderState{}, false, err
+	}
+	defer rc.Close()
+	var state streamclips.RenderState
+	if err := json.NewDecoder(rc).Decode(&state); err != nil {
+		return streamclips.RenderState{}, false, fmt.Errorf("decode stream render state: %w", err)
+	}
+	return state, true, nil
 }
 
 func storageNotExist(err error) bool {

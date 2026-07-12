@@ -64,11 +64,12 @@ type statusUpdater interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
 }
 
-// Enqueuer is the subset of the task queue the record worker uses to chain a
-// render after a successful capture. Both *asynq.Client and the inline queue
-// satisfy it. A nil Enqueuer disables chaining, which is the manual record path.
+// Enqueuer is the desktop queue contract the record worker uses to chain a
+// render after successful capture. The transition runs atomically with queue
+// admission; a nil Enqueuer disables chaining for the manual record path.
 type Enqueuer interface {
 	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
+	EnqueueWithTransition(*asynq.Task, func(error) error, ...asynq.Option) (*asynq.TaskInfo, error)
 }
 
 // chainedRenderUniqueTTL deduplicates a chained render against a render the user
@@ -313,15 +314,21 @@ func (w *RecordWorker) chainRender(id uuid.UUID) {
 		logWorkerError(id, "build chained render task", err)
 		return
 	}
-	// Surface "rendering is queued" immediately so the UI does not flash back to
-	// "not started" between the capture finishing and the render worker starting.
-	if err := w.writeQueuedRenderState(id, intent.Variant); err != nil {
-		logWorkerError(id, "write queued render state", err)
-	}
-	if _, err := w.enqueuer.Enqueue(task, asynq.Unique(chainedRenderUniqueTTL)); err != nil {
-		if !errors.Is(err, asynq.ErrDuplicateTask) {
-			logWorkerError(id, "enqueue chained render", err)
+	_, err = w.enqueuer.EnqueueWithTransition(task, func(decision error) error {
+		switch {
+		case decision == nil:
+			// Publish queued before the task is visible so a fast render worker
+			// cannot advance to rendering/ready and then be overwritten.
+			return w.writeQueuedRenderState(id, intent.Variant)
+		case errors.Is(decision, asynq.ErrDuplicateTask):
+			// Another task owns the render and its state; never downgrade it.
+			return nil
+		default:
+			return w.writeFailedRenderState(id, intent.Variant, fmt.Sprintf("enqueue render: %v", decision))
 		}
+	}, asynq.Unique(chainedRenderUniqueTTL))
+	if err != nil {
+		logWorkerError(id, "enqueue chained render", err)
 		return
 	}
 	logWorkerTransition(id, tasks.TypeRenderVariant, job.StatusRecorded)
@@ -344,6 +351,14 @@ func (w *RecordWorker) readGenerateIntent(id uuid.UUID) (renderplan.GenerateInte
 }
 
 func (w *RecordWorker) writeQueuedRenderState(id uuid.UUID, variant string) error {
+	return w.writeRenderState(id, variant, renderplan.RenderVariantStatusQueued, "")
+}
+
+func (w *RecordWorker) writeFailedRenderState(id uuid.UUID, variant, message string) error {
+	return w.writeRenderState(id, variant, renderplan.RenderVariantStatusFailed, message)
+}
+
+func (w *RecordWorker) writeRenderState(id uuid.UUID, variant, status, message string) error {
 	loadout, err := renderplan.LoadoutForVariant(variant)
 	if err != nil {
 		return err
@@ -351,7 +366,8 @@ func (w *RecordWorker) writeQueuedRenderState(id uuid.UUID, variant string) erro
 	state, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
 		JobID:   id,
 		Loadout: loadout,
-		Status:  renderplan.RenderVariantStatusQueued,
+		Status:  status,
+		Error:   message,
 	})
 	if err != nil {
 		return err

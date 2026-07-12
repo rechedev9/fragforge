@@ -60,9 +60,11 @@ type StreamJobRepository interface {
 	SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error
 }
 
-// Enqueuer is the subset of *asynq.Client used by handlers.
+// Enqueuer is the desktop queue contract used by handlers. A transition runs
+// inside the queue's admission boundary before accepted work becomes visible.
 type Enqueuer interface {
 	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
+	EnqueueWithTransition(*asynq.Task, func(error) error, ...asynq.Option) (*asynq.TaskInfo, error)
 }
 
 // Handlers bundles the dependencies needed by every endpoint.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -23,11 +24,28 @@ import (
 type fakeEnqueuer struct {
 	mu    sync.Mutex
 	tasks []*asynq.Task
+	err   error
 }
 
 func (e *fakeEnqueuer) Enqueue(t *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	return e.enqueue(t, nil)
+}
+
+func (e *fakeEnqueuer) EnqueueWithTransition(t *asynq.Task, transition func(error) error, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	return e.enqueue(t, transition)
+}
+
+func (e *fakeEnqueuer) enqueue(t *asynq.Task, transition func(error) error) (*asynq.TaskInfo, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if transition != nil {
+		if err := transition(e.err); err != nil {
+			return nil, err
+		}
+	}
+	if e.err != nil {
+		return nil, e.err
+	}
 	e.tasks = append(e.tasks, t)
 	return &asynq.TaskInfo{ID: "x"}, nil
 }
@@ -134,6 +152,110 @@ func TestRecordWorkerChainsRenderFromGenerateIntent(t *testing.T) {
 	}
 	if state.Status != renderplan.RenderVariantStatusQueued {
 		t.Fatalf("render state status = %q, want queued", state.Status)
+	}
+}
+
+func TestRecordWorkerMarksChainedRenderFailedWhenEnqueueFails(t *testing.T) {
+	store := newFakeStorage()
+	repo, id := parsedRecordJob(store)
+	intent := renderplan.GenerateIntent{
+		Variant: editor.PresetViral60Clean,
+		Edit:    renderplan.DefaultEditRequest(),
+	}
+	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
+
+	enqueueErr := errors.New("inline queue is full")
+	w := newRecordWorkerForTest(repo, store, t)
+	w.UseEnqueuer(&fakeEnqueuer{err: enqueueErr})
+
+	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+		t.Fatalf("HandleRecordDemo error = %v", err)
+	}
+	if repo.jobs[id].Status != job.StatusRecorded {
+		t.Fatalf("Status = %s, want recorded", repo.jobs[id].Status)
+	}
+	raw, ok := store.files[mustRenderVariantStatusKey(t, id, intent.Variant)]
+	if !ok {
+		t.Fatal("failed render state not written")
+	}
+	var state renderplan.RenderVariantState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("unmarshal render state: %v", err)
+	}
+	if state.Status != renderplan.RenderVariantStatusFailed {
+		t.Fatalf("render state status = %q, want failed", state.Status)
+	}
+	if state.Error != "enqueue render: "+enqueueErr.Error() {
+		t.Fatalf("render state error = %q", state.Error)
+	}
+}
+
+func TestRecordWorkerKeepsChainedRenderQueuedWhenTaskIsDuplicate(t *testing.T) {
+	store := newFakeStorage()
+	repo, id := parsedRecordJob(store)
+	intent := renderplan.GenerateIntent{
+		Variant: editor.PresetViral60Clean,
+		Edit:    renderplan.DefaultEditRequest(),
+	}
+	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
+
+	w := newRecordWorkerForTest(repo, store, t)
+	if err := w.writeQueuedRenderState(id, intent.Variant); err != nil {
+		t.Fatalf("writeQueuedRenderState error = %v", err)
+	}
+	w.UseEnqueuer(&fakeEnqueuer{err: asynq.ErrDuplicateTask})
+
+	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+		t.Fatalf("HandleRecordDemo error = %v", err)
+	}
+	raw, ok := store.files[mustRenderVariantStatusKey(t, id, intent.Variant)]
+	if !ok {
+		t.Fatal("queued render state not written")
+	}
+	var state renderplan.RenderVariantState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("unmarshal render state: %v", err)
+	}
+	if state.Status != renderplan.RenderVariantStatusQueued || state.Error != "" {
+		t.Fatalf("render state = status %q, error %q; want queued without error", state.Status, state.Error)
+	}
+}
+
+func TestRecordWorkerPreservesReadyStateWhenFinishedTaskIsStillDuplicate(t *testing.T) {
+	store := newFakeStorage()
+	repo, id := parsedRecordJob(store)
+	intent := renderplan.GenerateIntent{
+		Variant: editor.PresetViral60Clean,
+		Edit:    renderplan.DefaultEditRequest(),
+	}
+	putJSON(t, store, artifacts.GenerateIntentKey(id), intent)
+	loadout, err := renderplan.LoadoutForVariant(intent.Variant)
+	if err != nil {
+		t.Fatalf("LoadoutForVariant error = %v", err)
+	}
+	ready, err := renderplan.NewRenderVariantStateForLoadout(renderplan.NewRenderVariantStateForLoadoutOptions{
+		JobID:   id,
+		Loadout: loadout,
+		Status:  renderplan.RenderVariantStatusReady,
+	})
+	if err != nil {
+		t.Fatalf("NewRenderVariantStateForLoadout error = %v", err)
+	}
+	putJSON(t, store, mustRenderVariantStatusKey(t, id, intent.Variant), ready)
+
+	w := newRecordWorkerForTest(repo, store, t)
+	w.UseEnqueuer(&fakeEnqueuer{err: asynq.ErrDuplicateTask})
+	if err := w.HandleRecordDemo(context.Background(), recordTask(t, id)); err != nil {
+		t.Fatalf("HandleRecordDemo error = %v", err)
+	}
+
+	raw := store.files[mustRenderVariantStatusKey(t, id, intent.Variant)]
+	var state renderplan.RenderVariantState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("unmarshal render state: %v", err)
+	}
+	if state.Status != renderplan.RenderVariantStatusReady {
+		t.Fatalf("render state status = %q, want ready", state.Status)
 	}
 }
 
