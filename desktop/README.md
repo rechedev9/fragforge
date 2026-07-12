@@ -39,7 +39,7 @@ app data dir, not Program Files.
 Prerequisites: Go 1.26+, Node.js + npm, and the web deps installed.
 
 ```powershell
-# 1. From the repo root: build the Go binaries (produces .\bin\zv.exe).
+# 1. From the repo root: build the Go binaries.
 .\scripts\build.ps1
 
 # 2. Install web deps (the assemble step runs the Next.js production build).
@@ -52,14 +52,15 @@ npm run dist
 ```
 
 `npm run dist` runs `scripts/assemble.mjs` (builds the web in local mode and
-stages `zv.exe`, `zv-orchestrator.exe`, `zv-editor.exe`, and the standalone
-server into `build-resources/`), then `electron-builder` produces the
+stages `zv-orchestrator.exe`, `zv-editor.exe`, and the standalone server into
+`build-resources/`), then `electron-builder` produces the
 installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
 where `<version>` is the `version` field in `desktop/package.json`). The app
 icon lives at `build/icon.ico`, which electron-builder picks up automatically;
-`assemble.mjs` fails fast if it's missing. `zv.exe`, `zv-orchestrator.exe`, and
-`zv-editor.exe` are required at assemble time; `zv-recorder.exe` is the only
-optional one, bundled only when it's present in `bin/`.
+`assemble.mjs` fails fast if it's missing. `zv-orchestrator.exe` and
+`zv-editor.exe` are required at assemble time; `zv-recorder.exe` is optional
+and bundled only when it's present in `bin/`. The developer `zv.exe` CLI stays
+available in the repository build but is not shipped in the desktop installer.
 
 This v2 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
 on first run - choose "More info" -> "Run anyway". Code signing and auto-update
@@ -88,8 +89,8 @@ npm start
 2. Kicks off music catalog provisioning in the background, and awaits
    provisioning of HLAE/FFmpeg/yt-dlp into `<userData>/tools` (first boot
    only; later boots return the cached installs instantly).
-3. Spawns `zv-orchestrator.exe` directly - not `zv.exe serve` - so quitting the
-   app reliably kills the real server (`ZV_DATABASE_URL=sqlite`,
+3. Spawns `zv-orchestrator.exe` directly - without a `zv.exe serve`
+   intermediary - so quitting the app reliably kills the real server (`ZV_DATABASE_URL=sqlite`,
    `ZV_DATA_DIR=<userData>/data`, `ZV_HTTP_ADDR=127.0.0.1:<orchPort>`, plus any
    provisioned tool paths).
 4. Spawns the Next standalone `server.js` via `ELECTRON_RUN_AS_NODE`

@@ -1,5 +1,5 @@
 // Assembles the resources electron-builder bundles into the installer:
-//   build-resources/bin/   -> zv.exe, zv-orchestrator.exe, zv-editor.exe (+ zv-recorder.exe)
+//   build-resources/bin/   -> zv-orchestrator.exe, zv-editor.exe (+ zv-recorder.exe)
 //   build-resources/web/   -> the Next.js standalone server, ready to run
 //   build-resources/music/ -> catalog.json (track metadata; audio is downloaded on first boot)
 //
@@ -23,12 +23,11 @@ const out = join(desktop, 'build-resources');
 // serve`, so quitting the app kills the real server). zv-editor.exe must sit
 // in the same bin/ so the orchestrator auto-detects it and enables the render
 // worker; without it every created reel fails after capture with an
-// unconfigured render:variant queue. zv.exe is staged for CLI use next to the
-// app's data.
-const zvExe = join(bin, 'zv.exe');
+// unconfigured render:variant queue. The developer CLI is intentionally not
+// part of the desktop runtime.
 const zvOrchestrator = join(bin, 'zv-orchestrator.exe');
 const zvEditor = join(bin, 'zv-editor.exe');
-for (const required of [zvExe, zvOrchestrator, zvEditor]) {
+for (const required of [zvOrchestrator, zvEditor]) {
   if (!existsSync(required)) {
     console.error(`\nmissing ${required}\nBuild the Go binaries first:  .\\scripts\\build.ps1\n`);
     process.exit(1);
@@ -70,7 +69,6 @@ cpSync(join(web, '.next', 'static'), join(out, 'web', '.next', 'static'), { recu
 const publicDir = join(web, 'public');
 if (existsSync(publicDir)) cpSync(publicDir, join(out, 'web', 'public'), { recursive: true });
 
-cpSync(zvExe, join(out, 'bin', 'zv.exe'));
 cpSync(zvOrchestrator, join(out, 'bin', 'zv-orchestrator.exe'));
 cpSync(zvEditor, join(out, 'bin', 'zv-editor.exe'));
 const recorder = join(bin, 'zv-recorder.exe');
