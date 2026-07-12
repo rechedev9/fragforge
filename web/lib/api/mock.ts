@@ -1,6 +1,13 @@
 import type { ApiClient } from './client';
 import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch } from './types';
 import { DEFAULT_EDIT_CONFIG } from './reel-store';
+import {
+  PUBLISH_ASSISTANT_SCHEMA_VERSION,
+  PUBLISH_ASSISTANT_TIME_ZONE,
+  YOUTUBE_STUDIO_URL,
+  type PublishAssistant,
+  type PublishRecommendation,
+} from './publish-assistant';
 import { playsSelectionLabel } from '@/lib/format';
 import {
   fixtureUser,
@@ -28,6 +35,103 @@ const session: Session = {
 };
 
 const videos: Video[] = seedVideos();
+
+function mockPublishAssistant(video: Video): PublishAssistant {
+  const now = Date.now();
+  const dayFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: PUBLISH_ASSISTANT_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const weekdayFormatter = new Intl.DateTimeFormat('es-ES', {
+    timeZone: PUBLISH_ASSISTANT_TIME_ZONE,
+    weekday: 'long',
+  });
+  const timeFormatter = new Intl.DateTimeFormat('es-ES', {
+    timeZone: PUBLISH_ASSISTANT_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  function dateKey(date: Date): string {
+    const parts = dayFormatter.formatToParts(date);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    return year && month && day ? `${year}-${month}-${day}` : date.toISOString().slice(0, 10);
+  }
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const best = new Date(now + (index * 24 + 2) * 60 * 60 * 1000);
+    return {
+      date: dateKey(best),
+      weekday: weekdayFormatter.format(best),
+      slots: [
+        {
+          publishAt: best.toISOString(),
+          localTime: timeFormatter.format(best),
+          source: 'baseline' as const,
+          confidence: 0.62,
+          score: 0.7,
+          rationale: 'Franja de referencia para Shorts en horario local de Madrid.',
+        },
+      ],
+    };
+  });
+  const recommendations: PublishRecommendation[] = [
+    {
+      title: `${video.title} | CS2 Shorts`,
+      description: `${video.title} en ${video.map}, con el POV completo.\n\n#CS2 #CounterStrike2 #Shorts`,
+      keywords: [video.title, video.map, 'CS2 Shorts'],
+      tags: ['CS2', 'Counter-Strike 2', video.map, 'Shorts'],
+      score: 91,
+      rationale: 'Usa únicamente el título del reel y el mapa disponibles en el render.',
+    },
+    {
+      title: `${video.map}: ${video.title} en CS2`,
+      description: `La jugada ${video.title} en ${video.map}, editada como Short vertical.\n\n#CS2 #Shorts`,
+      keywords: [video.map, video.title, 'CS2'],
+      tags: ['CS2', video.map, 'Shorts'],
+      score: 86,
+      rationale: 'Prioriza el mapa y la jugada sin añadir resultados que no constan en el reel.',
+    },
+    {
+      title: `POV completo en ${video.map} | ${video.title}`,
+      description: `POV de CS2 en ${video.map}: ${video.title}.\n\n#CS2 #CounterStrike2`,
+      keywords: ['CS2 POV', video.map, video.title],
+      tags: ['CS2', 'CS2 POV', video.map],
+      score: 82,
+      rationale: 'Describe el formato POV y repite solo datos presentes en la ficha del vídeo.',
+    },
+  ];
+  return {
+    schemaVersion: PUBLISH_ASSISTANT_SCHEMA_VERSION,
+    metadata: {
+      title: video.title,
+      description: `${video.title} en ${video.map}.\n\n#CS2 #CounterStrike2 #Shorts`,
+      tags: ['CS2', 'Counter-Strike 2', video.map, 'Shorts'],
+    },
+    recommendations,
+    keywords: [...recommendations[0].keywords],
+    tags: [...recommendations[0].tags],
+    schedule: {
+      timeZone: PUBLISH_ASSISTANT_TIME_ZONE,
+      generatedAt: new Date(now).toISOString(),
+      days,
+      sources: [
+        { title: 'YouTube: subir vídeos', url: 'https://support.google.com/youtube/answer/57407?hl=es' },
+      ],
+      caveat: 'No existe una hora mágica: usa estas franjas como punto de partida y reajusta con tus resultados.',
+    },
+    trends: {
+      available: false,
+      terms: [],
+      sources: [],
+      reason: 'Firecrawl no está configurado en el modo de demostración.',
+    },
+    studioUrl: YOUTUBE_STUDIO_URL,
+  };
+}
 
 /** Set by pairPc so the next getPcStatus reports the PC as paired. */
 let pcPaired = false;
@@ -308,7 +412,6 @@ export class MockApiClient implements ApiClient {
       createdAt: Date.now(),
       availableForSec: 14 * 3600,
       thumbnailUrl: `${THUMB_BASE}/${id}/640/360`,
-      published: false,
     };
 
     videos.unshift(video);
@@ -328,12 +431,11 @@ export class MockApiClient implements ApiClient {
     return video ? project(video) : null;
   }
 
-  async publishVideo(id: string): Promise<Video> {
+  async getPublishAssistant(id: string): Promise<PublishAssistant> {
     await delay();
     const video = videos.find((v) => v.id === id);
     if (!video) throw new Error(`video not found: ${id}`);
-    video.published = true;
-    return project(video);
+    return mockPublishAssistant(video);
   }
 
   async retryVideo(id: string): Promise<Video> {

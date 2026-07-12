@@ -23,8 +23,8 @@ import HeroForge from "@/components/hero-forge";
 import Reveal from "@/components/reveal";
 
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v2.0.1/FragForge.Studio.Setup.2.0.1.exe";
-const RELEASE_VERSION = "v2.0.1";
+  "https://github.com/rechedev9/fragforge/releases/download/v2.0.2/FragForge.Studio.Setup.2.0.2.exe";
+const RELEASE_VERSION = "v2.0.2";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
 function Corners() {
@@ -100,7 +100,7 @@ const STEPS = [
   { title: "Add the source", body: "Drop a .dem or paste a stream URL. Demo parsing and capture stay on your PC." },
   { title: "Choose the story", body: "Pick the player, round and exact kills worth turning into a Short." },
   { title: "Let the forge run", body: "FragForge records the real POV or cuts the stream, then composes the vertical edit and optional xAI captions." },
-  { title: "Post the result", body: "Open the finished pack and upload the MP4, cover and caption." },
+  { title: "Post the result", body: "Prepare the metadata, download the MP4 and open YouTube Studio to finish the official upload flow." },
 ];
 
 const REQUIREMENTS: { icon: LucideIcon; label: string; detail: string }[] = [

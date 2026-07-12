@@ -20,7 +20,6 @@ type PublishBoard struct {
 	PackManifestKey string             `json:"pack_manifest_key,omitempty"`
 	GalleryKey      string             `json:"gallery_key,omitempty"`
 	PublishSummary  string             `json:"publish_summary_key,omitempty"`
-	Uploaded        bool               `json:"uploaded"`
 	Items           []PublishBoardItem `json:"items"`
 	Warnings        []string           `json:"warnings,omitempty"`
 	Error           string             `json:"error,omitempty"`
@@ -46,7 +45,6 @@ type NewPublishBoardOptions struct {
 	PackManifestKey string
 	GalleryKey      string
 	PublishSummary  string
-	Uploaded        bool
 	Items           []PublishBoardItem
 	Warnings        []string
 	Error           string
@@ -62,7 +60,6 @@ type NewPublishBoardForVariantOptions struct {
 	Variant         string
 	UploadReadyRoot string
 	SegmentIDs      []string
-	Uploaded        bool
 	Warnings        []string
 	Error           string
 	ArtifactExists  ArtifactExistsFunc
@@ -126,7 +123,6 @@ func NewPublishBoardForVariant(opts NewPublishBoardForVariantOptions) (PublishBo
 		PackManifestKey: refs.PackManifestKey,
 		GalleryKey:      refs.GalleryKey,
 		PublishSummary:  refs.PublishSummaryKey,
-		Uploaded:        opts.Uploaded,
 		Items:           items,
 		Warnings:        opts.Warnings,
 		Error:           opts.Error,
@@ -147,17 +143,16 @@ func NewPublishBoard(opts NewPublishBoardOptions) PublishBoard {
 		PackManifestKey: opts.PackManifestKey,
 		GalleryKey:      opts.GalleryKey,
 		PublishSummary:  opts.PublishSummary,
-		Uploaded:        opts.Uploaded,
 		Items:           append([]PublishBoardItem(nil), opts.Items...),
 		Warnings:        append([]string(nil), opts.Warnings...),
 		Error:           opts.Error,
 		UpdatedAt:       time.Now().UTC(),
 	}
-	board.RenderReady, board.Status = summarizePublishBoard(board.Items, board.Error, board.Uploaded)
+	board.RenderReady, board.Status = summarizePublishBoard(board.Items, board.Error)
 	return board
 }
 
-func summarizePublishBoard(items []PublishBoardItem, resultError string, uploaded bool) (bool, string) {
+func summarizePublishBoard(items []PublishBoardItem, resultError string) (bool, string) {
 	if resultError != "" {
 		return false, "failed"
 	}
@@ -186,8 +181,6 @@ func summarizePublishBoard(items []PublishBoardItem, resultError string, uploade
 		}
 	}
 	switch {
-	case uploaded && allReady:
-		return true, "uploaded"
 	case allReady:
 		return true, "ready"
 	case needsCover:

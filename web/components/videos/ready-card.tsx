@@ -1,12 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { Clock, Download, Eye, Globe, Share2 } from 'lucide-react';
+import { Clock, Download, Eye, Share2, Youtube } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Video } from '@/lib/api/types';
-import { api } from '@/lib/api';
 import { formatCountdown } from '@/lib/format';
-import { Badge } from '@/components/ui/badge';
+import { downloadPublishMP4 } from '@/lib/publish-actions';
 import { PipelineSteps } from '@/components/brand/pipeline-steps';
 import {
   Dialog,
@@ -17,41 +16,31 @@ import {
 } from '@/components/ui/dialog';
 import { ReelCover } from '@/components/brand/reel-cover';
 import { DeleteVideoButton } from '@/components/videos/delete-video-button';
+import { PublishAssistantDialog } from '@/components/videos/publish-assistant-dialog';
 
 const FORMAT_LABEL: Record<string, string> = { 'short-9x16': '9:16', 'landscape-16x9': '16:9' };
 
 /**
  * A finished, downloadable video — the mockup's LISTO card: a cyan corner
- * bracket, a "● LISTO" status tag, and a notched PUBLICAR CTA next to an
- * outlined MP4 download. Hovering the thumbnail still surfaces View/Share
+ * bracket, a "● LISTO" status tag, and a publication assistant next to an outlined
+ * MP4 download. Hovering the thumbnail still surfaces View/Share
  * (there is no thumbnail-duration data to show a real running time, so the
  * corner badge shows only the render format). View plays the reel inline in a
  * dialog; the 9:16 short fits the portrait frame.
  */
-export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Video) => void }) {
-  const [publishing, setPublishing] = useState(false);
+export function ReadyCard({
+  video,
+  onDeleted,
+}: {
+  video: Video;
+  onDeleted?: () => void;
+}) {
+  const [publishOpen, setPublishOpen] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
-
-  const publish = async () => {
-    if (video.published || publishing) return;
-    setPublishing(true);
-    try {
-      const updated = await api.publishVideo(video.id);
-      onChange?.(updated);
-    } finally {
-      setPublishing(false);
-    }
-  };
 
   const handleDownload = () => {
     if (!video.downloadUrl) return;
-    const a = document.createElement('a');
-    a.href = video.downloadUrl;
-    a.download = `${video.title}.mp4`;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    downloadPublishMP4(video.downloadUrl, video.title);
   };
 
   // In cloud mode the reel's media is a DOM object URL (blob:) fetched through the
@@ -100,14 +89,6 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
             <span className="absolute top-2.5 right-2.5 border border-primary/30 bg-background/90 px-2 py-1 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.12em] text-primary">
               {formatBadge}
             </span>
-          ) : null}
-
-          {video.published ? (
-            <div className="absolute top-2.5 left-2.5">
-              <Badge className="border-success/35 bg-success/15 text-success">
-                <Globe /> Publicado
-              </Badge>
-            </div>
           ) : null}
 
           {/* Hover on precise pointers; always visible and actionable on touch. */}
@@ -159,21 +140,14 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
             <PipelineSteps status={video.status} className="gap-x-2 text-[10px]" />
           </div>
 
-          <div className="mt-auto grid grid-cols-[minmax(0,1fr)_minmax(0,0.78fr)_auto] items-center gap-2 border-t border-border/70 pt-4">
-            {video.published ? (
-              <span className="flex min-h-10 items-center justify-center gap-1.5 border border-success/35 bg-success/10 px-2 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-success">
-                <Globe className="size-3.5" /> PUBLICADO
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={publish}
-                disabled={publishing}
-                className="rounded-md min-h-10 bg-primary px-3 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-              >
-                {publishing ? 'PUBLICANDO…' : 'PUBLICAR'}
-              </button>
-            )}
+          <div className="mt-auto grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.6fr)_auto] items-center gap-2 border-t border-border/70 pt-4">
+            <button
+              type="button"
+              onClick={() => setPublishOpen(true)}
+              className="flex min-h-10 items-center justify-center gap-1.5 rounded-md bg-primary px-3 font-[family-name:var(--font-display)] text-xs font-bold tracking-[0.05em] text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              <Youtube className="size-3.5" /> PREPARAR PUBLICACIÓN
+            </button>
             <button
               type="button"
               onClick={handleDownload}
@@ -182,7 +156,7 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
             >
               <Download className="size-3.5" /> MP4
             </button>
-            <DeleteVideoButton video={video} onDeleted={() => onChange?.(video)} />
+            <DeleteVideoButton video={video} onDeleted={() => onDeleted?.()} />
           </div>
         </div>
       </article>
@@ -206,6 +180,12 @@ export function ReadyCard({ video, onChange }: { video: Video; onChange?: (v: Vi
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <PublishAssistantDialog
+        open={publishOpen}
+        video={video}
+        onOpenChange={setPublishOpen}
+      />
     </>
   );
 }

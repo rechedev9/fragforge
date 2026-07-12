@@ -66,6 +66,46 @@ in-process queue (HLAE/CS2 auto-detected), then starts the web UI and opens
 The flow is: upload a demo -> pick a player -> pick specific kills -> create the
 reel, at which point HLAE + CS2 open to capture and the edit is applied.
 
+### Manual YouTube publication assistant
+
+Every finished reel in the Library has a **PREPARAR PUBLICACIÓN** action. It
+builds a seven-day schedule in `Europe/Madrid`, three to five factual metadata
+alternatives, keywords, and tags from the reel itself. The title and description
+remain editable, and the dialog can copy each field, download the MP4, and open
+the stable [YouTube Studio](https://studio.youtube.com/) home page in the system
+browser.
+
+FragForge does not choose the channel, audience, visibility, or publication
+date. In YouTube Studio, follow the official **CREAR -> Subir vídeos** flow and
+complete those decisions there; see [YouTube's official upload guide](https://support.google.com/youtube/answer/57407?hl=es).
+No Google project or account connection is required by FragForge.
+
+The assistant uses this deterministic local-time Shorts reference:
+
+| Day | Recommended local hours, in order |
+|-----|-----------------------------------|
+| Monday | 20:00, 17:00, 18:00 |
+| Tuesday | 20:00, 21:00, 19:00 |
+| Wednesday | 19:00, 20:00, 21:00 |
+| Thursday | 19:00, 20:00, 21:00 |
+| Friday | 16:00, 18:00, 19:00 |
+| Saturday | 19:00, 11:00, 18:00 |
+| Sunday | 19:00, 20:00, 17:00 |
+
+If `FIRECRAWL_API_KEY` is present server-side, Studio also performs a bounded
+monthly search for recent public CS2 Shorts and shows the extracted terms as
+trend hints. Firecrawl results never masquerade as YouTube views or ranking
+metrics, and the key is never sent to the renderer. Without the key, the same
+schedule and reel-derived recommendations remain available. Suggestions only
+use terms that match the player, map, weapon, hook, or kill count from that
+request.
+
+Experimental local builds may have left generic Windows Credential Manager
+entries named `FragForge/YouTube/OAuthClient`,
+`FragForge/YouTube/Connection`, or `FragForge/YouTube/Upload/<id>`. Current
+builds do not read or delete them. Remove them manually from **Credential
+Manager -> Windows Credentials** if desired.
+
 ## Render preset
 
 The single supported preset lives in `internal/editor/preset.go`: `viral-60-clean`.
@@ -123,6 +163,7 @@ address requires `ZV_MUTATION_TOKEN`. Optional environment variables:
 | `ZV_MEDIA_WORK_DIR` | Keep media workdirs for debugging (deleted after each task when unset). |
 | `ZV_CODEX_PATH`, `ZV_CODEX_MODEL`, `ZV_AGENT_TIMEOUT` | Optional local editorial assistant (`codex exec`, read-only sandbox) for caption/title suggestions. |
 | `XAI_API_KEY` | Optional xAI speech-to-text for stream captions. |
+| `FIRECRAWL_API_KEY` | Optional public CS2 Shorts trend hints for the publication assistant; never sent to the browser. |
 
 xAI captions use the REST `/v1/stt` endpoint, which returns word-level timestamps
 and accepts the rendered MP4 directly. The endpoint does not take a model name;
@@ -173,6 +214,7 @@ available.
 | POST | `/api/jobs/{id}/compose` | Enqueue final composition after recording. |
 | GET | `/api/jobs/{id}/final` | Stream the composed MP4 when ready. |
 | GET | `/api/presets` | Render preset registry as JSON (name, geometry, behavior flags, default). |
+| GET | `/api/jobs/{id}/renders/{variant}/videos/{name}/publish-assistant?days=7` | Reel metadata, factual suggestions, Madrid schedule, optional trend hints, and the stable YouTube Studio URL. |
 
 `POST /record` is accepted for `parsed` and `recorded` jobs; `POST /compose`
 for `recorded` and `composed` jobs. Manual retries are idempotent: workers skip
@@ -260,6 +302,9 @@ run. Never commit generated video/audio/image artifacts to git.
 - `internal/httpapi` — orchestrator HTTP routes, handlers, and the embedded
   workbench UI.
 - `internal/workers` — Asynq parser/media/agent workers.
+- `internal/youtubeinsights`, `internal/youtubetrends` — explainable Madrid
+  scheduling, factual metadata recommendations, and optional bounded Firecrawl
+  discovery for the manual publication assistant.
 - `internal/storage`, `internal/job`, `internal/tasks` — persistence and job
   state.
 - `effects/` — editable Lua effect scripts.

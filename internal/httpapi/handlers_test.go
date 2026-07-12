@@ -2008,11 +2008,6 @@ func TestGetRenderPublishBoardReturnsReadyStatus(t *testing.T) {
 	for _, key := range []string{videoKey, coverKey, captionKey} {
 		_ = store.Put(key, bytes.NewReader([]byte("artifact")))
 	}
-	uploadedKey, err := renderplan.RenderVariantUploadStatusKey(j.ID, variant)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = store.Put(uploadedKey, bytes.NewReader([]byte(`{"uploaded":true}`)))
 	h := NewHandlers(repo, store, &fakeQueue{})
 
 	r := chi.NewRouter()
@@ -2024,52 +2019,10 @@ func TestGetRenderPublishBoardReturnsReadyStatus(t *testing.T) {
 	if rw.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
 	}
-	for _, want := range []string{`"status":"uploaded"`, `"uploaded":true`, `"render_ready":true`, `"video_ready":true`, `"cover_ready":true`, `"caption_ready":true`} {
+	for _, want := range []string{`"status":"ready"`, `"render_ready":true`, `"video_ready":true`, `"cover_ready":true`, `"caption_ready":true`} {
 		if !strings.Contains(rw.Body.String(), want) {
 			t.Fatalf("body missing %s: %s", want, rw.Body.String())
 		}
-	}
-}
-
-func TestSetRenderUploadedWritesLocalMarker(t *testing.T) {
-	repo := newFakeRepo()
-	store := newFakeStorage()
-	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
-	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, store, &fakeQueue{})
-
-	r := chi.NewRouter()
-	r.Post("/api/jobs/{id}/renders/{variant}/publish/uploaded", h.SetRenderUploaded)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/publish/uploaded", strings.NewReader(`{"uploaded":true}`))
-	rw := httptest.NewRecorder()
-	r.ServeHTTP(rw, req)
-
-	if rw.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
-	}
-	key, err := renderplan.RenderVariantUploadStatusKey(j.ID, editor.PresetViral60Clean)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(storeBytes(t, store, key)), `"uploaded": true`) {
-		t.Fatalf("uploaded marker = %s", storeBytes(t, store, key))
-	}
-}
-
-func TestSetRenderUploadedRejectsLargeJSONBody(t *testing.T) {
-	repo := newFakeRepo()
-	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
-	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
-
-	r := chi.NewRouter()
-	r.Post("/api/jobs/{id}/renders/{variant}/publish/uploaded", h.SetRenderUploaded)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean/publish/uploaded", strings.NewReader(`{`+strings.Repeat(" ", maxJSONBodyBytes+1)))
-	rw := httptest.NewRecorder()
-	r.ServeHTTP(rw, req)
-
-	if rw.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want 413; body=%s", rw.Code, rw.Body.String())
 	}
 }
 
@@ -2537,10 +2490,6 @@ func TestWorkbenchLocalProductFlowEndToEnd(t *testing.T) {
 	publishPath := renderPath + "/publish"
 	if body := get(publishPath); !strings.Contains(body, `"status":"ready"`) {
 		t.Fatalf("publish board missing ready: %s", body)
-	}
-	post(publishPath+"/uploaded", `{"uploaded":true}`, true, http.StatusOK)
-	if body := get(publishPath); !strings.Contains(body, `"status":"uploaded"`) {
-		t.Fatalf("publish board missing uploaded: %s", body)
 	}
 	if body := get(renderPath + "/quality"); !strings.Contains(body, `"status":"ready"`) || !strings.Contains(body, `"video_codec":"h264"`) {
 		t.Fatalf("quality body missing ready codec: %s", body)

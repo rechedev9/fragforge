@@ -169,6 +169,19 @@ func TestLoadConfigXAIAPIKey(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFirecrawlAPIKey(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ZV_DATABASE_URL", "memory")
+	t.Setenv("FIRECRAWL_API_KEY", "fc-test-secret")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig error = %v", err)
+	}
+	if cfg.FirecrawlAPIKey != "fc-test-secret" || !cfg.firecrawlEnabled() {
+		t.Fatalf("firecrawl config = %q enabled=%v", cfg.FirecrawlAPIKey, cfg.firecrawlEnabled())
+	}
+}
+
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
@@ -192,6 +205,7 @@ func clearConfigEnv(t *testing.T) {
 		"ZV_CODEX_MODEL",
 		"ZV_AGENT_TIMEOUT",
 		"XAI_API_KEY",
+		"FIRECRAWL_API_KEY",
 	} {
 		t.Setenv(key, "")
 	}

@@ -37,6 +37,7 @@ type config struct {
 	WhisperPath       string
 	WhisperModelPath  string
 	XAIAPIKey         string
+	FirecrawlAPIKey   string
 }
 
 const (
@@ -80,6 +81,9 @@ func loadConfig() (config, error) {
 		// XAI_API_KEY is the only cloud transcription credential. It is not
 		// auto-detected because an API key cannot be probed on PATH or disk.
 		XAIAPIKey: os.Getenv("XAI_API_KEY"),
+		// Firecrawl enriches strategy suggestions with public CS2 trend
+		// references. It is optional and never sent to the web renderer.
+		FirecrawlAPIKey: os.Getenv("FIRECRAWL_API_KEY"),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
@@ -148,6 +152,10 @@ func (c config) whisperEnabled() bool {
 
 func (c config) xaiEnabled() bool {
 	return c.XAIAPIKey != ""
+}
+
+func (c config) firecrawlEnabled() bool {
+	return c.FirecrawlAPIKey != ""
 }
 
 // streamAcquireWorkerEnabled reports whether the acquire-by-URL worker can

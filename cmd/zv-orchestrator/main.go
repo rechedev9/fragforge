@@ -18,6 +18,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/streamclips"
 	"github.com/rechedev9/fragforge/internal/tasks"
 	"github.com/rechedev9/fragforge/internal/workers"
+	"github.com/rechedev9/fragforge/internal/youtubetrends"
 )
 
 type orchestratorStreamJobRepository interface {
@@ -65,6 +66,11 @@ func run() error {
 		return fmt.Errorf("storage: %w", err)
 	}
 	generateIntents := generateintent.New(store)
+	youtubeTrends, err := youtubetrends.New(youtubetrends.Options{APIKey: cfg.FirecrawlAPIKey})
+	if err != nil {
+		return fmt.Errorf("youtube trends client: %w", err)
+	}
+	log.Printf("publish assistant: firecrawl trends enabled=%v", cfg.firecrawlEnabled())
 
 	var repo orchestratorJobRepository
 	var streamRepo orchestratorStreamJobRepository
@@ -210,6 +216,7 @@ func run() error {
 		httpapi.WithMusicDir(cfg.MusicDir),
 		httpapi.WithCapabilities(cfg.captureCapabilities(captureSource)),
 		httpapi.WithGenerateIntentStore(generateIntents),
+		httpapi.WithPublishAssistantTrends(youtubeTrends),
 	)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

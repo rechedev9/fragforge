@@ -54,6 +54,7 @@ Module boundaries (keep `cmd/` entrypoints thin):
 - `internal/composition` - concat/composition planning and FFmpeg boundaries.
 - `internal/httpapi` - orchestrator HTTP routes, handlers, and the embedded HTMX workbench UI.
 - `internal/workers` - Asynq parser/media/agent workers.
+- `internal/youtubeinsights`, `internal/youtubetrends` - deterministic Europe/Madrid scheduling, factual reel-derived metadata recommendations, and optional bounded Firecrawl trend discovery for the manual publication assistant. Firecrawl results are hints, never fabricated YouTube performance metrics.
 - `internal/storage`, `internal/job`, `internal/tasks` - persistence and job state.
 - `internal/lineups` - utility lineup catalog data.
 - `effects/` - editable Lua effect scripts.
@@ -76,6 +77,8 @@ The editing rationale: hook text in the first 1-2s, punch-ins on kills, slow-mo 
 `web/` is a standalone Next.js app (App Router, React 19, Tailwind 4): the no-login `/upload` entry, match/clip/video views, and a typed API client under `web/lib/api`.
 It is local-first and stateless: it talks only to the orchestrator (`zv serve`) through same-origin proxy route handlers under `web/app/api/demos/*`, which forward `.dem` uploads and job calls while keeping the orchestrator URL and token server-side.
 `web/lib/api` always uses the real typed client; same-origin route handlers keep the orchestrator URL and token server-side.
+
+Finished Library reels expose a manual publication assistant through the per-artifact `/api/demos/*/publish-assistant` proxy. It generates Madrid-time guidance and factual reel-derived metadata, lets the user download the MP4, and opens only `https://studio.youtube.com/` in the system browser. Account, audience, visibility, scheduling, and the official upload flow remain entirely in YouTube Studio; FragForge has no Google account connection or direct publishing path.
 
 Run it locally (needs the orchestrator on `127.0.0.1:8080`; the desktop/local-studio path uses persistent SQLite plus the inline queue):
 

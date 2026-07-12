@@ -88,7 +88,9 @@ export default function VideosPage() {
   } else if (videos.length === 0) {
     content = <EmptyState />;
   } else {
-    content = <LibrarySections videos={visible} allVideos={videos} onChange={() => void refresh()} />;
+    content = (
+      <LibrarySections videos={visible} allVideos={videos} onChange={() => void refresh()} />
+    );
   }
 
   return (
@@ -126,7 +128,7 @@ function LibrarySections({
 }: {
   videos: Video[];
   allVideos: Video[];
-  onChange: () => void;
+  onChange(): void;
 }) {
   const failed = videos.filter((v) => v.status === 'failed');
   const active = videos.filter((v) => v.status !== 'failed');
@@ -136,7 +138,7 @@ function LibrarySections({
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,250px),300px))] justify-start gap-5">
         {active.map((v) =>
           v.status === 'ready' ? (
-            <ReadyCard key={v.id} video={v} onChange={onChange} />
+            <ReadyCard key={v.id} video={v} onDeleted={onChange} />
           ) : (
             <RenderingCard key={v.id} video={v} />
           ),

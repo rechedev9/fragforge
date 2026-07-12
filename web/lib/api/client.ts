@@ -1,4 +1,5 @@
 import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch } from './types';
+import type { PublishAssistant } from './publish-assistant';
 
 export interface ApiClient {
   /** Whether gameplay capture (HLAE + CS2) is configured on the local machine. */
@@ -19,7 +20,8 @@ export interface ApiClient {
   createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video>;
   listVideos(): Promise<Video[]>;
   getVideo(id: string): Promise<Video | null>;
-  publishVideo(id: string): Promise<Video>;
+  /** Build editable metadata and a Madrid schedule for manual publishing. */
+  getPublishAssistant(id: string): Promise<PublishAssistant>;
   /** Re-drive a failed reel from where it failed (re-record or re-render). */
   retryVideo(id: string): Promise<Video>;
   /** Remove a reel from the library, deleting its rendered artifacts where possible. */

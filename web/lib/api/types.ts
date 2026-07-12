@@ -42,7 +42,7 @@ export type Preset = { name: string; label: string; description: string; hudMode
 export type VideoStatus = 'queued' | 'recording' | 'composing' | 'ready' | 'failed';
 /** Live capture progress (segments done/total); set only while status is 'recording'. */
 export type CaptureProgress = { done: number; total: number };
-export type Video = { id: string; title: string; map: string; score: string; mode: RenderMode; variant?: string; songId?: string; editConfig?: EditConfig; status: VideoStatus; createdAt: number; availableForSec?: number; thumbnailUrl?: string; published: boolean; downloadUrl?: string; failureReason?: string; captureProgress?: CaptureProgress };
+export type Video = { id: string; title: string; map: string; score: string; mode: RenderMode; variant?: string; songId?: string; editConfig?: EditConfig; status: VideoStatus; createdAt: number; availableForSec?: number; thumbnailUrl?: string; downloadUrl?: string; failureReason?: string; captureProgress?: CaptureProgress };
 export type Slots = { used: number; total: number };
 export type FeedItem = { id: string; author: string; authorAvatarUrl: string; title: string; map: string; thumbnailUrl: string; likes: number; createdAt: number; videoUrl: string };
 export type Session = { user: SteamUser | null; slots: Slots; pcPaired: boolean; matchHistoryLinked: boolean };
