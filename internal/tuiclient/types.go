@@ -296,11 +296,31 @@ type CropRect struct {
 }
 
 type ClipRange struct {
-	ID              string    `json:"id"`
-	StartSeconds    float64   `json:"start_seconds"`
-	EndSeconds      float64   `json:"end_seconds"`
-	KillfeedSeconds []float64 `json:"killfeed_seconds,omitempty"`
-	Title           string    `json:"title,omitempty"`
+	ID              string           `json:"id"`
+	StartSeconds    float64          `json:"start_seconds"`
+	EndSeconds      float64          `json:"end_seconds"`
+	KillfeedSeconds []float64        `json:"killfeed_seconds,omitempty"`
+	KillfeedKills   [][]KillfeedKill `json:"killfeed_kills,omitempty"`
+	Title           string           `json:"title,omitempty"`
+}
+
+// KillfeedKill mirrors internal/streamclips.KillfeedKill: one CS2 kill notice,
+// index-aligned per cue with ClipRange.KillfeedKills.
+type KillfeedKill struct {
+	AttackerSide string `json:"attacker_side"`
+	AttackerName string `json:"attacker_name"`
+	VictimSide   string `json:"victim_side"`
+	VictimName   string `json:"victim_name"`
+	AssisterSide string `json:"assister_side,omitempty"`
+	AssisterName string `json:"assister_name,omitempty"`
+	Weapon       string `json:"weapon"`
+	Headshot     bool   `json:"headshot,omitempty"`
+	Wallbang     bool   `json:"wallbang,omitempty"`
+	Noscope      bool   `json:"noscope,omitempty"`
+	Smoke        bool   `json:"smoke,omitempty"`
+	Blind        bool   `json:"blind,omitempty"`
+	InAir        bool   `json:"in_air,omitempty"`
+	FlashAssist  bool   `json:"flash_assist,omitempty"`
 }
 
 // StreamRenderState is the render state of a stream job (internal/streamclips.RenderState).

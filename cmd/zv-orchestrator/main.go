@@ -220,6 +220,8 @@ func run() error {
 		httpapi.WithRateLimit(rateLimitRPS, rateLimitBurst),
 		httpapi.WithStreamRepository(streamRepo),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
+		httpapi.WithFFmpegPath(cfg.FFmpegPath),
+		httpapi.WithXAIKey(cfg.XAIAPIKey),
 		httpapi.WithMusicDir(cfg.MusicDir),
 		httpapi.WithCapabilities(cfg.captureCapabilities(captureSource)),
 		httpapi.WithGenerateIntentStore(generateIntents),

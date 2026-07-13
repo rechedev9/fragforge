@@ -81,11 +81,33 @@ type CropRect struct {
 }
 
 type ClipRange struct {
-	ID              string    `json:"id"`
-	StartSeconds    float64   `json:"start_seconds"`
-	EndSeconds      float64   `json:"end_seconds"`
-	KillfeedSeconds []float64 `json:"killfeed_seconds,omitempty"`
-	Title           string    `json:"title,omitempty"`
+	ID              string           `json:"id"`
+	StartSeconds    float64          `json:"start_seconds"`
+	EndSeconds      float64          `json:"end_seconds"`
+	KillfeedSeconds []float64        `json:"killfeed_seconds,omitempty"`
+	KillfeedKills   [][]KillfeedKill `json:"killfeed_kills,omitempty"`
+	Title           string           `json:"title,omitempty"`
+}
+
+// KillfeedKill is one confirmed CS2 kill notice, either read from the cue
+// frame by the xAI vision reader or entered by the user in the web editor.
+// It mirrors the community killfeed CSV schema so imports stay trivial.
+// Weapon is a key from WeaponKeys (the embedded notice icon catalog).
+type KillfeedKill struct {
+	AttackerSide string `json:"attacker_side"` // "CT" or "T"
+	AttackerName string `json:"attacker_name"`
+	VictimSide   string `json:"victim_side"` // "CT" or "T"
+	VictimName   string `json:"victim_name"`
+	AssisterSide string `json:"assister_side,omitempty"`
+	AssisterName string `json:"assister_name,omitempty"`
+	Weapon       string `json:"weapon"`
+	Headshot     bool   `json:"headshot,omitempty"`
+	Wallbang     bool   `json:"wallbang,omitempty"`
+	Noscope      bool   `json:"noscope,omitempty"`
+	Smoke        bool   `json:"smoke,omitempty"`
+	Blind        bool   `json:"blind,omitempty"`
+	InAir        bool   `json:"in_air,omitempty"`
+	FlashAssist  bool   `json:"flash_assist,omitempty"`
 }
 
 type EditPlan struct {
@@ -263,6 +285,9 @@ func (p EditPlan) Validate() error {
 		if err := clip.Validate(); err != nil {
 			return err
 		}
+		// Kills are index-aligned with killfeed_seconds (enforced in
+		// ClipRange.Validate), so a clip with kills always has cues and this
+		// single check covers both.
 		if p.KillfeedCrop == nil && len(clip.KillfeedSeconds) > 0 {
 			return fmt.Errorf("clip %s has killfeed_seconds but killfeed_crop is not configured", clip.ID)
 		}
@@ -331,7 +356,54 @@ func (c ClipRange) Validate() error {
 			)
 		}
 	}
+	if c.KillfeedKills != nil && len(c.KillfeedKills) != len(c.KillfeedSeconds) {
+		return fmt.Errorf(
+			"clip %s killfeed_kills length %d must match %d killfeed_seconds",
+			c.ID, len(c.KillfeedKills), len(c.KillfeedSeconds),
+		)
+	}
+	for _, cue := range c.KillfeedKills {
+		for _, kill := range cue {
+			if err := kill.validate(c.ID); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+// validate checks that a kill notice carries the names, team sides, and weapon
+// key the synthetic notice renderer needs. It is tolerant of un-normalized case
+// and whitespace so a plan validates the same before and after normalization.
+func (k KillfeedKill) validate(clipID string) error {
+	if strings.TrimSpace(k.AttackerName) == "" {
+		return fmt.Errorf("clip %s killfeed kill attacker_name is required", clipID)
+	}
+	if strings.TrimSpace(k.VictimName) == "" {
+		return fmt.Errorf("clip %s killfeed kill victim_name is required", clipID)
+	}
+	if !validKillSide(k.AttackerSide) {
+		return fmt.Errorf("clip %s killfeed kill attacker_side %q must be CT or T", clipID, k.AttackerSide)
+	}
+	if !validKillSide(k.VictimSide) {
+		return fmt.Errorf("clip %s killfeed kill victim_side %q must be CT or T", clipID, k.VictimSide)
+	}
+	if strings.TrimSpace(k.AssisterName) != "" && !validKillSide(k.AssisterSide) {
+		return fmt.Errorf("clip %s killfeed kill assister_side %q must be CT or T", clipID, k.AssisterSide)
+	}
+	if !ValidWeaponKey(strings.ToLower(strings.TrimSpace(k.Weapon))) {
+		return fmt.Errorf("clip %s killfeed kill weapon %q is not a known weapon", clipID, k.Weapon)
+	}
+	return nil
+}
+
+func validKillSide(side string) bool {
+	switch strings.ToUpper(strings.TrimSpace(side)) {
+	case "CT", "T":
+		return true
+	default:
+		return false
+	}
 }
 
 func NormalizeEditPlan(plan EditPlan) EditPlan {
@@ -350,6 +422,7 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 	for i := range plan.Clips {
 		plan.Clips[i].ID = strings.TrimSpace(plan.Clips[i].ID)
 		plan.Clips[i].KillfeedSeconds = normalizeKillfeedSeconds(plan.Clips[i].KillfeedSeconds)
+		plan.Clips[i].KillfeedKills = normalizeKillfeedKills(plan.Clips[i].KillfeedKills)
 	}
 	plan.StreamerBanner.Nick = strings.TrimSpace(plan.StreamerBanner.Nick)
 	plan.Music.Key = strings.TrimSpace(plan.Music.Key)
@@ -362,7 +435,40 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 }
 func normalizeClipRange(clip ClipRange) ClipRange {
 	clip.KillfeedSeconds = normalizeKillfeedSeconds(clip.KillfeedSeconds)
+	clip.KillfeedKills = normalizeKillfeedKills(clip.KillfeedKills)
 	return clip
+}
+
+// normalizeKillfeedKills trims and case-folds every kill's names, team sides,
+// and weapon key. It deep-copies so the caller's slices are never mutated, and
+// preserves nil cue entries so the result stays index-aligned with the cues.
+func normalizeKillfeedKills(kills [][]KillfeedKill) [][]KillfeedKill {
+	if len(kills) == 0 {
+		return kills
+	}
+	out := make([][]KillfeedKill, len(kills))
+	for i, cue := range kills {
+		if cue == nil {
+			continue
+		}
+		normalized := make([]KillfeedKill, len(cue))
+		for j, kill := range cue {
+			normalized[j] = normalizeKill(kill)
+		}
+		out[i] = normalized
+	}
+	return out
+}
+
+func normalizeKill(k KillfeedKill) KillfeedKill {
+	k.AttackerSide = strings.ToUpper(strings.TrimSpace(k.AttackerSide))
+	k.VictimSide = strings.ToUpper(strings.TrimSpace(k.VictimSide))
+	k.AssisterSide = strings.ToUpper(strings.TrimSpace(k.AssisterSide))
+	k.AttackerName = strings.TrimSpace(k.AttackerName)
+	k.VictimName = strings.TrimSpace(k.VictimName)
+	k.AssisterName = strings.TrimSpace(k.AssisterName)
+	k.Weapon = strings.ToLower(strings.TrimSpace(k.Weapon))
+	return k
 }
 
 func normalizeKillfeedSeconds(cues []float64) []float64 {

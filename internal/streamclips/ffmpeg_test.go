@@ -217,88 +217,194 @@ func TestBuildFFmpegArgsCreatesVerticalStackCommand(t *testing.T) {
 	}
 }
 
-func TestBuildFFmpegArgsBuildsKillfeedCueGraphs(t *testing.T) {
+// stackedLayoutBranches are the split/scale/vstack lines the default 40/60
+// stacked variant emits before any killfeed overlay chain.
+var stackedLayoutBranches = []string{
+	`[facein]crop=w=iw*0.250000:h=ih*0.300000:x=iw*0.000000:y=ih*0.000000,scale=1080:768:force_original_aspect_ratio=increase,crop=1080:768[face]`,
+	`[gamein]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1152:force_original_aspect_ratio=increase,crop=1080:1152[game]`,
+	`[face][game]vstack=inputs=2[layout]`,
+}
+
+func TestBuildFFmpegArgsBuildsNoticeOverlayGraph(t *testing.T) {
 	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
 	clip := ClipRange{
 		ID:              "clip-001",
 		StartSeconds:    10,
 		EndSeconds:      15,
-		KillfeedSeconds: []float64{12, 11},
+		KillfeedSeconds: []float64{11},
 	}
-	killfeedRows := [][]NoticeRow{
-		{
-			{X: 1621, Y: 73, Width: 288, Height: 37},
-			{X: 1469, Y: 103, Width: 440, Height: 40},
-		},
-		nil,
-	}
-	tests := []struct {
-		name       string
-		plan       EditPlan
-		wantFilter string
-	}{
-		{
-			name: "stacked graph",
-			plan: DefaultEditPlan(),
-			wantFilter: strings.Join([]string{
-				`[0:v]split=4[facein][gamein][killfeedin0_0][killfeedin0_1]`,
-				`[facein]crop=w=iw*0.250000:h=ih*0.300000:x=iw*0.000000:y=ih*0.000000,scale=1080:768:force_original_aspect_ratio=increase,crop=1080:768[face]`,
-				`[gamein]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1152:force_original_aspect_ratio=increase,crop=1080:1152[game]`,
-				`[face][game]vstack=inputs=2[layout]`,
-				`[killfeedin0_0]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=288:37:1621:73,scale=288:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0_0]`,
-				`[killfeedin0_1]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=440:40:1469:103,scale=440:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0_1]`,
-				`[layout][killfeed0_0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[killfeeded0_0]`,
-				`[killfeeded0_0][killfeed0_1]overlay=x=W-w-24:y=870:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
-				`[content]fps=60,format=yuv420p[v]`,
-			}, ";"),
-		},
-		{
-			name: "fullframe graph",
-			plan: EditPlan{
-				Variant:      VariantStreamerFullframeNoCam,
-				GameplayCrop: CropRect{X: 0, Y: 0, Width: 1, Height: 1},
-			},
-			wantFilter: strings.Join([]string{
-				`[0:v]split=3[layoutin][killfeedin0_0][killfeedin0_1]`,
-				`[layoutin]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[layout]`,
-				`[killfeedin0_0]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=288:37:1621:73,scale=288:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0_0]`,
-				`[killfeedin0_1]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=440:40:1469:103,scale=440:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0_1]`,
-				`[layout][killfeed0_0]overlay=x=W-w-24:y=64:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[killfeeded0_0]`,
-				`[killfeeded0_0][killfeed0_1]overlay=x=W-w-24:y=94:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
-				`[content]fps=60,format=yuv420p[v]`,
-			}, ";"),
-		},
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:          "source.mp4",
+		OutputPath:          "out.mp4",
+		KillfeedNoticePaths: [][]string{{"n0.png"}},
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			plan := tt.plan
-			plan.KillfeedCrop = &killfeedCrop
-			args, err := BuildFFmpegArgs(
-				FFmpegInputs{
-					SourcePath:   "source.mp4",
-					OutputPath:   "out.mp4",
-					KillfeedRows: killfeedRows,
-				},
-				plan,
-				clip,
-			)
-			if err != nil {
-				t.Fatalf("BuildFFmpegArgs error = %v", err)
-			}
-
-			got := filterComplexArg(t, args)
-			if got != tt.wantFilter {
-				t.Fatalf("filter_complex mismatch\n got: %s\nwant: %s", got, tt.wantFilter)
-			}
-			if strings.Contains(got, "curves=") {
-				t.Fatalf("killfeed graph darkens cue branches: %s", got)
-			}
-		})
+	wantFilter := strings.Join(append(
+		append([]string{`[0:v]split=2[facein][gamein]`}, stackedLayoutBranches...),
+		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
+		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[content]fps=60,format=yuv420p[v]`,
+	), ";")
+	if got := filterComplexArg(t, args); got != wantFilter {
+		t.Fatalf("filter_complex mismatch\n got: %s\nwant: %s", got, wantFilter)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-loop 1 -i n0.png") {
+		t.Fatalf("notice PNG must be a looped input: %s", joined)
 	}
 }
 
-func TestBuildFFmpegArgsOmitsCuesWithoutDetectedRows(t *testing.T) {
+func TestBuildFFmpegArgsNoticeInputIndexShiftsAfterMusic(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	clip := ClipRange{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{11},
+	}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+	plan.Music = MusicPlan{Key: "concrete-teeth"}
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:          "source.mp4",
+		OutputPath:          "out.mp4",
+		MusicPath:           "music/concrete-teeth.mp3",
+		SourceHasAudio:      true,
+		KillfeedNoticePaths: [][]string{{"n0.png"}},
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	filter := filterComplexArg(t, args)
+	// Source is input 0 and music is input 1, so the notice PNG is input 2.
+	if !strings.Contains(filter, `[2:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`) {
+		t.Fatalf("notice input index did not shift past music: %s", filter)
+	}
+	if strings.Contains(filter, `[1:v]format=rgba`) {
+		t.Fatalf("notice must not reuse the music input index: %s", filter)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-i music/concrete-teeth.mp3 -loop 1 -i n0.png") {
+		t.Fatalf("notice input must follow the music input: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsMixesNoticesAndFrozenCropFallback(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	clip := ClipRange{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{11, 12},
+	}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:          "source.mp4",
+		OutputPath:          "out.mp4",
+		KillfeedNoticePaths: [][]string{{"n0.png", "n1.png"}, nil},
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+
+	wantFilter := strings.Join(append(
+		append([]string{`[0:v]split=3[facein][gamein][killfeedin1]`}, stackedLayoutBranches...),
+		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
+		`[2:v]format=rgba,setpts=PTS-STARTPTS[notice0_1]`,
+		`[killfeedin1]trim=start=2.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed1]`,
+		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[kfover0]`,
+		`[kfover0][notice0_1]overlay=x=W-w-24:y=896:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[kfover1]`,
+		`[kfover1][killfeed1]overlay=x=W-w-24:y=840:enable='between(t\,1.650000\,4.800000)':eof_action=pass:shortest=0[content]`,
+		`[content]fps=60,format=yuv420p[v]`,
+	), ";")
+	if got := filterComplexArg(t, args); got != wantFilter {
+		t.Fatalf("filter_complex mismatch\n got: %s\nwant: %s", got, wantFilter)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-loop 1 -i n0.png -loop 1 -i n1.png") {
+		t.Fatalf("both notice PNGs must be looped inputs in order: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsFrozenCropFallbackGeometry(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	clip := ClipRange{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{11},
+	}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+
+	// No notice paths: every configured cue falls back to a frozen crop strip.
+	args, err := BuildFFmpegArgs(FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+
+	wantFilter := strings.Join(append(
+		append([]string{`[0:v]split=3[facein][gamein][killfeedin0]`}, stackedLayoutBranches...),
+		`[killfeedin0]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0]`,
+		`[layout][killfeed0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[content]fps=60,format=yuv420p[v]`,
+	), ";")
+	if got := filterComplexArg(t, args); got != wantFilter {
+		t.Fatalf("filter_complex mismatch\n got: %s\nwant: %s", got, wantFilter)
+	}
+	if joined := strings.Join(args, " "); strings.Contains(joined, "-loop 1 -i") {
+		t.Fatalf("frozen-crop fallback must not add looped notice inputs: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsFullframeNoticeGraphOmitsDegenerateSplit(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	clip := ClipRange{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{11},
+	}
+	plan := EditPlan{
+		Variant:      VariantStreamerFullframeNoCam,
+		GameplayCrop: CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+		KillfeedCrop: &killfeedCrop,
+	}
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:          "source.mp4",
+		OutputPath:          "out.mp4",
+		KillfeedNoticePaths: [][]string{{"n0.png"}},
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+
+	wantFilter := strings.Join([]string{
+		`[0:v]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[layout]`,
+		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
+		`[layout][notice0_0]overlay=x=W-w-24:y=64:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[content]fps=60,format=yuv420p[v]`,
+	}, ";")
+	got := filterComplexArg(t, args)
+	if got != wantFilter {
+		t.Fatalf("filter_complex mismatch\n got: %s\nwant: %s", got, wantFilter)
+	}
+	if strings.Contains(got, "split") {
+		t.Fatalf("fullframe notice graph must not emit a degenerate split: %s", got)
+	}
+}
+
+func TestBuildFFmpegArgsRejectsMismatchedNoticePaths(t *testing.T) {
 	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
 	plan := DefaultEditPlan()
 	plan.KillfeedCrop = &killfeedCrop
@@ -308,25 +414,14 @@ func TestBuildFFmpegArgsOmitsCuesWithoutDetectedRows(t *testing.T) {
 		EndSeconds:      15,
 		KillfeedSeconds: []float64{11, 12},
 	}
-	inputs := FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"}
 
-	args, err := BuildFFmpegArgs(inputs, plan, clip)
-	if err != nil {
-		t.Fatalf("BuildFFmpegArgs with undetected cues error = %v", err)
-	}
-	clip.KillfeedSeconds = nil
-	standardArgs, err := BuildFFmpegArgs(inputs, plan, clip)
-	if err != nil {
-		t.Fatalf("BuildFFmpegArgs standard graph error = %v", err)
-	}
-	if !slices.Equal(args, standardArgs) {
-		t.Fatalf("undetected cues changed the standard graph\n got: %q\nwant: %q", args, standardArgs)
-	}
-	filter := filterComplexArg(t, args)
-	for _, forbidden := range []string{"killfeedin", "scale=620", "curves="} {
-		if strings.Contains(filter, forbidden) {
-			t.Fatalf("undetected cue graph contains %q: %s", forbidden, filter)
-		}
+	_, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:          "source.mp4",
+		OutputPath:          "out.mp4",
+		KillfeedNoticePaths: [][]string{{"n0.png"}},
+	}, plan, clip)
+	if err == nil || !strings.Contains(err.Error(), "killfeed notice paths") {
+		t.Fatalf("BuildFFmpegArgs error = %v, want mismatched notice paths error", err)
 	}
 }
 
@@ -726,6 +821,142 @@ func TestEditPlanNormalizesAndValidatesStreamerBannerNick(t *testing.T) {
 		if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "streamer banner nick") {
 			t.Fatalf("Validate nick %q error = %v, want streamer banner nick error", nick, err)
 		}
+	}
+}
+
+func killedPlanWith(kill KillfeedKill) EditPlan {
+	killfeedCrop := CropRect{X: 0.75, Y: 0.05, Width: 0.2, Height: 0.1}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+	plan.Clips = []ClipRange{{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      12,
+		KillfeedSeconds: []float64{11},
+		KillfeedKills:   [][]KillfeedKill{{kill}},
+	}}
+	return plan
+}
+
+func validKill() KillfeedKill {
+	return KillfeedKill{
+		AttackerSide: "T",
+		AttackerName: "player1",
+		VictimSide:   "CT",
+		VictimName:   "player2",
+		Weapon:       "ak47",
+	}
+}
+
+func TestEditPlanValidationChecksKillfeedKills(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*KillfeedKill)
+		wantErr string
+	}{
+		{name: "valid kill accepted"},
+		{name: "empty attacker name", mutate: func(k *KillfeedKill) { k.AttackerName = "" }, wantErr: "attacker_name"},
+		{name: "empty victim name", mutate: func(k *KillfeedKill) { k.VictimName = "" }, wantErr: "victim_name"},
+		{name: "bad attacker side", mutate: func(k *KillfeedKill) { k.AttackerSide = "TT" }, wantErr: "attacker_side"},
+		{name: "bad victim side", mutate: func(k *KillfeedKill) { k.VictimSide = "" }, wantErr: "victim_side"},
+		{name: "unknown weapon", mutate: func(k *KillfeedKill) { k.Weapon = "not_a_weapon" }, wantErr: "weapon"},
+		{name: "assister without name ignores side", mutate: func(k *KillfeedKill) { k.AssisterSide = "" }},
+		{name: "assister with name needs side", mutate: func(k *KillfeedKill) { k.AssisterName = "helper"; k.AssisterSide = "" }, wantErr: "assister_side"},
+		{name: "assister with valid side accepted", mutate: func(k *KillfeedKill) { k.AssisterName = "helper"; k.AssisterSide = "CT" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kill := validKill()
+			if tt.mutate != nil {
+				tt.mutate(&kill)
+			}
+			err := killedPlanWith(kill).Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestEditPlanValidationRejectsKillCueLengthMismatch(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.75, Y: 0.05, Width: 0.2, Height: 0.1}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+	plan.Clips = []ClipRange{{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      13,
+		KillfeedSeconds: []float64{11, 12},
+		KillfeedKills:   [][]KillfeedKill{{validKill()}},
+	}}
+	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "killfeed_kills") {
+		t.Fatalf("Validate error = %v, want killfeed_kills length error", err)
+	}
+}
+
+func TestEditPlanValidationRequiresKillfeedCropForKills(t *testing.T) {
+	// Kills are index-aligned with killfeed_seconds, so a clip carrying kills
+	// always carries cues and must therefore configure a killfeed crop.
+	plan := DefaultEditPlan()
+	plan.Clips = []ClipRange{{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      12,
+		KillfeedSeconds: []float64{11},
+		KillfeedKills:   [][]KillfeedKill{{validKill()}},
+	}}
+	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "killfeed_crop is not configured") {
+		t.Fatalf("Validate error = %v, want missing killfeed_crop error", err)
+	}
+}
+
+func TestNormalizeEditPlanNormalizesKillsWithoutMutatingCaller(t *testing.T) {
+	callerKill := KillfeedKill{
+		AttackerSide: " t ",
+		AttackerName: "  player1  ",
+		VictimSide:   "ct",
+		VictimName:   " player2 ",
+		AssisterSide: "t",
+		AssisterName: " helper ",
+		Weapon:       "AK47",
+	}
+	callerKills := [][]KillfeedKill{{callerKill}, nil}
+	callerClips := []ClipRange{{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      14,
+		KillfeedSeconds: []float64{11, 12},
+		KillfeedKills:   callerKills,
+	}}
+
+	normalized := NormalizeEditPlan(EditPlan{Clips: callerClips})
+	got := normalized.Clips[0].KillfeedKills
+	if len(got) != 2 {
+		t.Fatalf("normalized killfeed kills len = %d, want 2 (index alignment preserved)", len(got))
+	}
+	if got[1] != nil {
+		t.Fatalf("normalized empty cue = %v, want nil to keep index alignment", got[1])
+	}
+	want := KillfeedKill{
+		AttackerSide: "T",
+		AttackerName: "player1",
+		VictimSide:   "CT",
+		VictimName:   "player2",
+		AssisterSide: "T",
+		AssisterName: "helper",
+		Weapon:       "ak47",
+	}
+	if got[0][0] != want {
+		t.Fatalf("normalized kill = %+v, want %+v", got[0][0], want)
+	}
+	if callerKills[0][0] != callerKill {
+		t.Fatalf("caller kill mutated: %+v", callerKills[0][0])
 	}
 }
 

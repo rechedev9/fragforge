@@ -1,13 +1,11 @@
 package workers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,95 +204,16 @@ func newReadyStreamJobWithCaptions(t *testing.T, store *fakeStorage, enabled boo
 	return id, plan
 }
 
-func TestStreamRenderWorkerOmitsKillfeedWhenDetectionFails(t *testing.T) {
-	store := newFakeStorage()
-	id, plan := newReadyStreamJobWithCaptions(t, store, false)
-	hint := streamclips.CropRect{X: 0.68, Y: 0.04, Width: 0.31, Height: 0.14}
-	plan.KillfeedCrop = &hint
-	plan.Clips[0].KillfeedSeconds = []float64{0.5, 1.25}
-	planJSON, err := json.Marshal(plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := newFakeStreamRepo(streamclips.Job{
-		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
-	})
-	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
-	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		out := args[len(args)-1]
-		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-			return nil, err
-		}
-		if argValue(args, "-frames:v") == "1" {
-			if argValue(args, "-ss") == "1.600" {
-				return nil, errors.New("ffmpeg probe failed")
-			}
-			return nil, writeStreamKillfeedPNG(out, frame)
-		}
-		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
-	}}
-	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
-		WorkDir:    t.TempDir(),
-		FFmpegPath: "ffmpeg",
-	})
-	w.runner = runner
-
-	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
-		t.Fatalf("HandleRenderStreamClip error = %v", err)
-	}
-
-	if got, want := len(runner.calls), 3; got != want {
-		t.Fatalf("runner calls = %d, want %d (two cue extractions and one render)", got, want)
-	}
-	for i, cue := range []string{"0.850", "1.600"} {
-		call := runner.calls[i]
-		if call.exe != "ffmpeg" {
-			t.Fatalf("cue extraction %d executable = %q, want ffmpeg", i, call.exe)
-		}
-		if got := strings.Join(call.args[:4], " "); got != "-y -loglevel error -ss" {
-			t.Fatalf("cue extraction %d prefix = %q", i, got)
-		}
-		if got := argValue(call.args, "-ss"); got != cue {
-			t.Fatalf("cue extraction %d -ss = %q, want %q", i, got, cue)
-		}
-		if got := argValue(call.args, "-frames:v"); got != "1" {
-			t.Fatalf("cue extraction %d -frames:v = %q, want 1", i, got)
-		}
-		if got := filepath.Base(call.args[len(call.args)-1]); got != fmt.Sprintf("killfeed-cue-clip-001-%d.png", i) {
-			t.Fatalf("cue extraction %d output = %q", i, got)
-		}
-	}
-	renderFilter := argValue(runner.calls[2].args, "-filter_complex")
-	for _, forbidden := range []string{"killfeedin", "scale=620", "curves="} {
-		if strings.Contains(renderFilter, forbidden) {
-			t.Fatalf("failed-detection render contains %q: %s", forbidden, renderFilter)
-		}
-	}
-	stateKey, err := streamclips.RenderStateKey(id, streamclips.VariantStreamer4060)
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := string(store.files[stateKey])
-	for _, warning := range []string{
-		"clip clip-001 killfeed cue 0.50s: no highlighted kill notice detected; omitting killfeed overlay",
-		"clip clip-001 killfeed cue 1.25s: ffmpeg probe failed; omitting killfeed overlay",
-	} {
-		if !strings.Contains(state, warning) {
-			t.Fatalf("render state missing warning %q: %s", warning, state)
-		}
-	}
-}
-
-func TestStreamRenderWorkerUsesDetectedKillfeedRows(t *testing.T) {
+func TestStreamRenderWorkerRendersSyntheticKillfeedNotices(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, false)
 	hint := streamclips.CropRect{X: 0.68, Y: 0.04, Width: 0.31, Height: 0.14}
 	plan.KillfeedCrop = &hint
 	plan.Clips[0].KillfeedSeconds = []float64{0.5}
+	weapon := streamclips.WeaponKeys()[0]
+	plan.Clips[0].KillfeedKills = [][]streamclips.KillfeedKill{{
+		{AttackerSide: "CT", AttackerName: "hero", VictimSide: "T", VictimName: "villain", Weapon: weapon, Headshot: true},
+	}}
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -302,19 +221,10 @@ func TestStreamRenderWorkerUsesDetectedKillfeedRows(t *testing.T) {
 	repo := newFakeStreamRepo(streamclips.Job{
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
 	})
-	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
-	drawStreamWorkerKillfeedNotice(frame, image.Rect(1621, 73, 1909, 110))
-	rows := streamclips.DetectNoticeRows(frame, &hint)
-	if len(rows) != 1 {
-		t.Fatalf("test frame detected %d rows, want 1: %+v", len(rows), rows)
-	}
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		out := args[len(args)-1]
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return nil, err
-		}
-		if argValue(args, "-frames:v") == "1" {
-			return nil, writeStreamKillfeedPNG(out, frame)
 		}
 		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
 	}}
@@ -332,51 +242,85 @@ func TestStreamRenderWorkerUsesDetectedKillfeedRows(t *testing.T) {
 		t.Fatalf("HandleRenderStreamClip error = %v", err)
 	}
 
-	if got, want := len(runner.calls), 2; got != want {
-		t.Fatalf("runner calls = %d, want %d (cue extraction and render)", got, want)
+	// The synthetic-notice flow renders notice PNGs in Go; it does not extract
+	// cue frames, so only the render pass runs.
+	if got, want := len(runner.calls), 1; got != want {
+		t.Fatalf("runner calls = %d, want %d (render only)", got, want)
 	}
-	row := rows[0]
-	wantCrop := fmt.Sprintf("crop=%d:%d:%d:%d", row.Width, row.Height, row.X, row.Y)
-	renderFilter := argValue(runner.calls[1].args, "-filter_complex")
-	if !strings.Contains(renderFilter, wantCrop) {
-		t.Fatalf("render filter missing detected row %q: %s", wantCrop, renderFilter)
+	renderArgs := runner.calls[0].args
+	var noticePath string
+	for _, a := range renderArgs {
+		if strings.HasSuffix(filepath.ToSlash(a), "killfeed/clip-001/cue0_0.png") {
+			noticePath = a
+		}
 	}
-	if strings.Contains(renderFilter, "curves=") {
-		t.Fatalf("detected-row render darkens the killfeed: %s", renderFilter)
+	if noticePath == "" {
+		t.Fatalf("render args missing notice PNG input: %v", renderArgs)
 	}
-}
-
-func writeStreamKillfeedPNG(path string, frame image.Image) error {
-	file, err := os.Create(path)
+	renderFilter := argValue(renderArgs, "-filter_complex")
+	if !strings.Contains(renderFilter, "notice0_0") || !strings.Contains(renderFilter, "overlay") {
+		t.Fatalf("render filter missing synthetic notice overlay: %s", renderFilter)
+	}
+	for _, forbidden := range []string{"killfeedin", "scale=620:-2"} {
+		if strings.Contains(renderFilter, forbidden) {
+			t.Fatalf("synthetic-notice render fell back to a frozen crop (%q): %s", forbidden, renderFilter)
+		}
+	}
+	data, err := os.ReadFile(noticePath)
 	if err != nil {
-		return err
+		t.Fatalf("read rendered notice PNG: %v", err)
 	}
-	if err := png.Encode(file, frame); err != nil {
-		_ = file.Close()
-		return err
+	if !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatalf("notice file is not a PNG: % x", data[:min(8, len(data))])
 	}
-	return file.Close()
 }
 
-func drawStreamWorkerKillfeedNotice(frame *image.RGBA, notice image.Rectangle) {
-	dim := color.RGBA{R: 130, G: 45, B: 45, A: 255}
-	for y := notice.Min.Y; y < notice.Max.Y; y++ {
-		for x := notice.Min.X; x < notice.Max.X; x++ {
-			frame.Set(x, y, dim)
-		}
+func TestStreamRenderWorkerFreezesKillfeedCropWithoutKills(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, false)
+	hint := streamclips.CropRect{X: 0.68, Y: 0.04, Width: 0.31, Height: 0.14}
+	plan.KillfeedCrop = &hint
+	plan.Clips[0].KillfeedSeconds = []float64{0.5}
+	// No KillfeedKills: the render must fall back to a frozen crop of the
+	// killfeed region rather than extract or detect anything.
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
 	}
-	red := color.RGBA{R: 200, G: 30, B: 30, A: 255}
-	inner := notice.Inset(1)
-	for x := inner.Min.X; x < inner.Max.X; x++ {
-		for d := range 2 {
-			frame.Set(x, inner.Min.Y+d, red)
-			frame.Set(x, inner.Max.Y-1-d, red)
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
 		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		WorkDir:    t.TempDir(),
+		FFmpegPath: "ffmpeg",
+	})
+	w.runner = runner
+
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for y := inner.Min.Y; y < inner.Max.Y; y++ {
-		for d := range 2 {
-			frame.Set(inner.Min.X+d, y, red)
-			frame.Set(inner.Max.X-1-d, y, red)
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+
+	if got, want := len(runner.calls), 1; got != want {
+		t.Fatalf("runner calls = %d, want %d (render only)", got, want)
+	}
+	renderFilter := argValue(runner.calls[0].args, "-filter_complex")
+	if !strings.Contains(renderFilter, "killfeedin0") || !strings.Contains(renderFilter, "scale=620:-2") {
+		t.Fatalf("frozen-crop fallback filter missing: %s", renderFilter)
+	}
+	for _, a := range runner.calls[0].args {
+		if strings.Contains(filepath.ToSlash(a), "/killfeed/clip-001/cue") {
+			t.Fatalf("frozen-crop fallback unexpectedly rendered a notice PNG: %q", a)
 		}
 	}
 }

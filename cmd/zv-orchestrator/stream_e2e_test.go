@@ -147,16 +147,17 @@ func TestStreamRenderE2E(t *testing.T) {
 			t.Fatalf("output size = %dx%d, want 1080x1920", probe.Width, probe.Height)
 		}
 
-		// The detector finds two staggered red-ringed rows: notice A
-		// (1021,33)-(1251,75) and the wider notice B (981,79)-(1251,119).
-		// Both scale by 40/42 (A: 218px wide, B: 256px, even) and overlay
-		// right-aligned at x=W-w-24, so A's lime interior covers roughly
-		// (841,67)-(1054,101) and B's yellow interior (803,111)-(1054,141).
-		// Region means over the interiors keep the assertions robust against
-		// one-pixel geometry drift and chroma subsampling.
+		// A cue without confirmed kills freezes the FULL killfeed crop rect
+		// as one WYSIWYG strip: crop (947,29)-(1267,137) of the 1280x720
+		// source (320x108), scaled to 620px wide (x1.9375) and overlaid at
+		// x=1080-620-24=436, y=64. Notice A's lime interior (1024,36)-(1248,72)
+		// lands roughly at (585,78)-(1019,148) and notice B's yellow interior
+		// (984,82)-(1248,114) at (507,167)-(1019,229). Region means over the
+		// interiors keep the assertions robust against one-pixel geometry
+		// drift and chroma subsampling.
 		const (
-			noticeAX, noticeAY = 946, 84
-			noticeBX, noticeBY = 928, 126
+			noticeAX, noticeAY = 780, 108
+			noticeBX, noticeBY = 780, 196
 		)
 		beforeFrame := extractFramePNG(t, ffmpegPath, outPath, 1.0)
 		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.5)
@@ -173,6 +174,59 @@ func TestStreamRenderE2E(t *testing.T) {
 		}
 		if !isPredominantlyYellow(atCueB) {
 			t.Fatalf("notice B region at cue = %+v, want yellow sampled notice", atCueB)
+		}
+	})
+
+	t.Run("confirmed kills render a synthetic notice at the cue", func(t *testing.T) {
+		id := uploadStreamSource(t, client, srv.URL, sourcePath)
+		plan := streamclips.EditPlan{
+			Variant:      streamclips.VariantStreamerFullframeNoCam,
+			GameplayCrop: streamclips.CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+			KillfeedCrop: &streamclips.CropRect{X: 0.74, Y: 0.04, Width: 0.25, Height: 0.15},
+			Clips: []streamclips.ClipRange{{
+				ID:              "clip-1",
+				StartSeconds:    0.5,
+				EndSeconds:      3.5,
+				KillfeedSeconds: []float64{2},
+				KillfeedKills: [][]streamclips.KillfeedKill{{{
+					AttackerSide: "CT",
+					AttackerName: "donk",
+					VictimSide:   "T",
+					VictimName:   "s1mple",
+					Weapon:       "ak47",
+					Headshot:     true,
+				}}},
+			}},
+			Captions: streamclips.CaptionsPlan{Enabled: false},
+		}
+		putStreamEditPlan(t, client, srv.URL, id, plan)
+
+		clipID := startAndAwaitStreamRender(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam)
+		outPath := downloadStreamVideo(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam, clipID)
+
+		// The synthetic notice overlays right-aligned at x=W-w-24 (right edge
+		// 1056), y=64, height 48, whatever width the names produce. Its right
+		// padding zone (text-free) sits at x ~1045..1051 and shows the
+		// half-black plate over the blue gameplay, and the top 2px #B50000
+		// border covers rows y=64..65 across the notice width.
+		const (
+			plateX, plateY   = 1048, 88
+			borderX, borderY = 1040, 65
+		)
+		beforeFrame := extractFramePNG(t, ffmpegPath, outPath, 1.0)
+		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.5)
+		beforePlate := readRegionMean(t, beforeFrame, plateX, plateY, 3, 14)
+		atCuePlate := readRegionMean(t, atCueFrame, plateX, plateY, 3, 14)
+		atCueBorder := readRegionMean(t, atCueFrame, borderX, borderY, 8, 0)
+		t.Logf("synthetic notice plate before=%+v at cue=%+v, top border at cue=%+v", beforePlate, atCuePlate, atCueBorder)
+		if !isPredominantlyBlue(beforePlate) {
+			t.Fatalf("notice plate region before cue = %+v, want blue gameplay background", beforePlate)
+		}
+		if atCuePlate.R > 80 || atCuePlate.G > 80 || atCuePlate.B < 60 || atCuePlate.B > 180 {
+			t.Fatalf("notice plate region at cue = %+v, want blue darkened by the half-black plate", atCuePlate)
+		}
+		if !isPredominantlyRed(atCueBorder) {
+			t.Fatalf("notice top border at cue = %+v, want red synthetic notice border", atCueBorder)
 		}
 	})
 

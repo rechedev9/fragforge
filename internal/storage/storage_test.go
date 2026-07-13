@@ -184,6 +184,34 @@ func TestLocalRejectsEscapingKeys(t *testing.T) {
 	}
 }
 
+func TestLocalResolvePathStaysUnderRootAndRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewLocal(dir)
+	if err != nil {
+		t.Fatalf("NewLocal error = %v", err)
+	}
+	want := []byte("stream bytes")
+	if err := store.Put("streams/source.mp4", bytes.NewReader(want)); err != nil {
+		t.Fatalf("Put error = %v", err)
+	}
+
+	path, err := store.ResolvePath("streams/source.mp4")
+	if err != nil {
+		t.Fatalf("ResolvePath error = %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read resolved path: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("resolved file content = %q, want %q", got, want)
+	}
+
+	if _, err := store.ResolvePath("../escaped.mp4"); err == nil {
+		t.Error("expected error resolving escaping key")
+	}
+}
+
 func TestLocalAllowsDotsInsideFileName(t *testing.T) {
 	store, _ := NewLocal(t.TempDir())
 	if err := store.Put("demos/match..v1.dem", bytes.NewReader([]byte("x"))); err != nil {

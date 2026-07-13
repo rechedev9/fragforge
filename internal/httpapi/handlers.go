@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"log"
 	"net/http"
@@ -89,6 +90,15 @@ type Handlers struct {
 	capabilities     Capabilities
 	youtubeTrends    YouTubeTrends
 	publishAssistant *publishAssistantCache
+	// ffmpegPath and xaiAPIKey back the killfeed-read endpoint: ffmpeg extracts
+	// the cue frame and the xAI vision client reads it. killfeedVisionBaseURL
+	// overrides the xAI base URL (tests point it at an httptest fake).
+	ffmpegPath            string
+	xaiAPIKey             string
+	killfeedVisionBaseURL string
+	// killfeedFrame extracts a single source frame at atSeconds. It defaults to
+	// an ffmpeg-backed extractor; tests replace it so they never shell out.
+	killfeedFrame func(ctx context.Context, sourceKey string, atSeconds float64) (image.Image, error)
 }
 
 type Option func(*Handlers)
@@ -175,6 +185,9 @@ func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts
 	}
 	for _, opt := range opts {
 		opt(h)
+	}
+	if h.killfeedFrame == nil {
+		h.killfeedFrame = h.extractKillfeedFrame
 	}
 	return h
 }

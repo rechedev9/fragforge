@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	"image/png"
 	"io"
 	"os"
 	"os/exec"
@@ -923,52 +921,18 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		}
 	}
 	for _, clip := range plan.Clips {
-		killfeedRows := make([][]streamclips.NoticeRow, len(clip.KillfeedSeconds))
-		if len(clip.KillfeedSeconds) > 0 && plan.KillfeedCrop != nil {
-			for i, cue := range clip.KillfeedSeconds {
-				framePath := filepath.Join(workDir, fmt.Sprintf("killfeed-cue-%s-%d.png", clip.ID, i))
-				probeArgs := []string{
-					"-y",
-					"-loglevel", "error",
-					"-ss", strconv.FormatFloat(cue+streamclips.KillfeedSampleDelaySeconds, 'f', 3, 64),
-					"-i", sourcePath,
-					"-frames:v", "1",
-					framePath,
-				}
-				if _, err := w.runner.Run(runCtx, cfg.FFmpegPath, probeArgs...); err != nil {
-					warnings = append(warnings, fmt.Sprintf(
-						"clip %s killfeed cue %.2fs: %v; omitting killfeed overlay",
-						clip.ID, cue, err,
-					))
-					continue
-				}
-				frame, err := decodeStreamKillfeedFrame(framePath)
-				if err != nil {
-					warnings = append(warnings, fmt.Sprintf(
-						"clip %s killfeed cue %.2fs: %v; omitting killfeed overlay",
-						clip.ID, cue, err,
-					))
-					continue
-				}
-				rows := streamclips.DetectNoticeRows(frame, plan.KillfeedCrop)
-				if len(rows) == 0 {
-					warnings = append(warnings, fmt.Sprintf(
-						"clip %s killfeed cue %.2fs: no highlighted kill notice detected; omitting killfeed overlay",
-						clip.ID, cue,
-					))
-					continue
-				}
-				killfeedRows[i] = rows
-			}
+		noticePaths, err := renderClipKillfeedNotices(workDir, clip)
+		if err != nil {
+			return err
 		}
 		outPath := filepath.Join(outDir, clip.ID+".mp4")
 		args, err := streamclips.BuildFFmpegArgs(streamclips.FFmpegInputs{
-			SourcePath:     sourcePath,
-			OutputPath:     outPath,
-			MusicPath:      musicPath,
-			BannerFontPath: bannerFontPath,
-			SourceHasAudio: j.Probe.AudioCodec != "",
-			KillfeedRows:   killfeedRows,
+			SourcePath:          sourcePath,
+			OutputPath:          outPath,
+			MusicPath:           musicPath,
+			BannerFontPath:      bannerFontPath,
+			SourceHasAudio:      j.Probe.AudioCodec != "",
+			KillfeedNoticePaths: noticePaths,
 		}, plan, clip)
 		if err != nil {
 			return err
@@ -1047,20 +1011,50 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	return nil
 }
 
-func decodeStreamKillfeedFrame(path string) (image.Image, error) {
-	file, err := os.Open(path)
+// renderClipKillfeedNotices renders every kill in clip.KillfeedKills to a
+// synthetic CS2 kill-notice PNG under <workDir>/killfeed/<clipID>/cue<i>_<j>.png
+// and returns the paths index-aligned with clip.KillfeedSeconds (top-first per
+// cue). A cue with no kills gets a nil entry so BuildFFmpegArgs falls back to a
+// frozen crop of the killfeed region. Names are deterministic and files are
+// overwritten, so a redriven task stays idempotent. It returns nil when the
+// clip carries no kills at all.
+func renderClipKillfeedNotices(workDir string, clip streamclips.ClipRange) ([][]string, error) {
+	if len(clip.KillfeedKills) == 0 {
+		return nil, nil
+	}
+	paths := make([][]string, len(clip.KillfeedSeconds))
+	dir := filepath.Join(workDir, "killfeed", clip.ID)
+	for i := range clip.KillfeedSeconds {
+		if i >= len(clip.KillfeedKills) || len(clip.KillfeedKills[i]) == 0 {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return nil, err
+		}
+		cuePaths := make([]string, len(clip.KillfeedKills[i]))
+		for j, kill := range clip.KillfeedKills[i] {
+			noticePath := filepath.Join(dir, fmt.Sprintf("cue%d_%d.png", i, j))
+			if err := writeKillfeedNoticePNG(noticePath, kill); err != nil {
+				return nil, fmt.Errorf("render killfeed notice for clip %s cue %d kill %d: %w", clip.ID, i, j, err)
+			}
+			cuePaths[j] = noticePath
+		}
+		paths[i] = cuePaths
+	}
+	return paths, nil
+}
+
+func writeKillfeedNoticePNG(path string, kill streamclips.KillfeedKill) error {
+	// #nosec G304 -- path is constructed under the worker stage directory.
+	f, err := os.Create(path)
 	if err != nil {
-		return nil, fmt.Errorf("open extracted killfeed frame: %w", err)
+		return err
 	}
-	frame, decodeErr := png.Decode(file)
-	closeErr := file.Close()
-	if decodeErr != nil {
-		return nil, fmt.Errorf("decode extracted killfeed frame: %w", decodeErr)
+	if err := streamclips.EncodeNoticePNG(kill, f); err != nil {
+		_ = f.Close()
+		return err
 	}
-	if closeErr != nil {
-		return nil, fmt.Errorf("close extracted killfeed frame: %w", closeErr)
-	}
-	return frame, nil
+	return f.Close()
 }
 
 // extractXAICaptionAudio materializes the selected range from the original
