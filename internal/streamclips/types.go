@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -80,10 +81,11 @@ type CropRect struct {
 }
 
 type ClipRange struct {
-	ID           string  `json:"id"`
-	StartSeconds float64 `json:"start_seconds"`
-	EndSeconds   float64 `json:"end_seconds"`
-	Title        string  `json:"title,omitempty"`
+	ID              string    `json:"id"`
+	StartSeconds    float64   `json:"start_seconds"`
+	EndSeconds      float64   `json:"end_seconds"`
+	KillfeedSeconds []float64 `json:"killfeed_seconds,omitempty"`
+	Title           string    `json:"title,omitempty"`
 }
 
 type EditPlan struct {
@@ -91,6 +93,7 @@ type EditPlan struct {
 	Variant        string             `json:"variant"`
 	FaceCrop       CropRect           `json:"face_crop"`
 	GameplayCrop   CropRect           `json:"gameplay_crop"`
+	KillfeedCrop   *CropRect          `json:"killfeed_crop,omitempty"`
 	Clips          []ClipRange        `json:"clips"`
 	StreamerBanner StreamerBannerPlan `json:"streamer_banner,omitzero"`
 	Captions       CaptionsPlan       `json:"captions,omitzero"`
@@ -247,6 +250,11 @@ func (p EditPlan) Validate() error {
 			return err
 		}
 	}
+	if p.KillfeedCrop != nil {
+		if err := p.KillfeedCrop.Validate("killfeed_crop"); err != nil {
+			return err
+		}
+	}
 	if err := p.GameplayCrop.Validate("gameplay_crop"); err != nil {
 		return err
 	}
@@ -254,6 +262,9 @@ func (p EditPlan) Validate() error {
 	for _, clip := range p.Clips {
 		if err := clip.Validate(); err != nil {
 			return err
+		}
+		if p.KillfeedCrop == nil && len(clip.KillfeedSeconds) > 0 {
+			return fmt.Errorf("clip %s has killfeed_seconds but killfeed_crop is not configured", clip.ID)
 		}
 		if seen[clip.ID] {
 			return fmt.Errorf("duplicate clip id %q", clip.ID)
@@ -278,6 +289,12 @@ func (p EditPlan) Validate() error {
 }
 
 func (c CropRect) Validate(label string) error {
+	if math.IsNaN(c.X) || math.IsInf(c.X, 0) ||
+		math.IsNaN(c.Y) || math.IsInf(c.Y, 0) ||
+		math.IsNaN(c.Width) || math.IsInf(c.Width, 0) ||
+		math.IsNaN(c.Height) || math.IsInf(c.Height, 0) {
+		return fmt.Errorf("%s must use finite normalized coordinates", label)
+	}
 	if c.X < 0 || c.Y < 0 || c.Width <= 0 || c.Height <= 0 {
 		return fmt.Errorf("%s must use positive normalized coordinates", label)
 	}
@@ -291,11 +308,28 @@ func (c ClipRange) Validate() error {
 	if !clipIDPattern.MatchString(c.ID) {
 		return fmt.Errorf("invalid clip id %q", c.ID)
 	}
+	if math.IsNaN(c.StartSeconds) || math.IsInf(c.StartSeconds, 0) {
+		return fmt.Errorf("clip %s start_seconds must be finite", c.ID)
+	}
 	if c.StartSeconds < 0 {
 		return fmt.Errorf("clip %s start_seconds must be >= 0", c.ID)
 	}
+	if math.IsNaN(c.EndSeconds) || math.IsInf(c.EndSeconds, 0) {
+		return fmt.Errorf("clip %s end_seconds must be finite", c.ID)
+	}
 	if c.EndSeconds <= c.StartSeconds {
 		return fmt.Errorf("clip %s end_seconds must be greater than start_seconds", c.ID)
+	}
+	for _, cue := range c.KillfeedSeconds {
+		if math.IsNaN(cue) || math.IsInf(cue, 0) {
+			return fmt.Errorf("clip %s killfeed_seconds must contain only finite values", c.ID)
+		}
+		if cue < c.StartSeconds || cue >= c.EndSeconds {
+			return fmt.Errorf(
+				"clip %s killfeed cue %g must satisfy start_seconds <= cue < end_seconds",
+				c.ID, cue,
+			)
+		}
 	}
 	return nil
 }
@@ -310,8 +344,12 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 	if plan.UpdatedAt.IsZero() {
 		plan.UpdatedAt = time.Now().UTC()
 	}
+	if len(plan.Clips) > 0 {
+		plan.Clips = append([]ClipRange(nil), plan.Clips...)
+	}
 	for i := range plan.Clips {
 		plan.Clips[i].ID = strings.TrimSpace(plan.Clips[i].ID)
+		plan.Clips[i].KillfeedSeconds = normalizeKillfeedSeconds(plan.Clips[i].KillfeedSeconds)
 	}
 	plan.StreamerBanner.Nick = strings.TrimSpace(plan.StreamerBanner.Nick)
 	plan.Music.Key = strings.TrimSpace(plan.Music.Key)
@@ -321,4 +359,25 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 		plan.Music.Volume = defaultMusicVolume
 	}
 	return plan
+}
+func normalizeClipRange(clip ClipRange) ClipRange {
+	clip.KillfeedSeconds = normalizeKillfeedSeconds(clip.KillfeedSeconds)
+	return clip
+}
+
+func normalizeKillfeedSeconds(cues []float64) []float64 {
+	if len(cues) == 0 {
+		return cues
+	}
+	normalized := append([]float64(nil), cues...)
+	sort.Float64s(normalized)
+	writeIndex := 1
+	for _, cue := range normalized[1:] {
+		if cue == normalized[writeIndex-1] {
+			continue
+		}
+		normalized[writeIndex] = cue
+		writeIndex++
+	}
+	return normalized[:writeIndex]
 }

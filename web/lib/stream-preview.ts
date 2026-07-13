@@ -1,4 +1,4 @@
-import type { NormalizedRect, StreamVariant } from './api/streams';
+import type { NormalizedRect, StreamClipRange, StreamVariant } from './api/streams';
 
 export type FrameSize = { width: number; height: number };
 
@@ -64,6 +64,52 @@ export function calculateCropCoverGeometry(
     leftPercent: (((output.width - scaledCropWidth) / 2 - source.width * rect.x * scale) * 100) / output.width,
     topPercent: (((output.height - scaledCropHeight) / 2 - source.height * rect.y * scale) * 100) / output.height,
   };
+}
+
+const KILLFEED_WIDTH = 620;
+const KILLFEED_LEAD_SECONDS = 0.35;
+const KILLFEED_TAIL_SECONDS = 2.8;
+
+export function proportionalEvenKillfeedHeight(
+  rect: NormalizedRect,
+  source: FrameSize,
+): number | null {
+  if (rect.width <= 0 || rect.height <= 0 || source.width <= 0 || source.height <= 0) {
+    return null;
+  }
+  const proportionalHeight =
+    (KILLFEED_WIDTH * rect.height * source.height) / (rect.width * source.width);
+  return Math.max(2, Math.round(proportionalHeight / 2) * 2);
+}
+
+export function resolveActiveKillfeedCue(
+  clips: StreamClipRange[],
+  frameSeconds: number,
+): number | null {
+  if (!Number.isFinite(frameSeconds)) return null;
+  let activeCue: number | null = null;
+  for (const clip of clips) {
+    for (const cue of clip.killfeed_seconds ?? []) {
+      if (
+        !Number.isFinite(cue) ||
+        cue < clip.start_seconds ||
+        cue >= clip.end_seconds
+      ) {
+        continue;
+      }
+      const visibleFrom = Math.max(clip.start_seconds, cue - KILLFEED_LEAD_SECONDS);
+      const visibleThrough = Math.min(clip.end_seconds, cue + KILLFEED_TAIL_SECONDS);
+      if (
+        frameSeconds >= visibleFrom &&
+        frameSeconds < clip.end_seconds &&
+        frameSeconds <= visibleThrough &&
+        (activeCue === null || cue >= activeCue)
+      ) {
+        activeCue = cue;
+      }
+    }
+  }
+  return activeCue;
 }
 
 /** Selects the same stable, representative frame for every editor video. */

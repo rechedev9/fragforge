@@ -280,6 +280,7 @@ type StreamEditPlan struct {
 	Variant       string          `json:"variant"`
 	FaceCrop      CropRect        `json:"face_crop"`
 	GameplayCrop  CropRect        `json:"gameplay_crop"`
+	KillfeedCrop  *CropRect       `json:"killfeed_crop,omitempty"`
 	Clips         []ClipRange     `json:"clips"`
 	Captions      json.RawMessage `json:"captions,omitempty"`
 	Music         json.RawMessage `json:"music,omitempty"`
@@ -295,10 +296,11 @@ type CropRect struct {
 }
 
 type ClipRange struct {
-	ID           string  `json:"id"`
-	StartSeconds float64 `json:"start_seconds"`
-	EndSeconds   float64 `json:"end_seconds"`
-	Title        string  `json:"title,omitempty"`
+	ID              string    `json:"id"`
+	StartSeconds    float64   `json:"start_seconds"`
+	EndSeconds      float64   `json:"end_seconds"`
+	KillfeedSeconds []float64 `json:"killfeed_seconds,omitempty"`
+	Title           string    `json:"title,omitempty"`
 }
 
 // StreamRenderState is the render state of a stream job (internal/streamclips.RenderState).

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,6 +33,155 @@ func TestEditPlanValidationRejectsInvalidClipRange(t *testing.T) {
 
 	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "greater than start_seconds") {
 		t.Fatalf("Validate error = %v, want range error", err)
+	}
+}
+
+func TestEditPlanValidationRequiresKillfeedCrop(t *testing.T) {
+	plan := DefaultEditPlan()
+	plan.Clips = []ClipRange{{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      12,
+		KillfeedSeconds: []float64{11},
+	}}
+
+	if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "killfeed_crop is not configured") {
+		t.Fatalf("Validate error = %v, want missing killfeed_crop error", err)
+	}
+}
+
+func TestEditPlanValidationRejectsInvalidKillfeedCues(t *testing.T) {
+	tests := []struct {
+		name    string
+		cue     float64
+		wantErr string
+	}{
+		{name: "start boundary accepted", cue: 10},
+		{name: "finite cue inside range accepted", cue: 11.5},
+		{name: "nan rejected", cue: math.NaN(), wantErr: "only finite values"},
+		{name: "positive infinity rejected", cue: math.Inf(1), wantErr: "only finite values"},
+		{name: "negative infinity rejected", cue: math.Inf(-1), wantErr: "only finite values"},
+		{name: "before start rejected", cue: 9.999, wantErr: "start_seconds <= cue < end_seconds"},
+		{name: "end boundary rejected", cue: 12, wantErr: "start_seconds <= cue < end_seconds"},
+		{name: "after end rejected", cue: 12.001, wantErr: "start_seconds <= cue < end_seconds"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			killfeedCrop := CropRect{X: 0.75, Y: 0.05, Width: 0.2, Height: 0.1}
+			plan := DefaultEditPlan()
+			plan.KillfeedCrop = &killfeedCrop
+			plan.Clips = []ClipRange{{
+				ID:              "clip-001",
+				StartSeconds:    10,
+				EndSeconds:      12,
+				KillfeedSeconds: []float64{tt.cue},
+			}}
+
+			err := plan.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestEditPlanValidationRequiresFiniteKillfeedCropCoordinates(t *testing.T) {
+	coordinates := []struct {
+		name string
+		set  func(*CropRect, float64)
+	}{
+		{name: "x", set: func(crop *CropRect, value float64) { crop.X = value }},
+		{name: "y", set: func(crop *CropRect, value float64) { crop.Y = value }},
+		{name: "width", set: func(crop *CropRect, value float64) { crop.Width = value }},
+		{name: "height", set: func(crop *CropRect, value float64) { crop.Height = value }},
+	}
+	nonFiniteValues := []struct {
+		name  string
+		value float64
+	}{
+		{name: "nan", value: math.NaN()},
+		{name: "positive infinity", value: math.Inf(1)},
+		{name: "negative infinity", value: math.Inf(-1)},
+	}
+
+	for _, coordinate := range coordinates {
+		for _, nonFinite := range nonFiniteValues {
+			t.Run(coordinate.name+"/"+nonFinite.name, func(t *testing.T) {
+				killfeedCrop := CropRect{X: 0.75, Y: 0.05, Width: 0.2, Height: 0.1}
+				coordinate.set(&killfeedCrop, nonFinite.value)
+				plan := DefaultEditPlan()
+				plan.KillfeedCrop = &killfeedCrop
+				plan.Clips = []ClipRange{{
+					ID:              "clip-001",
+					StartSeconds:    10,
+					EndSeconds:      12,
+					KillfeedSeconds: []float64{11},
+				}}
+
+				if err := plan.Validate(); err == nil || !strings.Contains(err.Error(), "killfeed_crop must use finite normalized coordinates") {
+					t.Fatalf("Validate error = %v, want finite killfeed_crop coordinates error", err)
+				}
+			})
+		}
+	}
+
+	t.Run("finite coordinates accepted", func(t *testing.T) {
+		killfeedCrop := CropRect{X: 0.75, Y: 0.05, Width: 0.2, Height: 0.1}
+		plan := DefaultEditPlan()
+		plan.KillfeedCrop = &killfeedCrop
+		plan.Clips = []ClipRange{{
+			ID:              "clip-001",
+			StartSeconds:    10,
+			EndSeconds:      12,
+			KillfeedSeconds: []float64{11},
+		}}
+
+		if err := plan.Validate(); err != nil {
+			t.Fatalf("Validate error = %v, want nil", err)
+		}
+	})
+}
+
+func TestNormalizeEditPlanSortsAndDeduplicatesKillfeedCuesWithoutMutatingCaller(t *testing.T) {
+	distinctNearDuplicate := math.Nextafter(2, 3)
+	callerCues := []float64{3, 1, 2, 1, distinctNearDuplicate, 2}
+	originalCues := slices.Clone(callerCues)
+	callerClips := []ClipRange{{
+		ID:              " clip-001 ",
+		StartSeconds:    1,
+		EndSeconds:      4,
+		KillfeedSeconds: callerCues,
+	}}
+
+	normalized := NormalizeEditPlan(EditPlan{Clips: callerClips})
+	wantCues := []float64{1, 2, distinctNearDuplicate, 3}
+	if normalized.Clips[0].ID != "clip-001" {
+		t.Fatalf("normalized clip id = %q, want %q", normalized.Clips[0].ID, "clip-001")
+	}
+	if !slices.Equal(normalized.Clips[0].KillfeedSeconds, wantCues) {
+		t.Fatalf("normalized killfeed cues = %v, want %v", normalized.Clips[0].KillfeedSeconds, wantCues)
+	}
+	if callerClips[0].ID != " clip-001 " {
+		t.Fatalf("caller clip id = %q after normalization, want unchanged", callerClips[0].ID)
+	}
+	if !slices.Equal(callerCues, originalCues) {
+		t.Fatalf("caller cue backing array = %v after normalization, want %v", callerCues, originalCues)
+	}
+
+	normalized.Clips[0].ID = "changed"
+	normalized.Clips[0].KillfeedSeconds[0] = 99
+	if callerClips[0].ID != " clip-001 " {
+		t.Fatalf("caller clip backing array changed through normalized result: %+v", callerClips)
+	}
+	if !slices.Equal(callerCues, originalCues) {
+		t.Fatalf("caller cue backing array changed through normalized result: %v", callerCues)
 	}
 }
 
@@ -65,6 +215,157 @@ func TestBuildFFmpegArgsCreatesVerticalStackCommand(t *testing.T) {
 	if strings.Contains(joined, "drawtext=") {
 		t.Fatalf("empty streamer nick must not add a banner: %s", joined)
 	}
+}
+
+func TestBuildFFmpegArgsBuildsKillfeedCueGraphs(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	clip := ClipRange{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{12, 11},
+	}
+	killfeedRows := [][]NoticeRow{
+		{
+			{X: 1621, Y: 73, Width: 288, Height: 37},
+			{X: 1469, Y: 103, Width: 440, Height: 40},
+		},
+		nil,
+	}
+	tests := []struct {
+		name       string
+		plan       EditPlan
+		wantFilter string
+	}{
+		{
+			name: "stacked graph",
+			plan: DefaultEditPlan(),
+			wantFilter: strings.Join([]string{
+				`[0:v]split=4[facein][gamein][killfeedin0_0][killfeedin0_1]`,
+				`[facein]crop=w=iw*0.250000:h=ih*0.300000:x=iw*0.000000:y=ih*0.000000,scale=1080:768:force_original_aspect_ratio=increase,crop=1080:768[face]`,
+				`[gamein]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1152:force_original_aspect_ratio=increase,crop=1080:1152[game]`,
+				`[face][game]vstack=inputs=2[layout]`,
+				`[killfeedin0_0]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=288:37:1621:73,scale=288:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0_0]`,
+				`[killfeedin0_1]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=440:40:1469:103,scale=440:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0_1]`,
+				`[layout][killfeed0_0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[killfeeded0_0]`,
+				`[killfeeded0_0][killfeed0_1]overlay=x=W-w-24:y=870:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
+				`[content]fps=60,format=yuv420p[v]`,
+			}, ";"),
+		},
+		{
+			name: "fullframe graph",
+			plan: EditPlan{
+				Variant:      VariantStreamerFullframeNoCam,
+				GameplayCrop: CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+			},
+			wantFilter: strings.Join([]string{
+				`[0:v]split=3[layoutin][killfeedin0_0][killfeedin0_1]`,
+				`[layoutin]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[layout]`,
+				`[killfeedin0_0]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=288:37:1621:73,scale=288:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0_0]`,
+				`[killfeedin0_1]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=440:40:1469:103,scale=440:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0_1]`,
+				`[layout][killfeed0_0]overlay=x=W-w-24:y=64:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[killfeeded0_0]`,
+				`[killfeeded0_0][killfeed0_1]overlay=x=W-w-24:y=94:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
+				`[content]fps=60,format=yuv420p[v]`,
+			}, ";"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := tt.plan
+			plan.KillfeedCrop = &killfeedCrop
+			args, err := BuildFFmpegArgs(
+				FFmpegInputs{
+					SourcePath:   "source.mp4",
+					OutputPath:   "out.mp4",
+					KillfeedRows: killfeedRows,
+				},
+				plan,
+				clip,
+			)
+			if err != nil {
+				t.Fatalf("BuildFFmpegArgs error = %v", err)
+			}
+
+			got := filterComplexArg(t, args)
+			if got != tt.wantFilter {
+				t.Fatalf("filter_complex mismatch\n got: %s\nwant: %s", got, tt.wantFilter)
+			}
+			if strings.Contains(got, "curves=") {
+				t.Fatalf("killfeed graph darkens cue branches: %s", got)
+			}
+		})
+	}
+}
+
+func TestBuildFFmpegArgsOmitsCuesWithoutDetectedRows(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+	clip := ClipRange{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{11, 12},
+	}
+	inputs := FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"}
+
+	args, err := BuildFFmpegArgs(inputs, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs with undetected cues error = %v", err)
+	}
+	clip.KillfeedSeconds = nil
+	standardArgs, err := BuildFFmpegArgs(inputs, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs standard graph error = %v", err)
+	}
+	if !slices.Equal(args, standardArgs) {
+		t.Fatalf("undetected cues changed the standard graph\n got: %q\nwant: %q", args, standardArgs)
+	}
+	filter := filterComplexArg(t, args)
+	for _, forbidden := range []string{"killfeedin", "scale=620", "curves="} {
+		if strings.Contains(filter, forbidden) {
+			t.Fatalf("undetected cue graph contains %q: %s", forbidden, filter)
+		}
+	}
+}
+
+func TestBuildFFmpegArgsWithoutKillfeedCuesIsByteEquivalentToLegacyPath(t *testing.T) {
+	clip := ClipRange{ID: "clip-001", StartSeconds: 1.5, EndSeconds: 4.25}
+	legacyPlan := DefaultEditPlan()
+	inputs := FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"}
+
+	legacyArgs, err := BuildFFmpegArgs(inputs, legacyPlan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs legacy error = %v", err)
+	}
+
+	planWithUnusedKillfeedCrop := legacyPlan
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	planWithUnusedKillfeedCrop.KillfeedCrop = &killfeedCrop
+	argsWithUnusedKillfeedCrop, err := BuildFFmpegArgs(inputs, planWithUnusedKillfeedCrop, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs with unused killfeed crop error = %v", err)
+	}
+
+	if !slices.Equal(argsWithUnusedKillfeedCrop, legacyArgs) {
+		t.Fatalf("no-cue args changed\n got: %q\nwant: %q", argsWithUnusedKillfeedCrop, legacyArgs)
+	}
+}
+
+func filterComplexArg(t *testing.T, args []string) string {
+	t.Helper()
+	for i, arg := range args {
+		if arg != "-filter_complex" {
+			continue
+		}
+		if i+1 >= len(args) {
+			t.Fatal("-filter_complex is missing its value")
+		}
+		return args[i+1]
+	}
+	t.Fatal("args are missing -filter_complex")
+	return ""
 }
 
 func TestBuildFFmpegArgsOldStreamerBannerPlanUsesCurrentLayoutDefault(t *testing.T) {

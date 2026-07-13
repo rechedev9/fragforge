@@ -102,6 +102,11 @@ const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
         properties: {
           end_seconds: { exclusiveMinimum: 0, type: 'number' },
           id: SAFE_TOKEN_PROPERTY,
+          killfeed_seconds: {
+            description: 'Absolute source timestamps whose selected killfeed notice should be frozen for this clip.',
+            items: { type: 'number' },
+            type: 'array',
+          },
           start_seconds: { minimum: 0, type: 'number' },
           title: { type: 'string' },
         },
@@ -117,6 +122,10 @@ const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
     },
     face_crop: FACE_CROP_RECT_PROPERTY,
     gameplay_crop: CROP_RECT_PROPERTY,
+    killfeed_crop: {
+      ...CROP_RECT_PROPERTY,
+      description: 'Normalized source crop for frozen killfeed notices. Required when a clip contains killfeed_seconds cues.',
+    },
     music: {
       additionalProperties: false,
       properties: {
@@ -1033,7 +1042,7 @@ async function configureStreamCaptions(client: OrchestratorClient, input: JsonOb
 }
 
 function validateStreamEditPlan(plan: JsonObject): void {
-  for (const key of ['face_crop', 'gameplay_crop']) {
+  for (const key of ['face_crop', 'gameplay_crop', 'killfeed_crop']) {
     const crop = plan[key];
     if (!isJsonObject(crop)) continue;
     const x = crop.x;
@@ -1049,12 +1058,34 @@ function validateStreamEditPlan(plan: JsonObject): void {
   }
   const clips = plan.clips;
   if (!Array.isArray(clips)) return;
+  const hasKillfeedCrop = isJsonObject(plan.killfeed_crop);
   const seen = new Set<string>();
   for (const [index, value] of clips.entries()) {
     if (!isJsonObject(value)) continue;
     if (typeof value.start_seconds === 'number' && typeof value.end_seconds === 'number'
       && value.end_seconds <= value.start_seconds) {
       throw new Error(`arguments.plan.clips[${index}].end_seconds must be greater than start_seconds`);
+    }
+    const killfeedSeconds = value.killfeed_seconds;
+    if (Array.isArray(killfeedSeconds)) {
+      if (killfeedSeconds.length > 0 && !hasKillfeedCrop) {
+        throw new Error(`arguments.plan.killfeed_crop is required when arguments.plan.clips[${index}].killfeed_seconds contains cues`);
+      }
+      const seenKillfeedSeconds = new Set<number>();
+      for (const [cueIndex, cue] of killfeedSeconds.entries()) {
+        const field = `arguments.plan.clips[${index}].killfeed_seconds[${cueIndex}]`;
+        if (typeof cue !== 'number' || !Number.isFinite(cue)) {
+          throw new Error(`${field} must be a finite number`);
+        }
+        if (seenKillfeedSeconds.has(cue)) {
+          throw new Error(`${field} must not duplicate an earlier cue`);
+        }
+        seenKillfeedSeconds.add(cue);
+        if (typeof value.start_seconds === 'number' && typeof value.end_seconds === 'number'
+          && (cue < value.start_seconds || cue >= value.end_seconds)) {
+          throw new Error(`${field} must be greater than or equal to start_seconds and less than end_seconds`);
+        }
+      }
     }
     if (typeof value.id === 'string') {
       if (seen.has(value.id)) throw new Error(`arguments.plan.clips contains duplicate id ${value.id}`);

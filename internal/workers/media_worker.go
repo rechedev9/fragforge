@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"os/exec"
@@ -921,6 +923,44 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		}
 	}
 	for _, clip := range plan.Clips {
+		killfeedRows := make([][]streamclips.NoticeRow, len(clip.KillfeedSeconds))
+		if len(clip.KillfeedSeconds) > 0 && plan.KillfeedCrop != nil {
+			for i, cue := range clip.KillfeedSeconds {
+				framePath := filepath.Join(workDir, fmt.Sprintf("killfeed-cue-%s-%d.png", clip.ID, i))
+				probeArgs := []string{
+					"-y",
+					"-loglevel", "error",
+					"-ss", strconv.FormatFloat(cue+streamclips.KillfeedSampleDelaySeconds, 'f', 3, 64),
+					"-i", sourcePath,
+					"-frames:v", "1",
+					framePath,
+				}
+				if _, err := w.runner.Run(runCtx, cfg.FFmpegPath, probeArgs...); err != nil {
+					warnings = append(warnings, fmt.Sprintf(
+						"clip %s killfeed cue %.2fs: %v; omitting killfeed overlay",
+						clip.ID, cue, err,
+					))
+					continue
+				}
+				frame, err := decodeStreamKillfeedFrame(framePath)
+				if err != nil {
+					warnings = append(warnings, fmt.Sprintf(
+						"clip %s killfeed cue %.2fs: %v; omitting killfeed overlay",
+						clip.ID, cue, err,
+					))
+					continue
+				}
+				rows := streamclips.DetectNoticeRows(frame, plan.KillfeedCrop)
+				if len(rows) == 0 {
+					warnings = append(warnings, fmt.Sprintf(
+						"clip %s killfeed cue %.2fs: no highlighted kill notice detected; omitting killfeed overlay",
+						clip.ID, cue,
+					))
+					continue
+				}
+				killfeedRows[i] = rows
+			}
+		}
 		outPath := filepath.Join(outDir, clip.ID+".mp4")
 		args, err := streamclips.BuildFFmpegArgs(streamclips.FFmpegInputs{
 			SourcePath:     sourcePath,
@@ -928,6 +968,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 			MusicPath:      musicPath,
 			BannerFontPath: bannerFontPath,
 			SourceHasAudio: j.Probe.AudioCodec != "",
+			KillfeedRows:   killfeedRows,
 		}, plan, clip)
 		if err != nil {
 			return err
@@ -1002,7 +1043,24 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 			fmt.Errorf("mark stream rendered: %w", err),
 		)
 	}
+
 	return nil
+}
+
+func decodeStreamKillfeedFrame(path string) (image.Image, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open extracted killfeed frame: %w", err)
+	}
+	frame, decodeErr := png.Decode(file)
+	closeErr := file.Close()
+	if decodeErr != nil {
+		return nil, fmt.Errorf("decode extracted killfeed frame: %w", decodeErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close extracted killfeed frame: %w", closeErr)
+	}
+	return frame, nil
 }
 
 // extractXAICaptionAudio materializes the selected range from the original

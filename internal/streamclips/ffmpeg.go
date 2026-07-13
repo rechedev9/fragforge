@@ -21,6 +21,13 @@ const (
 	bannerSlideSeconds = 0.35
 	bannerColor        = "0x9146ff"
 	bannerAccentColor  = "0x5b1ba9"
+	// killfeedRowOutputHeight keeps each notice legible on the 1080px-wide output.
+	killfeedRowOutputHeight = 40
+	// KillfeedSampleDelaySeconds delays cue-frame sampling until the notice
+	// highlight ring is fully drawn. killfeedLeadTime must stay at least this long.
+	KillfeedSampleDelaySeconds = 0.35
+	killfeedLeadTime           = 0.35
+	killfeedTrailTime          = 2.8
 
 	// gradeFilter is the light contrast/saturation lift EffectsPlan.Grade
 	// applies — the same restrained look FragForge's viral presets use.
@@ -37,15 +44,20 @@ type FFmpegInputs struct {
 	MusicPath      string // resolved track file; empty renders without music
 	BannerFontPath string // resolved bold font file; required when the banner has a nick
 	SourceHasAudio bool
+	KillfeedRows   [][]NoticeRow // index-aligned with the normalized clip's killfeed cues
 }
 
 func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, error) {
 	plan = NormalizeEditPlan(plan)
+	clip = normalizeClipRange(clip)
 	if err := plan.Validate(); err != nil {
 		return nil, err
 	}
 	if err := clip.Validate(); err != nil {
 		return nil, err
+	}
+	if plan.KillfeedCrop == nil && len(clip.KillfeedSeconds) > 0 {
+		return nil, fmt.Errorf("clip %s has killfeed_seconds but killfeed_crop is not configured", clip.ID)
 	}
 	layout, ok := VariantByName(plan.Variant)
 	if !ok {
@@ -55,7 +67,7 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 		return nil, fmt.Errorf("streamer banner font path is required")
 	}
 	duration := clip.EndSeconds - clip.StartSeconds
-	filter := buildFilterGraph(layout, plan, in.BannerFontPath, duration)
+	filter := buildFilterGraph(layout, plan, clip, in.KillfeedRows, in.BannerFontPath, duration)
 
 	args := []string{
 		"-y",
@@ -100,9 +112,18 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 }
 
 // buildFilterGraph renders the split/scale/stack filtergraph for a facecam
-// layout, or a single crop/scale chain for a full-frame (no facecam) layout,
-// with the optional grade inserted before the fps/format tail.
-func buildFilterGraph(layout LayoutVariant, plan EditPlan, bannerFontPath string, duration float64) string {
+// layout, or a single crop/scale chain for a full-frame (no facecam) layout.
+// Plans without detected killfeed rows retain the original graph byte-for-byte.
+// Detected rows each get a dedicated source branch so every notice can be
+// frozen independently before the ordered overlay chain.
+func buildFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, killfeedRows [][]NoticeRow, bannerFontPath string, duration float64) string {
+	if len(clip.KillfeedSeconds) == 0 || killfeedRowCount(killfeedRows, len(clip.KillfeedSeconds)) == 0 {
+		return buildStandardFilterGraph(layout, plan, bannerFontPath, duration)
+	}
+	return buildKillfeedFilterGraph(layout, plan, clip, killfeedRows, bannerFontPath, duration)
+}
+
+func buildStandardFilterGraph(layout LayoutVariant, plan EditPlan, bannerFontPath string, duration float64) string {
 	tail := ""
 	if plan.Effects.Grade {
 		tail += gradeFilter + ","
@@ -140,6 +161,143 @@ func buildFilterGraph(layout LayoutVariant, plan EditPlan, bannerFontPath string
 		return content + "," + tail
 	}
 	return content + ";" + streamerBannerFilter(layout, plan.StreamerBanner, bannerFontPath, duration) + ";[bannered]" + tail
+}
+
+func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, killfeedRows [][]NoticeRow, bannerFontPath string, duration float64) string {
+	tail := ""
+	if plan.Effects.Grade {
+		tail += gradeFilter + ","
+	}
+	tail += fmt.Sprintf("fps=%d,format=yuv420p[v]", outputFPS)
+
+	cueCount := len(clip.KillfeedSeconds)
+	killfeedBranchCount := killfeedRowCount(killfeedRows, cueCount)
+	layoutBranchCount := 1
+	var sourceSplit strings.Builder
+	if layout.FullFrame {
+		fmt.Fprintf(&sourceSplit, "[0:v]split=%d[layoutin]", layoutBranchCount+killfeedBranchCount)
+	} else {
+		layoutBranchCount = 2
+		fmt.Fprintf(&sourceSplit, "[0:v]split=%d[facein][gamein]", layoutBranchCount+killfeedBranchCount)
+	}
+	for i := range cueCount {
+		for j := range killfeedRowsForCue(killfeedRows, i) {
+			fmt.Fprintf(&sourceSplit, "[killfeedin%d_%d]", i, j)
+		}
+	}
+
+	parts := make([]string, 0, killfeedBranchCount*2+5)
+	parts = append(parts, sourceSplit.String())
+	if layout.FullFrame {
+		parts = append(parts, fmt.Sprintf(
+			"[layoutin]%s,scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d[layout]",
+			cropFilter(plan.GameplayCrop),
+			layout.OutputWidth, layout.GameOutputHeight, layout.OutputWidth, layout.GameOutputHeight,
+		))
+	} else {
+		parts = append(parts,
+			fmt.Sprintf(
+				"[facein]%s,scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d[face]",
+				cropFilter(plan.FaceCrop),
+				layout.OutputWidth, layout.FaceOutputHeight, layout.OutputWidth, layout.FaceOutputHeight,
+			),
+			fmt.Sprintf(
+				"[gamein]%s,scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d[game]",
+				cropFilter(plan.GameplayCrop),
+				layout.OutputWidth, layout.GameOutputHeight, layout.OutputWidth, layout.GameOutputHeight,
+			),
+			"[face][game]vstack=inputs=2[layout]",
+		)
+	}
+
+	for i, cue := range clip.KillfeedSeconds {
+		relative := cue - clip.StartSeconds
+		rows := killfeedRowsForCue(killfeedRows, i)
+		if len(rows) == 0 {
+			continue
+		}
+		scale := killfeedRowScale(rows)
+		for j, row := range rows {
+			outWidth := int(math.Round(float64(row.Width) * scale))
+			outWidth -= outWidth % 2
+			if outWidth < 2 {
+				outWidth = 2
+			}
+			parts = append(parts, fmt.Sprintf(
+				"[killfeedin%d_%d]trim=start=%s,select='eq(n\\,0)',setpts=PTS-STARTPTS,"+
+					"crop=%d:%d:%d:%d,scale=%d:-2:flags=lanczos,"+
+					"tpad=stop_mode=clone:stop_duration=%s[killfeed%d_%d]",
+				i, j, floatArg(relative),
+				row.Width, row.Height, row.X, row.Y, outWidth,
+				floatArg(duration), i, j,
+			))
+		}
+	}
+
+	overlayY := 64
+	if !layout.FullFrame {
+		overlayY = layout.FaceOutputHeight + 72
+	}
+	baseLabel := "layout"
+	overlayIndex := 0
+	for i, cue := range clip.KillfeedSeconds {
+		relative := cue - clip.StartSeconds
+		start := math.Max(0, relative-killfeedLeadTime)
+		end := math.Min(duration, relative+killfeedTrailTime)
+		rows := killfeedRowsForCue(killfeedRows, i)
+		if len(rows) == 0 {
+			continue
+		}
+
+		scale := killfeedRowScale(rows)
+		for j, row := range rows {
+			rowY := overlayY + int(math.Round(float64(row.Y-rows[0].Y)*scale))
+			outputLabel := fmt.Sprintf("killfeeded%d_%d", i, j)
+			if overlayIndex == killfeedBranchCount-1 {
+				outputLabel = "content"
+			}
+			parts = append(parts, fmt.Sprintf(
+				"[%s][killfeed%d_%d]overlay=x=W-w-24:y=%d:"+
+					"enable='between(t\\,%s\\,%s)':eof_action=pass:shortest=0[%s]",
+				baseLabel, i, j, rowY, floatArg(start), floatArg(end), outputLabel,
+			))
+			baseLabel = outputLabel
+			overlayIndex++
+		}
+	}
+
+	if plan.StreamerBanner.Nick == "" {
+		parts = append(parts, "[content]"+tail)
+	} else {
+		parts = append(parts,
+			streamerBannerFilter(layout, plan.StreamerBanner, bannerFontPath, duration),
+			"[bannered]"+tail,
+		)
+	}
+	return strings.Join(parts, ";")
+}
+
+func killfeedRowCount(rows [][]NoticeRow, cueCount int) int {
+	count := 0
+	for i := range cueCount {
+		count += len(killfeedRowsForCue(rows, i))
+	}
+	return count
+}
+
+func killfeedRowsForCue(rows [][]NoticeRow, cueIndex int) []NoticeRow {
+	if cueIndex >= len(rows) {
+		return nil
+	}
+	return rows[cueIndex]
+}
+
+func killfeedRowScale(rows []NoticeRow) float64 {
+	tallest := rows[0].Height
+	for _, row := range rows[1:] {
+		tallest = max(tallest, row.Height)
+	}
+	return float64(killfeedRowOutputHeight) / float64(tallest)
 }
 
 // streamerBannerFilter builds the strip independently and overlays it on the

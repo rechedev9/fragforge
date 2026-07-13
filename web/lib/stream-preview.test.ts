@@ -6,6 +6,8 @@ import {
   calculateCropCoverGeometry,
   clampStreamerBannerPosition,
   defaultStreamerBannerPosition,
+  proportionalEvenKillfeedHeight,
+  resolveActiveKillfeedCue,
   representativeFrameTime,
   resolveStreamerBannerPosition,
 } from './stream-preview.ts';
@@ -75,6 +77,139 @@ test('legacy 520/1400 bands cover without changing the source aspect ratio', () 
     assert.ok(displayedWidth >= output.width);
     assert.ok(displayedHeight >= output.height);
   }
+});
+
+test('killfeed overlay uses a proportional nearest-even height for its 620px output', () => {
+  assert.equal(
+    proportionalEvenKillfeedHeight(
+      { x: 0.68, y: 0.04, width: 0.31, height: 0.14 },
+      SOURCE,
+    ),
+    158,
+  );
+  assert.equal(
+    proportionalEvenKillfeedHeight(
+      { x: 0, y: 0, width: 1, height: 1 },
+      SOURCE,
+    ),
+    348,
+  );
+  assert.equal(
+    proportionalEvenKillfeedHeight(
+      { x: 0, y: 0, width: 1, height: 0.001 },
+      SOURCE,
+    ),
+    2,
+  );
+});
+
+test('killfeed overlay rejects non-positive crop and source geometry', () => {
+  const crop = { x: 0.68, y: 0.04, width: 0.31, height: 0.14 };
+
+  assert.equal(
+    proportionalEvenKillfeedHeight({ ...crop, width: 0 }, SOURCE),
+    null,
+  );
+  assert.equal(
+    proportionalEvenKillfeedHeight({ ...crop, height: -0.1 }, SOURCE),
+    null,
+  );
+  assert.equal(
+    proportionalEvenKillfeedHeight(crop, { width: 0, height: SOURCE.height }),
+    null,
+  );
+  assert.equal(
+    proportionalEvenKillfeedHeight(crop, { width: SOURCE.width, height: -1 }),
+    null,
+  );
+});
+
+test('killfeed cues use half-open clip boundaries', () => {
+  const clips = [{
+    id: 'half-open',
+    start_seconds: 10,
+    end_seconds: 20,
+    killfeed_seconds: [10, 20],
+  }];
+
+  assert.equal(resolveActiveKillfeedCue(clips, 9.999), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 10), 10);
+  assert.equal(resolveActiveKillfeedCue(clips, 19.999), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 20), null);
+});
+
+test('killfeed visibility clips lead and trail windows to the clip', () => {
+  const clips = [{
+    id: 'clipped-window',
+    start_seconds: 10,
+    end_seconds: 12,
+    killfeed_seconds: [10.2],
+  }];
+
+  assert.equal(resolveActiveKillfeedCue(clips, 9.999), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 10), 10.2);
+  assert.equal(resolveActiveKillfeedCue(clips, 12), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 12.001), null);
+});
+
+test('killfeed cue resolution ignores invalid cues and frame times', () => {
+  const clips = [{
+    id: 'invalid-cues',
+    start_seconds: 5,
+    end_seconds: 10,
+    killfeed_seconds: [
+      Number.NaN,
+      Number.NEGATIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+      4.999,
+      10,
+      7,
+    ],
+  }];
+
+  assert.equal(resolveActiveKillfeedCue(clips, 7), 7);
+  assert.equal(resolveActiveKillfeedCue(clips, 9.8), 7);
+  assert.equal(resolveActiveKillfeedCue(clips, 9.801), null);
+  assert.equal(resolveActiveKillfeedCue(clips, Number.NaN), null);
+  assert.equal(resolveActiveKillfeedCue(clips, Number.POSITIVE_INFINITY), null);
+});
+
+test('overlapping killfeed windows select the latest cue timestamp', () => {
+  const clips = [{
+    id: 'overlap',
+    start_seconds: 0,
+    end_seconds: 20,
+    killfeed_seconds: [12, 10, 11],
+  }];
+
+  assert.equal(resolveActiveKillfeedCue(clips, 11.649), 11);
+  assert.equal(resolveActiveKillfeedCue(clips, 11.65), 12);
+  assert.equal(resolveActiveKillfeedCue(clips, 12.8), 12);
+});
+
+test('killfeed cue resolution uses absolute source time across multiple clips', () => {
+  const clips = [
+    {
+      id: 'first',
+      start_seconds: 0,
+      end_seconds: 5,
+      killfeed_seconds: [1],
+    },
+    {
+      id: 'second',
+      start_seconds: 20,
+      end_seconds: 25,
+      killfeed_seconds: [22],
+    },
+  ];
+
+  assert.equal(resolveActiveKillfeedCue(clips, 0.649), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 0.65), 1);
+  assert.equal(resolveActiveKillfeedCue(clips, 3.8), 1);
+  assert.equal(resolveActiveKillfeedCue(clips, 15), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 21.65), 22);
+  assert.equal(resolveActiveKillfeedCue(clips, 24.8), 22);
+  assert.equal(resolveActiveKillfeedCue(clips, 24.801), null);
 });
 
 test('representative time is the safe midpoint for every editor video', () => {

@@ -27,7 +27,13 @@ export const STREAM_VARIANTS: { value: StreamVariant; label: string; subtitle: s
   { value: 'streamer-fullframe-nocam', label: 'Full-frame', subtitle: 'Sin facecam', needsFaceCrop: false },
 ];
 
-export type StreamClipRange = { id: string; start_seconds: number; end_seconds: number; title?: string };
+export type StreamClipRange = {
+  id: string;
+  start_seconds: number;
+  end_seconds: number;
+  title?: string;
+  killfeed_seconds?: number[];
+};
 
 export type StreamCaptions = { enabled: boolean; language: string };
 
@@ -41,9 +47,10 @@ export type StreamEffects = { grade?: boolean };
 export type StreamerBanner = { nick?: string; position_y?: number; slide_enabled?: boolean };
 
 export type StreamEditPlan = {
-  schema_version: number;
+  schema_version: string;
   variant: StreamVariant;
   face_crop?: NormalizedRect;
+  killfeed_crop?: NormalizedRect;
   gameplay_crop?: NormalizedRect;
   clips: StreamClipRange[];
   streamer_banner?: StreamerBanner;

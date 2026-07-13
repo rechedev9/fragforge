@@ -1,0 +1,116 @@
+# openspec/config.yaml
+schema: spec-driven
+
+strict_tdd: true
+
+context: |
+  FragForge: deterministic CS2 demo-to-video pipeline.
+  Stack: Go 1.26.1 (module github.com/rechedev9/fragforge, internal/* package
+  boundaries: parser, killplan, moments, recording, editor, renderplan,
+  composition, httpapi, workers, storage, job, tasks); standalone Next.js 15
+  (React 19, Tailwind 4, strict TypeScript) under web/; Electron desktop app
+  under desktop/; Next.js marketing/landing site under landing/ (Vercel).
+  Architecture: parse .dem -> kill plan/moments -> HLAE/CS2 recording ->
+  FFmpeg + Lua-effects render -> publish pack. Single render preset
+  viral-60-clean. Orchestrator (zv serve) runs an in-process job state
+  machine (queued->parsing->parsed->recording->recorded->composing->
+  composed->done/failed) backed by SQLite or an in-memory repo for tests.
+  Conventions: idiomatic boring Go, no util/common/manager layers, errors
+  wrapped with %w, table-driven tests; web/ is full TypeScript strict (no
+  any, no !, no @ts-ignore, no re-exports), oxlint + tsc --noEmit gates.
+  Primary test command: make test (go test ./... -count=1 + zv check).
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes (recording, DB schema, media pipeline)
+    - Require a problem statement
+  spec:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Require acceptance criteria
+  design:
+    - Include sequence diagrams for complex flows (job state machine, worker handoffs)
+    - Document architecture decisions with rationale
+    - Require tradeoffs section
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+    - Protect review workload (small, focused diffs)
+  apply:
+    guidelines:
+      - Follow existing code patterns (see CLAUDE.md Go style and TypeScript style sections)
+      - Keep cmd/ entrypoints thin; business logic lives in internal/*
+      - Bug fixes need regression tests; behavior changes add/update tests
+    tdd: true
+    test_command: "make test"
+  verify:
+    test_command: "make test"
+    build_command: "go build ./..."
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+
+testing:
+  detected: "2026-07-13"
+  runner:
+    command: "make test"
+    framework: "go test (via Makefile, plus zv check)"
+  layers:
+    unit: "go test ./... -count=1; web: node --test lib/**/*.test.ts; desktop: node --test src/**/*.test.ts"
+    integration: "Go HTTP/worker tests (internal/httpapi, internal/workers) via go test ./..."
+    e2e: "None (Playwright E2E removed by project policy per CLAUDE.md; covered by Go integration tests and manual smoke scripts)"
+  commands:
+    unit:
+      - scope: "."
+        command: "go test ./... -count=1"
+        framework: "go test"
+      - scope: "."
+        command: "make test"
+        framework: "go test + zv check"
+      - scope: "web"
+        command: "npm run test:unit"
+        framework: "node --test"
+      - scope: "desktop"
+        command: "npm run test:unit"
+        framework: "node --test"
+    integration:
+      - scope: "."
+        command: "go test ./... -count=1"
+        framework: "Go HTTP/worker integration tests"
+    race:
+      - scope: "."
+        command: "go test ./... -race"
+        framework: "go test -race"
+    e2e: []
+  coverage:
+    command: "go test -cover ./..."
+    commands:
+      - scope: "."
+        command: "go test -cover ./..."
+        framework: "go coverage"
+
+quality:
+  lint: "cd web && npm run lint"
+  lint_commands:
+    - scope: "web"
+      command: "npm run lint"
+      framework: "oxlint"
+    - scope: "desktop"
+      command: "npm run lint"
+      framework: "oxlint"
+  typecheck: "cd web && npm run typecheck"
+  typecheck_commands:
+    - scope: "web"
+      command: "npm run typecheck"
+      framework: "tsc --noEmit"
+    - scope: "desktop"
+      command: "npm run typecheck"
+      framework: "tsc --noEmit"
+  format: "scripts/go-format-changed.sh"
+  format_commands:
+    - scope: "."
+      command: "scripts/go-format-changed.sh"
+      framework: "gofmt (changed files)"
+  gate:
+    command: "scripts/go-gate.sh"
+    description: "Main gate: fmt, vet, build, tests. Add --race for shared-state changes, --security for dependency-sensitive changes."

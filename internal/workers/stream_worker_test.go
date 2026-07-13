@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,6 +204,181 @@ func newReadyStreamJobWithCaptions(t *testing.T, store *fakeStorage, enabled boo
 	plan.Clips = []streamclips.ClipRange{{ID: "clip-001", StartSeconds: 0, EndSeconds: 2, Title: "one"}}
 	plan.Captions = streamclips.CaptionsPlan{Enabled: enabled, Language: "en"}
 	return id, plan
+}
+
+func TestStreamRenderWorkerOmitsKillfeedWhenDetectionFails(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, false)
+	hint := streamclips.CropRect{X: 0.68, Y: 0.04, Width: 0.31, Height: 0.14}
+	plan.KillfeedCrop = &hint
+	plan.Clips[0].KillfeedSeconds = []float64{0.5, 1.25}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+	})
+	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		if argValue(args, "-frames:v") == "1" {
+			if argValue(args, "-ss") == "1.600" {
+				return nil, errors.New("ffmpeg probe failed")
+			}
+			return nil, writeStreamKillfeedPNG(out, frame)
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		WorkDir:    t.TempDir(),
+		FFmpegPath: "ffmpeg",
+	})
+	w.runner = runner
+
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+
+	if got, want := len(runner.calls), 3; got != want {
+		t.Fatalf("runner calls = %d, want %d (two cue extractions and one render)", got, want)
+	}
+	for i, cue := range []string{"0.850", "1.600"} {
+		call := runner.calls[i]
+		if call.exe != "ffmpeg" {
+			t.Fatalf("cue extraction %d executable = %q, want ffmpeg", i, call.exe)
+		}
+		if got := strings.Join(call.args[:4], " "); got != "-y -loglevel error -ss" {
+			t.Fatalf("cue extraction %d prefix = %q", i, got)
+		}
+		if got := argValue(call.args, "-ss"); got != cue {
+			t.Fatalf("cue extraction %d -ss = %q, want %q", i, got, cue)
+		}
+		if got := argValue(call.args, "-frames:v"); got != "1" {
+			t.Fatalf("cue extraction %d -frames:v = %q, want 1", i, got)
+		}
+		if got := filepath.Base(call.args[len(call.args)-1]); got != fmt.Sprintf("killfeed-cue-clip-001-%d.png", i) {
+			t.Fatalf("cue extraction %d output = %q", i, got)
+		}
+	}
+	renderFilter := argValue(runner.calls[2].args, "-filter_complex")
+	for _, forbidden := range []string{"killfeedin", "scale=620", "curves="} {
+		if strings.Contains(renderFilter, forbidden) {
+			t.Fatalf("failed-detection render contains %q: %s", forbidden, renderFilter)
+		}
+	}
+	stateKey, err := streamclips.RenderStateKey(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := string(store.files[stateKey])
+	for _, warning := range []string{
+		"clip clip-001 killfeed cue 0.50s: no highlighted kill notice detected; omitting killfeed overlay",
+		"clip clip-001 killfeed cue 1.25s: ffmpeg probe failed; omitting killfeed overlay",
+	} {
+		if !strings.Contains(state, warning) {
+			t.Fatalf("render state missing warning %q: %s", warning, state)
+		}
+	}
+}
+
+func TestStreamRenderWorkerUsesDetectedKillfeedRows(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, false)
+	hint := streamclips.CropRect{X: 0.68, Y: 0.04, Width: 0.31, Height: 0.14}
+	plan.KillfeedCrop = &hint
+	plan.Clips[0].KillfeedSeconds = []float64{0.5}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+	})
+	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	drawStreamWorkerKillfeedNotice(frame, image.Rect(1621, 73, 1909, 110))
+	rows := streamclips.DetectNoticeRows(frame, &hint)
+	if len(rows) != 1 {
+		t.Fatalf("test frame detected %d rows, want 1: %+v", len(rows), rows)
+	}
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		if argValue(args, "-frames:v") == "1" {
+			return nil, writeStreamKillfeedPNG(out, frame)
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		WorkDir:    t.TempDir(),
+		FFmpegPath: "ffmpeg",
+	})
+	w.runner = runner
+
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+
+	if got, want := len(runner.calls), 2; got != want {
+		t.Fatalf("runner calls = %d, want %d (cue extraction and render)", got, want)
+	}
+	row := rows[0]
+	wantCrop := fmt.Sprintf("crop=%d:%d:%d:%d", row.Width, row.Height, row.X, row.Y)
+	renderFilter := argValue(runner.calls[1].args, "-filter_complex")
+	if !strings.Contains(renderFilter, wantCrop) {
+		t.Fatalf("render filter missing detected row %q: %s", wantCrop, renderFilter)
+	}
+	if strings.Contains(renderFilter, "curves=") {
+		t.Fatalf("detected-row render darkens the killfeed: %s", renderFilter)
+	}
+}
+
+func writeStreamKillfeedPNG(path string, frame image.Image) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if err := png.Encode(file, frame); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func drawStreamWorkerKillfeedNotice(frame *image.RGBA, notice image.Rectangle) {
+	dim := color.RGBA{R: 130, G: 45, B: 45, A: 255}
+	for y := notice.Min.Y; y < notice.Max.Y; y++ {
+		for x := notice.Min.X; x < notice.Max.X; x++ {
+			frame.Set(x, y, dim)
+		}
+	}
+	red := color.RGBA{R: 200, G: 30, B: 30, A: 255}
+	inner := notice.Inset(1)
+	for x := inner.Min.X; x < inner.Max.X; x++ {
+		for d := range 2 {
+			frame.Set(x, inner.Min.Y+d, red)
+			frame.Set(x, inner.Max.Y-1-d, red)
+		}
+	}
+	for y := inner.Min.Y; y < inner.Max.Y; y++ {
+		for d := range 2 {
+			frame.Set(inner.Min.X+d, y, red)
+			frame.Set(inner.Max.X-1-d, y, red)
+		}
+	}
 }
 
 func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) {

@@ -123,6 +123,59 @@ func TestStreamRenderE2E(t *testing.T) {
 		}
 	})
 
+	t.Run("fullframe staggered killfeed notices are absent before cue and visible per row at cue", func(t *testing.T) {
+		id := uploadStreamSource(t, client, srv.URL, sourcePath)
+		plan := streamclips.EditPlan{
+			Variant:      streamclips.VariantStreamerFullframeNoCam,
+			GameplayCrop: streamclips.CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+			KillfeedCrop: &streamclips.CropRect{X: 0.74, Y: 0.04, Width: 0.25, Height: 0.15},
+			Clips: []streamclips.ClipRange{{
+				ID:              "clip-1",
+				StartSeconds:    0.5,
+				EndSeconds:      3.5,
+				KillfeedSeconds: []float64{2},
+			}},
+			Captions: streamclips.CaptionsPlan{Enabled: false},
+		}
+		putStreamEditPlan(t, client, srv.URL, id, plan)
+
+		clipID := startAndAwaitStreamRender(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam)
+		outPath := downloadStreamVideo(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam, clipID)
+
+		probe := ffprobeVideo(t, ffprobePath, outPath)
+		if probe.Width != 1080 || probe.Height != 1920 {
+			t.Fatalf("output size = %dx%d, want 1080x1920", probe.Width, probe.Height)
+		}
+
+		// The detector finds two staggered red-ringed rows: notice A
+		// (1021,33)-(1251,75) and the wider notice B (981,79)-(1251,119).
+		// Both scale by 40/42 (A: 218px wide, B: 256px, even) and overlay
+		// right-aligned at x=W-w-24, so A's lime interior covers roughly
+		// (841,67)-(1054,101) and B's yellow interior (803,111)-(1054,141).
+		// Region means over the interiors keep the assertions robust against
+		// one-pixel geometry drift and chroma subsampling.
+		const (
+			noticeAX, noticeAY = 946, 84
+			noticeBX, noticeBY = 928, 126
+		)
+		beforeFrame := extractFramePNG(t, ffmpegPath, outPath, 1.0)
+		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.5)
+		beforeA := readRegionMean(t, beforeFrame, noticeAX, noticeAY, 40, 6)
+		beforeB := readRegionMean(t, beforeFrame, noticeBX, noticeBY, 40, 6)
+		atCueA := readRegionMean(t, atCueFrame, noticeAX, noticeAY, 40, 6)
+		atCueB := readRegionMean(t, atCueFrame, noticeBX, noticeBY, 40, 6)
+		t.Logf("notice regions before cue A=%+v B=%+v, at cue A=%+v B=%+v", beforeA, beforeB, atCueA, atCueB)
+		if !isPredominantlyBlue(beforeA) || !isPredominantlyBlue(beforeB) {
+			t.Fatalf("notice regions before cue = A %+v B %+v, want blue gameplay background", beforeA, beforeB)
+		}
+		if !isPredominantlyGreen(atCueA) {
+			t.Fatalf("notice A region at cue = %+v, want lime sampled notice", atCueA)
+		}
+		if !isPredominantlyYellow(atCueB) {
+			t.Fatalf("notice B region at cue = %+v, want yellow sampled notice", atCueB)
+		}
+	})
+
 	t.Run("moved banner slides in and out", func(t *testing.T) {
 		if streamclips.FindBannerFont() == "" {
 			t.Skip("supported bold system font not found, skipping real banner e2e")
@@ -231,15 +284,19 @@ func newStreamE2EServer(t *testing.T, ffmpegPath, ffprobePath string) (*httptest
 
 // generateSyntheticSource builds a 1280x720, 4s, 30fps clip: a solid blue
 // frame with a solid red rectangle over the exact top-left quarter
-// (x=[0,320) y=[0,180)), plus a sine wave audio track. This fakes a facecam
-// sitting in the top-left corner over gameplay.
+// (x=[0,320) y=[0,180)) and two staggered CS2-style highlighted kill notices
+// at the top right, each an interior bar wrapped in a 2px saturated-red
+// highlight ring so the notice-row detector can find it: notice A is lime,
+// ring (x=[1022,1250) y=[34,74)); notice B is wider, yellow, shifted left and
+// 6px below A like a real staggered killfeed, ring (x=[982,1250) y=[80,118)).
+// A sine wave audio track completes the source.
 func generateSyntheticSource(t *testing.T, ffmpegPath, outPath string) {
 	t.Helper()
 	args := []string{
 		"-y",
 		"-f", "lavfi", "-i", "color=c=blue:s=1280x720:d=4:r=30",
 		"-f", "lavfi", "-i", "sine=frequency=440:duration=4",
-		"-filter_complex", "[0:v]drawbox=x=0:y=0:w=320:h=180:color=red:t=fill[v]",
+		"-filter_complex", "[0:v]drawbox=x=0:y=0:w=320:h=180:color=red:t=fill,drawbox=x=1024:y=36:w=224:h=36:color=lime:t=fill,drawbox=x=1022:y=34:w=228:h=40:color=red:t=2,drawbox=x=984:y=82:w=264:h=32:color=yellow:t=fill,drawbox=x=982:y=80:w=268:h=38:color=red:t=2[v]",
 		"-map", "[v]",
 		"-map", "1:a",
 		"-c:v", "libx264",
@@ -532,6 +589,46 @@ func isPredominantlyRed(c color.RGBA) bool {
 
 func isPredominantlyBlue(c color.RGBA) bool {
 	return c.B > 150 && c.R < 100 && c.G < 100
+}
+
+func isPredominantlyGreen(c color.RGBA) bool {
+	return c.G > 150 && c.R < 100 && c.B < 100
+}
+
+func isPredominantlyYellow(c color.RGBA) bool {
+	return c.R > 150 && c.G > 150 && c.B < 100
+}
+
+// readRegionMean averages the pixels of the (2*halfW+1)x(2*halfH+1) region
+// centered on (cx,cy), keeping notice-interior assertions robust against
+// one-pixel overlay geometry drift and 4:2:0 chroma subsampling.
+func readRegionMean(t *testing.T, pngPath string, cx, cy, halfW, halfH int) color.RGBA {
+	t.Helper()
+	f, err := os.Open(pngPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatalf("decode png: %v", err)
+	}
+	region := image.Rect(cx-halfW, cy-halfH, cx+halfW+1, cy+halfH+1)
+	if !region.In(img.Bounds()) {
+		t.Fatalf("region %v is outside frame bounds %v", region, img.Bounds())
+	}
+	var rSum, gSum, bSum, aSum, n uint64
+	for y := region.Min.Y; y < region.Max.Y; y++ {
+		for x := region.Min.X; x < region.Max.X; x++ {
+			r, g, b, a := img.At(x, y).RGBA()
+			rSum += uint64(r >> 8)
+			gSum += uint64(g >> 8)
+			bSum += uint64(b >> 8)
+			aSum += uint64(a >> 8)
+			n++
+		}
+	}
+	return color.RGBA{R: uint8(rSum / n), G: uint8(gSum / n), B: uint8(bSum / n), A: uint8(aSum / n)}
 }
 
 func isPredominantlyPurple(c color.RGBA) bool {

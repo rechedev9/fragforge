@@ -303,20 +303,91 @@ test('operation schemas enforce API route and cross-field contracts', () => {
     rules: { ...rules, max_round: 0 },
   });
 
-  validateOperationInput(operation('streams.update_edit_plan'), {
-    plan: {
-      gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
-      variant: 'streamer-vertical-stack-40-60',
-    },
-    stream_job_id: STREAM_JOB_ID,
+  const updateEditPlan = operation('streams.update_edit_plan');
+  const validateStreamEditPlan = (plan: JsonObject): void => {
+    validateOperationInput(updateEditPlan, { plan, stream_job_id: STREAM_JOB_ID });
+  };
+  const legacyStreamEditPlan: JsonObject = {
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    variant: 'streamer-vertical-stack-40-60',
+  };
+  validateStreamEditPlan(legacyStreamEditPlan);
+  assert.deepEqual(legacyStreamEditPlan, {
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    variant: 'streamer-vertical-stack-40-60',
   });
-  validateOperationInput(operation('streams.update_edit_plan'), {
-    plan: {
-      gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
-      variant: 'streamer-fullframe-nocam',
-    },
-    stream_job_id: STREAM_JOB_ID,
+  validateStreamEditPlan({
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    variant: 'streamer-fullframe-nocam',
   });
+
+  const killfeedClip: JsonObject = {
+    end_seconds: 18,
+    id: 'ace',
+    killfeed_seconds: [12, 14.5, 17.999],
+    start_seconds: 12,
+    title: 'Ace',
+  };
+  const validKillfeedPlan: JsonObject = {
+    clips: [killfeedClip],
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    killfeed_crop: { height: 0.14, width: 0.25, x: 0.72, y: 0.04 },
+    schema_version: '1.0',
+    variant: 'streamer-vertical-stack-40-60',
+  };
+  validateStreamEditPlan(validKillfeedPlan);
+
+  const invalidKillfeedPlans: Array<{ error: string; name: string; plan: JsonObject }> = [
+    {
+      error: 'arguments.plan.killfeed_crop is required when arguments.plan.clips[0].killfeed_seconds contains cues',
+      name: 'cues without killfeed_crop',
+      plan: {
+        clips: [killfeedClip],
+        gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+        schema_version: '1.0',
+        variant: 'streamer-vertical-stack-40-60',
+      },
+    },
+    {
+      error: 'arguments.plan.killfeed_crop must stay within the source frame',
+      name: 'killfeed_crop outside the source frame',
+      plan: {
+        ...validKillfeedPlan,
+        killfeed_crop: { height: 0.14, width: 0.25, x: 0.8, y: 0.04 },
+      },
+    },
+    {
+      error: 'arguments.plan.clips[0].killfeed_seconds[1] must not duplicate an earlier cue',
+      name: 'duplicate killfeed cue',
+      plan: {
+        ...validKillfeedPlan,
+        clips: [{ ...killfeedClip, killfeed_seconds: [12, 12] }],
+      },
+    },
+    {
+      error: 'arguments.plan.clips[0].killfeed_seconds[0] must be greater than or equal to start_seconds and less than end_seconds',
+      name: 'killfeed cue before clip start',
+      plan: {
+        ...validKillfeedPlan,
+        clips: [{ ...killfeedClip, killfeed_seconds: [11.999] }],
+      },
+    },
+    {
+      error: 'arguments.plan.clips[0].killfeed_seconds[0] must be greater than or equal to start_seconds and less than end_seconds',
+      name: 'killfeed cue exactly at clip end',
+      plan: {
+        ...validKillfeedPlan,
+        clips: [{ ...killfeedClip, killfeed_seconds: [18] }],
+      },
+    },
+  ];
+  for (const invalid of invalidKillfeedPlans) {
+    assert.throws(
+      () => validateStreamEditPlan(invalid.plan),
+      (error: unknown) => error instanceof Error && error.message === invalid.error,
+      invalid.name,
+    );
+  }
   assert.throws(
     () => validateOperationInput(operation('streams.update_edit_plan'), {
       plan: {
