@@ -22,6 +22,7 @@ import {
   streamsApi,
   STREAM_VARIANTS,
   SERVICE_UNAVAILABLE_CODE,
+  type KillfeedKill,
   type NormalizedRect,
   type StreamClipRange,
   type StreamEditPlan,
@@ -41,6 +42,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { CropPicker } from '@/components/streams/crop-picker';
 import { StreamPreview } from '@/components/streams/stream-preview';
+import { KillfeedKillsEditor } from '@/components/streams/killfeed-kills-editor';
 import {
   STREAMER_BANNER_MAX_POSITION,
   STREAMER_BANNER_MIN_POSITION,
@@ -48,6 +50,10 @@ import {
   resolveStreamerBannerPosition,
   representativeFrameTime,
 } from '@/lib/stream-preview';
+import { addClipCue, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from '@/lib/killfeed-plan';
+
+/** Upstream code for a killfeed-read blocked by a missing xAI key. */
+const XAI_KEY_MISSING_CODE = 'xai_key_missing';
 
 type Stage = 'idle' | 'submitting' | 'acquiring' | 'editing' | 'rendering' | 'rendered' | 'failed';
 
@@ -122,38 +128,6 @@ function clipsAreValid(clips: StreamClipRange[]): boolean {
   return clips.length > 0 && clips.every((c) => Number.isFinite(c.start_seconds) && Number.isFinite(c.end_seconds) && c.end_seconds > c.start_seconds);
 }
 
-function normalizeClipKillfeedCues(clip: StreamClipRange): StreamClipRange {
-  const sorted = [...(clip.killfeed_seconds ?? [])]
-    .filter(
-      (cue) =>
-        Number.isFinite(cue) &&
-        cue >= clip.start_seconds &&
-        cue < clip.end_seconds,
-    )
-    .sort((left, right) => left - right);
-  const unique = sorted.filter(
-    (cue, index) => index === 0 || cue !== sorted[index - 1],
-  );
-  const normalized = { ...clip };
-  if (unique.length > 0) {
-    normalized.killfeed_seconds = unique;
-  } else {
-    delete normalized.killfeed_seconds;
-  }
-  return normalized;
-}
-
-function normalizeKillfeedPlan(plan: StreamEditPlan): StreamEditPlan {
-  const clips = plan.clips.map((clip) => {
-    const normalized = normalizeClipKillfeedCues(clip);
-    if (plan.killfeed_crop) return normalized;
-    const withoutCues = { ...normalized };
-    delete withoutCues.killfeed_seconds;
-    return withoutCues;
-  });
-  return { ...plan, clips };
-}
-
 function formatStreamTimestamp(seconds: number): string {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
   const minutes = Math.floor(safeSeconds / 60);
@@ -180,6 +154,7 @@ function planFingerprint(plan: StreamEditPlan): string {
       c.end_seconds,
       c.title ?? '',
       c.killfeed_seconds ?? [],
+      c.killfeed_kills ?? [],
     ]),
     streamerNick: plan.streamer_banner?.nick?.trim() ?? '',
     streamerPosition: plan.streamer_banner?.position_y ?? null,
@@ -630,7 +605,53 @@ function StreamEditor({
   const [previewSeconds, setPreviewSeconds] = useState(() =>
     representativeFrameTime(sourceDuration),
   );
+  const [weapons, setWeapons] = useState<string[]>([]);
+  const [readingCueKey, setReadingCueKey] = useState<string | null>(null);
+  const [readErrors, setReadErrors] = useState<Record<string, string>>({});
   const killfeedEnabled = plan.killfeed_crop !== undefined;
+
+  useEffect(() => {
+    if (!killfeedEnabled || weapons.length > 0) return;
+    let active = true;
+    streamsApi
+      .listKillfeedWeapons()
+      .then((next) => {
+        if (active) setWeapons(next);
+      })
+      .catch(() => {
+        // The weapon <select> stays empty; a render still validates server-side.
+      });
+    return () => {
+      active = false;
+    };
+  }, [killfeedEnabled, weapons.length]);
+
+  const cueKey = (clipId: string, cue: number) => `${clipId}@${cue}`;
+
+  const readCueWithAI = async (clip: StreamClipRange, cue: number): Promise<void> => {
+    const key = cueKey(clip.id, cue);
+    setReadingCueKey(key);
+    setReadErrors((prev) => {
+      const { [key]: _removed, ...rest } = prev;
+      return rest;
+    });
+    try {
+      // Persist first so the orchestrator can locate this clip/cue for the job;
+      // the read endpoint reads the saved plan, not the in-memory edits.
+      const saved = await streamsApi.putEditPlan(job.id, plan);
+      const kills = await streamsApi.readKillfeed(job.id, clip.id, cue);
+      const clips = saved.clips.map((c) => (c.id === clip.id ? setClipCueKills(c, cue, kills) : c));
+      onPlanChange({ ...saved, clips });
+    } catch (err) {
+      const message =
+        (err as { code?: string } | null)?.code === XAI_KEY_MISSING_CODE
+          ? 'Configura tu clave de xAI en Ajustes para leer la killfeed con IA.'
+          : errorMessage(err, 'No se pudieron leer las kills de esta marca.');
+      setReadErrors((prev) => ({ ...prev, [key]: message }));
+    } finally {
+      setReadingCueKey(null);
+    }
+  };
   const containingClipIndex = plan.clips.findIndex(
     (clip) =>
       Number.isFinite(clip.start_seconds) &&
@@ -669,6 +690,7 @@ function StreamEditor({
     const clips = plan.clips.map((clip) => {
       const withoutCues = { ...clip };
       delete withoutCues.killfeed_seconds;
+      delete withoutCues.killfeed_kills;
       return withoutCues;
     });
     const withoutKillfeed = { ...plan, clips };
@@ -678,28 +700,19 @@ function StreamEditor({
   const addKillfeedCue = () => {
     if (!canAddKillfeedCue) return;
     const clips = plan.clips.map((clip, index) =>
-      index === containingClipIndex
-        ? normalizeClipKillfeedCues({
-            ...clip,
-            killfeed_seconds: [
-              ...(clip.killfeed_seconds ?? []),
-              previewSeconds,
-            ],
-          })
-        : clip,
+      index === containingClipIndex ? addClipCue(clip, previewSeconds) : clip,
     );
     onPlanChange({ ...plan, clips });
   };
   const removeKillfeedCue = (clipId: string, cue: number) => {
     const clips = plan.clips.map((clip) =>
-      clip.id === clipId
-        ? normalizeClipKillfeedCues({
-            ...clip,
-            killfeed_seconds: (clip.killfeed_seconds ?? []).filter(
-              (value) => value !== cue,
-            ),
-          })
-        : clip,
+      clip.id === clipId ? removeClipCue(clip, cue) : clip,
+    );
+    onPlanChange({ ...plan, clips });
+  };
+  const setCueKills = (clipId: string, cue: number, kills: KillfeedKill[]) => {
+    const clips = plan.clips.map((clip) =>
+      clip.id === clipId ? setClipCueKills(clip, cue, kills) : clip,
     );
     onPlanChange({ ...plan, clips });
   };
@@ -808,8 +821,9 @@ function StreamEditor({
                     Killfeed limpia (opcional)
                   </h3>
                   <p id="killfeed-clean-description" className="text-xs leading-relaxed text-muted-foreground">
-                    Conserva el aviso real del MP4; FragForge no fabrica nombres, armas ni iconos.
-                    Selecciona el aviso original; FragForge congela ese fotograma solo alrededor de cada marca.
+                    Marca los momentos de la killfeed dentro de cada clip.
+                    Con kills confirmadas (a mano o leídas con IA) superpone una killfeed sintética nítida;
+                    si dejas una marca sin kills, congela el recorte del MP4 en esa ventana.
                   </p>
                 </div>
                 <Button
@@ -837,8 +851,7 @@ function StreamEditor({
               {killfeedEnabled ? (
                 <div id="killfeed-clean-controls" className="flex flex-col gap-4">
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Usa el rectángulo como una zona de búsqueda que cubra holgadamente el área de la killfeed.
-                    FragForge detecta automáticamente cada notificación resaltada dentro de ella y la superpone con precisión píxel a píxel.
+                    Ajusta el recorte para que cubra holgadamente el área de la killfeed: es la región que se congela sin kills y la que lee la IA.
                     El fotograma elegido también actualiza la preview 9:16.
                   </p>
                   <CropPicker
@@ -898,32 +911,47 @@ function StreamEditor({
                             </span>
                           </div>
                           {cues.length > 0 ? (
-                            <ul className="flex flex-wrap gap-2" aria-label={`Marcas de ${clipLabel}`}>
-                              {cues.map((cue) => (
-                                <li
-                                  key={`${clip.id}-${cue}`}
-                                  className="inline-flex items-center overflow-hidden rounded-full border border-stream/45 bg-stream/10 text-stream"
-                                >
-                                  <button
-                                    type="button"
-                                    disabled={busy}
-                                    aria-label={`Mostrar la marca ${formatStreamTimestamp(cue)} de ${clipLabel}`}
-                                    onClick={() => setPreviewSeconds(cue)}
-                                    className="px-2.5 py-1 font-[family-name:var(--font-mono)] text-xs tabular-nums outline-none hover:bg-stream/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stream disabled:opacity-50"
+                            <ul className="flex flex-col gap-3" aria-label={`Marcas de ${clipLabel}`}>
+                              {cues.map((cue, cueIndex) => {
+                                const key = cueKey(clip.id, cue);
+                                return (
+                                  <li
+                                    key={`${clip.id}-${cue}`}
+                                    className="flex flex-col gap-3 border border-stream/30 bg-stream/[0.04] p-3"
                                   >
-                                    {formatStreamTimestamp(cue)}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={busy}
-                                    aria-label={`Eliminar la marca ${formatStreamTimestamp(cue)} de ${clipLabel}`}
-                                    onClick={() => removeKillfeedCue(clip.id, cue)}
-                                    className="border-l border-stream/30 p-1.5 outline-none hover:bg-stream/15 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stream disabled:opacity-50"
-                                  >
-                                    <Trash2 className="size-3.5" aria-hidden />
-                                  </button>
-                                </li>
-                              ))}
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <button
+                                        type="button"
+                                        disabled={busy}
+                                        aria-label={`Mostrar la marca ${formatStreamTimestamp(cue)} de ${clipLabel}`}
+                                        onClick={() => setPreviewSeconds(cue)}
+                                        className="inline-flex items-center rounded-full border border-stream/45 bg-stream/10 px-2.5 py-1 font-[family-name:var(--font-mono)] text-xs tabular-nums text-stream outline-none hover:bg-stream/15 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stream disabled:opacity-50"
+                                      >
+                                        {formatStreamTimestamp(cue)}
+                                      </button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        disabled={busy}
+                                        aria-label={`Eliminar la marca ${formatStreamTimestamp(cue)} de ${clipLabel}`}
+                                        onClick={() => removeKillfeedCue(clip.id, cue)}
+                                      >
+                                        <Trash2 className="size-3.5" aria-hidden />
+                                      </Button>
+                                    </div>
+                                    <KillfeedKillsEditor
+                                      kills={clip.killfeed_kills?.[cueIndex] ?? []}
+                                      weapons={weapons}
+                                      reading={readingCueKey === key}
+                                      readError={readErrors[key] ?? null}
+                                      disabled={busy}
+                                      onChange={(kills) => setCueKills(clip.id, cue, kills)}
+                                      onReadWithAI={() => void readCueWithAI(clip, cue)}
+                                    />
+                                  </li>
+                                );
+                              })}
                             </ul>
                           ) : (
                             <p className="text-xs text-muted-foreground">
@@ -1114,7 +1142,7 @@ function StreamEditor({
           disabled={busy}
         />
         <p className="text-[11.5px] leading-relaxed text-muted-foreground/80">
-          La preview replica el encuadre vertical. La killfeed congela el recorte exacto del MP4 solo dentro de la ventana de cada marca.
+          La preview replica el encuadre vertical. En cada marca: con kills confirmadas superpone la killfeed sintética nítida; sin kills congela el recorte del MP4.
         </p>
       </div>
     </div>

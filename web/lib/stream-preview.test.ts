@@ -6,11 +6,22 @@ import {
   calculateCropCoverGeometry,
   clampStreamerBannerPosition,
   defaultStreamerBannerPosition,
+  killfeedKillsForCue,
+  killfeedNoticePlacement,
   proportionalEvenKillfeedHeight,
   resolveActiveKillfeedCue,
   representativeFrameTime,
   resolveStreamerBannerPosition,
 } from './stream-preview.ts';
+import type { KillfeedKill } from './api/streams.ts';
+
+const KILL: KillfeedKill = {
+  attacker_side: 'CT',
+  attacker_name: 'hero',
+  victim_side: 'T',
+  victim_name: 'villain',
+  weapon: 'ak47',
+};
 
 const SOURCE = { width: 1920, height: 1080 };
 
@@ -210,6 +221,54 @@ test('killfeed cue resolution uses absolute source time across multiple clips', 
   assert.equal(resolveActiveKillfeedCue(clips, 21.65), 22);
   assert.equal(resolveActiveKillfeedCue(clips, 24.8), 22);
   assert.equal(resolveActiveKillfeedCue(clips, 24.801), null);
+});
+
+test('synthetic notice placement stacks 48px notices with an 8px gap from the base top', () => {
+  const first = killfeedNoticePlacement(0, 64);
+  assert.equal(first.heightPercent, (48 * 100) / 1920);
+  assert.equal(first.rightPercent, (24 * 100) / 1080);
+  assert.equal(first.topPercent, (64 * 100) / 1920);
+
+  const second = killfeedNoticePlacement(1, 64);
+  assert.equal(second.topPercent, ((64 + 48 + 8) * 100) / 1920);
+  assert.equal(second.heightPercent, first.heightPercent);
+  assert.equal(second.rightPercent, first.rightPercent);
+
+  const third = killfeedNoticePlacement(2, 64);
+  assert.equal(third.topPercent, ((64 + 2 * (48 + 8)) * 100) / 1920);
+});
+
+test('synthetic notice placement honors a stacked base top offset', () => {
+  const stacked = killfeedNoticePlacement(0, 768 + 72);
+  assert.equal(stacked.topPercent, ((768 + 72) * 100) / 1920);
+});
+
+test('killfeedKillsForCue returns the kills index-aligned with the matching cue', () => {
+  const other: KillfeedKill = { ...KILL, attacker_name: 'second', weapon: 'awp' };
+  const clips = [
+    {
+      id: 'clip-1',
+      start_seconds: 0,
+      end_seconds: 20,
+      killfeed_seconds: [4, 8, 12],
+      killfeed_kills: [[KILL], [], [KILL, other]],
+    },
+  ];
+
+  assert.deepEqual(killfeedKillsForCue(clips, 4), [KILL]);
+  assert.deepEqual(killfeedKillsForCue(clips, 8), []);
+  assert.deepEqual(killfeedKillsForCue(clips, 12), [KILL, other]);
+});
+
+test('killfeedKillsForCue returns empty when the cue or kills are absent', () => {
+  const clips = [
+    { id: 'no-kills', start_seconds: 0, end_seconds: 20, killfeed_seconds: [4] },
+    { id: 'with-kills', start_seconds: 20, end_seconds: 40, killfeed_seconds: [24], killfeed_kills: [[KILL]] },
+  ];
+
+  assert.deepEqual(killfeedKillsForCue(clips, 4), []);
+  assert.deepEqual(killfeedKillsForCue(clips, 99), []);
+  assert.deepEqual(killfeedKillsForCue(clips, 24), [KILL]);
 });
 
 test('representative time is the safe midpoint for every editor video', () => {

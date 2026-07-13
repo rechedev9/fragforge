@@ -1,4 +1,4 @@
-import type { NormalizedRect, StreamClipRange, StreamVariant } from './api/streams';
+import type { KillfeedKill, NormalizedRect, StreamClipRange, StreamVariant } from './api/streams';
 
 export type FrameSize = { width: number; height: number };
 
@@ -110,6 +110,51 @@ export function resolveActiveKillfeedCue(
     }
   }
   return activeCue;
+}
+
+// Synthetic notice stack geometry, in output pixels on the 1080x1920 canvas,
+// mirroring the render: 48px-tall notices right-aligned 24px from the edge,
+// stacked from a base top with an 8px gap between them.
+const KILLFEED_OUTPUT_WIDTH = 1080;
+const KILLFEED_OUTPUT_HEIGHT = 1920;
+const KILLFEED_NOTICE_HEIGHT = 48;
+const KILLFEED_NOTICE_GAP = 8;
+const KILLFEED_NOTICE_RIGHT_MARGIN = 24;
+
+export type KillfeedNoticePlacement = {
+  topPercent: number;
+  heightPercent: number;
+  rightPercent: number;
+};
+
+/**
+ * Placement of the notice at stack position `index` (0 = topmost), as
+ * percentages of the preview box so it scales with the box. `baseTopPixels` is
+ * the same base top the frozen-crop overlay uses (64 full-frame, or
+ * faceHeight + 72 stacked) in 1080x1920 output pixels.
+ */
+export function killfeedNoticePlacement(index: number, baseTopPixels: number): KillfeedNoticePlacement {
+  const topPixels = baseTopPixels + index * (KILLFEED_NOTICE_HEIGHT + KILLFEED_NOTICE_GAP);
+  return {
+    topPercent: (topPixels * 100) / KILLFEED_OUTPUT_HEIGHT,
+    heightPercent: (KILLFEED_NOTICE_HEIGHT * 100) / KILLFEED_OUTPUT_HEIGHT,
+    rightPercent: (KILLFEED_NOTICE_RIGHT_MARGIN * 100) / KILLFEED_OUTPUT_WIDTH,
+  };
+}
+
+/**
+ * The confirmed kills for the cue timestamp `cue`, found by its index in the
+ * owning clip's `killfeed_seconds`. Returns an empty array when the cue is not
+ * marked or has no kills, so callers fall back to the frozen-crop overlay.
+ */
+export function killfeedKillsForCue(clips: StreamClipRange[], cue: number): KillfeedKill[] {
+  for (const clip of clips) {
+    const index = (clip.killfeed_seconds ?? []).indexOf(cue);
+    if (index < 0) continue;
+    const kills = clip.killfeed_kills?.[index];
+    if (kills && kills.length > 0) return kills;
+  }
+  return [];
 }
 
 /** Selects the same stable, representative frame for every editor video. */

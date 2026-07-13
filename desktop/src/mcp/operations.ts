@@ -82,6 +82,28 @@ const FACE_CROP_RECT_PROPERTY: JsonObject = {
   required: ['x', 'y', 'width', 'height'],
   type: 'object',
 };
+const KILLFEED_KILL_PROPERTY: JsonObject = {
+  additionalProperties: false,
+  description: 'One confirmed kill notice rendered as a synthetic killfeed entry.',
+  properties: {
+    assister_name: { type: 'string' },
+    assister_side: { enum: ['CT', 'T'], type: 'string' },
+    attacker_name: { minLength: 1, type: 'string' },
+    attacker_side: { enum: ['CT', 'T'], type: 'string' },
+    blind: { type: 'boolean' },
+    flash_assist: { type: 'boolean' },
+    headshot: { type: 'boolean' },
+    in_air: { type: 'boolean' },
+    noscope: { type: 'boolean' },
+    smoke: { type: 'boolean' },
+    victim_name: { minLength: 1, type: 'string' },
+    victim_side: { enum: ['CT', 'T'], type: 'string' },
+    wallbang: { type: 'boolean' },
+    weapon: { description: 'Weapon icon catalog key such as ak47.', minLength: 1, type: 'string' },
+  },
+  required: ['attacker_side', 'attacker_name', 'victim_side', 'victim_name', 'weapon'],
+  type: 'object',
+};
 const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
   additionalProperties: false,
   description: 'Complete stream edit plan. Search with stream_job_id to retrieve the current plan before replacing it.',
@@ -102,6 +124,11 @@ const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
         properties: {
           end_seconds: { exclusiveMinimum: 0, type: 'number' },
           id: SAFE_TOKEN_PROPERTY,
+          killfeed_kills: {
+            description: 'Per-cue confirmed kills, index-aligned with killfeed_seconds. A cue with an empty entry keeps the frozen-crop behavior; a cue with kills renders synthetic notices.',
+            items: { items: KILLFEED_KILL_PROPERTY, type: 'array' },
+            type: 'array',
+          },
           killfeed_seconds: {
             description: 'Absolute source timestamps whose selected killfeed notice should be frozen for this clip.',
             items: { type: 'number' },
@@ -659,6 +686,46 @@ const operations: readonly OperationDefinition[] = [
   },
   mutationOperation({ category: 'streams', description: 'Start a costly stream clip render from the saved edit plan, including xAI/Grok subtitles when enabled.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'vertical', 'render', 'captions', 'subtitles', 'subtitulos', 'xai', 'grok'], name: 'streams.start_render', path: (input) => streamRenderPath(input), risk: 'costly', title: 'Start stream render' }),
   readOperation({ category: 'streams', description: 'Read stream render progress and real video entries.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'render', 'videos'], name: 'streams.get_render', path: (input) => streamRenderPath(input), title: 'Get stream render state' }),
+  readOperation({
+    category: 'streams',
+    description: 'List the weapon icon catalog keys a synthetic killfeed notice may use.',
+    keywords: ['killfeed', 'weapon', 'notice', 'icon', 'synthetic'],
+    name: 'streams.list_killfeed_weapons',
+    path: () => '/api/stream-killfeed/weapons',
+    title: 'List killfeed weapons',
+  }),
+  mutationOperation({
+    body: (input) => ({ clip_id: stringInput(input, 'clip_id'), cue_seconds: input.cue_seconds }),
+    category: 'streams',
+    description: 'Read the confirmed kills visible at a killfeed cue with the configured xAI vision reader. Requires local ffmpeg and an xAI key; returns {kills} for the cue.',
+    inputSchema: objectSchema(
+      {
+        clip_id: SAFE_TOKEN_PROPERTY,
+        cue_seconds: { description: 'Absolute source timestamp of the cue, inside the clip range.', minimum: 0, type: 'number' },
+        stream_job_id: UUID_PROPERTY,
+      },
+      ['stream_job_id', 'clip_id', 'cue_seconds'],
+    ),
+    keywords: ['killfeed', 'kills', 'read', 'xai', 'grok', 'vision'],
+    name: 'streams.read_killfeed',
+    path: (input) => streamPath(input, '/killfeed-read'),
+    risk: 'costly',
+    title: 'Read killfeed kills',
+  }),
+  {
+    category: 'streams',
+    description: 'Render one kill notice to the exact synthetic PNG the render uses. The endpoint returns image bytes, so this reports the request rather than embedding the image; view notices in the web editor.',
+    inputSchema: KILLFEED_KILL_PROPERTY,
+    keywords: ['killfeed', 'notice', 'preview', 'png', 'synthetic'],
+    name: 'streams.preview_killfeed_notice',
+    preview: (input) => requestPreview('POST', '/api/stream-killfeed/notice-preview', input),
+    risk: 'read',
+    run: async (_client, input) => ({
+      note: 'The kill notice is returned as image bytes and is not embedded in MCP context; open the FragForge web editor to view the synthetic notice.',
+      request: requestPreview('POST', '/api/stream-killfeed/notice-preview', input),
+    }),
+    title: 'Preview killfeed notice',
+  },
   {
     category: 'artifacts',
     description: 'Return a loopback URL for a stream render gallery or MP4.',
@@ -1085,6 +1152,13 @@ function validateStreamEditPlan(plan: JsonObject): void {
           && (cue < value.start_seconds || cue >= value.end_seconds)) {
           throw new Error(`${field} must be greater than or equal to start_seconds and less than end_seconds`);
         }
+      }
+    }
+    const killfeedKills = value.killfeed_kills;
+    if (Array.isArray(killfeedKills)) {
+      const cueCount = Array.isArray(killfeedSeconds) ? killfeedSeconds.length : 0;
+      if (killfeedKills.length !== cueCount) {
+        throw new Error(`arguments.plan.clips[${index}].killfeed_kills must have one entry per killfeed_seconds cue`);
       }
     }
     if (typeof value.id === 'string') {

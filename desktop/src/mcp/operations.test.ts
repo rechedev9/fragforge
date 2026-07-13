@@ -337,7 +337,39 @@ test('operation schemas enforce API route and cross-field contracts', () => {
   };
   validateStreamEditPlan(validKillfeedPlan);
 
+  const killJson: JsonObject = {
+    attacker_name: 'hero',
+    attacker_side: 'CT',
+    victim_name: 'villain',
+    victim_side: 'T',
+    weapon: 'ak47',
+  };
+  validateStreamEditPlan({
+    ...validKillfeedPlan,
+    clips: [{ ...killfeedClip, killfeed_kills: [[killJson], [], [{ ...killJson, headshot: true }]] }],
+  });
+
   const invalidKillfeedPlans: Array<{ error: string; name: string; plan: JsonObject }> = [
+    {
+      error: 'arguments.plan.clips[0].killfeed_kills must have one entry per killfeed_seconds cue',
+      name: 'killfeed_kills length mismatch',
+      plan: {
+        ...validKillfeedPlan,
+        clips: [{ ...killfeedClip, killfeed_kills: [[killJson]] }],
+      },
+    },
+    {
+      error: 'arguments.plan.clips[0].killfeed_kills[0][0].attacker_side must be one of: CT, T',
+      name: 'killfeed kill invalid side',
+      plan: {
+        ...validKillfeedPlan,
+        clips: [{
+          ...killfeedClip,
+          killfeed_seconds: [12],
+          killfeed_kills: [[{ ...killJson, attacker_side: 'X' }]],
+        }],
+      },
+    },
     {
       error: 'arguments.plan.killfeed_crop is required when arguments.plan.clips[0].killfeed_seconds contains cues',
       name: 'cues without killfeed_crop',

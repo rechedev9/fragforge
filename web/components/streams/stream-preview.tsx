@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Twitch } from 'lucide-react';
-import type { NormalizedRect, StreamClipRange, StreamVariant } from '@/lib/api/streams';
+import { streamsApi, type KillfeedKill, type NormalizedRect, type StreamClipRange, type StreamVariant } from '@/lib/api/streams';
 import {
   calculateCropCoverGeometry,
   clampStreamerBannerPosition,
+  killfeedKillsForCue,
+  killfeedNoticePlacement,
   proportionalEvenKillfeedHeight,
   resolveActiveKillfeedCue,
   resolveStreamerBannerPosition,
@@ -187,6 +189,101 @@ function KillfeedOverlayFrame({
 }
 
 /**
+ * Loads the synthetic notice PNG for each kill through the notice-preview proxy
+ * and returns a ready object URL per kill (null until its image is ready).
+ * Images are cached and deduped by JSON.stringify(kill); every object URL is
+ * revoked when the preview unmounts.
+ */
+function useKillfeedNoticeUrls(kills: KillfeedKill[]): (string | null)[] {
+  const cacheRef = useRef<Map<string, string>>(new Map());
+  const pendingRef = useRef<Set<string>>(new Set());
+  const [ready, setReady] = useState<Record<string, string>>({});
+  const killsKey = JSON.stringify(kills);
+
+  useEffect(() => {
+    let cancelled = false;
+    const cache = cacheRef.current;
+    const pending = pendingRef.current;
+    for (const kill of kills) {
+      const key = JSON.stringify(kill);
+      if (cache.has(key) || pending.has(key)) continue;
+      pending.add(key);
+      streamsApi
+        .previewKillfeedNotice(kill)
+        .then((blob) => {
+          if (cancelled) return;
+          const url = URL.createObjectURL(blob);
+          cache.set(key, url);
+          setReady((prev) => ({ ...prev, [key]: url }));
+        })
+        .catch(() => {
+          // Leave the notice hidden until a later attempt succeeds.
+        })
+        .finally(() => {
+          pending.delete(key);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // killsKey captures the kill payloads; `ready` is intentionally not a dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [killsKey]);
+
+  useEffect(() => {
+    const cache = cacheRef.current;
+    return () => {
+      for (const url of cache.values()) URL.revokeObjectURL(url);
+      cache.clear();
+    };
+  }, []);
+
+  return kills.map((kill) => ready[JSON.stringify(kill)] ?? null);
+}
+
+/**
+ * Right-aligned stack of synthetic kill notices for a cue that has confirmed
+ * kills. Geometry mirrors the render (48px notices, 24px right margin, 8px gap)
+ * scaled to the preview box; a notice is shown only once its image is ready.
+ */
+function SyntheticKillfeedNotices({
+  kills,
+  baseTopPixels,
+}: {
+  kills: KillfeedKill[];
+  baseTopPixels: number;
+}) {
+  const urls = useKillfeedNoticeUrls(kills);
+
+  return (
+    <div aria-hidden="true" data-preview-killfeed-notices className="pointer-events-none absolute inset-0">
+      {kills.map((kill, index) => {
+        const url = urls[index];
+        if (!url) return null;
+        const placement = killfeedNoticePlacement(index, baseTopPixels);
+        return (
+          <img
+            // eslint-disable-next-line @next/next/no-img-element
+            key={`${index}-${JSON.stringify(kill)}`}
+            src={url}
+            alt=""
+            data-preview-killfeed-notice
+            className="absolute"
+            style={{
+              top: `${placement.topPercent}%`,
+              right: `${placement.rightPercent}%`,
+              height: `${placement.heightPercent}%`,
+              width: 'auto',
+              maxWidth: 'none',
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * Live 9:16 preview: facecam over gameplay for stack variants, or gameplay
  * only for the no-facecam variant. Band sizes and crop geometry mirror the
  * render variant registry in internal/streamclips.
@@ -233,6 +330,7 @@ export function StreamPreview({
   const activeKillfeedCue = killfeedCrop
     ? resolveActiveKillfeedCue(clips, frameSeconds)
     : null;
+  const activeKills = activeKillfeedCue !== null ? killfeedKillsForCue(clips, activeKillfeedCue) : [];
 
   const beginBannerDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || !onStreamerPositionChange) return;
@@ -292,7 +390,10 @@ export function StreamPreview({
           />
         </div>
       </div>
-      {killfeedCrop ? (
+      {killfeedCrop && activeKills.length > 0 ? (
+        <SyntheticKillfeedNotices kills={activeKills} baseTopPixels={killfeedTop} />
+      ) : null}
+      {killfeedCrop && activeKills.length === 0 ? (
         <KillfeedOverlayFrame
           videoSrc={videoSrc}
           rect={killfeedCrop}

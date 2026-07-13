@@ -27,12 +27,45 @@ export const STREAM_VARIANTS: { value: StreamVariant; label: string; subtitle: s
   { value: 'streamer-fullframe-nocam', label: 'Full-frame', subtitle: 'Sin facecam', needsFaceCrop: false },
 ];
 
+/** The two CS2 team sides a kill notice can belong to. */
+export const KILLFEED_SIDES = ['CT', 'T'] as const;
+export type KillfeedSide = (typeof KILLFEED_SIDES)[number];
+
+/**
+ * One confirmed kill notice, mirroring streamclips.KillfeedKill (snake_case
+ * JSON). It is either read from the cue frame by the xAI vision reader or
+ * entered by hand in the editor, then rendered as a synthetic notice. `weapon`
+ * is a catalog key served by the weapons endpoint.
+ */
+export type KillfeedKill = {
+  attacker_side: KillfeedSide;
+  attacker_name: string;
+  victim_side: KillfeedSide;
+  victim_name: string;
+  assister_side?: KillfeedSide;
+  assister_name?: string;
+  weapon: string;
+  headshot?: boolean;
+  wallbang?: boolean;
+  noscope?: boolean;
+  smoke?: boolean;
+  blind?: boolean;
+  in_air?: boolean;
+  flash_assist?: boolean;
+};
+
 export type StreamClipRange = {
   id: string;
   start_seconds: number;
   end_seconds: number;
   title?: string;
   killfeed_seconds?: number[];
+  /**
+   * Per-cue confirmed kills, index-aligned with `killfeed_seconds`. A cue with
+   * an empty or missing entry keeps the frozen-crop behavior; a cue with kills
+   * renders synthetic notices instead.
+   */
+  killfeed_kills?: KillfeedKill[][];
 };
 
 export type StreamCaptions = { enabled: boolean; language: string };
@@ -92,16 +125,25 @@ export interface StreamsApiClient {
   getRenderState(id: string, variant: StreamVariant): Promise<StreamRenderState>;
   /** Same-origin URL for a <video>/download link to a rendered Short. */
   videoUrl(id: string, variant: StreamVariant, clipId: string): string;
+  /** The weapon catalog keys a kill notice may use. */
+  listKillfeedWeapons(): Promise<string[]>;
+  /** Renders one kill notice to the exact synthetic PNG the render uses. */
+  previewKillfeedNotice(kill: KillfeedKill): Promise<Blob>;
+  /** Reads the confirmed kills visible at a cue with the xAI vision reader. */
+  readKillfeed(id: string, clipId: string, cueSeconds: number): Promise<KillfeedKill[]>;
+}
+
+/** Throws an Error (carrying any upstream `code`) for a non-2xx response. */
+async function throwResponseError(res: Response): Promise<never> {
+  const body = (await res.json().catch(() => null)) as { error?: unknown; code?: unknown } | null;
+  const message = body && typeof body.error === 'string' ? body.error : `request failed (${res.status})`;
+  const err = new Error(message) as Error & { code?: string };
+  if (body && typeof body.code === 'string') err.code = body.code;
+  throw err;
 }
 
 async function readJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    const message = body && typeof body.error === 'string' ? body.error : `request failed (${res.status})`;
-    const err = new Error(message) as Error & { code?: string };
-    if (body && typeof body.code === 'string') err.code = body.code;
-    throw err;
-  }
+  if (!res.ok) await throwResponseError(res);
   return (await res.json()) as T;
 }
 
@@ -165,6 +207,34 @@ export class RealStreamsApiClient implements StreamsApiClient {
 
   videoUrl(id: string, variant: StreamVariant, clipId: string): string {
     return `/api/streams/${id}/renders/${variant}/videos/${clipId}`;
+  }
+
+  async listKillfeedWeapons(): Promise<string[]> {
+    const data = await readJson<{ weapons?: string[] }>(
+      await fetch('/api/streams/killfeed/weapons', { cache: 'no-store' }),
+    );
+    return data.weapons ?? [];
+  }
+
+  async previewKillfeedNotice(kill: KillfeedKill): Promise<Blob> {
+    const res = await fetch('/api/streams/killfeed/notice-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(kill),
+    });
+    if (!res.ok) await throwResponseError(res);
+    return res.blob();
+  }
+
+  async readKillfeed(id: string, clipId: string, cueSeconds: number): Promise<KillfeedKill[]> {
+    const data = await readJson<{ kills?: KillfeedKill[] }>(
+      await fetch(`/api/streams/${id}/killfeed-read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clip_id: clipId, cue_seconds: cueSeconds }),
+      }),
+    );
+    return data.kills ?? [];
   }
 }
 
