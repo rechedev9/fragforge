@@ -986,8 +986,14 @@ func TestRunWorkflowsCheckRejectsMissingClaudeStyleGuidance(t *testing.T) {
 		t.Fatalf("read CLAUDE.md fixture: %v", err)
 	}
 	stripped := strings.ReplaceAll(string(body), "Every goroutine must have a clear owner and stop condition.", "")
-	stripped = strings.ReplaceAll(stripped, "No `any`, ever: use `unknown` and narrow it.", "")
 	writeFile(t, claudePath, stripped)
+	webClaudePath := filepath.Join(tempDir, "web", "CLAUDE.md")
+	webBody, err := os.ReadFile(webClaudePath)
+	if err != nil {
+		t.Fatalf("read web/CLAUDE.md fixture: %v", err)
+	}
+	webStripped := strings.ReplaceAll(string(webBody), "No `any`, ever: use `unknown` and narrow it.", "")
+	writeFile(t, webClaudePath, webStripped)
 	withWorkingDir(t, tempDir)
 
 	var stdout, stderr strings.Builder
@@ -998,7 +1004,7 @@ func TestRunWorkflowsCheckRejectsMissingClaudeStyleGuidance(t *testing.T) {
 	}
 	for _, want := range []string{
 		`CLAUDE.md: missing style guidance "Every goroutine must have a clear owner and stop condition."`,
-		`CLAUDE.md: missing style guidance "No ` + "`any`" + `, ever"`,
+		`web/CLAUDE.md: missing style guidance "No ` + "`any`" + `, ever"`,
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
