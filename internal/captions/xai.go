@@ -296,7 +296,7 @@ func xaiTranscribeError(status int, body []byte) error {
 	// a masked prefix/suffix of the rejected credential, which must not reach
 	// logs or durable render state.
 	case status == http.StatusUnauthorized || strings.Contains(msg, "api key"):
-		return fmt.Errorf("captions: xai api key rejected (status %d); create a new key, set XAI_API_KEY, and restart FragForge", status)
+		return fmt.Errorf("captions: xai api key rejected (status %d); create a new key, configure it in FragForge Studio Settings or set XAI_API_KEY, and restart FragForge", status)
 	case status == http.StatusRequestEntityTooLarge || strings.Contains(msg, "too large"):
 		return fmt.Errorf("captions: media file too large for xai (status %d): %s; shorten the clip or check xai's per-request size limit", status, msg)
 	default:

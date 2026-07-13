@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { allocateStableServicePorts } from './stable-ports.ts';
+import { allocateStableServicePorts, createDiscoverySecret } from './stable-ports.ts';
 
 const TEST_HOST = '127.0.0.1';
 
@@ -23,6 +23,63 @@ function portSequence(ports: number[]): (host: string) => Promise<number> {
     return port;
   };
 }
+
+test('creates independent 32-byte lowercase-hex discovery secrets', () => {
+  const first = createDiscoverySecret();
+  const second = createDiscoverySecret();
+
+  assert.match(first, /^[a-f0-9]{64}$/);
+  assert.match(second, /^[a-f0-9]{64}$/);
+  assert.notEqual(first, second);
+});
+
+test('rotates the discovery secret even when both saved ports are reused', async (t) => {
+  const portsFile = temporaryPortsFile(t);
+  const previousSecret = '1'.repeat(64);
+  const nextSecret = '2'.repeat(64);
+  fs.writeFileSync(portsFile, JSON.stringify({
+    orchestrator: 41001,
+    web: 42002,
+    discovery_secret: previousSecret,
+    keep: true,
+  }));
+
+  const ports = await allocateStableServicePorts({
+    host: TEST_HOST,
+    portsFile,
+    logLine: () => {},
+    discoverySecret: nextSecret,
+    isPortFree: async () => true,
+    allocateFreePort: async () => {
+      throw new Error('unexpected allocation');
+    },
+  });
+
+  assert.deepEqual(ports, { orchestrator: 41001, web: 42002 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(portsFile, 'utf8')), {
+    orchestrator: 41001,
+    web: 42002,
+    discovery_secret: nextSecret,
+    keep: true,
+  });
+});
+
+test('rejects malformed discovery secrets without persisting them', async (t) => {
+  const portsFile = temporaryPortsFile(t);
+
+  await assert.rejects(
+    allocateStableServicePorts({
+      host: TEST_HOST,
+      portsFile,
+      logLine: () => {},
+      discoverySecret: 'not-a-secret',
+      allocateFreePort: portSequence([41001, 42002]),
+    }),
+    /discovery secret must be 32 random bytes encoded as lowercase hex/,
+  );
+
+  assert.equal(fs.existsSync(portsFile), false);
+});
 
 test('reuses two valid saved ports without rewriting the file', async (t) => {
   const portsFile = temporaryPortsFile(t);
@@ -241,17 +298,20 @@ test('returns usable ports when persistence fails', async (t) => {
   const root = path.dirname(temporaryPortsFile(t));
   const portsFile = path.join(root, 'missing', 'ports.json');
   const logs: string[] = [];
+  const discoverySecret = 'a'.repeat(64);
 
   const ports = await allocateStableServicePorts({
     host: TEST_HOST,
     portsFile,
     logLine: (line) => logs.push(line),
+    discoverySecret,
     allocateFreePort: portSequence([41001, 42002]),
   });
 
   assert.deepEqual(ports, { orchestrator: 41001, web: 42002 });
   assert.equal(logs.length, 1);
   assert.match(logs[0] ?? '', /^\[ports\] could not persist service ports:/);
+  assert.equal(logs[0]?.includes(discoverySecret), false);
 });
 
 test('cleans the staged file when atomic replacement fails', async (t) => {

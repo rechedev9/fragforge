@@ -7,6 +7,7 @@ import {
   Compass,
   Crosshair,
   Film,
+  Settings,
   UploadCloud,
   type LucideIcon,
 } from 'lucide-react';
@@ -25,7 +26,7 @@ import { CaptureReadiness } from '@/components/shell/capture-readiness';
 import { cn } from '@/lib/utils';
 
 type NavItem = {
-  /** Mono HUD index rendered before the label ("01".."05"). */
+  /** Mono HUD index rendered before the label ("01".."06"). */
   number: string;
   label: string;
   href: string;
@@ -40,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { number: '03', label: 'Clips de stream', href: '/streams', icon: Clapperboard, stream: true },
   { number: '04', label: 'Biblioteca', href: '/videos', icon: Film },
   { number: '05', label: 'Feed', href: '/feed', icon: Compass },
+  { number: '06', label: 'Ajustes', href: '/settings', icon: Settings },
 ];
 
 /** A nav href is active for its exact page and any nested route under it. */
@@ -48,7 +50,7 @@ function isActiveHref(pathname: string, href: string): boolean {
 }
 
 /**
- * The persistent left sidebar shell: brand lockup up top, the numbered 01-05
+ * The persistent left sidebar shell: brand lockup up top, the numbered 01-06
  * nav (active item gets the inset accent bar; the active destination always
  * uses cyan), and a footer with the local CAPTURA readiness card.
  */

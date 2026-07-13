@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fragforge": {
+      "command": "node",
+      "args": ["--no-warnings", "--experimental-strip-types", "desktop/src/mcp/stdio.ts"]
+    }
+  }
+}

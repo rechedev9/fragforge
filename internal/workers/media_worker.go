@@ -877,7 +877,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		return fmt.Errorf("edit plan has no clips")
 	}
 	if plan.Captions.Enabled && !cfg.captionsConfigured() {
-		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (set XAI_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL)")
+		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (configure an xAI key in FragForge Studio Settings or set XAI_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, then restart)")
 	}
 	bannerFontPath := ""
 	if plan.StreamerBanner.Nick != "" {

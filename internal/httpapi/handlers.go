@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -80,6 +81,7 @@ type Handlers struct {
 	generateIntents  *generateintent.Store
 	queue            Enqueuer
 	mutationToken    string
+	discoverySecret  string
 	requireReadAuth  bool
 	rateLimiter      *rateLimiter
 	streamProber     streamclips.Prober
@@ -95,6 +97,14 @@ type Option func(*Handlers)
 func WithMutationToken(token string) Option {
 	return func(h *Handlers) {
 		h.mutationToken = token
+	}
+}
+
+// WithDiscoverySecret authenticates loopback service discovery without
+// reusing the mutation credential. Desktop supplies a fresh value per boot.
+func WithDiscoverySecret(secret string) Option {
+	return func(h *Handlers) {
+		h.discoverySecret = secret
 	}
 }
 
@@ -1369,20 +1379,30 @@ func (h *Handlers) streamRenderVariantArtifact(w http.ResponseWriter, r *http.Re
 	serveArtifact(w, r, contentType, rc)
 }
 
-// serveArtifact writes an artifact body with the given content type. When the
-// storage reader is seekable (the local filesystem backend hands out *os.File)
-// it serves through http.ServeContent so Range requests are honoured — the
-// browser <video> element needs ranges and a Content-Length to start playback
-// and seek. Non-seekable backends fall back to a plain streamed copy.
+// serveArtifact writes an artifact body with the given content type. An empty
+// type asks Go to sniff the stored bytes, which is useful when the durable key
+// intentionally omits the uploaded source container. When the storage reader
+// is seekable (the local filesystem backend hands out *os.File), it serves
+// through http.ServeContent so Range requests are honoured. Non-seekable
+// backends sniff a bounded prefix before streaming the complete body.
 func serveArtifact(w http.ResponseWriter, r *http.Request, contentType string, rc io.ReadCloser) {
 	defer rc.Close()
-	w.Header().Set("Content-Type", contentType)
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
 	if rs, ok := rc.(io.ReadSeeker); ok {
 		http.ServeContent(w, r, "", time.Time{}, rs)
 		return
 	}
+	var body io.Reader = rc
+	if contentType == "" {
+		buffered := bufio.NewReader(rc)
+		prefix, _ := buffered.Peek(512)
+		w.Header().Set("Content-Type", http.DetectContentType(prefix))
+		body = buffered
+	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, rc)
+	_, _ = io.Copy(w, body)
 }
 
 func (h *Handlers) loadRenderResult(w http.ResponseWriter, id uuid.UUID, variant string) (editor.Result, string, bool) {

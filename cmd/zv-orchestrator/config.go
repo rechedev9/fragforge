@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ type config struct {
 	ComposeTimeout    string
 	RenderTimeout     string
 	MutationToken     string
+	DiscoverySecret   string
 	CodexPath         string
 	CodexModel        string
 	AgentTimeout      string
@@ -41,8 +43,9 @@ type config struct {
 }
 
 const (
-	databaseURLMemory            = "memory"
-	xaiAPIKeyEnvironmentVariable = "XAI_API_KEY"
+	databaseURLMemory                  = "memory"
+	xaiAPIKeyEnvironmentVariable       = "XAI_API_KEY"
+	discoverySecretEnvironmentVariable = "ZV_DISCOVERY_SECRET"
 	// databaseURLSQLite selects the on-disk SQLite job repository. Accepts the
 	// bare value "sqlite" (stores <DataDir>/jobs.db) or "sqlite:<path>".
 	databaseURLSQLite = "sqlite"
@@ -74,6 +77,7 @@ func loadConfig() (config, error) {
 		FFprobePath:      os.Getenv("ZV_FFPROBE_PATH"),
 		MusicDir:         os.Getenv("ZV_MUSIC_DIR"),
 		MutationToken:    os.Getenv("ZV_MUTATION_TOKEN"),
+		DiscoverySecret:  os.Getenv(discoverySecretEnvironmentVariable),
 		CodexPath:        os.Getenv("ZV_CODEX_PATH"),
 		CodexModel:       os.Getenv("ZV_CODEX_MODEL"),
 		YtdlpPath:        os.Getenv("ZV_YTDLP_PATH"),
@@ -91,6 +95,9 @@ func loadConfig() (config, error) {
 	}
 	if !httpapi.IsLoopbackAddr(c.HTTPAddr) && c.MutationToken == "" {
 		return c, fmt.Errorf("ZV_MUTATION_TOKEN is required when ZV_HTTP_ADDR is not loopback")
+	}
+	if c.DiscoverySecret != "" && !validDiscoverySecret(c.DiscoverySecret) {
+		return c, fmt.Errorf("ZV_DISCOVERY_SECRET must be 32 random bytes encoded as lowercase hex")
 	}
 
 	concRaw := envOr("ZV_WORKER_CONCURRENCY", "2")
@@ -119,18 +126,36 @@ func loadConfig() (config, error) {
 	return c, nil
 }
 
+func validDiscoverySecret(secret string) bool {
+	if len(secret) != 64 || secret != strings.ToLower(secret) {
+		return false
+	}
+	decoded, err := hex.DecodeString(secret)
+	return err == nil && len(decoded) == 32
+}
+
 // clearXAIAPIKeyEnvironment keeps the credential in config memory while
 // preventing editor, recorder, FFmpeg, HLAE, CS2, and other subprocesses from
 // inheriting it. EqualFold also removes casing variants on Windows, where
 // environment variable names are case-insensitive.
 func clearXAIAPIKeyEnvironment() error {
+	return clearEnvironmentVariable(xaiAPIKeyEnvironmentVariable)
+}
+
+// clearDiscoverySecretEnvironment prevents media and agent subprocesses from
+// inheriting the desktop-only discovery credential after config has loaded it.
+func clearDiscoverySecretEnvironment() error {
+	return clearEnvironmentVariable(discoverySecretEnvironmentVariable)
+}
+
+func clearEnvironmentVariable(variable string) error {
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
-		if !strings.EqualFold(name, xaiAPIKeyEnvironmentVariable) {
+		if !strings.EqualFold(name, variable) {
 			continue
 		}
 		if err := os.Unsetenv(name); err != nil {
-			return fmt.Errorf("unset %s: %w", xaiAPIKeyEnvironmentVariable, err)
+			return fmt.Errorf("unset %s: %w", variable, err)
 		}
 	}
 	return nil
