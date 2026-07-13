@@ -1474,11 +1474,6 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"Add useful context when returning errors.",
 		"Every goroutine must have a clear owner and stop condition.",
 		"",
-		"## TypeScript style (web/)",
-		"",
-		"No `any`, ever: use `unknown` and narrow it.",
-		"No re-exports: update every import when moving code.",
-		"",
 		"Do not add generated video/audio/image artifacts to git.",
 		"",
 		"```bash",
@@ -1500,6 +1495,15 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"@go-security-reviewer review filesystem/subprocess/security changes",
 		"@zv-media-pipeline-reviewer review FFmpeg/rendering changes",
 		"```",
+		"",
+	}, "\n"))
+	writeFile(t, filepath.Join(root, "web", "CLAUDE.md"), strings.Join([]string{
+		"# web/ frontend guidance",
+		"",
+		"## TypeScript style (web/)",
+		"",
+		"No `any`, ever: use `unknown` and narrow it.",
+		"No re-exports: update every import when moving code.",
 		"",
 	}, "\n"))
 	for _, fixture := range claudeReviewerAgentFixtures() {

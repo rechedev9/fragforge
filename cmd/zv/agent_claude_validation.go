@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -135,10 +136,19 @@ func checkClaudeRuleDocs() ([]skillIssue, error) {
 	if err != nil {
 		return nil, err
 	}
+	webClaudeBody, err := readWorkflowDocBody(root, "web/CLAUDE.md")
+	if err != nil {
+		return nil, err
+	}
 	var issues []skillIssue
 	for _, required := range claudeStyleRequiredText() {
 		if !strings.Contains(claudeBody, required) {
 			issues = append(issues, skillIssue{Path: "CLAUDE.md", Message: fmt.Sprintf("missing style guidance %q", required)})
+		}
+	}
+	for _, required := range webClaudeStyleRequiredText() {
+		if !strings.Contains(webClaudeBody, required) {
+			issues = append(issues, skillIssue{Path: "web/CLAUDE.md", Message: fmt.Sprintf("missing style guidance %q", required)})
 		}
 	}
 	rulesDir := filepath.Join(root, ".claude", "rules")
@@ -165,10 +175,17 @@ func claudeStyleRequiredText() []string {
 		"Do not introduce `util`, `common`, `helper`, `manager`",
 		"Add useful context when returning errors.",
 		"Every goroutine must have a clear owner and stop condition.",
+		"Do not add generated video/audio/image artifacts to git.",
+	}
+}
+
+// The web frontend style guidance lives in web/CLAUDE.md so it only loads when
+// working under web/; validate it there rather than in the root file.
+func webClaudeStyleRequiredText() []string {
+	return []string{
 		"## TypeScript style (web/)",
 		"No `any`, ever",
 		"No re-exports",
-		"Do not add generated video/audio/image artifacts to git.",
 	}
 }
 
@@ -233,10 +250,5 @@ func checkClaudeSettings() ([]skillIssue, error) {
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
