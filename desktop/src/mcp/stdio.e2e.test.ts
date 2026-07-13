@@ -52,7 +52,7 @@ test('the real TypeScript stdio entry interoperates end to end without stdout co
   }, AbortSignal.timeout(REQUEST_TIMEOUT_MS));
   assert.ok(isJsonObject(initialized));
   assert.equal(initialized.protocolVersion, '2025-11-25');
-  await client.sendNotification('notifications/initialized');
+  await sendNotificationWithTimeout(client, 'notifications/initialized');
 
   const tools = await client.sendRequest('tools/list', undefined, AbortSignal.timeout(REQUEST_TIMEOUT_MS));
   assert.ok(isJsonObject(tools));
@@ -109,7 +109,7 @@ test('the packaged Windows launcher uses Electron Node mode with working stdio',
     protocolVersion: '2025-11-25',
   }, AbortSignal.timeout(REQUEST_TIMEOUT_MS));
   assert.ok(isJsonObject(initialized));
-  await client.sendNotification('notifications/initialized');
+  await sendNotificationWithTimeout(client, 'notifications/initialized');
   const tools = await client.sendRequest('tools/list', undefined, AbortSignal.timeout(REQUEST_TIMEOUT_MS));
   assert.ok(isJsonObject(tools));
   assert.equal(Array.isArray(tools.tools) ? tools.tools.length : 0, 2);
@@ -173,7 +173,7 @@ test('closing stdin aborts an in-flight tool call and exits without termination 
     clientInfo: { name: 'shutdown-e2e', version: '1' },
     protocolVersion: '2025-11-25',
   }, AbortSignal.timeout(REQUEST_TIMEOUT_MS));
-  await client.sendNotification('notifications/initialized');
+  await sendNotificationWithTimeout(client, 'notifications/initialized');
   const pending = client.sendRequest('tools/call', {
     arguments: { arguments: { limit: 1 }, operation: 'jobs.list' },
     name: 'execute',
@@ -256,16 +256,55 @@ async function cleanupChildProcess(child: ChildProcess): Promise<void> {
 }
 
 function terminateProcessTree(child: ChildProcess): void {
-  if (child.pid === undefined || hasExited(child)) return;
-  if (process.platform === 'win32') {
-    const result = spawnSync('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {
-      stdio: 'ignore',
-      timeout: FORCED_EXIT_TIMEOUT_MS,
-      windowsHide: true,
-    });
-    if (result.status === 0 || hasExited(child)) return;
+  if (child.pid === undefined) {
+    if (hasExited(child)) return;
+    child.kill();
+    throw new Error('cannot terminate MCP process tree without a process id');
   }
+  if (process.platform === 'win32') {
+    const failures: string[] = [];
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const result = spawnSync('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {
+        encoding: 'utf8',
+        timeout: FORCED_EXIT_TIMEOUT_MS,
+        windowsHide: true,
+      });
+      if (result.status === 0) return;
+      failures.push(formatTaskkillFailure(result, attempt));
+    }
+    child.kill();
+    throw new Error(`taskkill /T failed for MCP process ${child.pid}: ${failures.join('; ')}`);
+  }
+  if (hasExited(child)) return;
   child.kill();
+}
+
+function formatTaskkillFailure(
+  result: ReturnType<typeof spawnSync>,
+  attempt: number,
+): string {
+  const error = result.error instanceof Error ? result.error.message : undefined;
+  const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : '';
+  const detail = error ?? (stderr || `status ${String(result.status)}, signal ${String(result.signal)}`);
+  return `attempt ${attempt}: ${detail}`;
+}
+
+async function sendNotificationWithTimeout(
+  client: JsonRpcConnection,
+  method: string,
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(
+      () => reject(new Error(`${method} notification timed out after ${REQUEST_TIMEOUT_MS}ms`)),
+      REQUEST_TIMEOUT_MS,
+    );
+  });
+  try {
+    await Promise.race([client.sendNotification(method), timedOut]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 async function waitForProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {

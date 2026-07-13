@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -8,11 +8,19 @@ import { createServer } from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  EvalProcessCleanupError,
+  EvalScenarioQuiescenceError,
+  EvalTimeoutError,
+  evalFailureRequiresForcedExit,
   isConcreteArtifactUnavailableError,
+  publishEvalReportBeforeFatalExit,
+  releaseStoppedEvalResource,
   requireEval,
   requireEvalString,
   renderEvalMarkdown,
+  runEvalFailureReport,
   runEvalScenarios,
+  runWithEvalTimeout,
   type EvalScenario,
   type McpEvalReport,
 } from './eval-core.ts';
@@ -24,6 +32,8 @@ const PROTOCOL_VERSION = '2025-11-25';
 const INVALID_UUID = '00000000-0000-0000-0000-000000000000';
 const MCP_TIMEOUT_MS = 8_000;
 const PROCESS_EXIT_TIMEOUT_MS = 3_000;
+const SCENARIO_ABORT_CLEANUP_TIMEOUT_MS = 1_000;
+const TREE_KILL_TIMEOUT_MS = 500;
 
 const evalEntry = process.argv[1];
 if (evalEntry === undefined || evalEntry === '') throw new Error('MCP eval entry path is unavailable');
@@ -62,30 +72,51 @@ interface StartMcpOptions {
   orchestratorUrl?: string;
 }
 
+const activeMcpSessions = new Set<McpSession>();
+
 async function main(): Promise<void> {
   const environment = reportEnvironment();
   let context: EvalContext | undefined;
   let cleanupError: unknown;
+  let forcedExit = false;
   let report: McpEvalReport;
   try {
     context = await startEvalContext();
     report = await runEvalScenarios(evalScenarios(context), environment);
   } catch (error: unknown) {
-    report = await runEvalScenarios([bootstrapFailureScenario(error)], environment);
+    forcedExit = evalFailureRequiresForcedExit(error);
+    report = error instanceof EvalScenarioQuiescenceError && error.report !== undefined
+      ? error.report
+      : await runEvalFailureReport(
+        'bootstrap.real-processes',
+        'Start isolated real orchestrator and MCP processes',
+        error,
+        environment,
+      );
   } finally {
     if (context !== undefined) {
       try {
         await cleanupEvalContext(context);
       } catch (error: unknown) {
-        cleanupError = error;
+        cleanupError = new EvalProcessCleanupError(errorMessage(error));
+        forcedExit = true;
       }
     }
   }
   if (cleanupError !== undefined) report = reportWithCleanupFailure(report, cleanupError);
 
-  const paths = await writeReport(report);
-  process.stdout.write(`FragForge MCP eval: ${report.summary.score}/100 (${report.summary.passed}/${report.summary.total})\n`);
-  process.stdout.write(`JSON: ${paths.json}\nMarkdown: ${paths.markdown}\n`);
+  await publishEvalReportBeforeFatalExit(forcedExit, async () => {
+    try {
+      const paths = await writeReport(report);
+      process.stdout.write(`FragForge MCP eval: ${report.summary.score}/100 (${report.summary.passed}/${report.summary.total})\n`);
+      process.stdout.write(`JSON: ${paths.json}\nMarkdown: ${paths.markdown}\n`);
+    } catch (error: unknown) {
+      if (forcedExit) {
+        process.stderr.write(`FragForge MCP eval could not write its fatal report: ${errorMessage(error)}\n`);
+      }
+      throw error;
+    }
+  }, (code) => process.exit(code));
   if (report.summary.failed > 0) process.exitCode = 1;
 }
 
@@ -100,17 +131,6 @@ function reportEnvironment(): JsonObject {
     orchestrator_binary_present: existsSync(orchestratorExecutable),
     platform: `${process.platform}-${process.arch}`,
     scenario_isolation: 'fresh temporary directory and process pair per CLI run',
-  };
-}
-
-function bootstrapFailureScenario(error: unknown): EvalScenario {
-  return {
-    id: 'bootstrap.real-processes',
-    run: async (signal) => {
-      signal.throwIfAborted();
-      throw error;
-    },
-    title: 'Start isolated real orchestrator and MCP processes',
   };
 }
 
@@ -195,10 +215,9 @@ async function startEvalContext(): Promise<EvalContext> {
         cleanupErrors.push(`MCP: ${errorMessage(cleanupError)}`);
       }
     }
-    if (orchestrator !== undefined && processIsRunning(orchestrator)) {
+    if (orchestrator !== undefined) {
       try {
-        if (!orchestrator.kill()) cleanupErrors.push('orchestrator rejected the termination signal');
-        await waitForExit(orchestrator, PROCESS_EXIT_TIMEOUT_MS);
+        await stopChildWithFallback(orchestrator, PROCESS_EXIT_TIMEOUT_MS);
       } catch (cleanupError: unknown) {
         cleanupErrors.push(`orchestrator: ${errorMessage(cleanupError)}`);
       }
@@ -209,7 +228,9 @@ async function startEvalContext(): Promise<EvalContext> {
       cleanupErrors.push(`temporary directory: ${errorMessage(cleanupError)}`);
     }
     if (cleanupErrors.length > 0) {
-      throw new Error(`${errorMessage(error)}; bootstrap cleanup failures: ${cleanupErrors.join('; ')}`);
+      throw new EvalProcessCleanupError(
+        `${errorMessage(error)}; bootstrap cleanup failures: ${cleanupErrors.join('; ')}`,
+      );
     }
     throw error;
   }
@@ -246,9 +267,7 @@ function lifecycleScenario(context: EvalContext): EvalScenario {
         protocolVersion: PROTOCOL_VERSION,
       }, signal), 'initialize result');
       requireEval(initialized.protocolVersion === PROTOCOL_VERSION, 'server did not negotiate the current MCP protocol');
-      signal.throwIfAborted();
-      await context.mcp.connection.sendNotification('notifications/initialized');
-      signal.throwIfAborted();
+      await sendMcpNotification(context.mcp, 'notifications/initialized', signal);
       const ping = jsonObject(await sendMcpRequest(context.mcp, 'ping', undefined, signal), 'ping result');
       requireEval(Object.keys(ping).length === 0, 'ping must return an empty object');
       const listed = jsonObject(await sendMcpRequest(context.mcp, 'tools/list', undefined, signal), 'tools/list result');
@@ -486,9 +505,13 @@ function streamHappyPathScenario(context: EvalContext): EvalScenario {
         operation: 'artifacts.get_stream_url',
       }, signal);
       const sourceURL = requireEvalString(operationResult(source).url, 'stream source URL');
-      const response = await fetch(sourceURL, { signal: boundedSignal(signal, MCP_TIMEOUT_MS) });
+      const { bytes, response } = await fetchBytesWithScenarioTimeout(
+        sourceURL,
+        {},
+        signal,
+        'stream source request',
+      );
       requireEval(response.status === 200, `stream source URL returned HTTP ${response.status}`);
-      const bytes = Buffer.from(await response.arrayBuffer());
       requireEval(bytes.equals(Buffer.from([0, 0, 0, 0])), 'stream source bytes changed in transit');
       return { source_status: response.status, stream_job_id: context.createdStreamJobID };
     },
@@ -546,14 +569,12 @@ function streamCancellationRecoveryScenario(context: EvalContext): EvalScenario 
           const headers: Record<string, string> = {};
           const contentType = request.headers['content-type'];
           if (typeof contentType === 'string') headers['content-type'] = contentType;
-          const upstream = await fetch(`${context.baseUrl}${requestUrl}`, {
+          const { bytes: responseBytes, response: upstream } = await fetchBytesWithScenarioTimeout(`${context.baseUrl}${requestUrl}`, {
             body,
             headers,
             method,
             redirect: 'manual',
-            signal: boundedSignal(signal, MCP_TIMEOUT_MS),
-          });
-          const responseBytes = Buffer.from(await upstream.arrayBuffer());
+          }, signal, 'cancellation proxy upstream request');
           if (method === 'POST' && pathname === '/api/stream-jobs') {
             uploadCount += 1;
             requireEval(upstream.ok, `real orchestrator rejected cancellation-eval upload with HTTP ${upstream.status}`);
@@ -642,23 +663,25 @@ function streamCancellationRecoveryScenario(context: EvalContext): EvalScenario 
       } finally {
         recoveryEnabled = true;
         for (const response of blockedResponses) response.destroy();
-        const cleanupErrors: string[] = [];
+        const cleanupTasks: Array<{ label: string; promise: Promise<void> }> = [];
         if (session !== undefined) {
-          try {
-            await stopMcp(session);
-          } catch (error: unknown) {
-            cleanupErrors.push(`secondary MCP: ${errorMessage(error)}`);
-          }
+          cleanupTasks.push({ label: 'secondary MCP', promise: stopMcp(session, signal) });
         }
-        try {
-          const closeProxy = new Promise<void>((resolve, reject) => {
-            httpServer.close((error) => error === undefined ? resolve() : reject(error));
-          });
-          httpServer.closeAllConnections();
-          await withTimeout(closeProxy, PROCESS_EXIT_TIMEOUT_MS, 'cancellation fault proxy did not close');
-        } catch (error: unknown) {
-          cleanupErrors.push(`fault proxy: ${errorMessage(error)}`);
-        }
+        const closeProxy = new Promise<void>((resolve, reject) => {
+          httpServer.close((error) => error === undefined ? resolve() : reject(error));
+        });
+        httpServer.closeAllConnections();
+        const proxyCleanupTimeout = signal.aborted
+          ? SCENARIO_ABORT_CLEANUP_TIMEOUT_MS
+          : PROCESS_EXIT_TIMEOUT_MS;
+        cleanupTasks.push({
+          label: 'fault proxy',
+          promise: withTimeout(closeProxy, proxyCleanupTimeout, 'cancellation fault proxy did not close'),
+        });
+        const cleanupResults = await Promise.allSettled(cleanupTasks.map((task) => task.promise));
+        const cleanupErrors = cleanupResults.flatMap((result, index) => result.status === 'rejected'
+          ? [`${cleanupTasks[index]?.label ?? 'unknown cleanup'}: ${errorMessage(result.reason)}`]
+          : []);
         if (cleanupErrors.length > 0) {
           throw new Error(`cancellation scenario cleanup failures: ${cleanupErrors.join('; ')}`);
         }
@@ -804,7 +827,7 @@ function conditionalElicitationScenario(context: EvalContext): EvalScenario {
         );
         return { elicited_fields: session.elicitedFields, error, is_error: true };
       } finally {
-        await stopMcp(session);
+        await stopMcp(session, signal);
       }
     },
     title: 'Complete conditionally required primitive inputs through MCP forms',
@@ -850,7 +873,7 @@ function staleHmacScenario(context: EvalContext): EvalScenario {
         requireEval(!serialized.includes(staleSecret) && !serialized.includes(context.secret), 'discovery secret leaked in an authentication failure');
         return { rejected: true };
       } finally {
-        await stopMcp(session);
+        await stopMcp(session, signal);
       }
     },
     title: 'Reject stale ports-file discovery secrets without leaking them',
@@ -874,8 +897,10 @@ function oversizedFrameScenario(context: EvalContext): EvalScenario {
         requireEval(session.child.exitCode === 1, `oversized-frame MCP exited with ${String(session.child.exitCode)} instead of 1`);
         return { exit_code: session.child.exitCode };
       } finally {
-        if (session.child.exitCode === null) session.child.kill();
-        session.connection.close();
+        await forceStopMcp(
+          session,
+          signal.aborted ? SCENARIO_ABORT_CLEANUP_TIMEOUT_MS : PROCESS_EXIT_TIMEOUT_MS,
+        );
       }
     },
     title: 'Terminate the MCP process after a fatal oversized input frame',
@@ -886,50 +911,60 @@ function processTeardownScenario(context: EvalContext): EvalScenario {
   return {
     id: 'process.teardown',
     run: async (signal) => {
-      const teardownErrors: string[] = [];
-      let exitCode: number | null = null;
       try {
-        exitCode = await closeMcp(context.mcp, signal);
+        return await teardownEvalProcesses(context, signal);
       } catch (error: unknown) {
-        teardownErrors.push(`MCP teardown: ${errorMessage(error)}`);
-        context.mcp.connection.close();
-        if (processIsRunning(context.mcp.child)) context.mcp.child.kill();
-        try {
-          await waitForExit(context.mcp.child, PROCESS_EXIT_TIMEOUT_MS);
-        } catch (waitError: unknown) {
-          teardownErrors.push(`forced MCP teardown: ${errorMessage(waitError)}`);
-        }
+        if (signal.aborted) await forceStopEvalProcesses(context);
+        throw error;
       }
-
-      if (processIsRunning(context.orchestrator)) {
-        const accepted = context.orchestrator.kill();
-        if (!accepted) teardownErrors.push('orchestrator rejected the termination signal');
-      }
-      try {
-        await waitForExit(context.orchestrator, PROCESS_EXIT_TIMEOUT_MS, signal);
-      } catch (error: unknown) {
-        teardownErrors.push(`orchestrator teardown: ${errorMessage(error)}`);
-      }
-
-      const mcpDead = !processIsRunning(context.mcp.child);
-      const orchestratorDead = !processIsRunning(context.orchestrator);
-      requireEval(mcpDead, 'MCP process remained alive after teardown');
-      requireEval(orchestratorDead, 'orchestrator process remained alive after teardown');
-      requireEval(teardownErrors.length === 0, teardownErrors.join('; '));
-      requireEval(exitCode === 0, `MCP exited with code ${String(exitCode)}`);
-      requireEval(context.mcp.protocolErrors.length === 0, `client observed protocol errors: ${context.mcp.protocolErrors.map((error) => error.message).join('; ')}`);
-      const stderr = Buffer.concat(context.mcp.stderr).toString('utf8');
-      requireEval(stderr === '', `MCP contaminated diagnostics during a healthy session: ${stderr}`);
-      return {
-        mcp_dead: mcpDead,
-        mcp_exit_code: exitCode,
-        mcp_stderr_bytes: 0,
-        orchestrator_dead: orchestratorDead,
-        orchestrator_exit_code: context.orchestrator.exitCode ?? -1,
-        orchestrator_signal: context.orchestrator.signalCode ?? 'none',
-      };
     },
     title: 'Stop and verify both isolated MCP and orchestrator processes',
+  };
+}
+
+async function teardownEvalProcesses(context: EvalContext, signal: AbortSignal): Promise<JsonObject> {
+  const teardownErrors: string[] = [];
+  let exitCode: number | null = null;
+  try {
+    exitCode = await closeMcp(context.mcp, signal);
+  } catch (error: unknown) {
+    if (signal.aborted) throw error;
+    teardownErrors.push(`MCP teardown: ${errorMessage(error)}`);
+    context.mcp.connection.close();
+    try {
+      await forceStopChild(context.mcp.child, PROCESS_EXIT_TIMEOUT_MS);
+    } catch (waitError: unknown) {
+      teardownErrors.push(`forced MCP teardown: ${errorMessage(waitError)}`);
+    }
+  }
+
+  if (processIsRunning(context.orchestrator)) {
+    const accepted = context.orchestrator.kill();
+    if (!accepted) teardownErrors.push('orchestrator rejected the termination signal');
+  }
+  try {
+    await waitForExit(context.orchestrator, PROCESS_EXIT_TIMEOUT_MS, signal);
+  } catch (error: unknown) {
+    if (signal.aborted) throw error;
+    teardownErrors.push(`orchestrator teardown: ${errorMessage(error)}`);
+  }
+
+  const mcpDead = !processIsRunning(context.mcp.child);
+  const orchestratorDead = !processIsRunning(context.orchestrator);
+  requireEval(mcpDead, 'MCP process remained alive after teardown');
+  requireEval(orchestratorDead, 'orchestrator process remained alive after teardown');
+  requireEval(teardownErrors.length === 0, teardownErrors.join('; '));
+  requireEval(exitCode === 0, `MCP exited with code ${String(exitCode)}`);
+  requireEval(context.mcp.protocolErrors.length === 0, `client observed protocol errors: ${context.mcp.protocolErrors.map((error) => error.message).join('; ')}`);
+  const stderr = Buffer.concat(context.mcp.stderr).toString('utf8');
+  requireEval(stderr === '', `MCP contaminated diagnostics during a healthy session: ${stderr}`);
+  return {
+    mcp_dead: mcpDead,
+    mcp_exit_code: exitCode,
+    mcp_stderr_bytes: 0,
+    orchestrator_dead: orchestratorDead,
+    orchestrator_exit_code: context.orchestrator.exitCode ?? -1,
+    orchestrator_signal: context.orchestrator.signalCode ?? 'none',
   };
 }
 
@@ -974,7 +1009,9 @@ function startMcp(portsFile: string, options: StartMcpOptions = {}): McpSession 
     await connection.sendResult(request.id, { action: 'accept', content: { [field]: value } });
   });
   connection.start();
-  return { child, connection, elicitedFields, protocolErrors, stderr };
+  const session = { child, connection, elicitedFields, protocolErrors, stderr };
+  activeMcpSessions.add(session);
+  return session;
 }
 
 async function initializeSession(session: McpSession, elicitation: boolean, signal: AbortSignal): Promise<void> {
@@ -984,9 +1021,7 @@ async function initializeSession(session: McpSession, elicitation: boolean, sign
     clientInfo: { name: 'fragforge-mcp-eval-secondary', version: '1' },
     protocolVersion: PROTOCOL_VERSION,
   }, signal);
-  signal.throwIfAborted();
-  await session.connection.sendNotification('notifications/initialized');
-  signal.throwIfAborted();
+  await sendMcpNotification(session, 'notifications/initialized', signal);
 }
 
 function elicitationField(params: unknown): string | undefined {
@@ -1150,12 +1185,13 @@ async function closeMcp(session: McpSession, signal?: AbortSignal): Promise<numb
   if (session.child.exitCode === null && !session.child.stdin.destroyed) session.child.stdin.end();
   await waitForExit(session.child, PROCESS_EXIT_TIMEOUT_MS, signal);
   session.connection.close();
+  activeMcpSessions.delete(session);
   return session.child.exitCode;
 }
 
-async function stopMcp(session: McpSession): Promise<void> {
+async function stopMcp(session: McpSession, signal?: AbortSignal): Promise<void> {
   try {
-    const exitCode = await closeMcp(session);
+    const exitCode = await closeMcp(session, signal);
     requireEval(session.child.signalCode === null, `secondary MCP was killed by ${String(session.child.signalCode)}`);
     requireEval(exitCode === 0, `secondary MCP exited with code ${String(exitCode)}`);
     requireEval(
@@ -1165,11 +1201,102 @@ async function stopMcp(session: McpSession): Promise<void> {
     const stderr = Buffer.concat(session.stderr).toString('utf8');
     requireEval(stderr === '', `secondary MCP contaminated diagnostics during a healthy session: ${stderr}`);
   } catch (error: unknown) {
-    session.connection.close();
-    if (processIsRunning(session.child)) session.child.kill();
-    await waitForExit(session.child, PROCESS_EXIT_TIMEOUT_MS);
+    await forceStopMcp(
+      session,
+      signal?.aborted === true ? SCENARIO_ABORT_CLEANUP_TIMEOUT_MS : PROCESS_EXIT_TIMEOUT_MS,
+    );
     throw error;
   }
+}
+
+async function forceStopEvalProcesses(context: EvalContext): Promise<void> {
+  const cleanup = await Promise.allSettled([
+    forceStopMcp(context.mcp, SCENARIO_ABORT_CLEANUP_TIMEOUT_MS),
+    forceStopChild(context.orchestrator, SCENARIO_ABORT_CLEANUP_TIMEOUT_MS),
+  ]);
+  const errors = cleanup.flatMap((result, index) => result.status === 'rejected'
+    ? [`${index === 0 ? 'MCP' : 'orchestrator'}: ${errorMessage(result.reason)}`]
+    : []);
+  if (errors.length > 0) throw new Error(`abort cleanup failures: ${errors.join('; ')}`);
+}
+
+async function stopChildWithFallback(child: ChildProcess, forceTimeoutMs: number): Promise<void> {
+  if (!processIsRunning(child)) return;
+  let gracefulError: unknown;
+  try {
+    const accepted = child.kill();
+    if (!accepted && processIsRunning(child)) throw new Error('process rejected the termination signal');
+    await waitForExit(child, PROCESS_EXIT_TIMEOUT_MS);
+    return;
+  } catch (error: unknown) {
+    gracefulError = error;
+  }
+  if (!processIsRunning(child)) return;
+  try {
+    await forceStopChild(child, forceTimeoutMs);
+  } catch (forceError: unknown) {
+    throw new Error(
+      `graceful termination: ${errorMessage(gracefulError)}; forced termination: ${errorMessage(forceError)}`,
+    );
+  }
+}
+
+async function forceStopMcp(session: McpSession, timeoutMs: number): Promise<void> {
+  try {
+    session.connection.close();
+    if (!session.child.stdin.destroyed) session.child.stdin.destroy();
+    await forceStopChild(session.child, timeoutMs);
+  } finally {
+    releaseStoppedEvalResource(activeMcpSessions, session, !processIsRunning(session.child));
+  }
+}
+
+async function forceStopChild(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (!processIsRunning(child)) return;
+  const deadline = Date.now() + timeoutMs;
+  let terminationError: unknown;
+  try {
+    terminateProcessTree(child, Math.min(TREE_KILL_TIMEOUT_MS, timeoutMs));
+  } catch (error: unknown) {
+    terminationError = error;
+    if (processIsRunning(child)) {
+      try {
+        child.kill('SIGKILL');
+      } catch (fallbackError: unknown) {
+        terminationError = new Error(`${errorMessage(error)}; direct kill fallback: ${errorMessage(fallbackError)}`);
+      }
+    }
+  }
+  const remaining = Math.max(1, deadline - Date.now());
+  let waitError: unknown;
+  try {
+    await waitForExit(child, remaining);
+  } catch (error: unknown) {
+    waitError = error;
+  }
+  const errors = [terminationError, waitError].filter((error) => error !== undefined).map(errorMessage);
+  if (errors.length > 0) {
+    const message = errors.join('; ');
+    if (waitError instanceof EvalTimeoutError) throw new EvalTimeoutError(message);
+    throw new Error(message);
+  }
+}
+
+function terminateProcessTree(child: ChildProcess, timeoutMs: number): void {
+  if (!processIsRunning(child)) return;
+  if (process.platform === 'win32') {
+    const pid = child.pid;
+    if (pid === undefined) throw new Error('cannot terminate process tree without a PID');
+    const result = spawnSync('taskkill.exe', ['/pid', String(pid), '/t', '/f'], {
+      stdio: 'ignore',
+      timeout: timeoutMs,
+      windowsHide: true,
+    });
+    if (result.error !== undefined) throw new Error(`taskkill failed: ${result.error.message}`);
+    if (result.status !== 0) throw new Error(`taskkill exited with code ${String(result.status)}`);
+    return;
+  }
+  if (!child.kill('SIGKILL')) throw new Error('process rejected SIGKILL');
 }
 
 async function waitForExit(child: ChildProcess, timeoutMs: number, signal?: AbortSignal): Promise<void> {
@@ -1191,7 +1318,7 @@ async function waitForExit(child: ChildProcess, timeoutMs: number, signal?: Abor
     };
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error(`process did not exit within ${timeoutMs}ms`));
+      reject(new EvalTimeoutError(`process did not exit within ${timeoutMs}ms`));
     }, timeoutMs);
     child.once('close', handleClose);
     signal?.addEventListener('abort', handleAbort, { once: true });
@@ -1202,13 +1329,44 @@ function processIsRunning(child: ChildProcess): boolean {
   return child.exitCode === null && child.signalCode === null;
 }
 
-function sendMcpRequest(
+async function sendMcpRequest(
   session: McpSession,
   method: string,
   params: unknown,
   signal: AbortSignal,
 ): Promise<unknown> {
-  return session.connection.sendRequest(method, params, boundedSignal(signal, MCP_TIMEOUT_MS));
+  return await runWithEvalTimeout(
+    signal,
+    MCP_TIMEOUT_MS,
+    `${method} request`,
+    async (boundedSignal) => await session.connection.sendRequest(method, params, boundedSignal),
+  );
+}
+
+async function fetchBytesWithScenarioTimeout(
+  input: string,
+  init: RequestInit,
+  signal: AbortSignal,
+  label: string,
+): Promise<{ bytes: Buffer; response: Response }> {
+  return await runWithEvalTimeout(signal, MCP_TIMEOUT_MS, label, async (boundedSignal) => {
+    const response = await fetch(input, { ...init, signal: boundedSignal });
+    const bytes = Buffer.from(await response.arrayBuffer());
+    return { bytes, response };
+  });
+}
+
+async function sendMcpNotification(
+  session: McpSession,
+  method: string,
+  signal: AbortSignal,
+): Promise<void> {
+  await withTimeout(
+    session.connection.sendNotification(method),
+    MCP_TIMEOUT_MS,
+    `${method} notification write timed out`,
+    signal,
+  );
 }
 
 async function cleanupEvalContext(context: EvalContext): Promise<void> {
@@ -1218,13 +1376,24 @@ async function cleanupEvalContext(context: EvalContext): Promise<void> {
   } catch (error: unknown) {
     errors.push(`MCP: ${errorMessage(error)}`);
   }
-  if (processIsRunning(context.orchestrator)) {
-    try {
-      if (!context.orchestrator.kill()) errors.push('orchestrator rejected the termination signal');
-      await waitForExit(context.orchestrator, PROCESS_EXIT_TIMEOUT_MS);
-    } catch (error: unknown) {
-      errors.push(`orchestrator: ${errorMessage(error)}`);
+  const leftoverSessions = [...activeMcpSessions];
+  const leftoverResults = await Promise.allSettled(
+    leftoverSessions.map((session) => forceStopMcp(session, SCENARIO_ABORT_CLEANUP_TIMEOUT_MS)),
+  );
+  for (const [index, result] of leftoverResults.entries()) {
+    if (result.status === 'rejected') {
+      errors.push(`tracked MCP ${index + 1}: ${errorMessage(result.reason)}`);
     }
+  }
+  const liveSessions = [...activeMcpSessions].filter((session) => processIsRunning(session.child));
+  if (liveSessions.length > 0) {
+    const processIDs = liveSessions.map((session) => session.child.pid ?? 'unknown').join(', ');
+    errors.push(`tracked MCP processes remain alive after cleanup: ${processIDs}`);
+  }
+  try {
+    await stopChildWithFallback(context.orchestrator, SCENARIO_ABORT_CLEANUP_TIMEOUT_MS);
+  } catch (error: unknown) {
+    errors.push(`orchestrator: ${errorMessage(error)}`);
   }
   try {
     await rm(context.temporaryDirectory, { force: true, recursive: true });
@@ -1260,17 +1429,13 @@ async function withTimeout<T>(
       resolve(value);
     };
     const handleAbort = (): void => rejectOnce(signal?.reason ?? new Error('operation aborted'));
-    const timeout = setTimeout(() => rejectOnce(new Error(message)), timeoutMs);
+    const timeout = setTimeout(() => rejectOnce(new EvalTimeoutError(message)), timeoutMs);
     signal?.addEventListener('abort', handleAbort, { once: true });
     void promise.then(
       resolveOnce,
       rejectOnce,
     );
   });
-}
-
-function boundedSignal(signal: AbortSignal, timeoutMs: number): AbortSignal {
-  return AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
 }
 
 function pause(milliseconds: number): Promise<void> {

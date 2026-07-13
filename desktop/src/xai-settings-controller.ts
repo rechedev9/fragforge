@@ -84,7 +84,7 @@ export class XAISettingsController {
     } catch {
       return failure('No se pudo eliminar la clave guardada.');
     }
-    if (removed) this.#restartRequired = true;
+    if (removed && !this.#environmentOverride) this.#restartRequired = true;
     return this.#mutationSuccess();
   }
 

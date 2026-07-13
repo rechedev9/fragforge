@@ -20,10 +20,11 @@ interface ControllerDouble {
 function controllerDouble(options: {
   available?: boolean;
   environmentOverride?: boolean;
+  initiallyStored?: boolean;
   statusError?: boolean;
 } = {}): ControllerDouble {
   const state = { removed: 0, restartScheduled: 0, saved: [] as string[] };
-  let stored = false;
+  let stored = options.initiallyStored ?? false;
   const keyStore: XAISettingsKeyStore = {
     isAvailable: async () => options.available ?? true,
     remove: async () => {
@@ -98,6 +99,21 @@ test('removal and restart are explicit and markApplied resets the transition', a
   assert.equal(state.restartScheduled, 1);
   controller.markApplied();
   assert.equal(controller.restartRequired, false);
+});
+
+test('removing a shadowed stored key under an environment override does not request restart', async () => {
+  const { controller, state } = controllerDouble({ environmentOverride: true, initiallyStored: true });
+
+  const removed = await controller.handle({ action: 'remove' });
+
+  assert.equal(state.removed, 1);
+  assert.equal(controller.restartRequired, false);
+  assert.match(JSON.stringify(removed), /"restartRequired":false/);
+  assert.deepEqual(await controller.handle({ action: 'restart' }), {
+    error: 'No hay cambios de xAI pendientes de aplicar.',
+    ok: false,
+  });
+  assert.equal(state.restartScheduled, 0);
 });
 
 test('status and connection test never require a stored key read', async () => {

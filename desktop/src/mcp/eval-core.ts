@@ -1,6 +1,7 @@
 import type { JsonObject } from './json.ts';
 
 export interface EvalScenario {
+  abortGraceMs?: number;
   id: string;
   run: (signal: AbortSignal) => Promise<JsonObject>;
   timeoutMs?: number;
@@ -39,7 +40,31 @@ export class EvalAssertionError extends Error {
   }
 }
 
-class EvalScenarioTimeoutError extends Error {
+export class EvalTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EvalTimeoutError';
+  }
+}
+
+export class EvalProcessCleanupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EvalProcessCleanupError';
+  }
+}
+
+export class EvalScenarioQuiescenceError extends EvalTimeoutError {
+  readonly report: McpEvalReport | undefined;
+
+  constructor(message: string, report?: McpEvalReport) {
+    super(message);
+    this.name = 'EvalScenarioQuiescenceError';
+    this.report = report;
+  }
+}
+
+class EvalScenarioTimeoutError extends EvalTimeoutError {
   constructor(message: string) {
     super(message);
     this.name = 'EvalScenarioTimeoutError';
@@ -47,7 +72,7 @@ class EvalScenarioTimeoutError extends Error {
 }
 
 const DEFAULT_SCENARIO_TIMEOUT_MS = 30_000;
-const SCENARIO_ABORT_GRACE_MS = 3_000;
+const DEFAULT_SCENARIO_ABORT_GRACE_MS = 3_000;
 
 export function requireEval(condition: boolean, message: string): asserts condition {
   if (!condition) throw new EvalAssertionError(message);
@@ -78,6 +103,7 @@ export async function runEvalScenarios(
         scenario.run(controller.signal),
         controller,
         timeoutMs,
+        scenario.abortGraceMs ?? DEFAULT_SCENARIO_ABORT_GRACE_MS,
         `scenario timed out after ${timeoutMs}ms`,
       );
       results.push({
@@ -95,7 +121,22 @@ export async function runEvalScenarios(
         status: 'failed',
         title: scenario.title,
       });
-      if (error instanceof EvalScenarioTimeoutError) {
+      if (error instanceof EvalScenarioQuiescenceError) {
+        for (const remaining of scenarios.slice(index + 1)) {
+          results.push({
+            duration_ms: 0,
+            error: `not run because prior scenario ${scenario.id} did not quiesce`,
+            id: remaining.id,
+            status: 'failed',
+            title: remaining.title,
+          });
+        }
+        throw new EvalScenarioQuiescenceError(
+          error.message,
+          buildEvalReport(started, now(), results, environment),
+        );
+      }
+      if (error instanceof EvalTimeoutError) {
         for (const remaining of scenarios.slice(index + 1)) {
           results.push({
             duration_ms: 0,
@@ -110,6 +151,15 @@ export async function runEvalScenarios(
     }
   }
   const finished = now();
+  return buildEvalReport(started, finished, results, environment);
+}
+
+function buildEvalReport(
+  started: Date,
+  finished: Date,
+  results: EvalScenarioResult[],
+  environment: JsonObject,
+): McpEvalReport {
   const passed = results.filter((result) => result.status === 'passed').length;
   const total = results.length;
   return {
@@ -129,10 +179,70 @@ export async function runEvalScenarios(
   };
 }
 
+export function runEvalFailureReport(
+  id: string,
+  title: string,
+  error: unknown,
+  environment: JsonObject,
+  now: () => Date = () => new Date(),
+): Promise<McpEvalReport> {
+  const message = errorMessage(error);
+  return runEvalScenarios([{
+    id,
+    run: async () => {
+      throw new Error(message);
+    },
+    title,
+  }], environment, now);
+}
+
+export async function runWithEvalTimeout<T>(
+  parentSignal: AbortSignal,
+  timeoutMs: number,
+  label: string,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  parentSignal.throwIfAborted();
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  try {
+    return await operation(AbortSignal.any([parentSignal, timeoutSignal]));
+  } catch (error: unknown) {
+    if (timeoutSignal.aborted && !parentSignal.aborted) {
+      throw new EvalTimeoutError(`${label} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  }
+}
+
+export async function publishEvalReportBeforeFatalExit(
+  fatal: boolean,
+  publish: () => Promise<void>,
+  exit: (code: number) => void,
+): Promise<void> {
+  try {
+    await publish();
+  } finally {
+    if (fatal) exit(1);
+  }
+}
+
+export function evalFailureRequiresForcedExit(error: unknown): boolean {
+  return error instanceof EvalScenarioQuiescenceError || error instanceof EvalProcessCleanupError;
+}
+
+export function releaseStoppedEvalResource<T>(
+  resources: Set<T>,
+  resource: T,
+  stopped: boolean,
+): void {
+  if (stopped) resources.delete(resource);
+}
+
 function runWithDeadline<T>(
   promise: Promise<T>,
   controller: AbortController,
   timeoutMs: number,
+  abortGraceMs: number,
   message: string,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -144,8 +254,10 @@ function runWithDeadline<T>(
       controller.abort(timeoutError);
       abortGrace = setTimeout(() => {
         settled = true;
-        reject(timeoutError);
-      }, SCENARIO_ABORT_GRACE_MS);
+        reject(new EvalScenarioQuiescenceError(
+          `${message}; scenario did not quiesce within ${abortGraceMs}ms after abort`,
+        ));
+      }, abortGraceMs);
     }, timeoutMs);
     void promise.then(
       (value) => {
