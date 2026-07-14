@@ -12,9 +12,6 @@ FragForge is a deterministic CS2 demo-to-video pipeline written primarily in Go.
 It parses `.dem` files, builds kill/smoke segment plans, records gameplay with HLAE/CS2 on Windows, and post-processes clips with FFmpeg, Lua effects, overlays, and publishing metadata.
 Everything runs locally on Windows.
 
-Module: `github.com/rechedev9/fragforge`
-Go version: `1.26.1`
-
 ## Architecture
 
 The pipeline is a chain of independent stages connected by on-disk artifacts and a job queue, so each stage is testable and replaceable on its own.
@@ -44,22 +41,15 @@ Pure stages (parse, compose) retry automatically; recording does not retry autom
 
 Module boundaries (keep `cmd/` entrypoints thin):
 
-- `cmd/` - CLI entrypoints (`zv` unified binary plus `zv-parser`, `zv-recorder`, `zv-composer`, `zv-editor`, `zv-orchestrator`, ...).
-- `internal/parser` - `.dem` parsing and segment extraction (built on `markus-wa/demoinfocs-golang`).
 - `internal/killplan` - shared kill/segment plan types; the kill plan is the contract between parse and every later stage.
 - `internal/moments` - scored, reviewable clip candidates derived from kill plans.
 - `internal/recording` - HLAE/CS2 recording scripts, artifacts, validation.
 - `internal/editor` - Shorts rendering, the render preset registry, Lua effects, validation, publish packs.
 - `internal/renderplan` - render variants, loadouts, edit documents, QA.
 - `internal/composition` - concat/composition planning and FFmpeg boundaries.
-- `internal/httpapi` - orchestrator HTTP routes, handlers, and the embedded HTMX workbench UI.
 - `internal/workers` - Asynq parser/media/agent workers.
 - `internal/youtubeinsights`, `internal/youtubetrends` - deterministic Europe/Madrid scheduling, factual reel-derived metadata recommendations, and optional bounded Firecrawl trend discovery for the manual publication assistant. Firecrawl results are hints, never fabricated YouTube performance metrics.
-- `internal/storage`, `internal/job`, `internal/tasks` - persistence and job state.
-- `internal/lineups` - utility lineup catalog data.
-- `effects/` - editable Lua effect scripts.
-- `overlays/` - HyperFrames overlay experiments and generated overlay projects.
-- `web/` - standalone Next.js (App Router) frontend: the no-login `/upload` flow, match/clip/video views, and a typed API client; it reaches the orchestrator only through same-origin `/api/demos/*` proxy routes (see "Web frontend" below).
+- `web/` - standalone Next.js (App Router) frontend: the no-login `/upload` flow, match/clip/video views, and a typed API client; it reaches the orchestrator only through same-origin `/api/demos/*` proxy routes (see `web/CLAUDE.md`).
 - `data/` - generated/local media artifacts; treat as output unless the task is explicitly about test fixtures or artifact cleanup.
 
 The current foundation runs locally and concatenates segments into `final.mp4`; treat `README.md` as the source of truth for what exists today.
