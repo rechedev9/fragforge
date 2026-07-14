@@ -203,19 +203,28 @@ test('turns a fatal quiescence error into a writable failure report', async () =
 });
 
 test('maps a timeout after an operation has started to the terminal eval timeout type', async () => {
-  const parent = new AbortController();
+  // AbortSignal.timeout()'s internal timer is unref'd, so on an otherwise idle
+  // event loop node:test can lose track of the pending abort/rejection before
+  // it settles, cancelling every later test in the file (nodejs/node#49952).
+  // Keep the loop alive for the duration so the rejection is observed here.
+  const keepAlive = setInterval(() => {}, 1_000);
+  try {
+    const parent = new AbortController();
 
-  const operation = runWithEvalTimeout(parent.signal, 5, 'response body', async (signal) => {
-    await Promise.resolve();
-    return await new Promise<never>((_resolve, reject) => {
-      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    const operation = runWithEvalTimeout(parent.signal, 5, 'response body', async (signal) => {
+      await Promise.resolve();
+      return await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
     });
-  });
 
-  await assert.rejects(
-    operation,
-    (error: unknown) => error instanceof EvalTimeoutError && error.message === 'response body timed out after 5ms',
-  );
+    await assert.rejects(
+      operation,
+      (error: unknown) => error instanceof EvalTimeoutError && error.message === 'response body timed out after 5ms',
+    );
+  } finally {
+    clearInterval(keepAlive);
+  }
 });
 
 test('requests fatal exit even when the best-effort report write fails', async () => {

@@ -1917,10 +1917,19 @@ func normalizedText(value string) string {
 	return strings.ReplaceAll(value, "\r\n", "\n")
 }
 
+// bashPath converts a Windows path to the POSIX form a spawned "bash" expects
+// on PATH. Which convention applies depends on which bash actually runs the
+// command: Git Bash/MSYS (the default on GitHub-hosted windows-latest
+// runners, and this project's supported bash per CLAUDE.md) mounts drives at
+// "/c/...", while WSL mounts them at "/mnt/c/...". Return both, colon-joined,
+// so the caller's PATH prefix works under either — same defensive pattern as
+// scripts/go-env.sh's candidate list.
 func bashPath(path string) string {
 	path = filepath.ToSlash(path)
 	if len(path) >= 3 && path[1] == ':' && path[2] == '/' {
-		return "/mnt/" + strings.ToLower(path[:1]) + "/" + path[3:]
+		drive := strings.ToLower(path[:1])
+		rest := path[3:]
+		return "/" + drive + "/" + rest + ":/mnt/" + drive + "/" + rest
 	}
 	return path
 }
