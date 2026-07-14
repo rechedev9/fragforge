@@ -186,13 +186,17 @@ address requires `ZV_MUTATION_TOKEN`. Optional environment variables:
 | `ZV_MEDIA_WORK_DIR` | Keep media workdirs for debugging (deleted after each task when unset). |
 | `ZV_CODEX_PATH`, `ZV_CODEX_MODEL`, `ZV_AGENT_TIMEOUT` | Optional local editorial assistant (`codex exec`, read-only sandbox) for caption/title suggestions. |
 | `XAI_API_KEY` | Optional xAI speech-to-text for stream captions. |
+| `GROQ_API_KEY` (or `ZV_GROQ_API_KEY`) | Optional Groq Whisper fallback for stream captions; runs when the preferred backend fails or transcribes no words. |
 | `FIRECRAWL_API_KEY` | Optional public CS2 Shorts trend hints for the publication assistant; never sent to the browser. |
 
 xAI captions use the REST `/v1/stt` endpoint, which returns word-level timestamps
 and accepts the rendered MP4 directly. The endpoint does not take a model name;
 xAI prices batch speech-to-text separately from streaming; check the
-[current Voice API pricing](https://x.ai/api/voice). Local whisper.cpp remains
-available as an offline fallback.
+[current Voice API pricing](https://x.ai/api/voice).
+Caption backends form a fallback chain in preference order xAI, Groq Whisper, local whisper.cpp:
+the next backend runs when the previous one fails or produces an empty transcript
+(observed with sparse speech buried in gameplay audio), and the clip is published
+uncaptioned only when every configured backend finds no words.
 
 Source builds and the standard desktop installer do not contain a credential.
 In the installed desktop app, each Windows user can open `/settings` and save

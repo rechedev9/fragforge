@@ -861,10 +861,6 @@ func (h *Handlers) readGenerateIntent(id uuid.UUID) (renderplan.GenerateIntent, 
 	return h.generateIntents.Read(id)
 }
 
-func (h *Handlers) completeGenerateIntent(id, runID uuid.UUID) error {
-	return h.generateIntents.Complete(id, runID)
-}
-
 // StartComposition handles POST /api/jobs/{id}/compose.
 func (h *Handlers) StartComposition(w http.ResponseWriter, r *http.Request) {
 	j, ok := h.loadJob(w, r)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -563,13 +564,15 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 		cfg            StreamRenderWorkerConfig
 		wantWhisper    bool
 		wantXAI        bool
+		wantGroq       bool
 		wantCaptioning bool
 	}{
 		{
-			name:           "neither configured",
+			name:           "none configured",
 			cfg:            StreamRenderWorkerConfig{},
 			wantWhisper:    false,
 			wantXAI:        false,
+			wantGroq:       false,
 			wantCaptioning: false,
 		},
 		{
@@ -577,6 +580,15 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 			cfg:            StreamRenderWorkerConfig{XAIAPIKey: "xai_test"},
 			wantWhisper:    false,
 			wantXAI:        true,
+			wantGroq:       false,
+			wantCaptioning: true,
+		},
+		{
+			name:           "groq only",
+			cfg:            StreamRenderWorkerConfig{GroqAPIKey: "groq_test"},
+			wantWhisper:    false,
+			wantXAI:        false,
+			wantGroq:       true,
 			wantCaptioning: true,
 		},
 		{
@@ -584,6 +596,7 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 			cfg:            StreamRenderWorkerConfig{WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
 			wantWhisper:    true,
 			wantXAI:        false,
+			wantGroq:       false,
 			wantCaptioning: true,
 		},
 		{
@@ -591,13 +604,15 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 			cfg:            StreamRenderWorkerConfig{WhisperPath: "whisper-cli"},
 			wantWhisper:    false,
 			wantXAI:        false,
+			wantGroq:       false,
 			wantCaptioning: false,
 		},
 		{
-			name:           "both configured",
-			cfg:            StreamRenderWorkerConfig{XAIAPIKey: "xai_test", WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
+			name:           "all configured",
+			cfg:            StreamRenderWorkerConfig{XAIAPIKey: "xai_test", GroqAPIKey: "groq_test", WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
 			wantWhisper:    true,
 			wantXAI:        true,
+			wantGroq:       true,
 			wantCaptioning: true,
 		},
 	}
@@ -610,10 +625,179 @@ func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
 			if got := tt.cfg.xaiConfigured(); got != tt.wantXAI {
 				t.Errorf("xaiConfigured() = %v, want %v", got, tt.wantXAI)
 			}
+			if got := tt.cfg.groqConfigured(); got != tt.wantGroq {
+				t.Errorf("groqConfigured() = %v, want %v", got, tt.wantGroq)
+			}
 			if got := tt.cfg.captionsConfigured(); got != tt.wantCaptioning {
 				t.Errorf("captionsConfigured() = %v, want %v", got, tt.wantCaptioning)
 			}
 		})
+	}
+}
+
+func TestStreamRenderWorkerConfigCaptionBackendOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  StreamRenderWorkerConfig
+		want []string
+	}{
+		{
+			name: "none configured",
+			cfg:  StreamRenderWorkerConfig{},
+			want: nil,
+		},
+		{
+			name: "xai only",
+			cfg:  StreamRenderWorkerConfig{XAIAPIKey: "xai_test"},
+			want: []string{"xai"},
+		},
+		{
+			name: "groq only",
+			cfg:  StreamRenderWorkerConfig{GroqAPIKey: "groq_test"},
+			want: []string{"groq"},
+		},
+		{
+			name: "xai preferred, then groq, then whisper",
+			cfg: StreamRenderWorkerConfig{
+				XAIAPIKey:        "xai_test",
+				GroqAPIKey:       "groq_test",
+				WhisperPath:      "whisper-cli",
+				WhisperModelPath: "model.bin",
+			},
+			want: []string{"xai", "groq", "whisper"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, b := range tt.cfg.captionBackends("auto") {
+				got = append(got, b.name)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("captionBackends() order = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTranscribeCaptionsWithFallbackFirstSuccessSkipsRest(t *testing.T) {
+	want := []captions.WordCue{{Word: "nice", StartSeconds: 0.5, EndSeconds: 1}}
+	var calls []string
+	backends := []captionBackend{
+		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			calls = append(calls, "xai")
+			return want, nil
+		}},
+		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			calls = append(calls, "groq")
+			return nil, errors.New("must not be called")
+		}},
+	}
+	got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+	if err != nil {
+		t.Fatalf("transcribeCaptionsWithFallback error = %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got cues %v, want %v", got, want)
+	}
+	if !slices.Equal(calls, []string{"xai"}) {
+		t.Errorf("backend calls = %v, want only xai", calls)
+	}
+}
+
+func TestTranscribeCaptionsWithFallbackUsesNextBackendOnNoWords(t *testing.T) {
+	// Regression for a real clip with sparse Spanish speech ("Hola Martínez" in
+	// 15s of gameplay audio): xAI returned an empty transcript on every attempt
+	// while Groq transcribed it. The chain must fall back to the next
+	// configured backend instead of publishing the clip uncaptioned.
+	want := []captions.WordCue{{Word: "Hola", StartSeconds: 1, EndSeconds: 1.4}, {Word: "Martínez", StartSeconds: 1.4, EndSeconds: 2}}
+	var calls []string
+	backends := []captionBackend{
+		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			calls = append(calls, "xai")
+			return nil, fmt.Errorf("captions: xai transcript contains no words")
+		}},
+		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			calls = append(calls, "groq")
+			return want, nil
+		}},
+	}
+	got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+	if err != nil {
+		t.Fatalf("transcribeCaptionsWithFallback error = %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got cues %v, want %v", got, want)
+	}
+	if !slices.Equal(calls, []string{"xai", "groq"}) {
+		t.Errorf("backend calls = %v, want xai then groq", calls)
+	}
+}
+
+func TestTranscribeCaptionsWithFallbackAllNoWordsPublishesUncaptioned(t *testing.T) {
+	backends := []captionBackend{
+		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			return nil, fmt.Errorf("captions: xai transcript contains no words")
+		}},
+		{name: "whisper", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			return nil, fmt.Errorf("captions: whisper transcript contains no words")
+		}},
+	}
+	_, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+	if err == nil {
+		t.Fatal("transcribeCaptionsWithFallback returned nil error, want a no-words error")
+	}
+	// burnClipCaptions keys on this substring to publish the clip uncaptioned
+	// instead of failing the render.
+	if !strings.Contains(err.Error(), "no words") {
+		t.Errorf("got error %q, want it to contain \"no words\"", err.Error())
+	}
+}
+
+func TestTranscribeCaptionsWithFallbackHardErrorFailsRender(t *testing.T) {
+	// One backend finding no words must not mask another backend's hard
+	// failure as an "empty transcript" warning: captions were explicitly
+	// requested, so the render fails and the user sees the real error.
+	backends := []captionBackend{
+		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			return nil, fmt.Errorf("captions: xai transcript contains no words")
+		}},
+		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			return nil, fmt.Errorf("captions: groq transcription request failed (status 500)")
+		}},
+	}
+	_, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+	if err == nil {
+		t.Fatal("transcribeCaptionsWithFallback returned nil error, want an error")
+	}
+	if strings.Contains(err.Error(), "no words") {
+		t.Errorf("got error %q, want the hard failure not to be downgraded to a no-words warning", err.Error())
+	}
+	if !strings.Contains(err.Error(), "status 500") {
+		t.Errorf("got error %q, want it to surface the groq failure", err.Error())
+	}
+}
+
+func TestTranscribeCaptionsWithFallbackStopsOnCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls []string
+	backends := []captionBackend{
+		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			calls = append(calls, "xai")
+			cancel()
+			return nil, fmt.Errorf("captions: xai transcription interrupted: %w", context.Canceled)
+		}},
+		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			calls = append(calls, "groq")
+			return nil, errors.New("must not be called after cancellation")
+		}},
+	}
+	_, err := transcribeCaptionsWithFallback(ctx, "clip.wav", t.TempDir(), backends)
+	if err == nil {
+		t.Fatal("transcribeCaptionsWithFallback returned nil error, want a context error")
+	}
+	if !slices.Equal(calls, []string{"xai"}) {
+		t.Errorf("backend calls = %v, want the chain to stop at xai after cancellation", calls)
 	}
 }
 
