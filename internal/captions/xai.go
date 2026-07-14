@@ -61,16 +61,6 @@ const xaiMaxTranscriptionAttempts = 3
 
 const xaiPartialSpanThreshold = 0.5
 
-// xaiMaxPlausibleWordSeconds bounds how long a single spoken word may
-// legitimately take, even shouted or drawn out in excitement. xAI has been
-// observed returning a garbled transcript concentrated in two or three
-// words stamped with wildly inflated spans instead of failing outright (a
-// "Hola"/"Martínez" pair verified at 3.66s and 8.14s on a 15s CS2 clip whose
-// source audio was almost never silent). The span-ratio partial check alone
-// misses this: a couple of long words can still cover more than half the
-// clip.
-const xaiMaxPlausibleWordSeconds = 2.5
-
 const (
 	xaiRetryInitialBackoff = 250 * time.Millisecond
 	xaiRetryMaxBackoff     = time.Second
@@ -128,7 +118,10 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 				best = cues
 				bestDuration = duration
 			}
-			if !xaiTranscriptLooksTemporallyPartial(cues, duration) && !xaiTranscriptHasImplausibleWordDuration(cues) {
+			// Retry a transcript that covers only part of the clip, and one whose
+			// word timings are implausible: both signal xAI returned something
+			// other than a faithful reading of the audio.
+			if !xaiTranscriptLooksTemporallyPartial(cues, duration) && ValidateTranscript(cues) == nil {
 				return cues, nil
 			}
 		}
@@ -139,9 +132,20 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 		}
 	}
 	if len(best) > 0 {
-		return best, nil
+		return acceptXAITranscript(best)
 	}
 	return nil, lastErr
+}
+
+// acceptXAITranscript returns the transcript unless ValidateTranscript rejects
+// its timings. Such a transcript is garbled, not merely sparse: retrying cannot
+// repair it (xAI returns the same reply for the same audio), so it is reported
+// as unusable and the caller falls back to another backend.
+func acceptXAITranscript(cues []WordCue) ([]WordCue, error) {
+	if err := ValidateTranscript(cues); err != nil {
+		return nil, fmt.Errorf("captions: xai %w", err)
+	}
+	return cues, nil
 }
 
 func bestXAITranscriptAfterError(ctx context.Context, best []WordCue, err error) ([]WordCue, error) {
@@ -149,7 +153,9 @@ func bestXAITranscriptAfterError(ctx context.Context, best []WordCue, err error)
 		return nil, fmt.Errorf("captions: xai transcription interrupted: %w", ctxErr)
 	}
 	if len(best) > 0 {
-		return best, nil
+		// Why a later attempt failed does not make an already-garbled transcript
+		// safe to burn in, so the same plausibility bar applies here.
+		return acceptXAITranscript(best)
 	}
 	return nil, err
 }
@@ -363,7 +369,7 @@ func parseXAITranscriptResponse(data []byte) ([]WordCue, float64, error) {
 	})
 	cues = normalizeXAICueTimings(cues)
 	if len(cues) == 0 {
-		return nil, transcript.Duration, fmt.Errorf("captions: xai transcript contains no words")
+		return nil, transcript.Duration, fmt.Errorf("captions: xai transcript contains no words: %w", ErrUnusableTranscript)
 	}
 	return cues, transcript.Duration, nil
 }
@@ -373,19 +379,6 @@ func xaiTranscriptLooksTemporallyPartial(cues []WordCue, duration float64) bool 
 		return false
 	}
 	return xaiTranscriptSpanRatio(cues, duration) < xaiPartialSpanThreshold
-}
-
-// xaiTranscriptHasImplausibleWordDuration reports whether any cue's spoken
-// duration exceeds xaiMaxPlausibleWordSeconds, the signature of a garbled
-// xAI response: a handful of words stretched to cover most of the clip
-// instead of the many short words real speech produces.
-func xaiTranscriptHasImplausibleWordDuration(cues []WordCue) bool {
-	for _, cue := range cues {
-		if cue.EndSeconds-cue.StartSeconds > xaiMaxPlausibleWordSeconds {
-			return true
-		}
-	}
-	return false
 }
 
 func betterXAITranscript(cues []WordCue, duration float64, best []WordCue, bestDuration float64) bool {

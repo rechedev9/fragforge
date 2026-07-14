@@ -319,10 +319,13 @@ func TestXAITranscriber_RetriesPartialBilingualTranscript(t *testing.T) {
 }
 
 func TestXAITranscriber_KeepsBestPartialTranscriptAfterRetries(t *testing.T) {
+	// Every attempt covers only part of the 20s clip, so all three run and the
+	// widest-spanning one wins. The words themselves are normal length: a
+	// transcript of implausibly long words is rejected outright, not ranked.
 	responses := []string{
-		`{"duration":20,"words":[{"text":"late","start":15,"end":19}]}`,
-		`{"duration":20,"words":[{"text":"middle","start":8,"end":16}]}`,
-		`{"duration":20,"words":[{"text":"short","start":18,"end":19}]}`,
+		`{"duration":20,"words":[{"text":"late","start":15,"end":15.4},{"text":"again","start":18.6,"end":19}]}`,
+		`{"duration":20,"words":[{"text":"middle","start":8,"end":8.4},{"text":"again","start":15.6,"end":16}]}`,
+		`{"duration":20,"words":[{"text":"short","start":18,"end":18.4},{"text":"again","start":18.6,"end":19}]}`,
 	}
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -349,7 +352,7 @@ func TestXAITranscriber_KeepsBestPartialTranscriptAfterRetries(t *testing.T) {
 }
 
 func TestXAITranscriber_ReturnsBestPartialWhenLaterAttemptFails(t *testing.T) {
-	partial := `{"duration":20,"words":[{"text":"usable","start":15,"end":19}]}`
+	partial := `{"duration":20,"words":[{"text":"usable","start":15,"end":15.4}]}`
 	tests := []struct {
 		name         string
 		secondStatus int
@@ -472,42 +475,44 @@ func TestXAITranscriber_RetriesImplausibleWordDurations(t *testing.T) {
 	}
 }
 
-func TestXAITranscriptHasImplausibleWordDuration(t *testing.T) {
-	tests := []struct {
-		name string
-		cues []WordCue
-		want bool
-	}{
-		{
-			name: "typical spoken words",
-			cues: []WordCue{
-				{Word: "gg", StartSeconds: 0, EndSeconds: 0.4},
-				{Word: "wp", StartSeconds: 0.4, EndSeconds: 0.9},
-			},
-			want: false,
-		},
-		{
-			name: "drawn out but plausible shout",
-			cues: []WordCue{{Word: "noooo", StartSeconds: 0, EndSeconds: 2.4}},
-			want: false,
-		},
-		{
-			name: "implausibly long single word",
-			cues: []WordCue{{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8}},
-			want: true,
-		},
-		{
-			name: "no cues",
-			cues: nil,
-			want: false,
-		},
+// When retrying cannot produce a plausible transcript, the garbled one must be
+// rejected as unusable rather than returned: burning it in froze a "Hola
+// Martínez" card over most of a real 15s clip. Rejecting it lets the worker
+// fall back to another backend.
+func TestXAITranscriber_RejectsPersistentlyGarbledTranscript(t *testing.T) {
+	garbled := `{
+  "duration": 15,
+  "language": "Spanish",
+  "words": [
+    {"text":"Hola","start":0,"end":3.66},
+    {"text":"Martínez","start":3.66,"end":11.8}
+  ]
+}`
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(garbled))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "gameplay.wav")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := xaiTranscriptHasImplausibleWordDuration(tt.cues); got != tt.want {
-				t.Fatalf("xaiTranscriptHasImplausibleWordDuration(%+v) = %v, want %v", tt.cues, got, tt.want)
-			}
-		})
+	cues, err := (XAITranscriber{APIKey: "secret-key", BaseURL: server.URL}).Transcribe(context.Background(), mediaPath, dir)
+	if err == nil {
+		t.Fatalf("Transcribe returned cues %+v, want an unusable-transcript error", cues)
+	}
+	if !errors.Is(err, ErrUnusableTranscript) {
+		t.Fatalf("error = %v, want it to wrap ErrUnusableTranscript", err)
+	}
+	if !strings.Contains(err.Error(), "Martínez") {
+		t.Fatalf("error = %v, want it to name the offending word", err)
+	}
+	if requests != xaiMaxTranscriptionAttempts {
+		t.Fatalf("requests = %d, want %d before giving up", requests, xaiMaxTranscriptionAttempts)
 	}
 }
 
