@@ -112,9 +112,8 @@ func (r *memoryJobRepository) List(ctx context.Context, limit int) ([]job.Job, e
 	defer r.mu.RUnlock()
 	out := make([]job.Job, 0, len(r.jobs))
 	for _, j := range r.jobs {
-		copied := cloneJob(j)
-		copied.KillPlan = nil
-		out = append(out, copied)
+		j.KillPlan = nil
+		out = append(out, j)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {

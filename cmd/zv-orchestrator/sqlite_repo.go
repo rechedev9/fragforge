@@ -146,7 +146,7 @@ func (r *sqliteJobRepository) List(ctx context.Context, limit int) ([]job.Job, e
 		limit = 100
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT data FROM jobs ORDER BY updated_at DESC, created_at DESC LIMIT ?`, limit,
+		`SELECT json_remove(data, '$.kill_plan') FROM jobs ORDER BY updated_at DESC, created_at DESC LIMIT ?`, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query jobs: %w", err)
@@ -163,7 +163,6 @@ func (r *sqliteJobRepository) List(ctx context.Context, limit int) ([]job.Job, e
 		if err := json.Unmarshal(data, &j); err != nil {
 			return nil, fmt.Errorf("unmarshal job: %w", err)
 		}
-		j.KillPlan = nil
 		out = append(out, j)
 	}
 	if err := rows.Err(); err != nil {
@@ -174,7 +173,7 @@ func (r *sqliteJobRepository) List(ctx context.Context, limit int) ([]job.Job, e
 
 func (r *sqliteJobRepository) ListByStatus(ctx context.Context, status job.Status) ([]job.Job, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT data FROM jobs WHERE status = ? ORDER BY updated_at DESC, created_at DESC`,
+		`SELECT json_remove(data, '$.kill_plan') FROM jobs WHERE status = ? ORDER BY updated_at DESC, created_at DESC`,
 		status.String(),
 	)
 	if err != nil {
@@ -192,7 +191,6 @@ func (r *sqliteJobRepository) ListByStatus(ctx context.Context, status job.Statu
 		if err := json.Unmarshal(data, &j); err != nil {
 			return nil, fmt.Errorf("unmarshal job: %w", err)
 		}
-		j.KillPlan = nil
 		out = append(out, j)
 	}
 	if err := rows.Err(); err != nil {
@@ -202,11 +200,47 @@ func (r *sqliteJobRepository) ListByStatus(ctx context.Context, status job.Statu
 }
 
 func (r *sqliteJobRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status job.Status, failureReason string) error {
-	return r.mutate(ctx, id, func(j *job.Job) error {
-		j.Status = status
-		j.FailureReason = failureReason
-		return nil
-	})
+	now := time.Now().UTC()
+	var result sql.Result
+	var err error
+	if failureReason == "" {
+		result, err = r.db.ExecContext(ctx, `
+			UPDATE jobs
+			SET data = json_remove(
+					json_set(data, '$.status', ?, '$.updated_at', ?),
+					'$.failure_reason'
+				),
+				status = ?,
+				updated_at = ?
+			WHERE id = ?`,
+			status.String(), now.Format(time.RFC3339Nano), status.String(), now.UnixNano(), id.String(),
+		)
+	} else {
+		result, err = r.db.ExecContext(ctx, `
+			UPDATE jobs
+			SET data = json_set(
+					data,
+					'$.status', ?,
+					'$.failure_reason', ?,
+					'$.updated_at', ?
+				),
+				status = ?,
+				updated_at = ?
+			WHERE id = ?`,
+			status.String(), failureReason, now.Format(time.RFC3339Nano), status.String(), now.UnixNano(), id.String(),
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("update job status: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count updated jobs: %w", err)
+	}
+	if updated == 0 {
+		return job.ErrNotFound
+	}
+	return nil
 }
 
 func (r *sqliteJobRepository) SetParseInputs(ctx context.Context, id uuid.UUID, steamID string, rl rules.Rules) error {

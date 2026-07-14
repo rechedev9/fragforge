@@ -256,6 +256,68 @@ func TestProcessScanRoster_BadDemoMarksFailed(t *testing.T) {
 	}
 }
 
+func TestOpenDemoUsesLocalFileDirectly(t *testing.T) {
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("storage: %v", err)
+	}
+	const key = "demos/direct.dem"
+	want := []byte("demo bytes")
+	if err := store.Put(key, bytes.NewReader(want)); err != nil {
+		t.Fatalf("Put error = %v", err)
+	}
+	wantPath, err := store.ResolvePath(key)
+	if err != nil {
+		t.Fatalf("ResolvePath error = %v", err)
+	}
+
+	demo, cleanup, err := NewParserWorker(nil, store).openDemo(key)
+	if err != nil {
+		t.Fatalf("openDemo error = %v", err)
+	}
+	if got, want := demo.Name(), wantPath; got != want {
+		cleanup()
+		t.Fatalf("demo path = %q, want original storage path %q", got, want)
+	}
+	got, err := io.ReadAll(demo)
+	if err != nil {
+		cleanup()
+		t.Fatalf("ReadAll error = %v", err)
+	}
+	cleanup()
+	if !bytes.Equal(got, want) {
+		t.Fatalf("demo content = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("source file after cleanup: %v", err)
+	}
+}
+
+func TestOpenDemoCopiesGenericReaderToTemporaryFile(t *testing.T) {
+	store := newFakeStorage()
+	const key = "demos/copied.dem"
+	want := []byte("demo bytes")
+	store.files[key] = want
+
+	demo, cleanup, err := NewParserWorker(nil, store).openDemo(key)
+	if err != nil {
+		t.Fatalf("openDemo error = %v", err)
+	}
+	tempPath := demo.Name()
+	got, err := io.ReadAll(demo)
+	if err != nil {
+		cleanup()
+		t.Fatalf("ReadAll error = %v", err)
+	}
+	cleanup()
+	if !bytes.Equal(got, want) {
+		t.Fatalf("demo content = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
+		t.Fatalf("temporary demo after cleanup error = %v, want not exist", err)
+	}
+}
+
 func TestParserWorkerWritesMomentsArtifact(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()

@@ -121,13 +121,13 @@ func (w *ParserWorker) ProcessScanRoster(ctx context.Context, jobID uuid.UUID) e
 }
 
 func (w *ParserWorker) parse(ctx context.Context, j job.Job) (killplan.Plan, error) {
-	tmp, cleanup, err := w.openDemo(j.DemoPath)
+	demo, cleanup, err := w.openDemo(j.DemoPath)
 	if err != nil {
 		return killplan.Plan{}, err
 	}
 	defer cleanup()
 
-	p := demoinfocs.NewParser(tmp)
+	p := demoinfocs.NewParser(demo)
 	defer p.Close()
 
 	meta := parser.PlanMeta{
@@ -145,13 +145,13 @@ func (w *ParserWorker) parse(ctx context.Context, j job.Job) (killplan.Plan, err
 }
 
 func (w *ParserWorker) scanRoster(ctx context.Context, j job.Job) (string, error) {
-	tmp, cleanup, err := w.openDemo(j.DemoPath)
+	demo, cleanup, err := w.openDemo(j.DemoPath)
 	if err != nil {
 		return "", err
 	}
 	defer cleanup()
 
-	p := demoinfocs.NewParser(tmp)
+	p := demoinfocs.NewParser(demo)
 	defer p.Close()
 
 	result, err := parser.RosterScanWithContext(ctx, p)
@@ -169,14 +169,17 @@ func (w *ParserWorker) scanRoster(ctx context.Context, j job.Job) (string, error
 	return key, nil
 }
 
-// openDemo copies the demo blob to a temp *.dem and returns it positioned at
-// the start. demoinfocs needs an io.ReadSeeker for CS2 demos; copying to a
-// temp file gives it one without buffering the whole demo in memory. The
-// returned cleanup closes and removes the temp file and must be deferred.
+// openDemo returns a local demo file directly when storage already provides
+// one. Other storage implementations are copied to a temporary file so the
+// parser retains the same stable, file-backed input it has always received.
+// The returned cleanup must be deferred.
 func (w *ParserWorker) openDemo(demoPath string) (*os.File, func(), error) {
 	rc, err := w.storage.Open(demoPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open demo: %w", err)
+	}
+	if file, ok := rc.(*os.File); ok {
+		return file, func() { _ = file.Close() }, nil
 	}
 	defer rc.Close()
 

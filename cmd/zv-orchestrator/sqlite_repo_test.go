@@ -90,6 +90,17 @@ func TestSQLiteRepoGetMetaAndListStripKillPlan(t *testing.T) {
 	if list[0].KillPlan != nil {
 		t.Fatal("List: want KillPlan nil, got non-nil")
 	}
+
+	byStatus, err := repo.ListByStatus(ctx, job.StatusScanned)
+	if err != nil {
+		t.Fatalf("ListByStatus: %v", err)
+	}
+	if len(byStatus) != 1 {
+		t.Fatalf("ListByStatus: got %d jobs, want 1", len(byStatus))
+	}
+	if byStatus[0].KillPlan != nil {
+		t.Fatal("ListByStatus: want KillPlan nil, got non-nil")
+	}
 }
 
 func TestSQLiteRepoGetStatusReturnsOnlyLifecycleSummary(t *testing.T) {
@@ -168,7 +179,9 @@ func TestSQLiteRepoUpdateStatus(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
 
-	j := &job.Job{Status: job.StatusRecording}
+	plan := killplan.NewPlan()
+	plan.Segments = []killplan.Segment{{ID: "seg-001", TickStart: 64, TickEnd: 128}}
+	j := &job.Job{Status: job.StatusRecording, KillPlan: &plan}
 	if err := repo.Create(ctx, j); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -181,6 +194,43 @@ func TestSQLiteRepoUpdateStatus(t *testing.T) {
 	}
 	if got.Status != job.StatusFailed || got.FailureReason != "boom" {
 		t.Fatalf("UpdateStatus: got status=%s reason=%q, want failed/boom", got.Status, got.FailureReason)
+	}
+	if got.KillPlan == nil || len(got.KillPlan.Segments) != 1 || got.KillPlan.Segments[0].ID != "seg-001" {
+		t.Fatalf("UpdateStatus changed kill plan: %#v", got.KillPlan)
+	}
+	var mirroredUpdatedAt int64
+	if err := repo.db.QueryRowContext(ctx, `SELECT updated_at FROM jobs WHERE id = ?`, j.ID.String()).Scan(&mirroredUpdatedAt); err != nil {
+		t.Fatalf("read mirrored updated_at: %v", err)
+	}
+	if got, want := mirroredUpdatedAt, got.UpdatedAt.UnixNano(); got != want {
+		t.Fatalf("mirrored updated_at = %d, want JSON timestamp %d", got, want)
+	}
+	if err := repo.UpdateStatus(ctx, j.ID, job.StatusDone, ""); err != nil {
+		t.Fatalf("UpdateStatus clear failure: %v", err)
+	}
+	got, err = repo.Get(ctx, j.ID)
+	if err != nil {
+		t.Fatalf("Get after clear failure: %v", err)
+	}
+	if got.Status != job.StatusDone || got.FailureReason != "" {
+		t.Fatalf("UpdateStatus clear failure: got status=%s reason=%q, want done/empty", got.Status, got.FailureReason)
+	}
+	if got.KillPlan == nil || len(got.KillPlan.Segments) != 1 || got.KillPlan.Segments[0].ID != "seg-001" {
+		t.Fatalf("UpdateStatus clear failure changed kill plan: %#v", got.KillPlan)
+	}
+	byFailed, err := repo.ListByStatus(ctx, job.StatusFailed)
+	if err != nil {
+		t.Fatalf("ListByStatus failed: %v", err)
+	}
+	if len(byFailed) != 0 {
+		t.Fatalf("ListByStatus failed returned %d jobs after done transition, want 0", len(byFailed))
+	}
+	byDone, err := repo.ListByStatus(ctx, job.StatusDone)
+	if err != nil {
+		t.Fatalf("ListByStatus done: %v", err)
+	}
+	if len(byDone) != 1 || byDone[0].ID != j.ID {
+		t.Fatalf("ListByStatus done = %+v, want job %s", byDone, j.ID)
 	}
 	if err := repo.UpdateStatus(ctx, uuid.New(), job.StatusDone, ""); !errors.Is(err, job.ErrNotFound) {
 		t.Fatalf("UpdateStatus unknown: got %v, want ErrNotFound", err)
