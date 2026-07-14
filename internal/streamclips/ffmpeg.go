@@ -407,9 +407,15 @@ func FindBannerFont() string {
 	return ""
 }
 
+// ffmpegFilterPath escapes a path for embedding in an ffmpeg filtergraph
+// string (e.g. drawtext's fontfile). ffmpeg filtergraph syntax always wants
+// forward slashes and an escaped drive-letter colon, regardless of the OS
+// running this code, so backslashes are normalized unconditionally rather
+// than with filepath.ToSlash: ToSlash only rewrites the host OS's own
+// separator, which is a no-op for a Windows-style path like `C:\Windows\...`
+// on a non-Windows build and left it double-escaped instead of slash-joined.
 func ffmpegFilterPath(value string) string {
-	value = filepath.ToSlash(value)
-	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `\`, "/")
 	value = strings.ReplaceAll(value, ":", `\:`)
 	return strings.ReplaceAll(value, "'", `\'`)
 }
