@@ -19,7 +19,7 @@ import (
 // callers try the next backend, and publish the clip uncaptioned if none
 // succeed — which is why it is distinct from a transport or auth error, where
 // failing the render is correct.
-var ErrUnusableTranscript = errors.New("captions: transcript is unusable")
+var ErrUnusableTranscript = errors.New("unusable transcript")
 
 // MaxPlausibleWordSeconds bounds how long a single spoken word may take, even
 // shouted or drawn out. Speech-to-text on gameplay audio hallucinates: on a

@@ -866,6 +866,13 @@ func (c StreamRenderWorkerConfig) captionBackends(language string) []captionBack
 	return backends
 }
 
+// singleLine flattens an error for a render warning. Every backend's failure is
+// collected with errors.Join, which separates them with newlines, and a warning
+// is surfaced as one line of text.
+func singleLine(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
+}
+
 // transcribeCaptionsWithFallback tries each backend in order and returns the
 // first usable transcript. A backend that returns captions.ErrUnusableTranscript
 // (an empty transcript, or one whose word timings are too implausible to burn
@@ -892,8 +899,12 @@ func transcribeCaptionsWithFallback(ctx context.Context, mediaPath, workDir stri
 			}
 			err = fmt.Errorf("captions: %s %w", b.name, err)
 		}
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("%s: %w", b.name, err)
+		// A dead context is a hard failure even when this backend's transcript was
+		// merely unusable: %v keeps ErrUnusableTranscript out of the chain, so a
+		// cancelled render fails instead of publishing uncaptioned as though the
+		// audio simply had no speech.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("%s: %v: %w", b.name, err, ctxErr)
 		}
 		if errors.Is(err, captions.ErrUnusableTranscript) {
 			unusableErrs = append(unusableErrs, fmt.Errorf("%s: %w", b.name, err))
@@ -1218,7 +1229,7 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 	cues, err := w.transcribe(ctx, transcriptionPath, workDir, language)
 	if err != nil {
 		if errors.Is(err, captions.ErrUnusableTranscript) {
-			return "", fmt.Sprintf("clip %s: no usable transcript (%v), publishing without captions", clipID, err), nil
+			return "", fmt.Sprintf("clip %s: no usable transcript (%s), publishing without captions", clipID, singleLine(err)), nil
 		}
 		return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
 	}

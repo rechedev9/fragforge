@@ -3,6 +3,7 @@ package captions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -110,7 +111,9 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 		cues, duration, err := parseXAITranscriptResponse(data)
 		if err != nil {
 			lastErr = err
-			if !strings.Contains(err.Error(), "no words") {
+			// An empty transcript is worth another attempt; a malformed response is
+			// not going to parse any better next time.
+			if !errors.Is(err, ErrUnusableTranscript) {
 				return bestXAITranscriptAfterError(ctx, best, err)
 			}
 		} else {
@@ -154,8 +157,14 @@ func bestXAITranscriptAfterError(ctx context.Context, best []WordCue, err error)
 	}
 	if len(best) > 0 {
 		// Why a later attempt failed does not make an already-garbled transcript
-		// safe to burn in, so the same plausibility bar applies here.
-		return acceptXAITranscript(best)
+		// safe to burn in, so the same plausibility bar applies here. Keep what
+		// went wrong upstream visible: rejecting the transcript sends the caller
+		// to the next backend, and a rejected API key must not vanish silently.
+		cues, acceptErr := acceptXAITranscript(best)
+		if acceptErr != nil {
+			return nil, fmt.Errorf("%w (last attempt also failed: %v)", acceptErr, err)
+		}
+		return cues, nil
 	}
 	return nil, err
 }
@@ -337,9 +346,9 @@ type xaiWord struct {
 
 // parseXAITranscript parses xAI's /stt response into word cues. Entries with
 // empty trimmed text or invalid timings (start < 0 or end <= start) are
-// dropped, and a transcript with no usable words returns an error whose
-// message contains "no words" (the worker relies on that substring to publish
-// the clip uncaptioned instead of failing the render).
+// dropped, and a transcript with no usable words returns an error wrapping
+// ErrUnusableTranscript, which the worker treats as a soft failure: try the
+// next backend, and publish the clip uncaptioned rather than fail the render.
 func parseXAITranscript(data []byte) ([]WordCue, error) {
 	cues, _, err := parseXAITranscriptResponse(data)
 	return cues, err
