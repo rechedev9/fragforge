@@ -172,27 +172,6 @@ func articleFor(word string) string {
 	}
 }
 
-func appendUniqueHashtags(tags []string, extra ...string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(tags)+len(extra))
-	for _, tag := range append(tags, extra...) {
-		tag = strings.TrimSpace(tag)
-		if tag == "" {
-			continue
-		}
-		if !strings.HasPrefix(tag, "#") {
-			tag = "#" + tag
-		}
-		key := strings.ToLower(tag)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, tag)
-	}
-	return out
-}
-
 func publishHashtags(player, mapName, weapon string, extra ...string) []string {
 	raw := []string{"CS2", "CounterStrike2", socialTag(displayMapName(mapName)), socialTag(weapon)}
 	raw = append(raw, extra...)

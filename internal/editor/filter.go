@@ -281,10 +281,6 @@ func zoomHeightExpressionForBase(effects []Effect, baseHeight float64) string {
 	return combined
 }
 
-func smoothZoomHeightExpression(effect Effect) string {
-	return smoothZoomHeightExpressionForBase(effect, 1920)
-}
-
 func smoothZoomHeightExpressionForBase(effect Effect, baseHeight float64) string {
 	start := effect.StartSeconds
 	end := effect.EndSeconds
@@ -405,31 +401,6 @@ func gradeFilters(effects []Effect) []string {
 		filters = append(filters, fmt.Sprintf("eq=contrast=%.3f:saturation=%.3f:gamma=%.3f", contrast, saturation, gamma))
 	}
 	return filters
-}
-
-func drawText(text string, x, y, size int, start, end float64, fontColor, boxColor string, boxBorder int) string {
-	return drawTextExpr(text, fmt.Sprintf("%d", x), fmt.Sprintf("%d", y), size, start, end, fontColor, boxColor, boxBorder)
-}
-
-func drawTextExpr(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int) string {
-	return drawTextExprWithFade(text, x, y, size, start, end, fontColor, boxColor, boxBorder, "", 0, 0)
-}
-
-func drawTextExprWithFade(text, x, y string, size int, start, end float64, fontColor, boxColor string, boxBorder int, fontFile string, fadeIn, fadeOut float64) string {
-	return drawTextEffect(Effect{
-		Value:          text,
-		X:              x,
-		Y:              y,
-		Size:           size,
-		StartSeconds:   start,
-		EndSeconds:     end,
-		FontColor:      fontColor,
-		BoxColor:       boxColor,
-		BoxBorder:      boxBorder,
-		FontFile:       fontFile,
-		FadeInSeconds:  fadeIn,
-		FadeOutSeconds: fadeOut,
-	})
 }
 
 // drawTextEffect renders a text effect as a drawtext filter. BoxColor "none"

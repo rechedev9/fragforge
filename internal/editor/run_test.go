@@ -456,7 +456,10 @@ func main() {
 			t.Fatal(err)
 		}
 		path := filepath.Join(dir, "ffmpeg-failing-short.exe")
-		goExe := filepath.Join(runtime.GOROOT(), "bin", "go.exe")
+		goExe, err := exec.LookPath("go")
+		if err != nil {
+			t.Fatalf("find go toolchain: %v", err)
+		}
 		if out, err := exec.Command(goExe, "build", "-o", path, src).CombinedOutput(); err != nil {
 			t.Fatalf("build fake ffmpeg: %v\n%s", err, out)
 		}
@@ -502,7 +505,10 @@ func main() {
 			t.Fatal(err)
 		}
 		path := filepath.Join(dir, "ffmpeg.exe")
-		goExe := filepath.Join(runtime.GOROOT(), "bin", "go.exe")
+		goExe, err := exec.LookPath("go")
+		if err != nil {
+			t.Fatalf("find go toolchain: %v", err)
+		}
 		if out, err := exec.Command(goExe, "build", "-o", path, src).CombinedOutput(); err != nil {
 			t.Fatalf("build fake ffmpeg: %v\n%s", err, out)
 		}

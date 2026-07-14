@@ -759,10 +759,6 @@ func smokeCues(segment recording.RecordingSegment, tickrate int, mapName string,
 	return out
 }
 
-func parserSmokeGrenadeType() string {
-	return "smokegrenade"
-}
-
 func isOverlayUtilityType(typ string) bool {
 	switch typ {
 	case "smokegrenade", "flashbang", "molotov", "incgrenade":

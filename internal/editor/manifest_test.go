@@ -763,46 +763,6 @@ func testRecordingResult(dir string) recording.RecordingResult {
 	}
 }
 
-func testSmokeRecordingResult(dir string) recording.RecordingResult {
-	return recording.RecordingResult{
-		Plan: recording.RecordingPlan{
-			DemoPath:         filepath.Join(dir, "match-de_ancient.dem"),
-			DemoMap:          "de_ancient",
-			OutputDir:        filepath.Join(dir, "recording"),
-			TargetSteamID64:  "76561198148986856",
-			TargetNameInDemo: "MartinezSa",
-			TargetAccountID:  188721128,
-			Tickrate:         64,
-			Stream:           recording.DefaultStreamConfig(),
-			Segments: []recording.RecordingSegment{
-				{
-					ID:        "seg-001",
-					Round:     3,
-					TickStart: 9000,
-					TickEnd:   9800,
-					Utility: []killplan.UtilityThrow{
-						{
-							ID:          "smoke-001",
-							Type:        "smokegrenade",
-							Round:       3,
-							ThrowTick:   9200,
-							PopTick:     9500,
-							ThrowPlace:  "T Spawn",
-							ThrowAction: "jumpthrow",
-							Stance:      "standing",
-							ThrowPos:    [3]float64{10, 20, 0},
-							LandingPos:  [3]float64{110, 205, 0},
-						},
-					},
-				},
-			},
-		},
-		Artifacts: []recording.RecordingArtifact{
-			{SegmentID: "seg-001", Role: "segment", Type: "video", Path: filepath.Join(dir, "recording", "segments", "seg-001.mp4"), SizeBytes: 12_000_000, DurationSeconds: 10, Codec: "h264", Width: 1920, Height: 1080, FrameRate: "60/1"},
-		},
-	}
-}
-
 func argAfter(args []string, key string) string {
 	for i := 0; i < len(args)-1; i++ {
 		if args[i] == key {

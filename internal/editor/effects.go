@@ -505,13 +505,6 @@ func clampSeconds(value, min, max float64) float64 {
 	return value
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // compileEffectsScript parses and compiles the Lua effects source into reusable
 // bytecode. It returns a nil proto (and nil error) when the source is empty so
 // callers can treat "no script" as "no effects".

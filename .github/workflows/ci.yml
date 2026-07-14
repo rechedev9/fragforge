@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_windows_gate:
+        description: Also run the windows-latest Go gate on this ref
+        type: boolean
+        default: true
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -34,7 +39,43 @@ jobs:
           fi
 
   go:
-    name: Go gate
+    name: Go gate (ubuntu, every push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache staticcheck/govulncheck binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin
+          key: ${{ runner.os }}-go-tools-staticcheck2025.1.1-govulncheck1.4.0
+
+      - name: Install staticcheck and govulncheck
+        shell: bash
+        run: |
+          command -v staticcheck >/dev/null || go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+          command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
+
+      - name: go-gate (fmt, vet, build, test, zv check, staticcheck)
+        shell: bash
+        run: scripts/go-gate.sh --build
+
+      - name: govulncheck (informational)
+        shell: bash
+        continue-on-error: true
+        run: govulncheck ./...
+
+  go-windows:
+    name: Go gate (windows-latest fidelity)
+    # Full Windows-fidelity re-run: automatic on every push to main (the safety
+    # net after landing), plus on-demand via workflow_dispatch for verifying
+    # this job itself on a branch without waiting for a main push.
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event.inputs.run_windows_gate == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,9 +85,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install staticcheck
+      - name: Cache staticcheck/govulncheck binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin
+          key: ${{ runner.os }}-go-tools-staticcheck2025.1.1-govulncheck1.4.0
+
+      - name: Install staticcheck and govulncheck
         shell: bash
-        run: go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+        run: |
+          command -v staticcheck >/dev/null || go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+          command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
 
       - name: go-gate (fmt, vet, build, test, zv check, staticcheck)
         shell: bash
@@ -55,9 +104,7 @@ jobs:
       - name: govulncheck (informational)
         shell: bash
         continue-on-error: true
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+        run: govulncheck ./...
 
   web:
     name: web (lint, typecheck, unit)
