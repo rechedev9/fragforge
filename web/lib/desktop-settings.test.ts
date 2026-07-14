@@ -23,6 +23,12 @@ function bridge(): DesktopSettingsBridge {
     removeXAIKey: async () => ({ ok: true, status: STATUS }),
     testXAIKey: async () => ({ ok: true, code: 'ok', message: 'Conexión correcta.' }),
     restartStudio: async () => ({ ok: true }),
+    getMCPConfig: async () => ({
+      launcherPath: 'C:\\Programs\\FragForge Studio\\fragforge-mcp.cmd',
+      launcherInstalled: true,
+      claudeCommand: 'claude mcp add …',
+      mcpServersJSON: '{}',
+    }),
   };
 }
 

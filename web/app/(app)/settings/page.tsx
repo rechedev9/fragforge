@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { StudioPageHeader } from '@/components/studio/page-header';
+import { MCPSettings } from '@/components/settings/mcp-settings';
 import { XAISettings } from '@/components/settings/xai-settings';
 
 /** Desktop-only application settings. Secret handling remains in Electron. */
@@ -10,9 +11,10 @@ export default function SettingsPage(): ReactNode {
         number={6}
         label="AJUSTES"
         title="CONFIGURACIÓN"
-        description="Configura las credenciales opcionales que FragForge usa para generar subtítulos en tu propio equipo."
+        description="Configura las credenciales opcionales de subtítulos y conecta tu asistente por MCP, todo en tu propio equipo."
       />
       <XAISettings />
+      <MCPSettings />
     </div>
   );
 }
