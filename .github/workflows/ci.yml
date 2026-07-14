@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repo-integrity:
+    name: Repo integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: AGENTS.md must be a symlink to CLAUDE.md
+        run: |
+          if [ ! -L AGENTS.md ] || [ "$(readlink AGENTS.md)" != "CLAUDE.md" ]; then
+            echo "AGENTS.md must be a symbolic link to CLAUDE.md (see .githooks/pre-commit)" >&2
+            exit 1
+          fi
+
+      - name: No generated media or binaries tracked in git
+        run: |
+          pattern='\.(exe|dem|mp4|mov|webm|avi|mkv|wav|flac|aac|tga|exr|y4m|yuv)$'
+          hits="$(git ls-files | grep -Ei "$pattern" || true)"
+          if [ -n "$hits" ]; then
+            echo "generated media/binary files must never be committed (see .gitignore):" >&2
+            echo "$hits" >&2
+            exit 1
+          fi
+
+  go:
+    name: Go gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install staticcheck
+        shell: bash
+        run: go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+
+      - name: go-gate (fmt, vet, build, test, zv check, staticcheck)
+        shell: bash
+        run: scripts/go-gate.sh --build
+
+      - name: govulncheck (informational)
+        shell: bash
+        continue-on-error: true
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  web:
+    name: web (lint, typecheck, unit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+
+  desktop:
+    name: desktop (lint, typecheck, unit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      # No Go binaries are built in this job, so bin/zv-orchestrator.exe never
+      # exists and the MCP e2e specs matched by this glob stay self-skipped.
+      - run: npm run test:unit
+
+  landing:
+    name: landing (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: landing/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
