@@ -70,7 +70,7 @@ if (!existsSync(iconFile)) {
 // 1. Build the desktop-bundled web server.
 console.log('[assemble] building web...');
 const webBuildEnvironment = environmentWithoutXAIAPIKey();
-execSync('npm run build', {
+execSync('pnpm run build', {
   cwd: web,
   stdio: 'inherit',
   env: webBuildEnvironment,

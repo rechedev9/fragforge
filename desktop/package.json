@@ -6,6 +6,7 @@
   "author": "FragForge",
   "main": "dist/main.js",
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
@@ -13,11 +14,11 @@
     "test:mcp:e2e": "set \"FRAGFORGE_REQUIRE_REAL_ORCHESTRATOR=1\" && node --no-warnings --test \"src/mcp/*.e2e.test.ts\"",
     "test:mcp:packaged": "set \"FRAGFORGE_REQUIRE_PACKAGED_MCP=1\" && node --no-warnings --test \"src/mcp/packaged-launcher.e2e.test.ts\"",
     "eval:mcp": "node --no-warnings --experimental-strip-types src/mcp/eval.ts",
-    "eval:mcp:gate": "go build -o ../bin/zv-orchestrator.exe ../cmd/zv-orchestrator && npm run eval:mcp",
+    "eval:mcp:gate": "go build -o ../bin/zv-orchestrator.exe ../cmd/zv-orchestrator && pnpm run eval:mcp",
     "mcp": "node --no-warnings --experimental-strip-types src/mcp/stdio.ts",
     "assemble": "node scripts/assemble.mjs",
     "assemble:team": "node scripts/assemble.mjs --team-xai-key",
-    "start": "npm run build && electron .",
+    "start": "pnpm run build && electron .",
     "dist": "node scripts/dist.mjs",
     "dist:team": "node scripts/dist.mjs --team-xai-key"
   },

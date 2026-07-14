@@ -10,7 +10,7 @@ It is local-first and stateless: it talks only to the orchestrator (`zv serve`) 
 
 Finished Library reels expose a manual publication assistant through the per-artifact `/api/demos/*/publish-assistant` proxy. It generates Madrid-time guidance and factual reel-derived metadata, lets the user download the MP4, and opens only `https://studio.youtube.com/` in the system browser. Account, audience, visibility, scheduling, and the official upload flow remain entirely in YouTube Studio; FragForge has no Google account connection or direct publishing path.
 
-Run it locally with the standard npm scripts in `web/package.json` (`dev`, `typecheck`, `lint`, `test:unit`).
+Run it locally with the standard pnpm scripts in `web/package.json` (`dev`, `typecheck`, `lint`, `test:unit`).
 The dev server needs the orchestrator on `127.0.0.1:8080`; the desktop/local-studio path uses persistent SQLite plus the inline queue.
 
 Proxy-route contract: every `/api/demos/*` route reaches the orchestrator through `callOrchestrator` (`web/app/api/demos/_lib.ts`).
@@ -28,7 +28,7 @@ Same priorities as the Go rules: clarity, simplicity, concision, maintainability
 Full TypeScript, strict:
 
 - The project is full TypeScript: no `.js`/`.jsx` source files, `strict: true` and `allowJs: false` stay on in `web/tsconfig.json`.
-- `npm run typecheck` (`tsc --noEmit`) and `npm run lint` (oxlint) must pass before any change is considered done.
+- `pnpm run typecheck` (`tsc --noEmit`) and `pnpm run lint` (oxlint) must pass before any change is considered done.
 - Lint config lives in `web/.oxlintrc.json` (adapted from berrus).
 
 Type safety:
@@ -77,7 +77,7 @@ React:
 
 Testing:
 
-- Unit tests are `lib/**/*.test.ts` on `node:test`, run with `npm run test:unit` (Node strips types natively; relative imports keep the `.ts` extension, allowed by `allowImportingTsExtensions`).
+- Unit tests are `lib/**/*.test.ts` on `node:test`, run with `pnpm run test:unit` (Node strips types natively; relative imports keep the `.ts` extension, allowed by `allowImportingTsExtensions`).
 - Browser E2E/Playwright was removed by project policy; integration coverage lives in Go HTTP/worker tests and targeted manual smoke commands such as `scripts/smoke-xai-stt.ps1`.
 - A test double for an external client (e.g. a fake `SupabaseClient`) types only the call surface it fakes and is cast once at creation with `as unknown as <ClientType>` plus a comment; that is the sole sanctioned use of a double cast.
 - Bug fixes need a regression test, same as Go.

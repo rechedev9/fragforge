@@ -85,7 +85,7 @@ assets are unchanged; an installer must be rebuilt and published separately to
 include this MCP launcher. See the complete setup, installed-app
 commands, operation model, and security notes in
 [`desktop/README.md`](./desktop/README.md#model-context-protocol-mcp).
-For deterministic source evaluation, run `cd desktop; npm run eval:mcp:gate`;
+For deterministic source evaluation, run `cd desktop; pnpm run eval:mcp:gate`;
 it rebuilds the local orchestrator and writes scored JSON/Markdown reports to
 `data/mcp-evals/`.
 
@@ -209,7 +209,7 @@ renders, so finish those tasks first.
 
 xAI credential precedence is: an inherited `XAI_API_KEY`, then the encrypted
 per-user key from `/settings`, then the packaged key in an internal team
-edition, then no xAI credential. `npm run dist:team` exists only to produce that
+edition, then no xAI credential. `pnpm run dist:team` exists only to produce that
 internal fallback; the packaged key is extractable by anyone who obtains the
 installer. See `desktop/README.md` for the desktop and build details.
 
