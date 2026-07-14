@@ -134,37 +134,27 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 			}
 		}
 	}
+	// A transcript that stayed implausible across every attempt is returned as-is:
+	// ValidateTranscript is the caller's single gate (see
+	// transcribeCaptionsWithFallback), which rejects it there and falls back to
+	// another backend. Re-deciding that here would make xAI the only backend
+	// enforcing the bar on itself.
 	if len(best) > 0 {
-		return acceptXAITranscript(best)
+		return best, nil
 	}
 	return nil, lastErr
-}
-
-// acceptXAITranscript returns the transcript unless ValidateTranscript rejects
-// its timings. Such a transcript is garbled, not merely sparse: retrying cannot
-// repair it (xAI returns the same reply for the same audio), so it is reported
-// as unusable and the caller falls back to another backend.
-func acceptXAITranscript(cues []WordCue) ([]WordCue, error) {
-	if err := ValidateTranscript(cues); err != nil {
-		return nil, fmt.Errorf("captions: xai %w", err)
-	}
-	return cues, nil
 }
 
 func bestXAITranscriptAfterError(ctx context.Context, best []WordCue, err error) ([]WordCue, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("captions: xai transcription interrupted: %w", ctxErr)
 	}
-	if len(best) > 0 {
-		// Why a later attempt failed does not make an already-garbled transcript
-		// safe to burn in, so the same plausibility bar applies here. Keep what
-		// went wrong upstream visible: rejecting the transcript sends the caller
-		// to the next backend, and a rejected API key must not vanish silently.
-		cues, acceptErr := acceptXAITranscript(best)
-		if acceptErr != nil {
-			return nil, fmt.Errorf("%w (last attempt also failed: %v)", acceptErr, err)
-		}
-		return cues, nil
+	// A usable earlier transcript survives a later attempt's failure. An unusable
+	// one cannot rescue it, so report what actually went wrong upstream: that
+	// keeps an outage (a rejected key, a 500) classified as an outage instead of
+	// reappearing as "the audio had no usable speech".
+	if len(best) > 0 && ValidateTranscript(best) == nil {
+		return best, nil
 	}
 	return nil, err
 }

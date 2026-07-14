@@ -475,11 +475,12 @@ func TestXAITranscriber_RetriesImplausibleWordDurations(t *testing.T) {
 	}
 }
 
-// When retrying cannot produce a plausible transcript, the garbled one must be
-// rejected as unusable rather than returned: burning it in froze a "Hola
-// Martínez" card over most of a real 15s clip. Rejecting it lets the worker
-// fall back to another backend.
-func TestXAITranscriber_RejectsPersistentlyGarbledTranscript(t *testing.T) {
+// A garbled transcript is worth retrying — xAI has answered a repeat request
+// with a clean reading — but retrying cannot repair a reply xAI keeps giving.
+// Transcribe must spend its whole retry budget and then hand the transcript back
+// for ValidateTranscript (the caller's single gate) to reject, rather than
+// enforcing the bar on itself and leaving groq and whisper unpoliced.
+func TestXAITranscriber_RetriesThenSurrendersPersistentlyGarbledTranscript(t *testing.T) {
 	garbled := `{
   "duration": 15,
   "language": "Spanish",
@@ -502,17 +503,16 @@ func TestXAITranscriber_RejectsPersistentlyGarbledTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	cues, err := (XAITranscriber{APIKey: "secret-key", BaseURL: server.URL}).Transcribe(context.Background(), mediaPath, dir)
-	if err == nil {
-		t.Fatalf("Transcribe returned cues %+v, want an unusable-transcript error", cues)
-	}
-	if !errors.Is(err, ErrUnusableTranscript) {
-		t.Fatalf("error = %v, want it to wrap ErrUnusableTranscript", err)
-	}
-	if !strings.Contains(err.Error(), "Martínez") {
-		t.Fatalf("error = %v, want it to name the offending word", err)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
 	}
 	if requests != xaiMaxTranscriptionAttempts {
 		t.Fatalf("requests = %d, want %d before giving up", requests, xaiMaxTranscriptionAttempts)
+	}
+	// The transcript comes back only so the gate can throw it out; xAI must not
+	// have quietly promoted it to something publishable.
+	if err := ValidateTranscript(cues); !errors.Is(err, ErrUnusableTranscript) {
+		t.Fatalf("ValidateTranscript(%+v) = %v, want it to reject the garbled transcript", cues, err)
 	}
 }
 

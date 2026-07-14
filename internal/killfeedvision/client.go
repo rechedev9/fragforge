@@ -280,12 +280,14 @@ func normalizeKill(k streamclips.KillfeedKill) (streamclips.KillfeedKill, bool) 
 	return k, true
 }
 
-// sanitizeName strips every space inside a player name, not just the ends. The
-// killfeed font renders names with wide letter spacing, and the vision reader
-// reads those gaps as word breaks — a real notice for "ZaCkk" killing "bek667"
-// came back as "Za Ckk" and "be k6 67". CS2 player names do not contain spaces
-// in practice, so removing them repairs the split without a roster to check
-// against.
+// sanitizeName strips every space inside a player name, not just the ends. It
+// repairs an artifact of this reader, not a rule about names: the killfeed font
+// renders names with wide letter spacing, and the model reads those gaps as word
+// breaks — a real notice for "ZaCkk" killing "bek667" came back as "Za Ckk" and
+// "be k6 67". Joining the fragments is the only repair available without a
+// roster to check against. A genuinely spaced name would be collapsed too, which
+// is acceptable here and only here: names typed in the editor are ground truth
+// and are left alone, and the user can always correct an AI-read notice.
 func sanitizeName(name string) string {
 	return strings.Join(strings.Fields(name), "")
 }

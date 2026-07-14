@@ -26,8 +26,12 @@ const (
 	killfeedFrozenWidth = 620
 	// killfeedNoticeStackGap is the vertical gap between stacked synthetic notices.
 	killfeedNoticeStackGap = 8
-	// KillfeedSampleDelaySeconds delays cue-frame sampling until the notice
-	// highlight ring is fully drawn. killfeedLeadTime must stay at least this long.
+	// KillfeedSampleDelaySeconds is how long after a cue a killfeed frame is
+	// sampled: at the cue itself the newest notice may not be drawn at all, and
+	// its highlight ring is still fading in. Both readers of a cue frame wait it
+	// out — the xAI vision reader (httpapi.ReadStreamKillfeed) and the frozen-crop
+	// fallback (killfeedFreezeOffset) — so the two never disagree about which
+	// kills a cue shows. killfeedLeadTime must stay at least this long.
 	KillfeedSampleDelaySeconds = 0.35
 	killfeedLeadTime           = 0.35
 	killfeedTrailTime          = 2.8
@@ -565,15 +569,14 @@ func ffmpegFilterPath(value string) string {
 
 // killfeedFreezeOffset returns the in-clip timestamp whose frame a frozen
 // killfeed strip is cropped from. CS2 finishes drawing a kill notice shortly
-// after the kill lands, so freezing the exact cue frame can catch a notice
-// that has not appeared yet — a verified failure on a three-kill AWP burst,
-// where the newest notice was still absent at the cue and only rendered
-// 0.35s later. Sampling the same KillfeedSampleDelaySeconds the vision reader
-// uses (see ReadStreamKillfeed) keeps what is rendered identical to what was
-// read. The offset is clamped inside the clip so a cue at the very end still
-// resolves to a real frame instead of trimming past the last one.
+// after the kill lands, so freezing the exact cue frame can catch a notice that
+// has not appeared yet — a verified failure on a three-kill AWP burst, where the
+// newest notice was still absent at the cue and only rendered 0.35s later. The
+// delay is the same one the vision reader waits for the notice with, for the
+// same physical reason. The offset is clamped inside the clip so a cue at the
+// very end still resolves to a real frame instead of trimming past the last one.
 func killfeedFreezeOffset(relative, duration float64) float64 {
-	return math.Min(relative+KillfeedSampleDelaySeconds, math.Max(relative, duration-killfeedFreezeEndGuard))
+	return min(relative+KillfeedSampleDelaySeconds, max(relative, duration-killfeedFreezeEndGuard))
 }
 
 func cropFilter(c CropRect) string {

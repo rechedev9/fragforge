@@ -33,26 +33,23 @@ const MaxPlausibleWordSeconds = 2.5
 // wrapping ErrUnusableTranscript when they cannot. It is the single gate every
 // backend's output passes through, because a garbled transcript is just as
 // unusable when it comes from the fallback backend as from the preferred one.
+// It also fronts BuildASS's own structural checks, so cues BuildASS would
+// reject (unsorted, overlapping, zero-length) are reported as unusable — a soft
+// failure that falls back to another backend — rather than failing the render.
 func ValidateTranscript(cues []WordCue) error {
 	if len(cues) == 0 {
 		return fmt.Errorf("transcript contains no words: %w", ErrUnusableTranscript)
 	}
-	worst := longestWordCue(cues)
-	if duration := worst.EndSeconds - worst.StartSeconds; duration > MaxPlausibleWordSeconds {
-		return fmt.Errorf("transcript has implausible word timings (%q spans %.2fs): %w",
-			worst.Word, duration, ErrUnusableTranscript)
-	}
-	return nil
-}
-
-func longestWordCue(cues []WordCue) WordCue {
-	worst := cues[0]
-	for _, cue := range cues[1:] {
-		if cue.EndSeconds-cue.StartSeconds > worst.EndSeconds-worst.StartSeconds {
-			worst = cue
+	for _, cue := range cues {
+		if spoken := cue.EndSeconds - cue.StartSeconds; spoken > MaxPlausibleWordSeconds {
+			return fmt.Errorf("transcript has implausible word timings (%q spans %.2fs): %w",
+				cue.Word, spoken, ErrUnusableTranscript)
 		}
 	}
-	return worst
+	if err := validateCues(cues); err != nil {
+		return fmt.Errorf("%w: %w", err, ErrUnusableTranscript)
+	}
+	return nil
 }
 
 // WordCue is a single spoken word with its start and end time, in seconds
