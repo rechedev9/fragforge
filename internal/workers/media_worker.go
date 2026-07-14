@@ -838,6 +838,24 @@ type captionBackend struct {
 	transcribe func(ctx context.Context, mediaPath, workDir string) ([]captions.WordCue, error)
 }
 
+// attempt runs one backend and rejects a transcript that must not be burned in,
+// so a backend that fails and one that succeeds with garbage reach the caller as
+// the same shape of error. A backend can succeed and still hand back an unusable
+// transcript: gameplay audio makes every engine hallucinate, and on one real clip
+// xAI and Groq each returned two words stamped across 11.8s of 15s. Validating
+// here, rather than inside one backend, holds the fallback backend's output to
+// the same bar as the preferred one's.
+func (b captionBackend) attempt(ctx context.Context, mediaPath, workDir string) ([]captions.WordCue, error) {
+	cues, err := b.transcribe(ctx, mediaPath, workDir)
+	if err == nil {
+		err = captions.ValidateTranscript(cues)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", b.name, err)
+	}
+	return cues, nil
+}
+
 // captionBackends returns the configured transcription backends in preference
 // order: xAI, then Groq, then local whisper.
 func (c StreamRenderWorkerConfig) captionBackends(language string) []captionBackend {
@@ -866,40 +884,50 @@ func (c StreamRenderWorkerConfig) captionBackends(language string) []captionBack
 	return backends
 }
 
+// singleLine flattens an error for a render warning. Every backend's failure is
+// collected with errors.Join, which separates them with newlines, and a warning
+// is surfaced as one line of text.
+func singleLine(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
+}
+
 // transcribeCaptionsWithFallback tries each backend in order and returns the
-// first successful transcript. When every backend reports an empty transcript,
-// the returned error contains "no words" so burnClipCaptions publishes the
-// clip uncaptioned; when any backend fails for another reason, that hard
-// failure is returned (without the "no words" marker) so the render fails
-// instead of silently downgrading a transcription outage to a warning.
+// first usable transcript. A backend that returns captions.ErrUnusableTranscript
+// (an empty transcript, or one whose word timings are too implausible to burn
+// in) is a soft failure: the next backend runs, and when every backend is
+// unusable the error stays soft so burnClipCaptions publishes the clip
+// uncaptioned. Any other failure is hard and is returned as such, so the render
+// fails instead of silently downgrading a transcription outage to a warning.
 func transcribeCaptionsWithFallback(ctx context.Context, mediaPath, workDir string, backends []captionBackend) ([]captions.WordCue, error) {
 	if len(backends) == 0 {
 		return nil, fmt.Errorf("no captions transcription backend configured")
 	}
-	var noWordsErrs, hardErrs []error
-	var noWordsNames []string
+	var unusableErrs, hardErrs []error
 	for _, b := range backends {
-		cues, err := b.transcribe(ctx, mediaPath, workDir)
+		cues, err := b.attempt(ctx, mediaPath, workDir)
 		if err == nil {
 			return cues, nil
 		}
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("%s: %w", b.name, err)
+		// A dead context is a hard failure even when this backend's transcript was
+		// merely unusable: %v keeps ErrUnusableTranscript out of the chain, so a
+		// cancelled render fails instead of publishing uncaptioned as though the
+		// audio simply had no speech.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("%v: %w", err, ctxErr)
 		}
-		if strings.Contains(err.Error(), "no words") {
-			noWordsErrs = append(noWordsErrs, fmt.Errorf("%s: %w", b.name, err))
-			noWordsNames = append(noWordsNames, b.name)
+		if errors.Is(err, captions.ErrUnusableTranscript) {
+			unusableErrs = append(unusableErrs, err)
 		} else {
-			hardErrs = append(hardErrs, fmt.Errorf("%s: %w", b.name, err))
+			hardErrs = append(hardErrs, err)
 		}
 	}
 	if len(hardErrs) == 0 {
-		return nil, errors.Join(noWordsErrs...)
+		return nil, errors.Join(unusableErrs...)
 	}
-	// Summarize empty transcripts without the "no words" marker: a hard
-	// failure must fail the render, not publish the clip uncaptioned.
-	if len(noWordsNames) > 0 {
-		hardErrs = append(hardErrs, fmt.Errorf("%s produced an empty transcript", strings.Join(noWordsNames, ", ")))
+	// Fold the unusable transcripts in with %s, not %w: a hard failure must fail
+	// the render rather than publish the clip uncaptioned.
+	if len(unusableErrs) > 0 {
+		hardErrs = append(hardErrs, fmt.Errorf("unusable transcripts: %s", singleLine(errors.Join(unusableErrs...))))
 	}
 	return nil, errors.Join(hardErrs...)
 }
@@ -1200,16 +1228,16 @@ func (w *StreamRenderWorker) extractCaptionSourceAudio(ctx context.Context, cfg 
 
 // burnClipCaptions transcribes transcriptionPath with the configured caption backend and burns the resulting
 // karaoke captions into a second copy, <clipID>_captioned.mp4, next to
-// clipPath. It returns the captioned file's path on success. If the
-// transcript has no words, it returns ("", warning, nil) so the caller
+// clipPath. It returns the captioned file's path on success. If every backend
+// produced an unusable transcript, it returns ("", warning, nil) so the caller
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
 // explicitly requested and a transcription backend is configured.
 func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, cueSpeed float64, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
 	cues, err := w.transcribe(ctx, transcriptionPath, workDir, language)
 	if err != nil {
-		if strings.Contains(err.Error(), "no words") {
-			return "", fmt.Sprintf("clip %s: transcription produced no words, publishing without captions", clipID), nil
+		if errors.Is(err, captions.ErrUnusableTranscript) {
+			return "", fmt.Sprintf("clip %s: no usable transcript (%s), publishing without captions", clipID, singleLine(err)), nil
 		}
 		return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
 	}

@@ -23,8 +23,18 @@ const defaultBaseURL = "https://api.x.ai/v1"
 
 // DefaultModel is the cheap non-reasoning multimodal Grok tier used to read a
 // killfeed crop when Client.Model is empty. Reading a kill-notice column is a
-// simple perception task, so the reasoning tiers are not worth their cost.
+// simple perception task, so the reasoning tiers are not worth their cost: on a
+// real three-kill AWP burst the reasoning tier misread the awp icon as an
+// m4a1_silencer, which this tier reads correctly. Both tiers split names on the
+// killfeed font's wide letter spacing; sanitizeName repairs that.
 const DefaultModel = "grok-4.20-0309-non-reasoning"
+
+// readTemperature pins sampling off. Reading a killfeed is perception, not
+// composition: the same crop must always yield the same kills. Left to the API
+// default, repeated reads of one verified frame disagreed with each other — four
+// runs returned the victim as both "bek667" and "bek657", and one flipped every
+// side and called an awp a deagle. There is nothing here to be creative about.
+const readTemperature = 0
 
 // defaultHTTPTimeout bounds a single killfeed read. The payload is one small
 // PNG crop and a short JSON reply, so the round trip is quick.
@@ -54,6 +64,7 @@ type Client struct {
 type chatRequest struct {
 	Model          string         `json:"model"`
 	ResponseFormat responseFormat `json:"response_format"`
+	Temperature    float64        `json:"temperature"`
 	Messages       []chatMessage  `json:"messages"`
 }
 
@@ -90,6 +101,7 @@ func (c *Client) ReadKillfeed(ctx context.Context, framePNG []byte) ([]streamcli
 	reqBody := chatRequest{
 		Model:          c.model(),
 		ResponseFormat: responseFormat{Type: "json_object"},
+		Temperature:    readTemperature,
 		Messages: []chatMessage{{
 			Role: "user",
 			Content: []contentPart{
@@ -158,6 +170,19 @@ func (c *Client) model() string {
 func killfeedPrompt() string {
 	keys := strings.Join(streamclips.WeaponKeys(), ", ")
 	return "The image is the kill-notice area of a CS2 stream frame. " +
+		"Each notice reads left to right: the attacker's name, then the weapon icon, " +
+		"then any modifier icons, then the victim's name on the right. " +
+		"attacker_name is the LEFT name and victim_name is the RIGHT name. " +
+		"Decide each side ONLY from the colour of that name's own text: " +
+		"blue or cyan text means \"CT\", yellow or orange text means \"T\". " +
+		"Set attacker_side from the colour of the LEFT name and victim_side from the colour of the " +
+		"RIGHT name, judging each independently. Never infer a side from who killed whom, from which " +
+		"side you assume the streamer plays, or from the notice's border colour. " +
+		"Transcribe each name exactly as spelled, character by character, preserving case and digits. " +
+		"The text is rendered with wide letter spacing: do NOT insert spaces inside a name, and do not " +
+		"correct, complete, or guess at a name. " +
+		"Identify the weapon from the icon's silhouette (for example a long-barrelled scoped rifle is an awp, " +
+		"not an ak47), and prefer reporting nothing over a wrong guess. " +
 		"List every fully visible kill notice from top to bottom as JSON of the form " +
 		`{"kills":[{"attacker_side":"CT","attacker_name":"...","victim_side":"T","victim_name":"...",` +
 		`"assister_side":"","assister_name":"","weapon":"ak47","headshot":false,"wallbang":false,` +
@@ -244,9 +269,9 @@ func parseKillfeed(body []byte) ([]streamclips.KillfeedKill, error) {
 }
 
 func normalizeKill(k streamclips.KillfeedKill) (streamclips.KillfeedKill, bool) {
-	k.AttackerName = strings.TrimSpace(k.AttackerName)
-	k.VictimName = strings.TrimSpace(k.VictimName)
-	k.AssisterName = strings.TrimSpace(k.AssisterName)
+	k.AttackerName = sanitizeName(k.AttackerName)
+	k.VictimName = sanitizeName(k.VictimName)
+	k.AssisterName = sanitizeName(k.AssisterName)
 	k.AttackerSide = strings.ToUpper(strings.TrimSpace(k.AttackerSide))
 	k.VictimSide = strings.ToUpper(strings.TrimSpace(k.VictimSide))
 	k.AssisterSide = strings.ToUpper(strings.TrimSpace(k.AssisterSide))
@@ -262,6 +287,18 @@ func normalizeKill(k streamclips.KillfeedKill) (streamclips.KillfeedKill, bool) 
 		return streamclips.KillfeedKill{}, false
 	}
 	return k, true
+}
+
+// sanitizeName strips every space inside a player name, not just the ends. It
+// repairs an artifact of this reader, not a rule about names: the killfeed font
+// renders names with wide letter spacing, and the model reads those gaps as word
+// breaks — a real notice for "ZaCkk" killing "bek667" came back as "Za Ckk" and
+// "be k6 67". Joining the fragments is the only repair available without a
+// roster to check against. A genuinely spaced name would be collapsed too, which
+// is acceptable here and only here: names typed in the editor are ground truth
+// and are left alone, and the user can always correct an AI-read notice.
+func sanitizeName(name string) string {
+	return strings.Join(strings.Fields(name), "")
 }
 
 func isSide(side string) bool {

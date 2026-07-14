@@ -1,9 +1,58 @@
 package captions
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+// Speech-to-text on gameplay audio hallucinates. ValidateTranscript is the one
+// gate that keeps such a transcript from being burned in, whichever backend
+// produced it.
+func TestValidateTranscript(t *testing.T) {
+	tests := []struct {
+		name    string
+		cues    []WordCue
+		wantErr bool
+	}{
+		{
+			name: "typical spoken words",
+			cues: []WordCue{
+				{Word: "gg", StartSeconds: 0, EndSeconds: 0.4},
+				{Word: "wp", StartSeconds: 0.4, EndSeconds: 0.9},
+			},
+		},
+		{
+			name: "drawn out but plausible shout",
+			cues: []WordCue{{Word: "noooo", StartSeconds: 0, EndSeconds: 2.4}},
+		},
+		{
+			// The real hallucination that shipped: two words frozen over a 15s clip.
+			name:    "words stretched across the clip",
+			cues:    []WordCue{{Word: "Hola", StartSeconds: 0, EndSeconds: 3.66}, {Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8}},
+			wantErr: true,
+		},
+		{
+			name:    "no cues",
+			cues:    nil,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTranscript(tt.cues)
+			if tt.wantErr && err == nil {
+				t.Fatalf("ValidateTranscript(%+v) = nil, want an unusable-transcript error", tt.cues)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("ValidateTranscript(%+v) = %v, want nil", tt.cues, err)
+			}
+			if tt.wantErr && !errors.Is(err, ErrUnusableTranscript) {
+				t.Fatalf("error = %v, want it to wrap ErrUnusableTranscript", err)
+			}
+		})
+	}
+}
 
 func TestDefaultStyle(t *testing.T) {
 	style := DefaultStyle()

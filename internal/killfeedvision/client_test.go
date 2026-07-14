@@ -86,7 +86,8 @@ func TestReadKillfeedHappyPath(t *testing.T) {
 	}
 
 	var reqBody struct {
-		Model          string `json:"model"`
+		Model          string  `json:"model"`
+		Temperature    float64 `json:"temperature"`
 		ResponseFormat struct {
 			Type string `json:"type"`
 		} `json:"response_format"`
@@ -106,6 +107,10 @@ func TestReadKillfeedHappyPath(t *testing.T) {
 	}
 	if reqBody.Model != DefaultModel {
 		t.Errorf("got model %q, want %q", reqBody.Model, DefaultModel)
+	}
+	// Sampling must be off: the same crop has to read the same kills every time.
+	if reqBody.Temperature != 0 {
+		t.Errorf("got temperature %v, want 0 so a killfeed read is deterministic", reqBody.Temperature)
 	}
 	if reqBody.ResponseFormat.Type != "json_object" {
 		t.Errorf("got response_format.type %q, want json_object", reqBody.ResponseFormat.Type)
@@ -181,6 +186,35 @@ func TestReadKillfeedInvalidWeaponDropped(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].AttackerName != "valid" {
 		t.Fatalf("got %+v, want only the valid-weapon kill", got)
+	}
+}
+
+// The killfeed font's wide letter spacing makes the reader split names into
+// words. These are the exact names a real three-kill AWP burst came back as.
+func TestReadKillfeedRepairsNamesSplitOnLetterSpacing(t *testing.T) {
+	weapon := validWeaponKey(t)
+	kills := `{"kills":[` +
+		`{"attacker_side":"CT","attacker_name":"Za Ckk","victim_side":"T","victim_name":"be k6 67",` +
+		`"assister_side":"CT","assister_name":"Nm okas","weapon":"` + weapon + `"}` +
+		`]}`
+	srv := newServer(t, http.StatusOK, chatReply(t, kills), nil)
+
+	client := &Client{APIKey: "k", BaseURL: srv.URL}
+	got, err := client.ReadKillfeed(context.Background(), []byte("png"))
+	if err != nil {
+		t.Fatalf("ReadKillfeed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d kills, want 1: %+v", len(got), got)
+	}
+	if got[0].AttackerName != "ZaCkk" {
+		t.Fatalf("attacker name = %q, want %q", got[0].AttackerName, "ZaCkk")
+	}
+	if got[0].VictimName != "bek667" {
+		t.Fatalf("victim name = %q, want %q", got[0].VictimName, "bek667")
+	}
+	if got[0].AssisterName != "Nmokas" {
+		t.Fatalf("assister name = %q, want %q", got[0].AssisterName, "Nmokas")
 	}
 }
 

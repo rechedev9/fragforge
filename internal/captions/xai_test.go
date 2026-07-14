@@ -319,10 +319,13 @@ func TestXAITranscriber_RetriesPartialBilingualTranscript(t *testing.T) {
 }
 
 func TestXAITranscriber_KeepsBestPartialTranscriptAfterRetries(t *testing.T) {
+	// Every attempt covers only part of the 20s clip, so all three run and the
+	// widest-spanning one wins. The words themselves are normal length: a
+	// transcript of implausibly long words is rejected outright, not ranked.
 	responses := []string{
-		`{"duration":20,"words":[{"text":"late","start":15,"end":19}]}`,
-		`{"duration":20,"words":[{"text":"middle","start":8,"end":16}]}`,
-		`{"duration":20,"words":[{"text":"short","start":18,"end":19}]}`,
+		`{"duration":20,"words":[{"text":"late","start":15,"end":15.4},{"text":"again","start":18.6,"end":19}]}`,
+		`{"duration":20,"words":[{"text":"middle","start":8,"end":8.4},{"text":"again","start":15.6,"end":16}]}`,
+		`{"duration":20,"words":[{"text":"short","start":18,"end":18.4},{"text":"again","start":18.6,"end":19}]}`,
 	}
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -349,7 +352,7 @@ func TestXAITranscriber_KeepsBestPartialTranscriptAfterRetries(t *testing.T) {
 }
 
 func TestXAITranscriber_ReturnsBestPartialWhenLaterAttemptFails(t *testing.T) {
-	partial := `{"duration":20,"words":[{"text":"usable","start":15,"end":19}]}`
+	partial := `{"duration":20,"words":[{"text":"usable","start":15,"end":15.4}]}`
 	tests := []struct {
 		name         string
 		secondStatus int
@@ -413,6 +416,103 @@ func TestXAITranscriber_CompleteFirstResponseUsesOneRequest(t *testing.T) {
 	}
 	if got, want := len(cues), 2; got != want {
 		t.Fatalf("cues = %d, want %d", got, want)
+	}
+}
+
+func TestXAITranscriber_RetriesImplausibleWordDurations(t *testing.T) {
+	// Reproduces a real render: xAI's first attempt returns two words
+	// stretched across most of a 15s CS2 clip (span ratio 0.787, above the
+	// 0.5 partial threshold, so the span check alone accepts it) instead of
+	// the many short words the source audio's speech actually contains.
+	garbled := `{
+  "duration": 15,
+  "language": "Spanish",
+  "words": [
+    {"text":"Hola","start":0,"end":3.66},
+    {"text":"Martínez","start":3.66,"end":11.8}
+  ]
+}`
+	clean := `{
+  "duration": 15,
+  "language": "Spanish",
+  "words": [
+    {"text":"Vamos,","start":0.1,"end":0.4},
+    {"text":"vamos,","start":0.4,"end":0.7},
+    {"text":"vamos!","start":0.7,"end":1.1},
+    {"text":"Que","start":8.2,"end":8.4},
+    {"text":"golazo.","start":8.4,"end":8.9}
+  ]
+}`
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			_, _ = w.Write([]byte(garbled))
+			return
+		}
+		_, _ = w.Write([]byte(clean))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "gameplay.wav")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cues, err := (XAITranscriber{APIKey: "secret-key", BaseURL: server.URL}).Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if got, want := len(cues), 5; got != want {
+		t.Fatalf("cues = %d, want %d: %+v", got, want, cues)
+	}
+	if got, want := cues[0].Word, "Vamos,"; got != want {
+		t.Fatalf("first cue = %q, want %q", got, want)
+	}
+}
+
+// A garbled transcript is worth retrying — xAI has answered a repeat request
+// with a clean reading — but retrying cannot repair a reply xAI keeps giving.
+// Transcribe must spend its whole retry budget and then hand the transcript back
+// for ValidateTranscript (the caller's single gate) to reject, rather than
+// enforcing the bar on itself and leaving groq and whisper unpoliced.
+func TestXAITranscriber_RetriesThenSurrendersPersistentlyGarbledTranscript(t *testing.T) {
+	garbled := `{
+  "duration": 15,
+  "language": "Spanish",
+  "words": [
+    {"text":"Hola","start":0,"end":3.66},
+    {"text":"Martínez","start":3.66,"end":11.8}
+  ]
+}`
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(garbled))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "gameplay.wav")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cues, err := (XAITranscriber{APIKey: "secret-key", BaseURL: server.URL}).Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != xaiMaxTranscriptionAttempts {
+		t.Fatalf("requests = %d, want %d before giving up", requests, xaiMaxTranscriptionAttempts)
+	}
+	// The transcript comes back only so the gate can throw it out; xAI must not
+	// have quietly promoted it to something publishable.
+	if err := ValidateTranscript(cues); !errors.Is(err, ErrUnusableTranscript) {
+		t.Fatalf("ValidateTranscript(%+v) = %v, want it to reject the garbled transcript", cues, err)
 	}
 }
 

@@ -1,9 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"image"
+	"image/color"
+	"image/png"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -193,6 +197,53 @@ func TestPreviewStreamKillfeedNoticeRejectsUnknownWeapon(t *testing.T) {
 
 	if rw.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+}
+
+// A 1080p killfeed crop is only ~150px tall, where the vision model misreads
+// player names and weapon icons. The crop must reach the reader enlarged, with
+// its aspect ratio and its side-encoding colours intact.
+func TestEncodeKillfeedCropPNGEnlargesSmallCrops(t *testing.T) {
+	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	ctBlue := color.RGBA{R: 0x8a, G: 0xc8, B: 0xff, A: 0xff}
+	for y := range 1080 {
+		for x := range 1920 {
+			frame.Set(x, y, ctBlue)
+		}
+	}
+	crop := streamclips.CropRect{X: 0.68, Y: 0.04, Width: 0.31, Height: 0.14}
+
+	data, err := encodeKillfeedCropPNG(frame, crop)
+	if err != nil {
+		t.Fatalf("encodeKillfeedCropPNG error = %v", err)
+	}
+	decoded, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode encoded crop: %v", err)
+	}
+
+	nativeWidth := int(crop.Width * 1920)
+	nativeHeight := int(crop.Height * 1080)
+	got := decoded.Bounds()
+	if got.Dx() <= nativeWidth {
+		t.Fatalf("encoded width = %d, want it enlarged beyond the native %d", got.Dx(), nativeWidth)
+	}
+	if got.Dx() > killfeedCropTargetWidth*2 {
+		t.Fatalf("encoded width = %d, want it capped near %d", got.Dx(), killfeedCropTargetWidth)
+	}
+	// Enlarging must not distort the notices: a stretched crop would misplace
+	// the names the reader pairs with each weapon icon.
+	wantRatio := float64(nativeWidth) / float64(nativeHeight)
+	gotRatio := float64(got.Dx()) / float64(got.Dy())
+	if math.Abs(gotRatio-wantRatio) > 0.01 {
+		t.Fatalf("aspect ratio = %.4f, want %.4f", gotRatio, wantRatio)
+	}
+	// The side of a name is encoded purely in its colour, so enlarging must not
+	// blend it toward a neighbouring colour.
+	r, g, b, _ := decoded.At(got.Dx()/2, got.Dy()/2).RGBA()
+	if uint8(r>>8) != ctBlue.R || uint8(g>>8) != ctBlue.G || uint8(b>>8) != ctBlue.B {
+		t.Fatalf("centre pixel = (%d,%d,%d), want the source colour (%d,%d,%d)",
+			r>>8, g>>8, b>>8, ctBlue.R, ctBlue.G, ctBlue.B)
 	}
 }
 

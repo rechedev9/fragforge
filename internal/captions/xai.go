@@ -3,6 +3,7 @@ package captions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -110,7 +111,9 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 		cues, duration, err := parseXAITranscriptResponse(data)
 		if err != nil {
 			lastErr = err
-			if !strings.Contains(err.Error(), "no words") {
+			// An empty transcript is worth another attempt; a malformed response is
+			// not going to parse any better next time.
+			if !errors.Is(err, ErrUnusableTranscript) {
 				return bestXAITranscriptAfterError(ctx, best, err)
 			}
 		} else {
@@ -118,7 +121,10 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 				best = cues
 				bestDuration = duration
 			}
-			if !xaiTranscriptLooksTemporallyPartial(cues, duration) {
+			// Retry a transcript that covers only part of the clip, and one whose
+			// word timings are implausible: both signal xAI returned something
+			// other than a faithful reading of the audio.
+			if !xaiTranscriptLooksTemporallyPartial(cues, duration) && ValidateTranscript(cues) == nil {
 				return cues, nil
 			}
 		}
@@ -128,6 +134,11 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 			}
 		}
 	}
+	// A transcript that stayed implausible across every attempt is returned as-is:
+	// ValidateTranscript is the caller's single gate (see
+	// transcribeCaptionsWithFallback), which rejects it there and falls back to
+	// another backend. Re-deciding that here would make xAI the only backend
+	// enforcing the bar on itself.
 	if len(best) > 0 {
 		return best, nil
 	}
@@ -138,7 +149,11 @@ func bestXAITranscriptAfterError(ctx context.Context, best []WordCue, err error)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("captions: xai transcription interrupted: %w", ctxErr)
 	}
-	if len(best) > 0 {
+	// A usable earlier transcript survives a later attempt's failure. An unusable
+	// one cannot rescue it, so report what actually went wrong upstream: that
+	// keeps an outage (a rejected key, a 500) classified as an outage instead of
+	// reappearing as "the audio had no usable speech".
+	if len(best) > 0 && ValidateTranscript(best) == nil {
 		return best, nil
 	}
 	return nil, err
@@ -321,9 +336,9 @@ type xaiWord struct {
 
 // parseXAITranscript parses xAI's /stt response into word cues. Entries with
 // empty trimmed text or invalid timings (start < 0 or end <= start) are
-// dropped, and a transcript with no usable words returns an error whose
-// message contains "no words" (the worker relies on that substring to publish
-// the clip uncaptioned instead of failing the render).
+// dropped, and a transcript with no usable words returns an error wrapping
+// ErrUnusableTranscript, which the worker treats as a soft failure: try the
+// next backend, and publish the clip uncaptioned rather than fail the render.
 func parseXAITranscript(data []byte) ([]WordCue, error) {
 	cues, _, err := parseXAITranscriptResponse(data)
 	return cues, err
@@ -353,7 +368,7 @@ func parseXAITranscriptResponse(data []byte) ([]WordCue, float64, error) {
 	})
 	cues = normalizeXAICueTimings(cues)
 	if len(cues) == 0 {
-		return nil, transcript.Duration, fmt.Errorf("captions: xai transcript contains no words")
+		return nil, transcript.Duration, fmt.Errorf("captions: xai transcript contains no words: %w", ErrUnusableTranscript)
 	}
 	return cues, transcript.Duration, nil
 }

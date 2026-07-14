@@ -524,7 +524,7 @@ func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
 	})
 	w.runner = runner
 	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
-		return nil, fmt.Errorf("captions: whisper transcript contains no words")
+		return nil, fmt.Errorf("captions: whisper transcript contains no words: %w", captions.ErrUnusableTranscript)
 	}
 
 	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
@@ -715,7 +715,7 @@ func TestTranscribeCaptionsWithFallbackUsesNextBackendOnNoWords(t *testing.T) {
 	backends := []captionBackend{
 		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
 			calls = append(calls, "xai")
-			return nil, fmt.Errorf("captions: xai transcript contains no words")
+			return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
 		}},
 		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
 			calls = append(calls, "groq")
@@ -734,33 +734,149 @@ func TestTranscribeCaptionsWithFallbackUsesNextBackendOnNoWords(t *testing.T) {
 	}
 }
 
-func TestTranscribeCaptionsWithFallbackAllNoWordsPublishesUncaptioned(t *testing.T) {
+func TestTranscribeCaptionsWithFallbackAllUnusablePublishesUncaptioned(t *testing.T) {
 	backends := []captionBackend{
 		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			return nil, fmt.Errorf("captions: xai transcript contains no words")
+			return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
 		}},
 		{name: "whisper", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			return nil, fmt.Errorf("captions: whisper transcript contains no words")
+			return nil, fmt.Errorf("captions: whisper transcript contains no words: %w", captions.ErrUnusableTranscript)
 		}},
 	}
 	_, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
 	if err == nil {
-		t.Fatal("transcribeCaptionsWithFallback returned nil error, want a no-words error")
+		t.Fatal("transcribeCaptionsWithFallback returned nil error, want an unusable-transcript error")
 	}
-	// burnClipCaptions keys on this substring to publish the clip uncaptioned
+	// burnClipCaptions keys on this sentinel to publish the clip uncaptioned
 	// instead of failing the render.
-	if !strings.Contains(err.Error(), "no words") {
-		t.Errorf("got error %q, want it to contain \"no words\"", err.Error())
+	if !errors.Is(err, captions.ErrUnusableTranscript) {
+		t.Errorf("got error %q, want it to wrap captions.ErrUnusableTranscript", err.Error())
+	}
+}
+
+// A garbled transcript (real words, but timings so implausible one caption card
+// would freeze over most of the clip) must be treated like an empty one: fall
+// through to the next backend rather than burning in text nobody said.
+func TestTranscribeCaptionsWithFallbackGarbledTranscriptFallsThrough(t *testing.T) {
+	want := []captions.WordCue{{Word: "Vamos", StartSeconds: 1, EndSeconds: 1.4}}
+	var calls []string
+	backends := []captionBackend{
+		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			calls = append(calls, "xai")
+			return nil, fmt.Errorf(
+				"captions: xai transcript has implausible word timings (%q spans %.2fs): %w",
+				"Martínez", 8.14, captions.ErrUnusableTranscript,
+			)
+		}},
+		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			calls = append(calls, "groq")
+			return want, nil
+		}},
+	}
+	got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+	if err != nil {
+		t.Fatalf("transcribeCaptionsWithFallback error = %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got cues %v, want the groq transcript %v", got, want)
+	}
+	if !slices.Equal(calls, []string{"xai", "groq"}) {
+		t.Errorf("backend calls = %v, want xai then groq", calls)
+	}
+}
+
+// A backend can succeed and still return a transcript nobody said: on a real
+// 15s clip both xAI and Groq stamped two words across 11.8s. The chain must
+// reject a garbled transcript from ANY backend, not just from the preferred
+// one, and must not burn it in when it is the last backend left.
+func TestTranscribeCaptionsWithFallbackRejectsGarbledSuccessFromAnyBackend(t *testing.T) {
+	garbled := []captions.WordCue{
+		{Word: "Hola", StartSeconds: 0, EndSeconds: 3.66},
+		{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8},
+	}
+	good := []captions.WordCue{{Word: "Vamos", StartSeconds: 1, EndSeconds: 1.4}}
+
+	t.Run("garbled preferred backend falls through to a good one", func(t *testing.T) {
+		var calls []string
+		backends := []captionBackend{
+			{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+				calls = append(calls, "xai")
+				return garbled, nil
+			}},
+			{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+				calls = append(calls, "groq")
+				return good, nil
+			}},
+		}
+		got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+		if err != nil {
+			t.Fatalf("transcribeCaptionsWithFallback error = %v", err)
+		}
+		if !slices.Equal(got, good) {
+			t.Errorf("got cues %v, want the usable transcript %v", got, good)
+		}
+		if !slices.Equal(calls, []string{"xai", "groq"}) {
+			t.Errorf("backend calls = %v, want xai then groq", calls)
+		}
+	})
+
+	t.Run("every backend garbled publishes uncaptioned", func(t *testing.T) {
+		backends := []captionBackend{
+			{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+				return garbled, nil
+			}},
+			{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+				return garbled, nil
+			}},
+		}
+		got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+		if err == nil {
+			t.Fatalf("got cues %v, want an unusable-transcript error rather than garbled captions", got)
+		}
+		if !errors.Is(err, captions.ErrUnusableTranscript) {
+			t.Errorf("got error %q, want it to wrap captions.ErrUnusableTranscript so the clip publishes uncaptioned", err)
+		}
+		if !strings.Contains(err.Error(), "Hola") {
+			t.Errorf("got error %q, want it to name the offending word", err)
+		}
+	})
+}
+
+// A cancelled render must fail, not quietly publish uncaptioned: "the audio had
+// no usable speech" and "we gave up half way" are different outcomes, and only
+// the first one may downgrade to a warning.
+func TestTranscribeCaptionsWithFallbackCancelledContextIsHard(t *testing.T) {
+	garbled := []captions.WordCue{{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8}}
+	ctx, cancel := context.WithCancel(context.Background())
+	backends := []captionBackend{
+		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			cancel()
+			return garbled, nil
+		}},
+		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			t.Error("groq must not run after the context is cancelled")
+			return nil, nil
+		}},
+	}
+	_, err := transcribeCaptionsWithFallback(ctx, "clip.wav", t.TempDir(), backends)
+	if err == nil {
+		t.Fatal("transcribeCaptionsWithFallback returned nil error, want a cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("got error %q, want it to wrap context.Canceled", err)
+	}
+	if errors.Is(err, captions.ErrUnusableTranscript) {
+		t.Errorf("got error %q, want cancellation not to be downgraded to a publish-uncaptioned warning", err)
 	}
 }
 
 func TestTranscribeCaptionsWithFallbackHardErrorFailsRender(t *testing.T) {
-	// One backend finding no words must not mask another backend's hard
-	// failure as an "empty transcript" warning: captions were explicitly
-	// requested, so the render fails and the user sees the real error.
+	// One backend producing an unusable transcript must not mask another
+	// backend's hard failure as a warning: captions were explicitly requested,
+	// so the render fails and the user sees the real error.
 	backends := []captionBackend{
 		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			return nil, fmt.Errorf("captions: xai transcript contains no words")
+			return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
 		}},
 		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
 			return nil, fmt.Errorf("captions: groq transcription request failed (status 500)")
@@ -770,8 +886,8 @@ func TestTranscribeCaptionsWithFallbackHardErrorFailsRender(t *testing.T) {
 	if err == nil {
 		t.Fatal("transcribeCaptionsWithFallback returned nil error, want an error")
 	}
-	if strings.Contains(err.Error(), "no words") {
-		t.Errorf("got error %q, want the hard failure not to be downgraded to a no-words warning", err.Error())
+	if errors.Is(err, captions.ErrUnusableTranscript) {
+		t.Errorf("got error %q, want the hard failure not to be downgraded to a soft warning", err.Error())
 	}
 	if !strings.Contains(err.Error(), "status 500") {
 		t.Errorf("got error %q, want it to surface the groq failure", err.Error())
