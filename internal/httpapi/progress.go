@@ -31,16 +31,25 @@ type captureProgressView struct {
 //
 // It reports ok=false - so the caller omits progress and the card keeps its
 // existing rendering - whenever progress is not meaningful: the job is not
-// capturing, it has no kill plan, the storage backend cannot list a directory,
-// or no completed segment exists yet (the segments dir is still absent/empty).
+// capturing, neither a current capture selection nor a kill plan is available,
+// the storage backend cannot list a directory, or no completed segment exists
+// yet (the segments dir is still absent/empty).
 // A segment mid-write is briefly counted or missed; the poll tolerates that.
 func captureProgress(store storage.Storage, j job.Job) (captureProgressView, bool) {
-	if j.Status != job.StatusRecording || j.KillPlan == nil {
+	total := 0
+	if j.KillPlan != nil {
+		total = len(j.KillPlan.Segments)
+	}
+	return captureProgressWithTotal(store, j.ID, j.Status, total)
+}
+
+func captureProgressWithTotal(store storage.Storage, id uuid.UUID, status job.Status, fallbackTotal int) (captureProgressView, bool) {
+	if status != job.StatusRecording {
 		return captureProgressView{}, false
 	}
 	// Resolve the segments directory from the same key builder the recorder
 	// writes through, so the two never drift on the on-disk layout.
-	ref, err := artifacts.SegmentClipKey(j.ID, artifactNamePlaceholder)
+	ref, err := artifacts.SegmentClipKey(id, artifactNamePlaceholder)
 	if err != nil {
 		return captureProgressView{}, false
 	}
@@ -49,12 +58,12 @@ func captureProgress(store storage.Storage, j job.Job) (captureProgressView, boo
 		return captureProgressView{}, false
 	}
 
-	selection, hasSelection, err := readCaptureSelection(store, j.ID)
+	selection, hasSelection, err := readCaptureSelection(store, id)
 	if err != nil {
 		return captureProgressView{}, false
 	}
 
-	total := len(j.KillPlan.Segments)
+	total := 0
 	done := 0
 	if hasSelection {
 		total = len(selection)
@@ -68,6 +77,10 @@ func captureProgress(store storage.Storage, j job.Job) (captureProgressView, boo
 			}
 		}
 	} else {
+		if fallbackTotal == 0 {
+			return captureProgressView{}, false
+		}
+		total = fallbackTotal
 		for _, f := range files {
 			if strings.EqualFold(path.Ext(f), ".mp4") {
 				done++

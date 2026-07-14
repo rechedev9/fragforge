@@ -4,10 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+var benchmarkArtifacts []RecordingArtifact
 
 func TestCollectArtifactsMapsTakeFoldersToSegments(t *testing.T) {
 	dir := t.TempDir()
@@ -74,6 +78,64 @@ func TestCollectArtifactsLeavesUnmappedExtraTakes(t *testing.T) {
 	}
 	if got[0].SegmentID != "" {
 		t.Fatalf("SegmentID = %q, want empty", got[0].SegmentID)
+	}
+}
+
+func TestProbeArtifactsUsesBoundedConcurrencyAndSkipsImageSequences(t *testing.T) {
+	files := make([]RecordingArtifact, maxConcurrentArtifactProbes+2)
+	for i := range files[:len(files)-1] {
+		files[i].Path = filepath.Join("take0000", "clip-"+string(rune('a'+i))+".mp4")
+	}
+	files[len(files)-1].Path = filepath.Join("take0000", "frames.tga")
+
+	started := make(chan struct{}, len(files))
+	release := make(chan struct{})
+	done := make(chan struct{})
+	var calls atomic.Int32
+	go func() {
+		probeArtifacts(context.Background(), "ffprobe", files, func(_ context.Context, path string, artifact *RecordingArtifact) {
+			if path != "ffprobe" {
+				t.Errorf("probe path = %q, want ffprobe", path)
+			}
+			calls.Add(1)
+			started <- struct{}{}
+			<-release
+			artifact.Codec = "probed"
+		})
+		close(done)
+	}()
+
+	for range maxConcurrentArtifactProbes {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatal("probe workers did not start concurrently")
+		}
+	}
+	select {
+	case <-started:
+		close(release)
+		t.Fatalf("more than %d probes ran concurrently", maxConcurrentArtifactProbes)
+	default:
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("probe workers did not finish")
+	}
+
+	if got, want := calls.Load(), int32(len(files)-1); got != want {
+		t.Fatalf("probe calls = %d, want %d", got, want)
+	}
+	for i, artifact := range files[:len(files)-1] {
+		if artifact.Codec != "probed" {
+			t.Errorf("artifact %d codec = %q, want probed", i, artifact.Codec)
+		}
+	}
+	if files[len(files)-1].Codec != "" {
+		t.Fatalf("image sequence codec = %q, want unprobed", files[len(files)-1].Codec)
 	}
 }
 
@@ -191,5 +253,24 @@ func assertArtifact(t *testing.T, got RecordingArtifact, segmentID, takeID, typ,
 	}
 	if got.SizeBytes != size {
 		t.Errorf("SizeBytes = %d, want %d", got.SizeBytes, size)
+	}
+}
+
+func BenchmarkProbeArtifacts(b *testing.B) {
+	base := make([]RecordingArtifact, 9)
+	for i := range base[:8] {
+		base[i].Path = filepath.Join("take0000", "clip-"+string(rune('a'+i))+".mp4")
+	}
+	base[8].Path = filepath.Join("take0000", "frames.tga")
+	probe := func(context.Context, string, *RecordingArtifact) {
+		time.Sleep(time.Millisecond)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		files := append([]RecordingArtifact(nil), base...)
+		probeArtifacts(context.Background(), "ffprobe", files, probe)
+		benchmarkArtifacts = files
 	}
 }

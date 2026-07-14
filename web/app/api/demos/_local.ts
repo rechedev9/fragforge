@@ -48,7 +48,7 @@ export async function localScan(request: Request): Promise<Response> {
 
 /** GET /api/demos/{jobId}/status (local) - proxy the job's current status. */
 export async function localStatus(jobId: string): Promise<Response> {
-  const url = jobUrl(jobId);
+  const url = jobUrl(jobId, '?view=status');
   if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
 
   const res = await callOrchestrator(url);

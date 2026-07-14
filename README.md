@@ -250,7 +250,7 @@ available.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/jobs` | Multipart upload: `demo` file + `config` JSON (`{"target_steamid":"..."}`). Returns `201 {id, status}`. |
-| GET | `/api/jobs/{id}` | Job metadata and status. |
+| GET | `/api/jobs/{id}` | Job metadata and status; `?view=status` returns the lightweight polling representation. |
 | GET | `/api/jobs/{id}/plan` | Kill plan JSON (200) or 409 if not ready. |
 | POST | `/api/jobs/{id}/record` | Enqueue recording after parse approval. |
 | POST | `/api/jobs/{id}/compose` | Enqueue final composition after recording. |

@@ -130,6 +130,27 @@ func (f *fakeRepo) Get(_ context.Context, id uuid.UUID) (job.Job, error) {
 	}
 	return j, nil
 }
+
+func (f *fakeRepo) GetMeta(ctx context.Context, id uuid.UUID) (job.Job, error) {
+	j, err := f.Get(ctx, id)
+	if err != nil {
+		return job.Job{}, err
+	}
+	j.KillPlan = nil
+	return j, nil
+}
+
+func (f *fakeRepo) GetStatus(ctx context.Context, id uuid.UUID) (job.Status, string, int, error) {
+	j, err := f.Get(ctx, id)
+	if err != nil {
+		return 0, "", 0, err
+	}
+	segmentCount := 0
+	if j.Status == job.StatusRecording && j.KillPlan != nil {
+		segmentCount = len(j.KillPlan.Segments)
+	}
+	return j.Status, j.FailureReason, segmentCount, nil
+}
 func (f *fakeRepo) List(_ context.Context, limit int) ([]job.Job, error) {
 	jobs := make([]job.Job, 0, len(f.jobs))
 	for _, j := range f.jobs {

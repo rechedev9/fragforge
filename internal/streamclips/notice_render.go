@@ -80,6 +80,22 @@ var weaponCatalog = sync.OnceValues(func() ([]string, map[string]bool) {
 	return keys, set
 })
 
+type iconCacheKey struct {
+	assetPath string
+	targetH   int
+}
+
+type iconCacheEntry struct {
+	once sync.Once
+	img  image.Image
+	err  error
+}
+
+// scaledIconCache avoids decoding and Catmull-Rom scaling immutable embedded
+// icons for every rendered kill. Each asset/height pair initializes once even
+// when several render workers request it concurrently.
+var scaledIconCache sync.Map
+
 // noticeFace is the parsed Rajdhani-Bold face used for player names.
 var noticeFace = sync.OnceValues(func() (font.Face, error) {
 	data, err := noticeAssets.ReadFile(assetsRoot + "/Rajdhani-Bold.ttf")
@@ -312,6 +328,16 @@ func loadFlag(name string, targetH int) (image.Image, error) {
 // loadIcon decodes an embedded white-on-transparent PNG and scales it to
 // targetH pixels tall, preserving aspect ratio with a quality scaler.
 func loadIcon(assetPath string, targetH int) (image.Image, error) {
+	key := iconCacheKey{assetPath: assetPath, targetH: targetH}
+	entryValue, _ := scaledIconCache.LoadOrStore(key, &iconCacheEntry{})
+	entry := entryValue.(*iconCacheEntry)
+	entry.once.Do(func() {
+		entry.img, entry.err = decodeAndScaleIcon(assetPath, targetH)
+	})
+	return entry.img, entry.err
+}
+
+func decodeAndScaleIcon(assetPath string, targetH int) (image.Image, error) {
 	data, err := noticeAssets.ReadFile(assetPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading icon %s: %w", assetPath, err)

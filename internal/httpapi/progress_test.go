@@ -92,6 +92,16 @@ func TestCaptureProgress(t *testing.T) {
 			wantOK: false,
 		},
 		{
+			name:      "selection reports progress without loading kill plan",
+			status:    job.StatusRecording,
+			plan:      nil,
+			clips:     []string{"s2"},
+			selection: []string{"s2", "s3"},
+			wantOK:    true,
+			wantDone:  1,
+			wantTotal: 2,
+		},
+		{
 			name:      "extra clips clamp done to total",
 			status:    job.StatusRecording,
 			plan:      segmentPlan(2),

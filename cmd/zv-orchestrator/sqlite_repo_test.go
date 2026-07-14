@@ -92,6 +92,40 @@ func TestSQLiteRepoGetMetaAndListStripKillPlan(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepoGetStatusReturnsOnlyLifecycleSummary(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	plan := killplan.NewPlan()
+	plan.Segments = []killplan.Segment{{ID: "s1"}, {ID: "s2"}, {ID: "s3"}}
+	j := &job.Job{Status: job.StatusRecording, KillPlan: &plan}
+	if err := repo.Create(ctx, j); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	status, reason, segments, err := repo.GetStatus(ctx, j.ID)
+	if err != nil {
+		t.Fatalf("GetStatus recording: %v", err)
+	}
+	if status != job.StatusRecording || reason != "" || segments != 3 {
+		t.Fatalf("recording status = %s/%q/%d, want recording/empty/3", status, reason, segments)
+	}
+
+	if err := repo.UpdateStatus(ctx, j.ID, job.StatusFailed, "capture failed"); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+	status, reason, segments, err = repo.GetStatus(ctx, j.ID)
+	if err != nil {
+		t.Fatalf("GetStatus failed: %v", err)
+	}
+	if status != job.StatusFailed || reason != "capture failed" || segments != 0 {
+		t.Fatalf("failed status = %s/%q/%d, want failed/capture failed/0", status, reason, segments)
+	}
+
+	if _, _, _, err := repo.GetStatus(ctx, uuid.New()); !errors.Is(err, job.ErrNotFound) {
+		t.Fatalf("GetStatus unknown error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestSQLiteRepoListOrdersByUpdatedThenLimits(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

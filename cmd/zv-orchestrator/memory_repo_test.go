@@ -51,6 +51,13 @@ func TestMemoryJobRepositoryStoresJobLifecycle(t *testing.T) {
 	if meta.KillPlan != nil {
 		t.Fatal("GetMeta returned kill plan, want nil")
 	}
+	status, reason, segmentCount, err := repo.GetStatus(ctx, j.ID)
+	if err != nil {
+		t.Fatalf("GetStatus error = %v", err)
+	}
+	if status != job.StatusParsed || reason != "" || segmentCount != 0 {
+		t.Fatalf("GetStatus = %s/%q/%d, want parsed/empty/0", status, reason, segmentCount)
+	}
 
 	jobs, err := repo.List(ctx, 10)
 	if err != nil {

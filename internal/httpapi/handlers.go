@@ -51,6 +51,8 @@ var errGenerateRenderActive = errors.New("a render is already active for this jo
 type JobRepository interface {
 	Create(ctx context.Context, j *job.Job) error
 	Get(ctx context.Context, id uuid.UUID) (job.Job, error)
+	// GetStatus returns segmentCount only while the job is recording.
+	GetStatus(ctx context.Context, id uuid.UUID) (status job.Status, failureReason string, segmentCount int, err error)
 	List(ctx context.Context, limit int) ([]job.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
 	SetParseInputs(ctx context.Context, id uuid.UUID, steamID string, r rules.Rules) error
@@ -399,6 +401,10 @@ func (h *Handlers) GetJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid job id")
 		return
 	}
+	if r.URL.Query().Get("view") == "status" {
+		h.writeJobStatus(w, r, id)
+		return
+	}
 	j, err := h.repo.Get(r.Context(), id)
 	if errors.Is(err, job.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "job not found")
@@ -409,6 +415,31 @@ func (h *Handlers) GetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.jobResponse(j))
+}
+
+// writeJobStatus serves the lightweight ?view=status representation. The
+// default GetJob response remains the complete job for existing API/MCP users.
+func (h *Handlers) writeJobStatus(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	status, failureReason, segmentCount, err := h.repo.GetStatus(r.Context(), id)
+	if errors.Is(err, job.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if err != nil {
+		internalError(w, "get job status", err)
+		return
+	}
+	resp := jobStatusResponse{Status: status, FailureReason: failureReason}
+	if progress, ok := captureProgressWithTotal(h.storage, id, status, segmentCount); ok {
+		resp.Progress = &progress
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type jobStatusResponse struct {
+	Status        job.Status           `json:"status"`
+	FailureReason string               `json:"failure_reason,omitempty"`
+	Progress      *captureProgressView `json:"progress,omitempty"`
 }
 
 // jobResponse is the GET /api/jobs/{id} body: the job plus optional capture

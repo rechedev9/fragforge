@@ -10,7 +10,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+const maxConcurrentArtifactProbes = 4
 
 // CollectArtifacts discovers HLAE take outputs and probes media metadata when
 // ffprobe is available. HLAE Source 2 writes takeNNNN/video.mp4 and audio.wav.
@@ -19,13 +22,56 @@ func CollectArtifacts(ctx context.Context, plan RecordingPlan, ffprobePath strin
 	takeSegments := mapTakesToSegments(files, plan.Segments)
 	for i := range files {
 		files[i].SegmentID = takeSegments[files[i].TakeID]
-		// Image-sequence frames carry no container metadata, so probing them is
-		// both meaningless and, for a multi-thousand-frame take, ruinously slow.
-		if ffprobePath != "" && !isImageSequenceExt(filepath.Ext(files[i].Path)) {
-			probeArtifact(ctx, ffprobePath, &files[i])
+	}
+	probeArtifacts(ctx, ffprobePath, files, probeArtifact)
+	return files
+}
+
+type artifactProbeFunc func(context.Context, string, *RecordingArtifact)
+
+func probeArtifacts(ctx context.Context, ffprobePath string, files []RecordingArtifact, probe artifactProbeFunc) {
+	if ffprobePath == "" {
+		return
+	}
+	probeCount := 0
+	for i := range files {
+		if !isImageSequenceExt(filepath.Ext(files[i].Path)) {
+			probeCount++
 		}
 	}
-	return files
+	if probeCount == 0 {
+		return
+	}
+	if probeCount == 1 {
+		for i := range files {
+			if !isImageSequenceExt(filepath.Ext(files[i].Path)) {
+				probe(ctx, ffprobePath, &files[i])
+				return
+			}
+		}
+	}
+
+	workerCount := min(probeCount, maxConcurrentArtifactProbes)
+	indices := make(chan int)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for i := range indices {
+				probe(ctx, ffprobePath, &files[i])
+			}
+		}()
+	}
+	for i := range files {
+		// Image-sequence frames carry no container metadata, so probing them is
+		// both meaningless and, for a multi-thousand-frame take, ruinously slow.
+		if !isImageSequenceExt(filepath.Ext(files[i].Path)) {
+			indices <- i
+		}
+	}
+	close(indices)
+	workers.Wait()
 }
 
 func FindFFprobe() string {

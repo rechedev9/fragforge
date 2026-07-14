@@ -19,6 +19,7 @@ type orchestratorJobRepository interface {
 	Create(context.Context, *job.Job) error
 	Get(context.Context, uuid.UUID) (job.Job, error)
 	GetMeta(context.Context, uuid.UUID) (job.Job, error)
+	GetStatus(context.Context, uuid.UUID) (job.Status, string, int, error)
 	List(context.Context, int) ([]job.Job, error)
 	ListByStatus(context.Context, job.Status) ([]job.Job, error)
 	UpdateStatus(context.Context, uuid.UUID, job.Status, string) error
@@ -67,12 +68,34 @@ func (r *memoryJobRepository) Get(ctx context.Context, id uuid.UUID) (job.Job, e
 }
 
 func (r *memoryJobRepository) GetMeta(ctx context.Context, id uuid.UUID) (job.Job, error) {
-	j, err := r.Get(ctx, id)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return job.Job{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return job.Job{}, job.ErrNotFound
 	}
 	j.KillPlan = nil
 	return j, nil
+}
+
+func (r *memoryJobRepository) GetStatus(ctx context.Context, id uuid.UUID) (job.Status, string, int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, "", 0, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return 0, "", 0, job.ErrNotFound
+	}
+	segmentCount := 0
+	if j.Status == job.StatusRecording && j.KillPlan != nil {
+		segmentCount = len(j.KillPlan.Segments)
+	}
+	return j.Status, j.FailureReason, segmentCount, nil
 }
 
 func (r *memoryJobRepository) List(ctx context.Context, limit int) ([]job.Job, error) {

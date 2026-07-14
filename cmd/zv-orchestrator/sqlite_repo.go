@@ -100,12 +100,42 @@ func (r *sqliteJobRepository) Get(ctx context.Context, id uuid.UUID) (job.Job, e
 }
 
 func (r *sqliteJobRepository) GetMeta(ctx context.Context, id uuid.UUID) (job.Job, error) {
-	j, err := r.Get(ctx, id)
-	if err != nil {
-		return job.Job{}, err
+	var data []byte
+	err := r.db.QueryRowContext(ctx, `SELECT json_remove(data, '$.kill_plan') FROM jobs WHERE id = ?`, id.String()).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return job.Job{}, job.ErrNotFound
 	}
-	j.KillPlan = nil
+	if err != nil {
+		return job.Job{}, fmt.Errorf("query job metadata: %w", err)
+	}
+	var j job.Job
+	if err := json.Unmarshal(data, &j); err != nil {
+		return job.Job{}, fmt.Errorf("unmarshal job metadata: %w", err)
+	}
 	return j, nil
+}
+
+func (r *sqliteJobRepository) GetStatus(ctx context.Context, id uuid.UUID) (job.Status, string, int, error) {
+	var rawStatus, failureReason string
+	var segmentCount int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT status,
+		       CASE WHEN status = ? THEN COALESCE(json_extract(data, '$.failure_reason'), '') ELSE '' END,
+		       CASE WHEN status = ? THEN COALESCE(json_array_length(data, '$.kill_plan.segments'), 0) ELSE 0 END
+		FROM jobs WHERE id = ?`,
+		job.StatusFailed.String(), job.StatusRecording.String(), id.String(),
+	).Scan(&rawStatus, &failureReason, &segmentCount)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", 0, job.ErrNotFound
+	}
+	if err != nil {
+		return 0, "", 0, fmt.Errorf("query job status: %w", err)
+	}
+	status, err := job.ParseStatus(rawStatus)
+	if err != nil {
+		return 0, "", 0, fmt.Errorf("parse stored job status: %w", err)
+	}
+	return status, failureReason, segmentCount, nil
 }
 
 func (r *sqliteJobRepository) List(ctx context.Context, limit int) ([]job.Job, error) {

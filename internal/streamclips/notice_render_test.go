@@ -2,9 +2,13 @@ package streamclips
 
 import (
 	"bytes"
+	"image"
 	"image/png"
+	"path"
 	"testing"
 )
+
+var benchmarkNotice image.Image
 
 func baseKill() KillfeedKill {
 	return KillfeedKill{
@@ -155,5 +159,81 @@ func TestEncodeNoticePNG(t *testing.T) {
 	}
 	if img.Bounds().Dx() <= 0 {
 		t.Fatalf("decoded width must be positive, got %d", img.Bounds().Dx())
+	}
+}
+
+func TestLoadIconConcurrentCallersShareCachedImage(t *testing.T) {
+	const callers = 32
+	start := make(chan struct{})
+	results := make(chan image.Image, callers)
+	errors := make(chan error, callers)
+	for range callers {
+		go func() {
+			<-start
+			img, err := loadIcon(path.Join(weaponsDir, "ak47.png"), 31)
+			results <- img
+			errors <- err
+		}()
+	}
+	close(start)
+
+	var first image.Image
+	for range callers {
+		if err := <-errors; err != nil {
+			t.Fatalf("loadIcon: %v", err)
+		}
+		img := <-results
+		if first == nil {
+			first = img
+			continue
+		}
+		if img != first {
+			t.Fatal("concurrent callers received different cached images")
+		}
+	}
+}
+
+func BenchmarkRenderNotice(b *testing.B) {
+	kill := benchmarkKillfeedKill()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		img, err := RenderNotice(kill)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkNotice = img
+	}
+}
+
+func BenchmarkEncodeNoticePNG(b *testing.B) {
+	kill := benchmarkKillfeedKill()
+	var buf bytes.Buffer
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		if err := EncodeNoticePNG(kill, &buf); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func benchmarkKillfeedKill() KillfeedKill {
+	return KillfeedKill{
+		AttackerSide: "T",
+		AttackerName: "MARTINEZSA",
+		AssisterSide: "CT",
+		AssisterName: "teammate",
+		VictimSide:   "CT",
+		VictimName:   "opponent",
+		Weapon:       "ak47",
+		Blind:        true,
+		FlashAssist:  true,
+		Noscope:      true,
+		Smoke:        true,
+		Wallbang:     true,
+		InAir:        true,
+		Headshot:     true,
 	}
 }
