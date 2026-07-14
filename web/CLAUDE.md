@@ -10,14 +10,8 @@ It is local-first and stateless: it talks only to the orchestrator (`zv serve`) 
 
 Finished Library reels expose a manual publication assistant through the per-artifact `/api/demos/*/publish-assistant` proxy. It generates Madrid-time guidance and factual reel-derived metadata, lets the user download the MP4, and opens only `https://studio.youtube.com/` in the system browser. Account, audience, visibility, scheduling, and the official upload flow remain entirely in YouTube Studio; FragForge has no Google account connection or direct publishing path.
 
-Run it locally (needs the orchestrator on `127.0.0.1:8080`; the desktop/local-studio path uses persistent SQLite plus the inline queue):
-
-```bash
-cd web && npm install && npm run dev   # http://localhost:3000
-npm run typecheck                      # tsc --noEmit
-npm run lint                           # oxlint (config in web/.oxlintrc.json)
-npm run test:unit                      # node --test unit tests (lib/**/*.test.ts)
-```
+Run it locally with the standard npm scripts in `web/package.json` (`dev`, `typecheck`, `lint`, `test:unit`).
+The dev server needs the orchestrator on `127.0.0.1:8080`; the desktop/local-studio path uses persistent SQLite plus the inline queue.
 
 Proxy-route contract: every `/api/demos/*` route reaches the orchestrator through `callOrchestrator` (`web/app/api/demos/_lib.ts`).
 When the orchestrator is unreachable the route returns `503 {code: "service_unavailable"}` and logs the cause server-side, and the UI tells "service offline" apart from a bad demo via `SERVICE_UNAVAILABLE_CODE`.
@@ -35,7 +29,7 @@ Full TypeScript, strict:
 
 - The project is full TypeScript: no `.js`/`.jsx` source files, `strict: true` and `allowJs: false` stay on in `web/tsconfig.json`.
 - `npm run typecheck` (`tsc --noEmit`) and `npm run lint` (oxlint) must pass before any change is considered done.
-- Lint config lives in `web/.oxlintrc.json` (adapted from berrus): type-aware oxlint with `no-explicit-any`, `no-nested-ternary`, the React/hooks rules, and `_`-prefixed unused args.
+- Lint config lives in `web/.oxlintrc.json` (adapted from berrus).
 
 Type safety:
 
