@@ -31,6 +31,14 @@ const xaiKeyMissingCode = "xai_key_missing"
 // checking the key instead of reporting an orchestrator bug.
 const xaiRequestFailedCode = "xai_request_failed"
 
+const (
+	// killfeedCropTargetWidth is the width a killfeed crop is enlarged toward
+	// before it is read, so player names are tall enough to transcribe.
+	killfeedCropTargetWidth = 1600
+	// killfeedCropMaxUpscale bounds that enlargement.
+	killfeedCropMaxUpscale = 3
+)
+
 // WithFFmpegPath configures the ffmpeg binary used to extract a cue frame for
 // the killfeed-read endpoint. An empty path leaves the endpoint returning 409.
 func WithFFmpegPath(path string) Option {
@@ -292,10 +300,32 @@ func encodeKillfeedCropPNG(frame image.Image, crop streamclips.CropRect) ([]byte
 	dst := image.NewRGBA(image.Rect(0, 0, cw, ch))
 	draw.Draw(dst, dst.Bounds(), frame, image.Pt(x0, y0), draw.Src)
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, dst); err != nil {
+	if err := png.Encode(&buf, upscaleKillfeedCrop(dst)); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// upscaleKillfeedCrop enlarges a killfeed crop before it is read. A 1080p
+// source crops to roughly 595x151, where player names are only a few pixels
+// tall and the vision model misreads them (verified: "bk667" read as "bk657",
+// an awp icon read as an ak47). Nearest-neighbour keeps the notice's hard
+// edges and flat colours crisp, which matters because a name's colour decides
+// its side. The crop is only enlarged, never shrunk, and the factor is capped
+// so an already-large crop is not blown up past the model's image budget.
+func upscaleKillfeedCrop(src *image.RGBA) image.Image {
+	b := src.Bounds()
+	factor := min(killfeedCropTargetWidth/max(b.Dx(), 1), killfeedCropMaxUpscale)
+	if factor < 2 {
+		return src
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx()*factor, b.Dy()*factor))
+	for y := range dst.Bounds().Dy() {
+		for x := range dst.Bounds().Dx() {
+			dst.Set(x, y, src.At(b.Min.X+x/factor, b.Min.Y+y/factor))
+		}
+	}
+	return dst
 }
 
 func writeCodedError(w http.ResponseWriter, status int, code, msg string) {
