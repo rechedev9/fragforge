@@ -852,3 +852,34 @@ test('streams.edit_clip rejects an unknown clip id and lists the valid ones', as
     /arguments\.clip_id "clip-9" is not one of the plan's clips: clip-1, clip-2/,
   );
 });
+
+test('streams.edit_clip surfaces unknown stored edit fields instead of silently dropping them', async () => {
+  const currentPlan: JsonObject = {
+    clips: [{ edit: { speed: 2, zoom: true }, end_seconds: 10, id: 'clip-1', start_seconds: 0 }],
+    face_crop: { height: 0.3, width: 0.25, x: 0, y: 0 },
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    schema_version: '1.0',
+    variant: 'streamer-vertical-stack-40-60',
+  };
+  const double = clientDouble((_request, index) => {
+    if (index === 0) return currentPlan;
+    throw new Error('unexpected request');
+  });
+
+  await assert.rejects(
+    operation('streams.edit_clip').run(double.client, {
+      clip_id: 'clip-1',
+      speed: 0.5,
+      stream_job_id: 'stream-123',
+    }),
+    /zoom is not allowed/,
+  );
+  assert.equal(double.state.requests.length, 1, 'must fail loudly before the PUT');
+});
+
+test('string length limits count code points, matching the Go rune validation', () => {
+  const schema: JsonObject = { maxLength: 3, minLength: 2, type: 'string' };
+  validateJsonSchema(schema, '🎉🎉🎉', 'field');
+  assert.throws(() => validateJsonSchema(schema, 'aaaa', 'field'), /too long/);
+  assert.throws(() => validateJsonSchema(schema, '🎉', 'field'), /too short/);
+});

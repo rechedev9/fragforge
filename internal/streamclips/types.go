@@ -103,6 +103,10 @@ const (
 	minOverlayFontSize     = 24
 	maxOverlayFontSize     = 120
 	defaultOverlayFontSize = 64
+	// Vertical center bounds shared by the streamer banner and text overlays:
+	// the drag-handle margin that keeps either strip fully inside the frame.
+	minVerticalPositionY = 0.025
+	maxVerticalPositionY = 0.975
 )
 
 // ClipEdit carries the optional per-clip edit options: playback speed, the
@@ -351,7 +355,7 @@ func (p EditPlan) Validate() error {
 		return fmt.Errorf("streamer banner nick must use 1-25 letters, numbers, or underscores")
 	}
 	if positionY := p.StreamerBanner.PositionY; positionY != nil {
-		if math.IsNaN(*positionY) || math.IsInf(*positionY, 0) || *positionY < 0.025 || *positionY > 0.975 {
+		if math.IsNaN(*positionY) || math.IsInf(*positionY, 0) || *positionY < minVerticalPositionY || *positionY > maxVerticalPositionY {
 			return fmt.Errorf("streamer banner position_y must be finite and between 0.025 and 0.975")
 		}
 	}
@@ -433,6 +437,18 @@ func (c ClipRange) OutputDurationSeconds() float64 {
 	return (c.EndSeconds - c.StartSeconds) / c.Edit.speed()
 }
 
+// EffectiveSpeed is the clip's playback rate with the unset default applied,
+// so callers can map source-time positions onto the rendered output timeline.
+func (c ClipRange) EffectiveSpeed() float64 {
+	return c.Edit.speed()
+}
+
+// SourceAudioMuted reports whether the clip edit silences the original audio,
+// which also means transcribing the source would caption inaudible speech.
+func (c ClipRange) SourceAudioMuted() bool {
+	return c.Edit != nil && c.Edit.SourceVolume != nil && *c.Edit.SourceVolume == 0
+}
+
 // HasTextOverlays reports whether any clip burns text overlays, which decides
 // whether the render worker must resolve a font file up front.
 func (p EditPlan) HasTextOverlays() bool {
@@ -490,7 +506,7 @@ func (o TextOverlay) validate(clipID string, clipDuration float64) error {
 			return fmt.Errorf("clip %s text overlay text must not contain control characters", clipID)
 		}
 	}
-	if math.IsNaN(o.PositionY) || math.IsInf(o.PositionY, 0) || o.PositionY < 0.025 || o.PositionY > 0.975 {
+	if math.IsNaN(o.PositionY) || math.IsInf(o.PositionY, 0) || o.PositionY < minVerticalPositionY || o.PositionY > maxVerticalPositionY {
 		return fmt.Errorf("clip %s text overlay position_y must be finite and between 0.025 and 0.975", clipID)
 	}
 	if o.FontSize != 0 && (o.FontSize < minOverlayFontSize || o.FontSize > maxOverlayFontSize) {
@@ -591,6 +607,14 @@ func normalizeClipEdit(edit *ClipEdit) *ClipEdit {
 			overlay.Text = strings.TrimSpace(overlay.Text)
 			normalized.TextOverlays[i] = overlay
 		}
+	}
+	// Identity values render exactly like unset ones, so collapse them too;
+	// this keeps plans saved through any surface shape-identical.
+	if normalized.Speed == 1 {
+		normalized.Speed = 0
+	}
+	if normalized.SourceVolume != nil && *normalized.SourceVolume == 1 {
+		normalized.SourceVolume = nil
 	}
 	if normalized.Speed == 0 && normalized.SourceVolume == nil &&
 		normalized.FadeInSeconds == 0 && normalized.FadeOutSeconds == 0 &&

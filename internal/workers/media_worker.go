@@ -1023,17 +1023,27 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		publishPath := outPath
 		publishClipID := clip.ID
 		if plan.Captions.Enabled {
-			if cfg.cloudCaptionsConfigured() && j.Probe.AudioCodec == "" {
+			switch {
+			case cfg.cloudCaptionsConfigured() && j.Probe.AudioCodec == "":
 				warnings = append(warnings, fmt.Sprintf("clip %s: source has no audio, publishing without captions", clip.ID))
-			} else {
+			case clip.SourceAudioMuted():
+				// Captions must describe what the viewer hears; a muted clip
+				// would otherwise get subtitles narrating inaudible speech.
+				warnings = append(warnings, fmt.Sprintf("clip %s: original audio is muted by the clip edit, publishing without captions", clip.ID))
+			default:
 				transcriptionPath := outPath
+				// Cues transcribed from the rendered clip are already in output
+				// time; cues from the source range must be mapped through the
+				// speed edit before burning onto the sped-up output.
+				cueSpeed := 1.0
 				if cfg.cloudCaptionsConfigured() {
 					transcriptionPath, err = w.extractCaptionSourceAudio(runCtx, cfg, workDir, sourcePath, clip)
 					if err != nil {
 						return err
 					}
+					cueSpeed = clip.EffectiveSpeed()
 				}
-				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, j.ID, variant, clip.ID, plan.Captions.Language)
+				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, cueSpeed, j.ID, variant, clip.ID, plan.Captions.Language)
 				if err != nil {
 					return err
 				}
@@ -1090,13 +1100,6 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	return nil
 }
 
-// renderClipKillfeedNotices renders every kill in clip.KillfeedKills to a
-// synthetic CS2 kill-notice PNG under <workDir>/killfeed/<clipID>/cue<i>_<j>.png
-// and returns the paths index-aligned with clip.KillfeedSeconds (top-first per
-// cue). A cue with no kills gets a nil entry so BuildFFmpegArgs falls back to a
-// frozen crop of the killfeed region. Names are deterministic and files are
-// overwritten, so a redriven task stays idempotent. It returns nil when the
-// clip carries no kills at all.
 // writeClipOverlayTexts materializes one text file per overlay so drawtext can
 // read the user's text verbatim (expansion=none) instead of embedding it in
 // the filtergraph, where escaping arbitrary characters is unreliable.
@@ -1119,6 +1122,13 @@ func writeClipOverlayTexts(workDir string, clip streamclips.ClipRange) ([]string
 	return paths, nil
 }
 
+// renderClipKillfeedNotices renders every kill in clip.KillfeedKills to a
+// synthetic CS2 kill-notice PNG under <workDir>/killfeed/<clipID>/cue<i>_<j>.png
+// and returns the paths index-aligned with clip.KillfeedSeconds (top-first per
+// cue). A cue with no kills gets a nil entry so BuildFFmpegArgs falls back to a
+// frozen crop of the killfeed region. Names are deterministic and files are
+// overwritten, so a redriven task stays idempotent. It returns nil when the
+// clip carries no kills at all.
 func renderClipKillfeedNotices(workDir string, clip streamclips.ClipRange) ([][]string, error) {
 	if len(clip.KillfeedKills) == 0 {
 		return nil, nil
@@ -1195,13 +1205,19 @@ func (w *StreamRenderWorker) extractCaptionSourceAudio(ctx context.Context, cfg 
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
 // explicitly requested and a transcription backend is configured.
-func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
+func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, cueSpeed float64, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
 	cues, err := w.transcribe(ctx, transcriptionPath, workDir, language)
 	if err != nil {
 		if strings.Contains(err.Error(), "no words") {
 			return "", fmt.Sprintf("clip %s: transcription produced no words, publishing without captions", clipID), nil
 		}
 		return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
+	}
+	if cueSpeed != 1 {
+		for i := range cues {
+			cues[i].StartSeconds /= cueSpeed
+			cues[i].EndSeconds /= cueSpeed
+		}
 	}
 	sort.SliceStable(cues, func(i, j int) bool {
 		return cues[i].StartSeconds < cues[j].StartSeconds

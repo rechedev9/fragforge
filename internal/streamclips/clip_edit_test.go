@@ -355,3 +355,46 @@ func TestEditPlanHasTextOverlays(t *testing.T) {
 		t.Fatalf("plan with overlays reported HasTextOverlays = false")
 	}
 }
+
+func TestBuildFFmpegArgsSpeedWithoutProbedAudioOmitsAudioMap(t *testing.T) {
+	// If the probe missed a real audio stream, mapping it untouched next to a
+	// sped-up video would desync the output; no audio map keeps it correct,
+	// and with a correct probe there is no stream for 0:a? to map anyway.
+	plan := planWithClip(ClipRange{ID: "clip-001", StartSeconds: 0, EndSeconds: 10, Edit: &ClipEdit{Speed: 2}})
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4", SourceHasAudio: false}, plan, plan.Clips[0])
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "-map 0:a?") {
+		t.Fatalf("speed edit on a probed-silent source must not map passthrough audio: %s", joined)
+	}
+	if !strings.Contains(joined, "-map [v]") {
+		t.Fatalf("args missing video map: %s", joined)
+	}
+}
+
+func TestNormalizeEditPlanCollapsesIdentityEdit(t *testing.T) {
+	one := 1.0
+	tests := []struct {
+		name string
+		edit ClipEdit
+	}{
+		{name: "speed one", edit: ClipEdit{Speed: 1}},
+		{name: "source volume one", edit: ClipEdit{SourceVolume: &one}},
+		{name: "both identity", edit: ClipEdit{Speed: 1, SourceVolume: &one}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			edit := tt.edit
+			plan := planWithClip(ClipRange{ID: "clip-001", StartSeconds: 0, EndSeconds: 5, Edit: &edit})
+
+			normalized := NormalizeEditPlan(plan)
+
+			if normalized.Clips[0].Edit != nil {
+				t.Fatalf("identity edit should normalize to nil, got %+v", normalized.Clips[0].Edit)
+			}
+		})
+	}
+}

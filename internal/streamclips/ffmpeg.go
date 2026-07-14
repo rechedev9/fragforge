@@ -112,7 +112,7 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 	audioMap := "0:a?"
 	shortest := false
 	srcFilters := sourceAudioFilters(clip.Edit)
-	fadeFilters := audioFadeFilters(clip.Edit, clip.OutputDurationSeconds())
+	fadeFilters := boundaryFades(clip.Edit, clip.OutputDurationSeconds(), "afade")
 	if in.MusicPath != "" {
 		// Loop the track so it always covers the clip; amix/-shortest bound it.
 		args = append(args, "-stream_loop", "-1", "-i", in.MusicPath)
@@ -155,6 +155,11 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 			filter += ";[0:a]" + chain + "[a]"
 			audioMap = "[a]"
 		}
+	} else if clip.Edit.speed() != 1 {
+		// A probed-silent source renders without an audio track when speed
+		// changes the timeline: with a correct probe 0:a? maps nothing anyway,
+		// and with a stale probe passing the stream untouched would desync it.
+		audioMap = ""
 	}
 	// Loop each notice PNG so it always covers the clip; the overlay enable window
 	// and eof_action=pass bound it. Order matches the filtergraph input indices.
@@ -167,7 +172,11 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 	args = append(args,
 		"-filter_complex", filter,
 		"-map", "[v]",
-		"-map", audioMap,
+	)
+	if audioMap != "" {
+		args = append(args, "-map", audioMap)
+	}
+	args = append(args,
 		"-c:v", "libx264",
 		"-preset", defaultPreset,
 		"-crf", strconv.Itoa(defaultVideoCRF),
@@ -198,26 +207,40 @@ func buildFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, notic
 // source time up to setpts), then boundary fades in output time, then the
 // grade and the output format. An unedited clip keeps the pre-edit chain.
 func videoTail(plan EditPlan, clip ClipRange, fontPath string, textPaths []string) string {
-	tail := ""
+	var parts []string
 	if clip.Edit != nil {
 		for i, overlay := range clip.Edit.TextOverlays {
-			tail += textOverlayFilter(overlay, fontPath, textPaths[i]) + ","
+			parts = append(parts, textOverlayFilter(overlay, fontPath, textPaths[i]))
 		}
 		if speed := clip.Edit.speed(); speed != 1 {
-			tail += fmt.Sprintf("setpts=PTS/%s,", floatArg(speed))
+			parts = append(parts, "setpts=PTS/"+floatArg(speed))
 		}
-		outputDuration := clip.OutputDurationSeconds()
-		if fadeIn := clip.Edit.FadeInSeconds; fadeIn > 0 {
-			tail += fmt.Sprintf("fade=t=in:st=0:d=%s,", floatArg(fadeIn))
-		}
-		if fadeOut := clip.Edit.FadeOutSeconds; fadeOut > 0 {
-			tail += fmt.Sprintf("fade=t=out:st=%s:d=%s,", floatArg(outputDuration-fadeOut), floatArg(fadeOut))
+		if fades := boundaryFades(clip.Edit, clip.OutputDurationSeconds(), "fade"); fades != "" {
+			parts = append(parts, fades)
 		}
 	}
 	if plan.Effects.Grade {
-		tail += gradeFilter + ","
+		parts = append(parts, gradeFilter)
 	}
-	return tail + fmt.Sprintf("fps=%d,format=yuv420p[v]", outputFPS)
+	parts = append(parts, fmt.Sprintf("fps=%d,format=yuv420p[v]", outputFPS))
+	return strings.Join(parts, ",")
+}
+
+// boundaryFades emits the clip-edge fades in output (post-speed) time. The
+// name is the FFmpeg filter to use — "fade" for video, "afade" for audio — so
+// both timelines share one timing implementation and can never drift apart.
+func boundaryFades(edit *ClipEdit, outputDuration float64, name string) string {
+	if edit == nil {
+		return ""
+	}
+	var parts []string
+	if fadeIn := edit.FadeInSeconds; fadeIn > 0 {
+		parts = append(parts, fmt.Sprintf("%s=t=in:st=0:d=%s", name, floatArg(fadeIn)))
+	}
+	if fadeOut := edit.FadeOutSeconds; fadeOut > 0 {
+		parts = append(parts, fmt.Sprintf("%s=t=out:st=%s:d=%s", name, floatArg(outputDuration-fadeOut), floatArg(fadeOut)))
+	}
+	return strings.Join(parts, ",")
 }
 
 // textOverlayFilter burns one centered text line. The text comes from a
@@ -272,22 +295,6 @@ func atempoChain(speed float64) string {
 	default:
 		return "atempo=" + floatArg(speed)
 	}
-}
-
-// audioFadeFilters fades the final audio at the clip boundaries in output
-// (post-speed) time, mirroring the video fades in videoTail.
-func audioFadeFilters(edit *ClipEdit, outputDuration float64) string {
-	if edit == nil {
-		return ""
-	}
-	var parts []string
-	if fadeIn := edit.FadeInSeconds; fadeIn > 0 {
-		parts = append(parts, fmt.Sprintf("afade=t=in:st=0:d=%s", floatArg(fadeIn)))
-	}
-	if fadeOut := edit.FadeOutSeconds; fadeOut > 0 {
-		parts = append(parts, fmt.Sprintf("afade=t=out:st=%s:d=%s", floatArg(outputDuration-fadeOut), floatArg(fadeOut)))
-	}
-	return strings.Join(parts, ",")
 }
 
 func buildStandardFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, bannerFontPath string, textPaths []string, duration float64) string {

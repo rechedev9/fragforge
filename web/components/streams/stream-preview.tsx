@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Twitch } from 'lucide-react';
 import { streamsApi, type KillfeedKill, type NormalizedRect, type StreamClipRange, type StreamVariant } from '@/lib/api/streams';
+import { DEFAULT_OVERLAY_FONT_SIZE } from '@/lib/clip-edit';
 import {
   activeTextOverlays,
   calculateCropCoverGeometry,
@@ -410,12 +411,12 @@ export function StreamPreview({
       ) : null}
       {activeOverlays.map((overlay, i) => (
         <span
-          key={`${overlay.text}-${i}`}
+          key={i}
           className="pointer-events-none absolute left-0 w-full -translate-y-1/2 px-[4%] text-center font-[family-name:var(--font-display)] font-black leading-tight text-white"
           style={{
             top: `${overlay.position_y * 100}%`,
             // Match the render: font_size output pixels on the 1920px-tall canvas.
-            fontSize: `${(((overlay.font_size ?? 64) || 64) / 1920) * 100}cqh`,
+            fontSize: `${((overlay.font_size ?? DEFAULT_OVERLAY_FONT_SIZE) / PREVIEW_HEIGHT) * 100}cqh`,
             textShadow: '0 0 2px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.55)',
           }}
         >

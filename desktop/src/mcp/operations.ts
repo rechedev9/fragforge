@@ -104,13 +104,16 @@ const KILLFEED_KILL_PROPERTY: JsonObject = {
   required: ['attacker_side', 'attacker_name', 'victim_side', 'victim_name', 'weapon'],
   type: 'object',
 };
+// Vertical-center bounds shared by the streamer banner and text overlays,
+// mirroring min/maxVerticalPositionY in internal/streamclips/types.go.
+const POSITION_Y_PROPERTY: JsonObject = { maximum: 0.975, minimum: 0.025, type: 'number' };
 const TEXT_OVERLAY_PROPERTY: JsonObject = {
   additionalProperties: false,
   description: 'One burned-in text line. Times are relative to the clip start in source seconds; omitted bounds extend to the clip edges.',
   properties: {
     end_seconds: { exclusiveMinimum: 0, type: 'number' },
     font_size: { description: 'Output pixels; omit for the default 64.', maximum: 120, minimum: 24, type: 'integer' },
-    position_y: { description: 'Normalized vertical center of the text line.', maximum: 0.975, minimum: 0.025, type: 'number' },
+    position_y: { ...POSITION_Y_PROPERTY, description: 'Normalized vertical center of the text line.' },
     start_seconds: { minimum: 0, type: 'number' },
     text: { maxLength: 120, minLength: 1, type: 'string' },
   },
@@ -118,6 +121,8 @@ const TEXT_OVERLAY_PROPERTY: JsonObject = {
   type: 'object',
 };
 // Shared between the edit plan's clips[].edit object and streams.edit_clip.
+// Bounds mirror the clip-edit constants in internal/streamclips/types.go
+// (min/maxClipSpeed, maxSourceVolume, maxClipFadeSeconds, font sizes).
 const CLIP_EDIT_OPTION_PROPERTIES: JsonObject = {
   fade_in_seconds: { description: 'Fade from black/silence at the clip start, in output (post-speed) seconds.', maximum: 5, minimum: 0, type: 'number' },
   fade_out_seconds: { description: 'Fade to black/silence at the clip end, in output (post-speed) seconds.', maximum: 5, minimum: 0, type: 'number' },
@@ -194,7 +199,7 @@ const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
       additionalProperties: false,
       properties: {
         nick: { pattern: '^[A-Za-z0-9_]{1,25}$', type: 'string' },
-        position_y: { maximum: 0.975, minimum: 0.025, type: 'number' },
+        position_y: POSITION_Y_PROPERTY,
         slide_enabled: { type: 'boolean' },
       },
       type: 'object',
@@ -1097,8 +1102,11 @@ export function validateJsonSchema(schema: JsonObject, value: JsonValue, path: s
   }
   if (expectedType === 'string') {
     if (typeof value !== 'string') throw new Error(`${path} must be a string`);
-    if (typeof schema.minLength === 'number' && value.length < schema.minLength) throw new Error(`${path} is too short`);
-    if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) throw new Error(`${path} is too long`);
+    // Count code points, not UTF-16 units, so limits agree with the Go
+    // validators' rune counts (an emoji is one character on both sides).
+    const length = [...value].length;
+    if (typeof schema.minLength === 'number' && length < schema.minLength) throw new Error(`${path} is too short`);
+    if (typeof schema.maxLength === 'number' && length > schema.maxLength) throw new Error(`${path} is too long`);
     if (schema.format === 'uri') {
       try {
         new URL(value);
@@ -1148,60 +1156,71 @@ function validateRules(rules: JsonObject): void {
 const CLIP_EDIT_OPTION_KEYS = ['speed', 'source_volume', 'fade_in_seconds', 'fade_out_seconds', 'text_overlays'] as const;
 
 /**
- * Drops default-valued fields so a fully reset edit disappears from the plan,
- * keeping the stored plan identical to one that was never edited.
+ * Drops default-valued known fields so a fully reset edit disappears from the
+ * plan. Unknown fields are deliberately preserved: the following schema
+ * validation then rejects them loudly instead of a targeted edit silently
+ * erasing data written by a newer FragForge.
  */
 function pruneClipEditObject(edit: JsonObject): JsonObject | undefined {
-  const next: JsonObject = {};
-  if (typeof edit.speed === 'number' && edit.speed !== 1) next.speed = edit.speed;
-  if (typeof edit.source_volume === 'number' && edit.source_volume !== 1) next.source_volume = edit.source_volume;
-  if (typeof edit.fade_in_seconds === 'number' && edit.fade_in_seconds !== 0) next.fade_in_seconds = edit.fade_in_seconds;
-  if (typeof edit.fade_out_seconds === 'number' && edit.fade_out_seconds !== 0) next.fade_out_seconds = edit.fade_out_seconds;
-  if (Array.isArray(edit.text_overlays) && edit.text_overlays.length > 0) next.text_overlays = edit.text_overlays;
+  const next: JsonObject = { ...edit };
+  if (next.speed === 1) delete next.speed;
+  if (next.source_volume === 1) delete next.source_volume;
+  if (next.fade_in_seconds === 0) delete next.fade_in_seconds;
+  if (next.fade_out_seconds === 0) delete next.fade_out_seconds;
+  if (Array.isArray(next.text_overlays) && next.text_overlays.length === 0) delete next.text_overlays;
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
-async function editStreamClip(client: OrchestratorClient, input: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
+/**
+ * Shared read-modify-write pipeline for every plan-mutating operation: fetch
+ * the current plan, apply the mutation, re-validate the whole plan (schema,
+ * cross-field, live variant), then persist it.
+ */
+async function updateStreamEditPlan(
+  client: OrchestratorClient,
+  input: JsonObject,
+  mutate: (plan: JsonObject) => JsonObject,
+  signal?: AbortSignal,
+): Promise<JsonValue> {
   const editPlanPath = streamPath(input, '/edit-plan');
   const current = await client.request({ path: editPlanPath, signal });
   if (!isJsonObject(current)) throw new Error('stream edit plan response must be an object');
-  const clipID = stringInput(input, 'clip_id');
-  const clips = Array.isArray(current.clips) ? current.clips : [];
-  const clipIDs = clips.filter(isJsonObject).flatMap((clip) => (typeof clip.id === 'string' ? [clip.id] : []));
-  if (!clipIDs.includes(clipID)) {
-    throw new Error(`arguments.clip_id ${JSON.stringify(clipID)} is not one of the plan's clips: ${clipIDs.join(', ')}`);
-  }
-  const updatedClips = clips.map((clip): JsonValue => {
-    if (!isJsonObject(clip) || clip.id !== clipID) return clip;
-    const merged: JsonObject = isJsonObject(clip.edit) ? { ...clip.edit } : {};
-    for (const key of CLIP_EDIT_OPTION_KEYS) {
-      if (input[key] !== undefined) merged[key] = input[key];
-    }
-    const next: JsonObject = { ...clip };
-    const pruned = pruneClipEditObject(merged);
-    if (pruned === undefined) delete next.edit;
-    else next.edit = pruned;
-    return next;
-  });
-  const updated: JsonObject = { ...current, clips: updatedClips };
+  const updated = mutate(current);
   validateJsonSchema(STREAM_EDIT_PLAN_PROPERTY, updated, 'stream edit plan');
   validateStreamEditPlan(updated);
   await validateLiveStreamEditPlan(client, updated, signal);
   return client.request({ body: updated, method: 'PUT', path: editPlanPath, signal });
 }
 
+async function editStreamClip(client: OrchestratorClient, input: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
+  return updateStreamEditPlan(client, input, (current) => {
+    const clipID = stringInput(input, 'clip_id');
+    const clips = Array.isArray(current.clips) ? current.clips : [];
+    const clipIDs = clips.filter(isJsonObject).flatMap((clip) => (typeof clip.id === 'string' ? [clip.id] : []));
+    if (!clipIDs.includes(clipID)) {
+      throw new Error(`arguments.clip_id ${JSON.stringify(clipID)} is not one of the plan's clips: ${clipIDs.join(', ')}`);
+    }
+    const updatedClips = clips.map((clip): JsonValue => {
+      if (!isJsonObject(clip) || clip.id !== clipID) return clip;
+      const merged: JsonObject = isJsonObject(clip.edit) ? { ...clip.edit } : {};
+      for (const key of CLIP_EDIT_OPTION_KEYS) {
+        if (input[key] !== undefined) merged[key] = input[key];
+      }
+      const next: JsonObject = { ...clip };
+      const pruned = pruneClipEditObject(merged);
+      if (pruned === undefined) delete next.edit;
+      else next.edit = pruned;
+      return next;
+    });
+    return { ...current, clips: updatedClips };
+  }, signal);
+}
+
 async function configureStreamCaptions(client: OrchestratorClient, input: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
-  const editPlanPath = streamPath(input, '/edit-plan');
-  const current = await client.request({ path: editPlanPath, signal });
-  if (!isJsonObject(current)) throw new Error('stream edit plan response must be an object');
   const captions: JsonObject = { enabled: input.enabled === true };
   const language = optionalStringInput(input, 'language');
   if (language !== undefined) captions.language = language;
-  const updated: JsonObject = { ...current, captions };
-  validateJsonSchema(STREAM_EDIT_PLAN_PROPERTY, updated, 'stream edit plan');
-  validateStreamEditPlan(updated);
-  await validateLiveStreamEditPlan(client, updated, signal);
-  return client.request({ body: updated, method: 'PUT', path: editPlanPath, signal });
+  return updateStreamEditPlan(client, input, (current) => ({ ...current, captions }), signal);
 }
 
 function validateStreamEditPlan(plan: JsonObject): void {

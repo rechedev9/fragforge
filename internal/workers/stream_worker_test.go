@@ -859,3 +859,115 @@ func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) 
 		t.Fatalf("got error %q, want it to mention no transcription backend is configured", err.Error())
 	}
 }
+
+func TestStreamRenderWorkerScalesCloudCaptionCuesBySpeed(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	plan.Clips[0].StartSeconds = 1.25
+	plan.Clips[0].EndSeconds = 3.25
+	plan.Clips[0].Edit = &streamclips.ClipEdit{Speed: 2}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		WorkDir:    t.TempDir(),
+		FFmpegPath: "ffmpeg",
+		XAIAPIKey:  "xai_test",
+	})
+	w.runner = runner
+	// Cloud cues come back in source-relative seconds over the 2s source range.
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		return []captions.WordCue{
+			{Word: "nice", StartSeconds: 0, EndSeconds: 0.5},
+			{Word: "gg", StartSeconds: 0.5, EndSeconds: 1},
+		}, nil
+	}
+
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+
+	captionKey, err := streamclips.RenderCaptionKey(id, streamclips.VariantStreamer4060, "clip-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ass, ok := store.files[captionKey]
+	if !ok {
+		t.Fatal("storage missing .ass caption artifact")
+	}
+	// At 2x the 1s of source speech plays back in 0.5s: cue times must be
+	// divided by the clip speed so captions stay on the output timeline.
+	if !strings.Contains(string(ass), `Dialogue: 0,0:00:00.00,0:00:00.50,Karaoke,,0,0,0,,{\k25}nice {\k25}gg`) {
+		t.Fatalf("caption artifact does not scale cues to the sped-up output: %s", ass)
+	}
+}
+
+func TestStreamRenderWorkerSkipsCaptionsWhenClipMutesSourceAudio(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	muted := 0.0
+	plan.Clips[0].Edit = &streamclips.ClipEdit{SourceVolume: &muted}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		WorkDir:    t.TempDir(),
+		FFmpegPath: "ffmpeg",
+		XAIAPIKey:  "xai_test",
+	})
+	w.runner = runner
+	transcribeCalled := false
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		transcribeCalled = true
+		return nil, errors.New("unexpected transcription")
+	}
+
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+	if transcribeCalled {
+		t.Fatal("transcription ran for a clip whose edit mutes the source audio")
+	}
+	if got, want := len(runner.calls), 1; got != want {
+		t.Fatalf("runner calls = %d, want %d render call", got, want)
+	}
+	stateKey, err := streamclips.RenderStateKey(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(store.files[stateKey]), "original audio is muted") {
+		t.Fatalf("render state missing muted-audio warning: %s", store.files[stateKey])
+	}
+}

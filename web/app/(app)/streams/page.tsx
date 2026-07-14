@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Captions,
@@ -53,6 +53,10 @@ import {
   representativeFrameTime,
 } from '@/lib/stream-preview';
 import { addClipCue, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from '@/lib/killfeed-plan';
+import { CLIP_SPEEDS, clipEditIssue, DEFAULT_OVERLAY_FONT_SIZE, MAX_OVERLAY_FONT_SIZE, MAX_TEXT_OVERLAYS, MIN_OVERLAY_FONT_SIZE } from '@/lib/clip-edit';
+
+/** Accent styling shared by every purple range slider in this editor. */
+const ACCENT_SLIDER_CLASS = 'accent-[#9146ff] disabled:opacity-50';
 
 /** Upstream code for a killfeed-read blocked by a missing xAI key. */
 const XAI_KEY_MISSING_CODE = 'xai_key_missing';
@@ -145,7 +149,7 @@ function formatStreamTimestamp(seconds: number): string {
  */
 function planFingerprint(plan: StreamEditPlan): string {
   const rect = (r?: NormalizedRect) => (r ? [r.x, r.y, r.width, r.height] : null);
-  const overlay = (o: StreamTextOverlay) => [o.text, o.position_y, o.start_seconds ?? null, o.end_seconds ?? null, o.font_size ?? 0];
+  const overlay = (o: StreamTextOverlay) => [o.text, o.position_y, o.start_seconds ?? null, o.end_seconds ?? null, o.font_size ?? DEFAULT_OVERLAY_FONT_SIZE];
   // Defaults collapse an absent edit and an all-defaults edit to the same key.
   const edit = (e?: StreamClipEdit) => [
     e?.speed ?? 1,
@@ -353,6 +357,11 @@ function LocalStreamsPage() {
     }
     if (!STREAMER_NICK_RE.test(plan.streamer_banner?.nick?.trim() ?? '')) {
       setError('El nick debe tener hasta 25 letras, números o guiones bajos.');
+      return;
+    }
+    const editIssue = clipEditIssue(plan.clips);
+    if (editIssue !== null) {
+      setError(editIssue);
       return;
     }
     setError(null);
@@ -607,7 +616,10 @@ function StreamEditor({
 }) {
   const videoSrc = streamsApi.sourceUrl(job.id);
   const variantMeta = STREAM_VARIANTS.find((v) => v.value === plan.variant) ?? STREAM_VARIANTS[0];
-  const stale = renderedPlan !== null && planFingerprint(renderedPlan) !== planFingerprint(plan);
+  const stale = useMemo(
+    () => renderedPlan !== null && plan !== null && planFingerprint(renderedPlan) !== planFingerprint(plan),
+    [renderedPlan, plan],
+  );
   const busy = stage === 'rendering' || saving;
   const probedDuration = job.probe?.duration_seconds ?? 0;
   const sourceDuration =
@@ -1024,7 +1036,7 @@ function StreamEditor({
                   aria-label="Posición vertical del banner"
                   aria-valuetext={`${Math.round(bannerPosition * 100)}% desde arriba`}
                   onChange={(event) => setStreamerPosition(Number(event.target.value))}
-                  className="w-full accent-[#9146ff] disabled:opacity-50"
+                  className={cn('w-full', ACCENT_SLIDER_CLASS)}
                 />
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -1195,11 +1207,6 @@ function LayoutGlyph({ variant, selected }: { variant: StreamVariant; selected: 
   );
 }
 
-/** Playback rates the render's chained atempo filters reproduce faithfully. */
-const CLIP_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
-/** Mirrors streamclips: at most 4 burned-in text overlays per clip. */
-const MAX_TEXT_OVERLAYS = 4;
-
 /**
  * Drops default-valued fields so an untouched edit keeps the plan (and the
  * render fingerprint) identical to a plan without an `edit` object at all.
@@ -1346,7 +1353,9 @@ function ClipEditControls({
     onEditChange({ text_overlays: [...overlays, { text: '', position_y: 0.5 }] });
 
   /** Empty input clears an optional numeric field; anything else sets it. */
-  const optionalSeconds = (value: string): number | undefined => (value === '' ? undefined : Number(value));
+  const optionalNumber = (value: string): number | undefined => (value === '' ? undefined : Number(value));
+  /** Go's font_size is an int, so typed decimals are rounded before saving. */
+  const optionalInteger = (value: string): number | undefined => (value === '' ? undefined : Math.round(Number(value)));
 
   return (
     <div className="mt-1 flex flex-col gap-3 border-t border-border/60 pt-3">
@@ -1427,7 +1436,7 @@ function ClipEditControls({
             aria-label="Volumen del audio original"
             aria-valuetext={sourceVolume === 0 ? 'Silencio' : `${Math.round(sourceVolume * 100)}%`}
             onChange={(e) => onEditChange({ source_volume: Number(e.target.value) })}
-            className="min-h-10 w-full accent-[#9146ff] disabled:opacity-50"
+            className={cn('min-h-10 w-full', ACCENT_SLIDER_CLASS)}
           />
         </div>
       </div>
@@ -1473,7 +1482,7 @@ function ClipEditControls({
                 step="0.1"
                 value={overlay.start_seconds ?? ''}
                 disabled={disabled}
-                onChange={(e) => updateOverlay(index, { start_seconds: optionalSeconds(e.target.value) })}
+                onChange={(e) => updateOverlay(index, { start_seconds: optionalNumber(e.target.value) })}
                 placeholder="0"
                 className="w-20"
               />
@@ -1490,7 +1499,7 @@ function ClipEditControls({
                 step="0.1"
                 value={overlay.end_seconds ?? ''}
                 disabled={disabled}
-                onChange={(e) => updateOverlay(index, { end_seconds: optionalSeconds(e.target.value) })}
+                onChange={(e) => updateOverlay(index, { end_seconds: optionalNumber(e.target.value) })}
                 placeholder={clipDuration.toFixed(1)}
                 className="w-20"
               />
@@ -1502,13 +1511,13 @@ function ClipEditControls({
               <Input
                 id={`${clip.id}-text-${index}-size`}
                 type="number"
-                min={24}
-                max={120}
+                min={MIN_OVERLAY_FONT_SIZE}
+                max={MAX_OVERLAY_FONT_SIZE}
                 step="1"
                 value={overlay.font_size ?? ''}
                 disabled={disabled}
-                onChange={(e) => updateOverlay(index, { font_size: optionalSeconds(e.target.value) })}
-                placeholder="64"
+                onChange={(e) => updateOverlay(index, { font_size: optionalInteger(e.target.value) })}
+                placeholder={String(DEFAULT_OVERLAY_FONT_SIZE)}
                 className="w-20"
               />
             </div>
@@ -1530,14 +1539,14 @@ function ClipEditControls({
             <input
               id={`${clip.id}-text-${index}-position`}
               type="range"
-              min={0.025}
-              max={0.975}
+              min={STREAMER_BANNER_MIN_POSITION}
+              max={STREAMER_BANNER_MAX_POSITION}
               step="0.005"
               value={overlay.position_y}
               disabled={disabled}
               aria-valuetext={`${Math.round(overlay.position_y * 100)}% desde arriba`}
               onChange={(e) => updateOverlay(index, { position_y: Number(e.target.value) })}
-              className="min-h-10 w-full accent-[#9146ff] disabled:opacity-50"
+              className={cn('min-h-10 w-full', ACCENT_SLIDER_CLASS)}
             />
             <span className="w-10 shrink-0 text-right font-[family-name:var(--font-mono)] text-[11px] text-stream">
               {Math.round(overlay.position_y * 100)}%
