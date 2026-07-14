@@ -29,6 +29,13 @@ const defaultBaseURL = "https://api.x.ai/v1"
 // killfeed font's wide letter spacing; sanitizeName repairs that.
 const DefaultModel = "grok-4.20-0309-non-reasoning"
 
+// readTemperature pins sampling off. Reading a killfeed is perception, not
+// composition: the same crop must always yield the same kills. Left to the API
+// default, repeated reads of one verified frame disagreed with each other — four
+// runs returned the victim as both "bek667" and "bek657", and one flipped every
+// side and called an awp a deagle. There is nothing here to be creative about.
+const readTemperature = 0
+
 // defaultHTTPTimeout bounds a single killfeed read. The payload is one small
 // PNG crop and a short JSON reply, so the round trip is quick.
 const defaultHTTPTimeout = 60 * time.Second
@@ -57,6 +64,7 @@ type Client struct {
 type chatRequest struct {
 	Model          string         `json:"model"`
 	ResponseFormat responseFormat `json:"response_format"`
+	Temperature    float64        `json:"temperature"`
 	Messages       []chatMessage  `json:"messages"`
 }
 
@@ -93,6 +101,7 @@ func (c *Client) ReadKillfeed(ctx context.Context, framePNG []byte) ([]streamcli
 	reqBody := chatRequest{
 		Model:          c.model(),
 		ResponseFormat: responseFormat{Type: "json_object"},
+		Temperature:    readTemperature,
 		Messages: []chatMessage{{
 			Role: "user",
 			Content: []contentPart{
