@@ -31,6 +31,9 @@ const (
 	KillfeedSampleDelaySeconds = 0.35
 	killfeedLeadTime           = 0.35
 	killfeedTrailTime          = 2.8
+	// killfeedFreezeEndGuard keeps a delayed freeze sample clear of the clip's
+	// final frame, so trim=start always lands on a frame that exists.
+	killfeedFreezeEndGuard = 0.05
 
 	// gradeFilter is the light contrast/saturation lift EffectsPlan.Grade
 	// applies — the same restrained look FragForge's viral presets use.
@@ -416,7 +419,7 @@ func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRang
 		parts = append(parts, fmt.Sprintf(
 			"[killfeedin%d]trim=start=%s,select='eq(n\\,0)',setpts=PTS-STARTPTS,%s,"+
 				"scale=%d:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=%s[killfeed%d]",
-			i, floatArg(relative), cropFilter(*plan.KillfeedCrop),
+			i, floatArg(killfeedFreezeOffset(relative, duration)), cropFilter(*plan.KillfeedCrop),
 			killfeedFrozenWidth, floatArg(duration), i,
 		))
 	}
@@ -558,6 +561,19 @@ func ffmpegFilterPath(value string) string {
 	value = strings.ReplaceAll(value, `\`, "/")
 	value = strings.ReplaceAll(value, ":", `\:`)
 	return strings.ReplaceAll(value, "'", `\'`)
+}
+
+// killfeedFreezeOffset returns the in-clip timestamp whose frame a frozen
+// killfeed strip is cropped from. CS2 finishes drawing a kill notice shortly
+// after the kill lands, so freezing the exact cue frame can catch a notice
+// that has not appeared yet — a verified failure on a three-kill AWP burst,
+// where the newest notice was still absent at the cue and only rendered
+// 0.35s later. Sampling the same KillfeedSampleDelaySeconds the vision reader
+// uses (see ReadStreamKillfeed) keeps what is rendered identical to what was
+// read. The offset is clamped inside the clip so a cue at the very end still
+// resolves to a real frame instead of trimming past the last one.
+func killfeedFreezeOffset(relative, duration float64) float64 {
+	return math.Min(relative+KillfeedSampleDelaySeconds, math.Max(relative, duration-killfeedFreezeEndGuard))
 }
 
 func cropFilter(c CropRect) string {

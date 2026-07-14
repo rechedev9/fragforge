@@ -320,7 +320,7 @@ func TestBuildFFmpegArgsMixesNoticesAndFrozenCropFallback(t *testing.T) {
 		append([]string{`[0:v]split=3[facein][gamein][killfeedin1]`}, stackedLayoutBranches...),
 		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
 		`[2:v]format=rgba,setpts=PTS-STARTPTS[notice0_1]`,
-		`[killfeedin1]trim=start=2.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed1]`,
+		`[killfeedin1]trim=start=2.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed1]`,
 		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[kfover0]`,
 		`[kfover0][notice0_1]overlay=x=W-w-24:y=896:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[kfover1]`,
 		`[kfover1][killfeed1]overlay=x=W-w-24:y=840:enable='between(t\,1.650000\,4.800000)':eof_action=pass:shortest=0[content]`,
@@ -354,7 +354,7 @@ func TestBuildFFmpegArgsFrozenCropFallbackGeometry(t *testing.T) {
 
 	wantFilter := strings.Join(append(
 		append([]string{`[0:v]split=3[facein][gamein][killfeedin0]`}, stackedLayoutBranches...),
-		`[killfeedin0]trim=start=1.000000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0]`,
+		`[killfeedin0]trim=start=1.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0]`,
 		`[layout][killfeed0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
 		`[content]fps=60,format=yuv420p[v]`,
 	), ";")
@@ -363,6 +363,74 @@ func TestBuildFFmpegArgsFrozenCropFallbackGeometry(t *testing.T) {
 	}
 	if joined := strings.Join(args, " "); strings.Contains(joined, "-loop 1 -i") {
 		t.Fatalf("frozen-crop fallback must not add looped notice inputs: %s", joined)
+	}
+}
+
+// A frozen killfeed strip must be cropped from the same delayed frame the
+// vision reader reads (cue + KillfeedSampleDelaySeconds), not from the cue
+// frame itself: on a real three-kill AWP burst the newest notice had not been
+// drawn yet at the cue, so freezing there rendered a strip missing that kill.
+func TestBuildFFmpegArgsFreezesKillfeedAfterNoticeIsDrawn(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+
+	tests := []struct {
+		name  string
+		clip  ClipRange
+		want  string
+		trail string
+	}{
+		{
+			name: "cue mid clip samples the delayed frame",
+			clip: ClipRange{ID: "clip-001", StartSeconds: 10, EndSeconds: 20, KillfeedSeconds: []float64{18.45}},
+			want: "trim=start=8.800000",
+		},
+		{
+			name: "cue near the clip end stays on a real frame",
+			clip: ClipRange{ID: "clip-002", StartSeconds: 0, EndSeconds: 5, KillfeedSeconds: []float64{4.9}},
+			want: "trim=start=4.950000",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := BuildFFmpegArgs(FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"}, plan, tt.clip)
+			if err != nil {
+				t.Fatalf("BuildFFmpegArgs error = %v", err)
+			}
+			got := filterComplexArg(t, args)
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("filter_complex must freeze at %q\n got: %s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestKillfeedFreezeOffsetNeverTrimsPastTheClip(t *testing.T) {
+	tests := []struct {
+		name     string
+		relative float64
+		duration float64
+		want     float64
+	}{
+		{name: "mid clip adds the sample delay", relative: 8.45, duration: 15.15, want: 8.8},
+		{name: "start of clip adds the sample delay", relative: 0, duration: 10, want: 0.35},
+		{name: "delay would overshoot the end", relative: 9.9, duration: 10, want: 9.95},
+		{name: "cue already past the guard never rewinds", relative: 9.99, duration: 10, want: 9.99},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := killfeedFreezeOffset(tt.relative, tt.duration)
+			if math.Abs(got-tt.want) > 1e-9 {
+				t.Fatalf("killfeedFreezeOffset(%v, %v) = %v, want %v", tt.relative, tt.duration, got, tt.want)
+			}
+			if got > tt.duration {
+				t.Fatalf("killfeedFreezeOffset(%v, %v) = %v, which trims past the clip", tt.relative, tt.duration, got)
+			}
+			if got < tt.relative {
+				t.Fatalf("killfeedFreezeOffset(%v, %v) = %v, which rewinds before the cue", tt.relative, tt.duration, got)
+			}
+		})
 	}
 }
 
