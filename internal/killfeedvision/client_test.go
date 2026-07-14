@@ -184,6 +184,35 @@ func TestReadKillfeedInvalidWeaponDropped(t *testing.T) {
 	}
 }
 
+// The killfeed font's wide letter spacing makes the reader split names into
+// words. These are the exact names a real three-kill AWP burst came back as.
+func TestReadKillfeedRepairsNamesSplitOnLetterSpacing(t *testing.T) {
+	weapon := validWeaponKey(t)
+	kills := `{"kills":[` +
+		`{"attacker_side":"CT","attacker_name":"Za Ckk","victim_side":"T","victim_name":"be k6 67",` +
+		`"assister_side":"CT","assister_name":"Nm okas","weapon":"` + weapon + `"}` +
+		`]}`
+	srv := newServer(t, http.StatusOK, chatReply(t, kills), nil)
+
+	client := &Client{APIKey: "k", BaseURL: srv.URL}
+	got, err := client.ReadKillfeed(context.Background(), []byte("png"))
+	if err != nil {
+		t.Fatalf("ReadKillfeed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d kills, want 1: %+v", len(got), got)
+	}
+	if got[0].AttackerName != "ZaCkk" {
+		t.Fatalf("attacker name = %q, want %q", got[0].AttackerName, "ZaCkk")
+	}
+	if got[0].VictimName != "bek667" {
+		t.Fatalf("victim name = %q, want %q", got[0].VictimName, "bek667")
+	}
+	if got[0].AssisterName != "Nmokas" {
+		t.Fatalf("assister name = %q, want %q", got[0].AssisterName, "Nmokas")
+	}
+}
+
 func TestReadKillfeedNon2xxError(t *testing.T) {
 	srv := newServer(t, http.StatusInternalServerError, `{"error":"boom"}`, nil)
 
