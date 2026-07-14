@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { Settings } from 'lucide-react';
 import { StudioPageHeader } from '@/components/studio/page-header';
 import { XAISettings } from '@/components/settings/xai-settings';
 
@@ -10,9 +9,8 @@ export default function SettingsPage(): ReactNode {
       <StudioPageHeader
         number={6}
         label="AJUSTES"
-        title="Configuración"
+        title="CONFIGURACIÓN"
         description="Configura las credenciales opcionales que FragForge usa para generar subtítulos en tu propio equipo."
-        actions={<Settings className="hidden size-8 text-primary/70 sm:block" aria-hidden />}
       />
       <XAISettings />
     </div>

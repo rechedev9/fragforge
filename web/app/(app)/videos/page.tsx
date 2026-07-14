@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { Film } from 'lucide-react';
+import { Film, Swords } from 'lucide-react';
 import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { startPollLoop } from '@/lib/poll-loop';
@@ -203,10 +203,12 @@ function EmptyState() {
       title="Todavía no hay reels"
       description="Elige una jugada y FragForge seguirá la captura, la edición y el render desde esta biblioteca."
       compact
-      className="max-w-2xl"
       actions={
-        <Button asChild>
-          <Link href="/matches">BUSCAR JUGADAS</Link>
+        <Button asChild className="font-[family-name:var(--font-display)] tracking-[0.06em]">
+          <Link href="/matches">
+            <Swords aria-hidden />
+            BUSCAR JUGADAS
+          </Link>
         </Button>
       }
       note="CAPTURA Y EDICIÓN EN TU RIG"
