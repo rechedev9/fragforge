@@ -60,6 +60,63 @@ func TestLoadConfigAllowsLANBindWithMutationToken(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsDiscoverySecret(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ZV_DATABASE_URL", "postgres://example")
+	secret := strings.Repeat("a", 64)
+	t.Setenv("ZV_DISCOVERY_SECRET", secret)
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig error = %v", err)
+	}
+	if got, want := cfg.DiscoverySecret, secret; got != want {
+		t.Fatalf("DiscoverySecret = %q, want %q", got, want)
+	}
+}
+
+func TestLoadConfigRejectsMalformedDiscoverySecretWithoutReflectingIt(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ZV_DATABASE_URL", "memory")
+	secret := "do-not-reflect-this-value"
+	t.Setenv("ZV_DISCOVERY_SECRET", secret)
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("loadConfig error = nil, want invalid discovery secret rejected")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("loadConfig error reflected discovery secret: %q", err)
+	}
+	if !strings.Contains(err.Error(), "32 random bytes encoded as lowercase hex") {
+		t.Fatalf("loadConfig error = %q, want format guidance", err)
+	}
+}
+
+func TestClearDiscoverySecretEnvironmentKeepsLoadedConfigOnlyInMemory(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ZV_DATABASE_URL", "memory")
+	t.Setenv("ZV_DISCOVERY_SECRET", strings.Repeat("a", 64))
+	t.Setenv("zv_discovery_secret", strings.Repeat("b", 64))
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig error = %v", err)
+	}
+	if err := clearDiscoverySecretEnvironment(); err != nil {
+		t.Fatalf("clearDiscoverySecretEnvironment error = %v", err)
+	}
+	if cfg.DiscoverySecret == "" {
+		t.Fatal("DiscoverySecret is empty after load, want credential retained in config memory")
+	}
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, discoverySecretEnvironmentVariable) {
+			t.Fatalf("environment still contains %q after credential cleanup", name)
+		}
+	}
+}
+
 func TestLoadConfigAllowsPartialRecordWorkerConfig(t *testing.T) {
 	// Regression: a partially-set record trio must not kill the boot. The
 	// desktop app passes only ZV_HLAE_PATH (its provisioned HLAE) and relies on
@@ -231,6 +288,7 @@ func clearConfigEnv(t *testing.T) {
 		"ZV_COMPOSE_TIMEOUT",
 		"ZV_RENDER_TIMEOUT",
 		"ZV_MUTATION_TOKEN",
+		"ZV_DISCOVERY_SECRET",
 		"ZV_CODEX_PATH",
 		"ZV_CODEX_MODEL",
 		"ZV_AGENT_TIMEOUT",

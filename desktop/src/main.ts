@@ -10,7 +10,15 @@
 // ports stay stable across launches when available and are reallocated if a
 // stray process has claimed one.
 
-import { app, BrowserWindow, shell, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  safeStorage,
+  shell,
+  session,
+  type IpcMainInvokeEvent,
+} from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -21,8 +29,24 @@ import { provisionRuntimeTools, RUNTIME_TOOL_LABELS } from './runtime-tools';
 import { ProcessSession, type LaunchedProcess } from './process-session';
 import { waitForDesktopServices } from './service-health';
 import { provisionMusicLibrary } from './music-library';
-import { allocateStableServicePorts } from './stable-ports';
-import { resolveXAIAPIKey } from './xai-api-key';
+import { allocateStableServicePorts, createDiscoverySecret } from './stable-ports';
+import {
+  resolveXAIAPIKeyDetails,
+  takeXAIAPIKeyFromEnvironment,
+  type ResolvedXAIAPIKey,
+  type XAIAPIKeySource,
+} from './xai-api-key';
+import { XAIAPIKeyStore } from './xai-api-key-store';
+import { testXAIConnection } from './xai-connection';
+import { XAISettingsController } from './xai-settings-controller';
+import {
+  isTrustedSettingsSender,
+  parseXAISettingsRequest,
+  XAI_SETTINGS_ACTION,
+  XAI_SETTINGS_CHANNEL,
+  type XAISettingsRequest,
+  type XAISettingsStatus,
+} from './xai-settings-ipc';
 
 // Every loopback server and health check binds/targets this host; named once so
 // the value that couples all the URLs below is not a scattered magic string.
@@ -65,6 +89,26 @@ const dataDir = path.join(app.getPath('userData'), 'data');
 const musicDir = path.join(dataDir, 'music');
 const bundledTeamXAIKeyPath = resourcePath('team', 'xai-api-key');
 
+// Capture and remove an inherited key before any provisioner or child process
+// can inherit it. The value remains only in this main process and is passed
+// explicitly to the orchestrator when selected by the precedence rules below.
+const inheritedXAIAPIKey = takeXAIAPIKeyFromEnvironment();
+const storedXAIAPIKeyPath = path.join(app.getPath('userData'), 'credentials', 'xai-api-key.bin');
+const xaiAPIKeyStore = new XAIAPIKeyStore({
+  codec: {
+    isAvailable: () => safeStorage.isAsyncEncryptionAvailable(),
+    encrypt: (value) => safeStorage.encryptStringAsync(value),
+    decrypt: async (encrypted) => {
+      const decrypted = await safeStorage.decryptStringAsync(encrypted);
+      return {
+        shouldReEncrypt: decrypted.shouldReEncrypt,
+        value: decrypted.result,
+      };
+    },
+  },
+  filePath: storedXAIAPIKeyPath,
+});
+
 // All child output is mirrored to this file so a failed boot is diagnosable
 // from a user report: the packaged app has no console, so stdout alone is
 // invisible. The error screen shows its tail.
@@ -104,6 +148,9 @@ function logTail(maxLines = 40): string {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let activeWebOrigin: string | null = null;
+let activeXAIAPIKeySource: XAIAPIKeySource = 'none';
+let xaiRelaunchScheduled = false;
 
 /**
  * Returns the main window only if it exists and Electron hasn't torn it down
@@ -149,9 +196,9 @@ const loadingFileUrl = pathToFileURL(loadingHtmlPath).href;
 const allowedInternalUrls = new Set<string>();
 
 // Fake, unresolvable "URL" the error screen's retry button links to. The
-// renderer runs sandboxed with no preload/IPC, so a plain <a href> navigation
-// intercepted by will-navigate is the only way for a button click to reach
-// the main process; Chromium never actually resolves this host.
+// sandboxed preload exposes only the xAI settings bridge, so the static error
+// page still uses a plain <a href> intercepted by will-navigate to request a
+// retry; Chromium never actually resolves this host.
 const RETRY_URL = 'https://retry.fragforge.invalid/';
 
 const windowFile = path.join(app.getPath('userData'), 'window.json');
@@ -201,6 +248,7 @@ function createWindow(): BrowserWindow {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
       sandbox: true,
       // Packaged users have no menu and should never land in DevTools by
       // accident; dev keeps it open for diagnosis (packaged-side diagnosis
@@ -352,6 +400,75 @@ async function loadMatches(webPort: number): Promise<void> {
 // Generous overall deadline for each server to answer its health check.
 const BOOT_HEALTH_TIMEOUT_MS = 60_000;
 
+interface PendingXAIConfiguration {
+  resolved: ResolvedXAIAPIKey;
+  storageAvailable: boolean;
+  storageError?: string;
+  stored: boolean;
+}
+
+async function pendingXAIConfiguration(): Promise<PendingXAIConfiguration> {
+  const stored = fs.existsSync(storedXAIAPIKeyPath);
+  const storageAvailable = await xaiAPIKeyStore.isAvailable();
+  let storageError: string | undefined;
+  let storedValue: string | undefined;
+  if (stored) {
+    if (!storageAvailable) {
+      storageError = 'La protección segura de Windows no está disponible; la clave guardada no se puede usar.';
+    } else {
+      try {
+        storedValue = await xaiAPIKeyStore.load();
+      } catch {
+        storageError = 'La clave guardada no se puede descifrar. Elimínala y guarda una nueva.';
+      }
+    }
+  }
+  return {
+    resolved: resolveXAIAPIKeyDetails({
+      bundledPath: bundledTeamXAIKeyPath,
+      environmentValue: inheritedXAIAPIKey,
+      storedValue,
+    }),
+    storageAvailable,
+    storageError,
+    stored,
+  };
+}
+
+async function currentXAISettingsStatus(restartRequired: boolean): Promise<XAISettingsStatus> {
+  const pending = await pendingXAIConfiguration();
+  return {
+    active: activeXAIAPIKeySource !== 'none',
+    activeSource: activeXAIAPIKeySource,
+    pendingSource: pending.resolved.source,
+    restartRequired,
+    storageAvailable: pending.storageAvailable,
+    storageError: pending.storageError,
+    stored: pending.stored,
+  };
+}
+
+function scheduleXAIRelaunch(): boolean {
+  if (xaiRelaunchScheduled) return true;
+  try {
+    app.relaunch();
+    xaiRelaunchScheduled = true;
+    setTimeout(() => app.quit(), 250);
+    return true;
+  } catch {
+    xaiRelaunchScheduled = false;
+    return false;
+  }
+}
+
+const xaiSettingsController = new XAISettingsController({
+  environmentOverride: typeof inheritedXAIAPIKey === 'string' && inheritedXAIAPIKey.trim() !== '',
+  keyStore: xaiAPIKeyStore,
+  readStatus: currentXAISettingsStatus,
+  scheduleRestart: scheduleXAIRelaunch,
+  testConnection: testXAIConnection,
+});
+
 async function boot(): Promise<void> {
   if (quitting) return;
   if (activeBootAttempt !== null) throw new Error('cannot start a boot while another attempt is active');
@@ -381,13 +498,11 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
   allowedOrigins.clear();
   allowedInternalUrls.clear();
 
-  // The normal build stages an empty file; the internal team build stages the
-  // shared subtitle credential. A local environment value wins for emergency
-  // rotation, and the result is passed only to the Go orchestrator below.
-  const xaiAPIKey = resolveXAIAPIKey({
-    environmentValue: process.env.XAI_API_KEY,
-    bundledPath: bundledTeamXAIKeyPath,
-  });
+  // The normal build stages an empty team file. Explicit environment input
+  // wins, followed by the user's DPAPI-protected key and then the optional
+  // internal-team bundle. Only the selected value reaches the Go orchestrator.
+  const xaiConfiguration = await pendingXAIConfiguration();
+  const xaiAPIKey = xaiConfiguration.resolved.apiKey;
 
   // Tracks can land in the background; the API rescans the music dir per request.
   provisionMusicLibrary({
@@ -415,22 +530,26 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
   // first boot, so selecting ports before it would leave a long window for an
   // unrelated process to claim a released probe port.
   setLoadingStatus('Eligiendo puertos libres…');
+  const discoverySecret = createDiscoverySecret();
   const { orchestrator: orchPort, web: webPort } = await allocateStableServicePorts({
     host: LOOPBACK_HOST,
     portsFile,
     logLine,
+    discoverySecret,
     signal: attempt.controller.signal,
   });
   assertBootAttemptActive(attempt);
   const orchestratorUrl = `http://${LOOPBACK_HOST}:${orchPort}`;
+  activeWebOrigin = `http://${LOOPBACK_HOST}:${webPort}`;
   allowedOrigins.add(`http://${LOOPBACK_HOST}:${orchPort}`);
-  allowedOrigins.add(`http://${LOOPBACK_HOST}:${webPort}`);
+  allowedOrigins.add(activeWebOrigin);
 
   setLoadingStatus('Iniciando el orquestador…');
   const orch = attempt.processes.launch('orchestrator', orchestratorExe, [], {
     ZV_DATABASE_URL: 'sqlite',
     ZV_DATA_DIR: dataDir,
     ZV_HTTP_ADDR: `${LOOPBACK_HOST}:${orchPort}`,
+    ZV_DISCOVERY_SECRET: discoverySecret,
     ZV_MUSIC_DIR: musicDir,
     XAI_API_KEY: xaiAPIKey,
     ...toolEnv,
@@ -459,6 +578,8 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
     childExited,
   });
   assertBootAttemptActive(attempt);
+  activeXAIAPIKeySource = xaiConfiguration.resolved.source;
+  xaiSettingsController.markApplied();
 
   const watchPostBoot = (child: LaunchedProcess): void => {
     attempt.processes.watchUnexpectedExit(child, (err: unknown) => {
@@ -486,6 +607,7 @@ function failBootAttempt(attempt: BootAttempt, err: unknown, details: BootFailur
   if (stopped) activeBootAttempt = null;
   allowedOrigins.clear();
   allowedInternalUrls.clear();
+  activeWebOrigin = null;
   logLine(`[boot] ${details.logLabel ?? 'failed'}: ${String(err)}\n`);
   if (!quitting) showErrorScreen(err, details.title, details.hint);
 }
@@ -500,6 +622,7 @@ function stopActiveBootAttempt(): boolean {
   const attempt = activeBootAttempt;
   allowedOrigins.clear();
   allowedInternalUrls.clear();
+  activeWebOrigin = null;
   if (attempt === null) return true;
   attempt.controller.abort();
   const stopped = attempt.processes.stop();
@@ -529,6 +652,50 @@ function retryBoot(): void {
   runBoot();
 }
 
+function trustedXAISettingsSender(event: IpcMainInvokeEvent): boolean {
+  const win = aliveWindow();
+  const senderFrame = event.senderFrame;
+  return isTrustedSettingsSender({
+    expectedOrigin: activeWebOrigin,
+    expectedWebContentsID: win?.webContents.id ?? null,
+    isMainFrame: win !== null && senderFrame !== null && senderFrame === win.webContents.mainFrame,
+    senderURL: senderFrame?.url ?? '',
+    senderWebContentsID: event.sender.id,
+  });
+}
+
+function settingsFailure(error: string): { error: string; ok: false } {
+  return { error, ok: false };
+}
+
+function registerXAISettingsIPC(): void {
+  ipcMain.handle(XAI_SETTINGS_CHANNEL, async (event, value: unknown): Promise<unknown> => {
+    if (!trustedXAISettingsSender(event)) return settingsFailure('Solicitud de Ajustes rechazada.');
+    let request: XAISettingsRequest;
+    try {
+      request = parseXAISettingsRequest(value);
+    } catch {
+      return settingsFailure('Solicitud de Ajustes no válida.');
+    }
+    try {
+      return await xaiSettingsController.handle(request);
+    } catch {
+      if (request.action === XAI_SETTINGS_ACTION.status) {
+        return {
+          active: activeXAIAPIKeySource !== 'none',
+          activeSource: activeXAIAPIKeySource,
+          pendingSource: activeXAIAPIKeySource,
+          restartRequired: xaiSettingsController.restartRequired,
+          storageAvailable: false,
+          storageError: 'No se pudo leer la configuración protegida de xAI.',
+          stored: fs.existsSync(storedXAIAPIKeyPath),
+        } satisfies XAISettingsStatus;
+      }
+      return settingsFailure('No se pudo completar la operación de Ajustes.');
+    }
+  });
+}
+
 // Prevent crash watchers and retries from fighting an intentional shutdown.
 let quitting = false;
 
@@ -546,6 +713,7 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   // Local app needs no browser permissions (camera/mic/geolocation/notifications/etc).
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  registerXAISettingsIPC();
   runBoot();
 });
 

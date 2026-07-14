@@ -163,7 +163,9 @@ func TestCreateJobUploadsMultipart(t *testing.T) {
 
 func TestNoTokenOmitsHeader(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := r.Header[tokenHeader]; ok {
+		// http.Header keys are canonicalized, so index with the canonical form
+		// of the constant; a raw tokenHeader lookup can never match.
+		if _, ok := r.Header[http.CanonicalHeaderKey(tokenHeader)]; ok {
 			t.Errorf("token header present when unset")
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []any{}})

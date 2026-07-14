@@ -42,6 +42,46 @@ type createStreamJobFromURLRequest struct {
 	Title     string `json:"title,omitempty"`
 }
 
+type streamVariantSummary struct {
+	Name             string  `json:"name"`
+	Label            string  `json:"label"`
+	Description      string  `json:"description"`
+	Default          bool    `json:"default"`
+	FullFrame        bool    `json:"full_frame"`
+	OutputWidth      int     `json:"output_width"`
+	FaceOutputHeight int     `json:"face_output_height,omitempty"`
+	GameOutputHeight int     `json:"game_output_height"`
+	BannerPositionY  float64 `json:"default_banner_position_y"`
+}
+
+// ListStreamVariants exposes the stream layout registry so MCP and web clients
+// discover the same live names and geometry the render handler validates.
+func (h *Handlers) ListStreamVariants(w http.ResponseWriter, _ *http.Request) {
+	defaultName := streamclips.DefaultVariant().Name
+	variants := make([]streamVariantSummary, 0, len(streamclips.VariantNames()))
+	for _, name := range streamclips.VariantNames() {
+		variant, ok := streamclips.VariantByName(name)
+		if !ok {
+			continue
+		}
+		variants = append(variants, streamVariantSummary{
+			Name:             variant.Name,
+			Label:            variant.Label,
+			Description:      variant.Description,
+			Default:          variant.Name == defaultName,
+			FullFrame:        variant.FullFrame,
+			OutputWidth:      variant.OutputWidth,
+			FaceOutputHeight: variant.FaceOutputHeight,
+			GameOutputHeight: variant.GameOutputHeight,
+			BannerPositionY:  variant.DefaultBannerPositionY,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"default":  defaultName,
+		"variants": variants,
+	})
+}
+
 func (h *Handlers) CreateStreamJob(w http.ResponseWriter, r *http.Request) {
 	if !h.streamReady(w) {
 		return
@@ -248,7 +288,10 @@ func (h *Handlers) GetStreamSource(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.streamStorageKey(w, r, "video/mp4", j.SourcePath)
+	// Stream uploads accept several containers, while the durable storage key
+	// intentionally normalizes every source to source.mp4. Ask serveArtifact to
+	// detect the stored bytes instead of claiming that every upload is MP4.
+	h.streamStorageKey(w, r, "", j.SourcePath)
 }
 
 func (h *Handlers) GetStreamEditPlan(w http.ResponseWriter, r *http.Request) {

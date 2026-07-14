@@ -73,6 +73,30 @@ func TestGetCapabilitiesReportsPerToolStatus(t *testing.T) {
 	}
 }
 
+func TestGetCapabilitiesReportsReadAuthentication(t *testing.T) {
+	h := NewHandlers(
+		newFakeRepo(),
+		newFakeStorage(),
+		&fakeQueue{},
+		WithMutationToken("local-secret"),
+		WithRequireReadAuth(true),
+	)
+	rw := httptest.NewRecorder()
+	h.GetCapabilities(rw, httptest.NewRequest(http.MethodGet, "/api/capabilities", nil))
+
+	var got struct {
+		Auth struct {
+			ReadRequiresToken bool `json:"read_requires_token"`
+		} `json:"auth"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.Auth.ReadRequiresToken {
+		t.Error("auth.read_requires_token = false, want true")
+	}
+}
+
 func TestStartRecordingGatesOnCaptureReadiness(t *testing.T) {
 	parsedJob := func() (*fakeRepo, uuid.UUID) {
 		repo := newFakeRepo()

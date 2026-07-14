@@ -77,3 +77,5 @@ web/playwright-report/
 
 # Local Vercel project links and build output.
 .vercel/
+# Local Pi runtime state
+.atl/

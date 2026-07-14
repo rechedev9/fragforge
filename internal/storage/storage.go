@@ -91,6 +91,14 @@ func (l *Local) Open(key string) (io.ReadCloser, error) {
 	return openLocalFile(path)
 }
 
+// ResolvePath returns the absolute filesystem path of the artifact at key,
+// whether or not it exists yet. Callers that hand artifacts to external tools
+// (ffmpeg reading a multi-gigabyte stream source) use it to avoid copying the
+// whole file through Open.
+func (l *Local) ResolvePath(key string) (string, error) {
+	return l.resolve(key)
+}
+
 // List returns the base file names present directly under the directory at key,
 // non-recursively. A missing directory yields no names (not an error), so
 // callers can list an artifact dir a stage has not written yet.

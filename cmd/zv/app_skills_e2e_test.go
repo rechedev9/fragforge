@@ -820,7 +820,7 @@ func TestZVBinarySkillsCheckRejectsFragForgeSkillWithoutWorkflowRequirementsEndT
 	writeSkillBody(t, tempDir, "zackvideo-youtube-shorts-publish", strings.Join([]string{
 		"---",
 		"name: zackvideo-youtube-shorts-publish",
-		`description: "Prepare or upload FragForge YouTube Shorts publish packs."`,
+		`description: "Prepare FragForge YouTube Shorts packs for manual publication."`,
 		"---",
 		"",
 		"```powershell",

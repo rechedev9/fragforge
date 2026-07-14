@@ -66,6 +66,29 @@ in-process queue (HLAE/CS2 auto-detected), then starts the web UI and opens
 The flow is: upload a demo -> pick a player -> pick specific kills -> create the
 reel, at which point HLAE + CS2 open to capture and the edit is applied.
 
+### Codex and Claude Code (MCP)
+
+This source tree includes a local TypeScript MCP server for FragForge Studio,
+so Codex or Claude Code can inspect live jobs, discover
+players/segments/presets/songs, start
+approved pipeline actions, follow render status, and obtain artifact URLs.
+It uses a Cloudflare-inspired progressive-disclosure contract: only `search`
+and `execute` are registered, while each operation's exact input schema and
+current allowed values are returned on demand. Mutations are previews unless
+the caller explicitly uses `mode=apply` and `confirmed=true`.
+
+Project-local Codex and Claude Code configuration is already checked in under
+`.codex/config.toml` and `.mcp.json`. Start Studio first, then open a new agent
+session from this trusted repository's root (not from `desktop/`), because the
+checked-in launcher paths are root-relative. Already-published v2.0.3 release
+assets are unchanged; an installer must be rebuilt and published separately to
+include this MCP launcher. See the complete setup, installed-app
+commands, operation model, and security notes in
+[`desktop/README.md`](./desktop/README.md#model-context-protocol-mcp).
+For deterministic source evaluation, run `cd desktop; npm run eval:mcp:gate`;
+it rebuilds the local orchestrator and writes scored JSON/Markdown reports to
+`data/mcp-evals/`.
+
 ### Manual YouTube publication assistant
 
 Every finished reel in the Library has a **PREPARAR PUBLICACIÓN** action. It
@@ -172,10 +195,19 @@ xAI prices batch speech-to-text separately from streaming; check the
 available as an offline fallback.
 
 Source builds and the standard desktop installer do not contain a credential.
-For the deliberately shared internal-team edition, `npm run dist:team` from
-`desktop/` packages the build machine's `XAI_API_KEY`; see
-`desktop/README.md`. That key is extractable by anyone who obtains the
-installer, and a local `XAI_API_KEY` overrides it at runtime for rotation.
+In the installed desktop app, each Windows user can open `/settings` and save
+their own xAI key. Electron encrypts it for that Windows user with
+`safeStorage` (backed by DPAPI); the stored value is never returned for display,
+sent to the bundled Next.js server, or written to browser `localStorage`. Saving
+or deleting it takes effect only after an explicit Studio restart. Restarting
+stops the local orchestrator and can interrupt active uploads, captures, or
+renders, so finish those tasks first.
+
+xAI credential precedence is: an inherited `XAI_API_KEY`, then the encrypted
+per-user key from `/settings`, then the packaged key in an internal team
+edition, then no xAI credential. `npm run dist:team` exists only to produce that
+internal fallback; the packaged key is extractable by anyone who obtains the
+installer. See `desktop/README.md` for the desktop and build details.
 
 Set a newly generated key in the same PowerShell session that starts Local
 Studio without putting the secret in command history:
@@ -220,6 +252,7 @@ available.
 | POST | `/api/jobs/{id}/compose` | Enqueue final composition after recording. |
 | GET | `/api/jobs/{id}/final` | Stream the composed MP4 when ready. |
 | GET | `/api/presets` | Render preset registry as JSON (name, geometry, behavior flags, default). |
+| GET | `/api/stream-variants` | Stream/VOD render variant registry, including the default; MCP input discovery derives live choices from this endpoint. |
 | GET | `/api/jobs/{id}/renders/{variant}/videos/{name}/publish-assistant?days=7` | Reel metadata, factual suggestions, Madrid schedule, optional trend hints, and the stable YouTube Studio URL. |
 
 `POST /record` is accepted for `parsed` and `recorded` jobs; `POST /compose`

@@ -5,6 +5,14 @@ Repo-local harness for using Codex CLI safely on FragForge.
 Codex should automatically load `AGENTS.md` from the repo root. That file holds
 project boundaries, Go style, safety rules, and verification expectations.
 
+The trusted project config in `.codex/config.toml` also registers the local
+FragForge MCP server. Start FragForge Studio, then launch Codex from the
+repository root (for example, `codex --cd C:\Users\reche\Documents\zackvideo`);
+the MCP's `cwd = "."` and entry path are intentionally root-relative. Then ask it
+to search FragForge operations; MCP writes/capture/render/delete remain preview
+only until explicitly applied and confirmed. Full details are in
+[`desktop/README.md`](../desktop/README.md#model-context-protocol-mcp).
+
 ## Common commands
 
 From WSL:

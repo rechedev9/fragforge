@@ -53,6 +53,9 @@ func (c Capabilities) captionsEnabled() bool {
 func (h *Handlers) GetCapabilities(w http.ResponseWriter, _ *http.Request) {
 	c := h.capabilities
 	writeJSON(w, http.StatusOK, map[string]any{
+		"auth": map[string]any{
+			"read_requires_token": h.requireReadAuth && h.mutationToken != "",
+		},
 		"record":  map[string]any{"enabled": c.RecordEnabled, "tools": resolveTools(c.RecordTools)},
 		"render":  map[string]any{"enabled": c.RenderEnabled, "tools": resolveTools(c.RenderTools)},
 		"compose": map[string]any{"enabled": c.ComposeEnabled},
@@ -116,6 +119,6 @@ func (h *Handlers) requireCaptionsEnabled(w http.ResponseWriter) bool {
 	if h.capabilities.captionsEnabled() {
 		return true
 	}
-	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but no transcription backend is configured on this machine; set XAI_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, and restart the orchestrator")
+	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but no transcription backend is configured on this machine; configure an xAI key in FragForge Studio Settings (or set XAI_API_KEY), or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, then restart")
 	return false
 }

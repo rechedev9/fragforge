@@ -43,6 +43,9 @@ func run() error {
 	if err := clearXAIAPIKeyEnvironment(); err != nil {
 		return fmt.Errorf("config: clear xai credential from process environment: %w", err)
 	}
+	if err := clearDiscoverySecretEnvironment(); err != nil {
+		return fmt.Errorf("config: clear discovery credential from process environment: %w", err)
+	}
 	// Auto-detect HLAE/CS2/recorder/editor/ffmpeg on the host so capture and
 	// rendering work without the user setting env vars; explicit env still wins.
 	// Best-effort, never fatal.
@@ -212,10 +215,13 @@ func run() error {
 	}
 	handlers := httpapi.NewHandlers(repo, store, queue,
 		httpapi.WithMutationToken(cfg.MutationToken),
+		httpapi.WithDiscoverySecret(cfg.DiscoverySecret),
 		httpapi.WithRequireReadAuth(exposed),
 		httpapi.WithRateLimit(rateLimitRPS, rateLimitBurst),
 		httpapi.WithStreamRepository(streamRepo),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
+		httpapi.WithFFmpegPath(cfg.FFmpegPath),
+		httpapi.WithXAIKey(cfg.XAIAPIKey),
 		httpapi.WithMusicDir(cfg.MusicDir),
 		httpapi.WithCapabilities(cfg.captureCapabilities(captureSource)),
 		httpapi.WithGenerateIntentStore(generateIntents),

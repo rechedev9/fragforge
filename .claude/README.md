@@ -6,6 +6,13 @@ Claude Code automatically loads `CLAUDE.md` from the repo root. That file holds
 project boundaries, Go and TypeScript style, safety rules, and verification
 expectations. All style and operational rules live directly in `CLAUDE.md`.
 
+The project `.mcp.json` registers the local FragForge MCP server for Claude
+Code. Start FragForge Studio and open Claude Code from the repository root so
+the relative TypeScript entry resolves correctly. Use its `search` tool to
+discover exact operation schemas and live IDs before `execute`.
+Mutations require an explicit apply+confirmation pair. Full details are in
+[`desktop/README.md`](../desktop/README.md#model-context-protocol-mcp).
+
 ## Interactive use
 
 From WSL:

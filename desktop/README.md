@@ -21,7 +21,9 @@ It bundles the same pieces `scripts/local-studio.ps1` runs:
 Both processes bind loopback (`ZV_HTTP_ADDR=127.0.0.1:<port>`) on ports chosen
 once per install and persisted in `<userData>/ports.json`; the web port in
 particular must stay stable across launches because the reel library lives in
-the browser's `localStorage`, which is keyed by origin (`host:port`).
+the browser's `localStorage`, which is keyed by origin (`host:port`). Electron
+also rotates a random `discovery_secret` in that file on every boot; it is used
+only to authenticate the matching local orchestrator to the MCP.
 
 On first boot the app provisions the official HLAE 2.191.0 release, FFmpeg, and
 yt-dlp (~110 MB total) into `<userData>/tools`, each verified against a pinned
@@ -45,12 +47,177 @@ visibility, and scheduling choices. No Google credentials are required by the
 installer. Optional public trend hints remain available when
 `FIRECRAWL_API_KEY` is inherited by the desktop process.
 
-The standard installer remains credential-free. FragForge also has an explicit
-internal team build that packages one shared `XAI_API_KEY` for stream
-subtitles. At runtime a locally configured `XAI_API_KEY` takes precedence, so
-the shared key can be replaced immediately without rebuilding. The credential
-is passed only to `zv-orchestrator.exe`, never to the bundled Next.js server or
-the renderer.
+## xAI subtitle credentials
+
+The standard installer remains credential-free. In the installed app, each
+Windows user opens `/settings` and enters their own xAI key for stream
+subtitles. The page sends the entered value through the narrow Electron preload
+bridge directly to the main process; it never goes through the bundled Next.js
+server or browser `localStorage`. After saving, the stored key is never returned
+to the page or displayed again. The UI exposes only whether a key is configured
+and which configuration source is active.
+
+Electron encrypts the saved key with `safeStorage`, backed by Windows DPAPI, so
+the encrypted value is tied to the current Windows user. Saving or deleting the
+key does not hot-reload the orchestrator: the user must explicitly restart
+Studio for the change to take effect. A restart terminates the local child
+processes and may interrupt an active upload, capture, or render, so finish
+current tasks before applying it.
+
+The runtime precedence is:
+
+1. `XAI_API_KEY` inherited by the desktop process.
+2. The current Windows user's encrypted key saved from `/settings`.
+3. The packaged key from an internal `dist:team` edition.
+4. No xAI credential (local whisper.cpp can still be used when configured).
+
+`dist:team` is only an internal fallback for machines whose users have not yet
+saved individual keys; it is not the standard distribution path. The selected
+credential is supplied to `zv-orchestrator.exe` for transcription and removed
+from the environments of the bundled Next.js server and media subprocesses.
+
+## Model Context Protocol (MCP)
+
+This source tree embeds a dependency-free TypeScript MCP server over stdio.
+Codex and Claude Code can operate the same local pipeline as the UI without a
+hosted backend, browser automation, raw shell commands, or a second API.
+
+The MCP follows Cloudflare's progressive-disclosure idea without evaluating
+model-generated JavaScript:
+
+- `search` ranks the allowlisted operation catalog and returns the exact JSON
+  input schema. With partial arguments it also resolves live values: job IDs,
+  roster players/SteamIDs, moments/segment IDs, presets, music, render artifact
+  names, and capture/render readiness.
+- `execute` validates an exact operation and arguments. Reads run immediately.
+  Writes, captures, renders, and deletes return a side-effect-free preview by
+  default; they run only with `mode: "apply"` and `confirmed: true`.
+- `fragforge://catalog` and `fragforge://status` expose the static catalog and
+  live readiness as MCP resources. Clients advertising MCP elicitation can be
+  asked for a missing scalar input during a tool call.
+
+Operations cover Studio status and metrics, catalogs, CS2 demo upload/scan/parse,
+record/generate/compose, render state/QA/publishing/artifacts, and stream/VOD
+jobs, exact edit plans, source/video URLs, and subtitle configuration. Binary
+media never enters model context; artifact operations return loopback URLs when
+Studio uses its normal loopback read mode.
+
+MCP cancellation follows the protocol's fire-and-forget semantics: cancelled
+requests receive no response. If `streams.create_from_file` is cancelled after
+the orchestrator accepted its upload, search and execute `streams.list`, then
+use `streams.get` with the returned ID before considering a retry. This recovers
+the durable job without uploading the same video twice.
+
+### Repository development setup
+
+The repository already contains both client configurations:
+
+- Codex: `.codex/config.toml`
+- Claude Code: `.mcp.json`
+
+They launch Node's built-in TypeScript stripper, so use Node 22.10+
+and start FragForge Studio before opening a new Codex or Claude Code session.
+Launch the client from the repository root (for example,
+`codex --cd C:\Users\reche\Documents\zackvideo`), not from `desktop/`: the
+checked-in `cwd = "."` and TypeScript entry paths are intentionally root-relative.
+From `desktop/`, the same server can be run directly with `npm run mcp`.
+Claude Code shows a newly discovered project MCP as pending until the user
+approves it once; this is expected trust behavior for `.mcp.json`.
+
+The MCP discovers the desktop's stable orchestrator port from the same
+`<userData>/ports.json` used by Electron. Development and diagnostics can
+override this without editing config:
+
+```powershell
+$env:FRAGFORGE_ORCHESTRATOR_URL = "http://127.0.0.1:8080"
+$env:FRAGFORGE_MCP_TIMEOUT_MS = "30000"
+npm run mcp
+```
+
+For a token-protected orchestrator, pass the token only through
+`FRAGFORGE_MUTATION_TOKEN`; it becomes `X-FragForge-Token` internally and is
+never returned or logged. `FRAGFORGE_PORTS_FILE` overrides port discovery. A
+desktop port and its fresh `discovery_secret` are read from one snapshot; the
+server must prove possession through a bounded HMAC challenge before the MCP
+sends a token or local media. The proof is available only to loopback peers,
+and the discovery secret is never sent as an API header or returned/logged.
+Older manually maintained port files may omit it only when
+`FRAGFORGE_MUTATION_TOKEN` supplies the HMAC fallback. Tokenless automatic
+discovery without either secret is rejected. An explicit
+`FRAGFORGE_ORCHESTRATOR_URL` remains an intentional trust override. Only HTTP
+loopback URLs are accepted, redirects are rejected, and stdout is reserved
+exclusively for MCP JSON-RPC.
+
+The normal desktop bind does not authenticate reads, so artifact URLs open in a
+browser. If a custom orchestrator enables token authentication for read routes,
+API operations still work but `artifacts.get_url` and
+`artifacts.get_stream_url` return an explicit unsupported-mode error instead of
+an unusable bare URL. Use the loopback-only Studio configuration for MCP media
+links. Upload requests have a ten-minute server timeout; the checked-in Codex
+configuration gives tools fifteen minutes so a valid upload is not cut short.
+
+### Installed Studio setup
+
+Installers built from this source include `fragforge-mcp.cmd` beside the desktop
+executable. This source change does not modify any already-published v2.0.3
+release asset. The launcher runs the compiled TypeScript server with Electron's
+embedded Node runtime, so the end user does not install Node. Keep the normal
+Studio window running so its orchestrator is available. For Codex, add this
+block to `%USERPROFILE%\.codex\config.toml` (adjust the installation path if
+needed):
+
+```toml
+[mcp_servers.fragforge]
+command = "cmd.exe"
+args = ["/d", "/s", "/c", 'C:\Users\<you>\AppData\Local\Programs\FragForge Studio\fragforge-mcp.cmd']
+startup_timeout_sec = 10
+tool_timeout_sec = 900
+default_tools_approval_mode = "writes"
+```
+
+The 900-second tool timeout accommodates local uploads and capture preparation;
+the `writes` approval mode keeps applying mutations behind client approval.
+Claude Code can register the same launcher once with:
+
+```powershell
+claude mcp add --transport stdio --scope user fragforge -- cmd.exe /d /s /c "C:\Users\<you>\AppData\Local\Programs\FragForge Studio\fragforge-mcp.cmd"
+```
+
+Restart/open a new client session after registration. A typical agent flow is:
+
+1. Search `studio status`, then execute the read-only `studio.status`.
+2. Search `create demo job` and execute the upload preview.
+3. Apply the approved upload; search `jobs.parse` with its `job_id` to discover
+   roster inputs, or poll `jobs.get` if a SteamID was supplied.
+4. Search `jobs.generate` with the job ID to discover segments, presets, and
+   music; preview first, then apply only after approval.
+5. Poll `renders.get`, read QA/publish metadata, and request an artifact URL.
+
+The launcher uses `ELECTRON_RUN_AS_NODE`, so the MCP process never loads the
+Electron main process, acquires its single-instance lock, or opens a window. It
+also never starts HLAE/CS2 merely because the server connects; only a confirmed
+costly operation can enqueue capture or render work.
+
+### MCP evaluation feedback loop
+
+The standalone evaluator uses an isolated in-memory orchestrator, fresh
+temporary data, authenticated `ports.json` discovery, and inaccessible
+sentinel paths for every external capture/render tool. It starts the real Go
+and MCP stdio processes, scores protocol, discovery, safety, validation,
+upload, artifact, HMAC, and shutdown scenarios, and exits non-zero on any
+failure:
+
+```powershell
+cd desktop
+npm run eval:mcp:gate
+```
+
+Every run writes timestamped JSON and Markdown plus `latest.json` and
+`latest.md` under `data/mcp-evals/`. Use the Markdown feedback queue to fix the
+root cause, rerun the gate, and require 100/100 on fresh runs. The gate always
+rebuilds `bin/zv-orchestrator.exe`, so a stale local binary cannot make a source
+change appear green. This complements, rather than replaces,
+`npm run test:mcp:e2e` and the packaged-launcher test.
 
 ## Build the installer (on Windows)
 
@@ -74,15 +241,22 @@ stages `zv-orchestrator.exe`, `zv-editor.exe`, `zv-recorder.exe`, and the
 standalone server into `build-resources/`), then `electron-builder` produces the
 installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
 where `<version>` is the `version` field in `desktop/package.json`). The app
-icon lives at `build/icon.ico`, which electron-builder picks up automatically;
+then runs a mandatory stdio handshake against the real
+`dist-installer/win-unpacked/fragforge-mcp.cmd` and its packaged `app.asar`;
+the distribution command fails if either artifact is absent or unusable. Run
+that gate separately after packaging with `npm run test:mcp:packaged`. Run all
+MCP E2E tests with a mandatory real Go orchestrator using `npm run test:mcp:e2e`.
+Run the scored real-process feedback gate with `npm run eval:mcp:gate`.
+The app icon lives at `build/icon.ico`, which electron-builder picks up
+automatically;
 `assemble.mjs` fails fast if it's missing. `zv-orchestrator.exe`,
 `zv-editor.exe`, and `zv-recorder.exe` are required at assemble time so the
 packaged app can parse, capture, and render reels. The developer `zv.exe` CLI
 stays available in the repository build but is not shipped in the desktop
 installer.
 
-To produce the internal team installer, load the shared key without placing it
-in command history and use the separate build target:
+To produce the optional internal fallback installer, load the shared key
+without placing it in command history and use the separate build target:
 
 ```powershell
 $secureKey = Read-Host "xAI team API key" -AsSecureString
@@ -92,13 +266,15 @@ Remove-Item Env:XAI_API_KEY
 ```
 
 `npm run dist:team` refuses to run when the key is missing or malformed. It
-stores the credential in `resources/team/xai-api-key` inside the installed app;
-the ignored `build-resources/` and `dist-installer/` directories are its only
-local staging locations. This is convenience, not secret protection: anyone
-who receives the installer can extract and use the shared key, so distribute
-that edition only to people authorized to consume the team's xAI quota. Running
-the ordinary `npm run dist` afterward replaces the staged key with an empty
-resource and produces a credential-free installer.
+stores the credential in `resources/team/xai-api-key` inside the installed app
+only as the lowest-priority configured fallback: an inherited environment key
+or a per-user key saved from `/settings` wins. The ignored `build-resources/`
+and `dist-installer/` directories are its only local staging locations. This is
+convenience, not secret protection: anyone who receives the installer can
+extract and use the shared key, so distribute that edition only to people
+authorized to consume the team's xAI quota. Running the ordinary `npm run dist`
+afterward replaces the staged key with an empty resource and produces the
+standard credential-free installer.
 
 This v2 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
 on first run - choose "More info" -> "Run anyway". Code signing and auto-update
@@ -123,17 +299,20 @@ npm start
 `src/main.ts` (Electron main process, compiled to `dist/main.js`):
 
 1. Reads or picks two per-install-stable loopback ports (`orchestrator`,
-   `web`), persisted in `<userData>/ports.json`.
+   `web`), rotates a 32-byte discovery secret, and persists all three atomically
+   in `<userData>/ports.json`.
 2. Kicks off music catalog provisioning in the background, and awaits
    provisioning of HLAE/FFmpeg/yt-dlp into `<userData>/tools` (first boot
    only; later boots return the cached installs instantly).
 3. Spawns `zv-orchestrator.exe` directly - without a `zv.exe serve`
    intermediary - so quitting the app reliably kills the real server (`ZV_DATABASE_URL=sqlite`,
-   `ZV_DATA_DIR=<userData>/data`, `ZV_HTTP_ADDR=127.0.0.1:<orchPort>`, plus any
-   provisioned tool paths).
+   `ZV_DATA_DIR=<userData>/data`, `ZV_HTTP_ADDR=127.0.0.1:<orchPort>`, the
+   ephemeral `ZV_DISCOVERY_SECRET`, plus any provisioned tool paths).
 4. Spawns the Next standalone `server.js` via `ELECTRON_RUN_AS_NODE`
    (`ORCHESTRATOR_URL` pointing at the orchestrator, `PORT=<webPort>`).
 5. Waits for `/healthz` and the web root.
 6. Loads `/matches` in the window.
 7. Kills the orchestrator and web children on quit. A single-instance lock
    prevents a second launch from spawning a duplicate backend.
+8. The separately packaged `fragforge-mcp.cmd` launcher uses Electron's Node
+   mode to run the stdio server against the already-running orchestrator.
