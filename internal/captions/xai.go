@@ -61,6 +61,16 @@ const xaiMaxTranscriptionAttempts = 3
 
 const xaiPartialSpanThreshold = 0.5
 
+// xaiMaxPlausibleWordSeconds bounds how long a single spoken word may
+// legitimately take, even shouted or drawn out in excitement. xAI has been
+// observed returning a garbled transcript concentrated in two or three
+// words stamped with wildly inflated spans instead of failing outright (a
+// "Hola"/"Martínez" pair verified at 3.66s and 8.14s on a 15s CS2 clip whose
+// source audio was almost never silent). The span-ratio partial check alone
+// misses this: a couple of long words can still cover more than half the
+// clip.
+const xaiMaxPlausibleWordSeconds = 2.5
+
 const (
 	xaiRetryInitialBackoff = 250 * time.Millisecond
 	xaiRetryMaxBackoff     = time.Second
@@ -118,7 +128,7 @@ func (x XAITranscriber) Transcribe(ctx context.Context, mediaPath, workDir strin
 				best = cues
 				bestDuration = duration
 			}
-			if !xaiTranscriptLooksTemporallyPartial(cues, duration) {
+			if !xaiTranscriptLooksTemporallyPartial(cues, duration) && !xaiTranscriptHasImplausibleWordDuration(cues) {
 				return cues, nil
 			}
 		}
@@ -363,6 +373,19 @@ func xaiTranscriptLooksTemporallyPartial(cues []WordCue, duration float64) bool 
 		return false
 	}
 	return xaiTranscriptSpanRatio(cues, duration) < xaiPartialSpanThreshold
+}
+
+// xaiTranscriptHasImplausibleWordDuration reports whether any cue's spoken
+// duration exceeds xaiMaxPlausibleWordSeconds, the signature of a garbled
+// xAI response: a handful of words stretched to cover most of the clip
+// instead of the many short words real speech produces.
+func xaiTranscriptHasImplausibleWordDuration(cues []WordCue) bool {
+	for _, cue := range cues {
+		if cue.EndSeconds-cue.StartSeconds > xaiMaxPlausibleWordSeconds {
+			return true
+		}
+	}
+	return false
 }
 
 func betterXAITranscript(cues []WordCue, duration float64, best []WordCue, bestDuration float64) bool {
