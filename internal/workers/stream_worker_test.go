@@ -842,6 +842,34 @@ func TestTranscribeCaptionsWithFallbackRejectsGarbledSuccessFromAnyBackend(t *te
 	})
 }
 
+// A cancelled render must fail, not quietly publish uncaptioned: "the audio had
+// no usable speech" and "we gave up half way" are different outcomes, and only
+// the first one may downgrade to a warning.
+func TestTranscribeCaptionsWithFallbackCancelledContextIsHard(t *testing.T) {
+	garbled := []captions.WordCue{{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8}}
+	ctx, cancel := context.WithCancel(context.Background())
+	backends := []captionBackend{
+		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			cancel()
+			return garbled, nil
+		}},
+		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
+			t.Error("groq must not run after the context is cancelled")
+			return nil, nil
+		}},
+	}
+	_, err := transcribeCaptionsWithFallback(ctx, "clip.wav", t.TempDir(), backends)
+	if err == nil {
+		t.Fatal("transcribeCaptionsWithFallback returned nil error, want a cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("got error %q, want it to wrap context.Canceled", err)
+	}
+	if errors.Is(err, captions.ErrUnusableTranscript) {
+		t.Errorf("got error %q, want cancellation not to be downgraded to a publish-uncaptioned warning", err)
+	}
+}
+
 func TestTranscribeCaptionsWithFallbackHardErrorFailsRender(t *testing.T) {
 	// One backend producing an unusable transcript must not mask another
 	// backend's hard failure as a warning: captions were explicitly requested,

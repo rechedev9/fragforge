@@ -315,14 +315,19 @@ func encodeKillfeedCropPNG(frame image.Image, crop streamclips.CropRect) ([]byte
 // so an already-large crop is not blown up past the model's image budget.
 func upscaleKillfeedCrop(src *image.RGBA) image.Image {
 	b := src.Bounds()
-	factor := min(killfeedCropTargetWidth/max(b.Dx(), 1), killfeedCropMaxUpscale)
+	width, height := b.Dx(), b.Dy()
+	factor := min(killfeedCropTargetWidth/max(width, 1), killfeedCropMaxUpscale)
 	if factor < 2 {
 		return src
 	}
-	dst := image.NewRGBA(image.Rect(0, 0, b.Dx()*factor, b.Dy()*factor))
-	for y := range dst.Bounds().Dy() {
-		for x := range dst.Bounds().Dx() {
-			dst.Set(x, y, src.At(b.Min.X+x/factor, b.Min.Y+y/factor))
+	dst := image.NewRGBA(image.Rect(0, 0, width*factor, height*factor))
+	for y := range height * factor {
+		srcOffset := src.PixOffset(b.Min.X, b.Min.Y+y/factor)
+		srcRow := src.Pix[srcOffset : srcOffset+width*4]
+		dstOffset := dst.PixOffset(0, y)
+		dstRow := dst.Pix[dstOffset : dstOffset+width*factor*4]
+		for x := range width * factor {
+			copy(dstRow[x*4:x*4+4], srcRow[(x/factor)*4:])
 		}
 	}
 	return dst
