@@ -110,7 +110,7 @@ func ParseWhisperJSON(data []byte) ([]WordCue, error) {
 	}
 
 	if len(cues) == 0 {
-		return nil, fmt.Errorf("captions: whisper transcript contains no words")
+		return nil, fmt.Errorf("captions: whisper transcript contains no words: %w", ErrUnusableTranscript)
 	}
 	return cues, nil
 }

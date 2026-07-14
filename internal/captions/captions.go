@@ -5,12 +5,55 @@
 package captions
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/rechedev9/fragforge/internal/mediafont"
 )
+
+// ErrUnusableTranscript marks a transcript a backend returned but that must not
+// be burned in: it carries no words at all, or word timings so implausible the
+// text cannot be trusted (see ValidateTranscript). It is a soft failure —
+// callers try the next backend, and publish the clip uncaptioned if none
+// succeed — which is why it is distinct from a transport or auth error, where
+// failing the render is correct.
+var ErrUnusableTranscript = errors.New("captions: transcript is unusable")
+
+// MaxPlausibleWordSeconds bounds how long a single spoken word may take, even
+// shouted or drawn out. Speech-to-text on gameplay audio hallucinates: on a
+// real 15s CS2 clip both xAI and Groq returned "Hola"/"Martínez" stamped at
+// 3.66s and 8.14s, which burned in as one caption card frozen over most of the
+// clip. No real word lasts that long, so the timings alone condemn the
+// transcript without needing to know what was actually said.
+const MaxPlausibleWordSeconds = 2.5
+
+// ValidateTranscript reports whether cues can be burned in as karaoke captions,
+// wrapping ErrUnusableTranscript when they cannot. It is the single gate every
+// backend's output passes through, because a garbled transcript is just as
+// unusable when it comes from the fallback backend as from the preferred one.
+func ValidateTranscript(cues []WordCue) error {
+	if len(cues) == 0 {
+		return fmt.Errorf("transcript contains no words: %w", ErrUnusableTranscript)
+	}
+	worst := longestWordCue(cues)
+	if duration := worst.EndSeconds - worst.StartSeconds; duration > MaxPlausibleWordSeconds {
+		return fmt.Errorf("transcript has implausible word timings (%q spans %.2fs): %w",
+			worst.Word, duration, ErrUnusableTranscript)
+	}
+	return nil
+}
+
+func longestWordCue(cues []WordCue) WordCue {
+	worst := cues[0]
+	for _, cue := range cues[1:] {
+		if cue.EndSeconds-cue.StartSeconds > worst.EndSeconds-worst.StartSeconds {
+			worst = cue
+		}
+	}
+	return worst
+}
 
 // WordCue is a single spoken word with its start and end time, in seconds
 // from the start of the media.

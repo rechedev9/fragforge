@@ -633,7 +633,7 @@ func ParseGroqJSON(data []byte) ([]WordCue, error) {
 		return nil, err
 	}
 	if len(cues) == 0 {
-		return nil, fmt.Errorf("captions: groq transcript contains no words")
+		return nil, fmt.Errorf("captions: groq transcript contains no words: %w", ErrUnusableTranscript)
 	}
 	return cues, nil
 }
