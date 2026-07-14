@@ -86,7 +86,8 @@ func TestReadKillfeedHappyPath(t *testing.T) {
 	}
 
 	var reqBody struct {
-		Model          string `json:"model"`
+		Model          string  `json:"model"`
+		Temperature    float64 `json:"temperature"`
 		ResponseFormat struct {
 			Type string `json:"type"`
 		} `json:"response_format"`
@@ -106,6 +107,10 @@ func TestReadKillfeedHappyPath(t *testing.T) {
 	}
 	if reqBody.Model != DefaultModel {
 		t.Errorf("got model %q, want %q", reqBody.Model, DefaultModel)
+	}
+	// Sampling must be off: the same crop has to read the same kills every time.
+	if reqBody.Temperature != 0 {
+		t.Errorf("got temperature %v, want 0 so a killfeed read is deterministic", reqBody.Temperature)
 	}
 	if reqBody.ResponseFormat.Type != "json_object" {
 		t.Errorf("got response_format.type %q, want json_object", reqBody.ResponseFormat.Type)
