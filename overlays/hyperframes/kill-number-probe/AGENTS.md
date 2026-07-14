@@ -5,7 +5,7 @@
 This project uses AI agent skills for framework-specific patterns. Install them if not already present:
 
 ```bash
-npx skills add heygen-com/hyperframes
+pnpm dlx skills add heygen-com/hyperframes
 ```
 
 Skills encode patterns like `window.__timelines` registration, `data-*` attribute semantics, Tailwind v4 browser-runtime styling for `--tailwind` projects, and shader-compatible CSS rules that are not in generic web docs. Using them produces correct compositions from the start.
@@ -13,14 +13,14 @@ Skills encode patterns like `window.__timelines` registration, `data-*` attribut
 ## Commands
 
 ```bash
-npm run dev          # start the preview server (long-running — keep it alive in background)
-npm run check        # lint + validate + inspect
-npm run render       # render to MP4
-npm run publish      # publish and get a shareable link
-npx hyperframes docs <topic> # reference docs in terminal
+pnpm run dev          # start the preview server (long-running — keep it alive in background)
+pnpm run check        # lint + validate + inspect
+pnpm run render       # render to MP4
+pnpm run publish      # publish and get a shareable link
+pnpm dlx hyperframes docs <topic> # reference docs in terminal
 ```
 
-> **`npm run dev` is a long-running server, not a one-shot command.** It blocks until stopped.
+> **`pnpm run dev` is a long-running server, not a one-shot command.** It blocks until stopped.
 > Always run it as a background process so it stays alive while you edit compositions.
 > Running it in the foreground will time out and kill the server, breaking the browser preview.
 
@@ -37,7 +37,7 @@ npx hyperframes docs <topic> # reference docs in terminal
 After creating or editing any `.html` composition, run the full check before considering the task complete:
 
 ```bash
-npm run check
+pnpm run check
 ```
 
 Fix all errors before presenting the result.

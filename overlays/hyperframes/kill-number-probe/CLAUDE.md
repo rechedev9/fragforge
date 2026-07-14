@@ -19,22 +19,22 @@
 | **three**                  | `/three`                  | Three.js scenes rendered from HyperFrames `hf-seek` events                                        |
 | **waapi**                  | `/waapi`                  | Web Animations API motion driven through `document.getAnimations()`                               |
 
-> **Skills not available?** Ask the user to run `npx hyperframes skills` and restart their
-> agent session, or install manually: `npx skills add heygen-com/hyperframes`.
+> **Skills not available?** Ask the user to run `pnpm dlx hyperframes skills` and restart their
+> agent session, or install manually: `pnpm dlx skills add heygen-com/hyperframes`.
 
 ## Commands
 
 ```bash
-npm run dev          # start the preview server (long-running — keep it alive in background)
-npm run check        # lint + validate + inspect
-npm run render       # render to MP4
-npm run publish      # publish and get a shareable link
-npx hyperframes lint --verbose  # include info-level findings
-npx hyperframes lint --json     # machine-readable output for CI
-npx hyperframes docs <topic> # reference docs in terminal
+pnpm run dev          # start the preview server (long-running — keep it alive in background)
+pnpm run check        # lint + validate + inspect
+pnpm run render       # render to MP4
+pnpm run publish      # publish and get a shareable link
+pnpm dlx hyperframes lint --verbose  # include info-level findings
+pnpm dlx hyperframes lint --json     # machine-readable output for CI
+pnpm dlx hyperframes docs <topic> # reference docs in terminal
 ```
 
-> **`npm run dev` is a long-running server, not a one-shot command.** It blocks until stopped.
+> **`pnpm run dev` is a long-running server, not a one-shot command.** It blocks until stopped.
 > In Claude Code, always run it with `run_in_background: true`. Never run it as a foreground
 > command — it will time out and the server will die, breaking the browser preview.
 
@@ -43,7 +43,7 @@ npx hyperframes docs <topic> # reference docs in terminal
 **For quick reference**, use the local CLI docs command (no network required):
 
 ```bash
-npx hyperframes docs <topic>
+pnpm dlx hyperframes docs <topic>
 ```
 
 Topics: `data-attributes`, `gsap`, `compositions`, `rendering`, `examples`, `troubleshooting`
@@ -66,7 +66,7 @@ https://hyperframes.heygen.com/llms.txt
 After creating or editing any `.html` composition, **always** run the full check before considering the task complete:
 
 ```bash
-npm run check
+pnpm run check
 ```
 
 Fix all errors before presenting the result. Inspect warnings should be reviewed before rendering.
