@@ -87,6 +87,55 @@ type ClipRange struct {
 	KillfeedSeconds []float64        `json:"killfeed_seconds,omitempty"`
 	KillfeedKills   [][]KillfeedKill `json:"killfeed_kills,omitempty"`
 	Title           string           `json:"title,omitempty"`
+	Edit            *ClipEdit        `json:"edit,omitempty"`
+}
+
+// Clip edit limits. Speed stays within what chained atempo filters reproduce
+// faithfully; fades and overlay text are bounded so a plan can never produce a
+// degenerate render.
+const (
+	minClipSpeed           = 0.25
+	maxClipSpeed           = 3
+	maxSourceVolume        = 2
+	maxClipFadeSeconds     = 5
+	maxTextOverlaysPerClip = 4
+	maxTextOverlayRunes    = 120
+	minOverlayFontSize     = 24
+	maxOverlayFontSize     = 120
+	defaultOverlayFontSize = 64
+	// Vertical center bounds shared by the streamer banner and text overlays:
+	// the drag-handle margin that keeps either strip fully inside the frame.
+	minVerticalPositionY = 0.025
+	maxVerticalPositionY = 0.975
+)
+
+// ClipEdit carries the optional per-clip edit options: playback speed, the
+// original-audio gain, fades, and burned-in text overlays. A nil or zero value
+// renders the clip exactly as before the edit options existed.
+type ClipEdit struct {
+	// Speed is the playback rate in [0.25, 3]; 0 means unchanged (1x).
+	Speed float64 `json:"speed,omitempty"`
+	// SourceVolume scales the clip's original audio in [0, 2]; nil means
+	// unchanged and 0 mutes the source (music, if any, still plays).
+	SourceVolume *float64 `json:"source_volume,omitempty"`
+	// FadeInSeconds / FadeOutSeconds fade video and audio at the clip
+	// boundaries, measured in output (post-speed) seconds.
+	FadeInSeconds  float64       `json:"fade_in_seconds,omitempty"`
+	FadeOutSeconds float64       `json:"fade_out_seconds,omitempty"`
+	TextOverlays   []TextOverlay `json:"text_overlays,omitempty"`
+}
+
+// TextOverlay burns a centered text line into the rendered clip. Times are
+// relative to the clip start in source seconds (the same timeline the web
+// preview scrubs); nil bounds extend to the clip edge.
+type TextOverlay struct {
+	Text string `json:"text"`
+	// PositionY is the normalized vertical center in [0.025, 0.975].
+	PositionY    float64  `json:"position_y"`
+	StartSeconds *float64 `json:"start_seconds,omitempty"`
+	EndSeconds   *float64 `json:"end_seconds,omitempty"`
+	// FontSize in output pixels, [24, 120]; 0 means the default 64.
+	FontSize int `json:"font_size,omitempty"`
 }
 
 // KillfeedKill is one confirmed CS2 kill notice, either read from the cue
@@ -200,7 +249,7 @@ func NewVideoEntry(clip ClipRange, key string) VideoEntry {
 		ClipID:          clip.ID,
 		Title:           clip.Title,
 		Key:             key,
-		DurationSeconds: clip.EndSeconds - clip.StartSeconds,
+		DurationSeconds: clip.OutputDurationSeconds(),
 	}
 }
 
@@ -306,7 +355,7 @@ func (p EditPlan) Validate() error {
 		return fmt.Errorf("streamer banner nick must use 1-25 letters, numbers, or underscores")
 	}
 	if positionY := p.StreamerBanner.PositionY; positionY != nil {
-		if math.IsNaN(*positionY) || math.IsInf(*positionY, 0) || *positionY < 0.025 || *positionY > 0.975 {
+		if math.IsNaN(*positionY) || math.IsInf(*positionY, 0) || *positionY < minVerticalPositionY || *positionY > maxVerticalPositionY {
 			return fmt.Errorf("streamer banner position_y must be finite and between 0.025 and 0.975")
 		}
 	}
@@ -369,6 +418,109 @@ func (c ClipRange) Validate() error {
 			}
 		}
 	}
+	if err := c.Edit.validate(c.ID, c.EndSeconds-c.StartSeconds); err != nil {
+		return err
+	}
+	return nil
+}
+
+// speed returns the effective playback rate, treating nil and 0 as 1x.
+func (e *ClipEdit) speed() float64 {
+	if e == nil || e.Speed == 0 {
+		return 1
+	}
+	return e.Speed
+}
+
+// OutputDurationSeconds is the rendered clip length after the speed edit.
+func (c ClipRange) OutputDurationSeconds() float64 {
+	return (c.EndSeconds - c.StartSeconds) / c.Edit.speed()
+}
+
+// EffectiveSpeed is the clip's playback rate with the unset default applied,
+// so callers can map source-time positions onto the rendered output timeline.
+func (c ClipRange) EffectiveSpeed() float64 {
+	return c.Edit.speed()
+}
+
+// SourceAudioMuted reports whether the clip edit silences the original audio,
+// which also means transcribing the source would caption inaudible speech.
+func (c ClipRange) SourceAudioMuted() bool {
+	return c.Edit != nil && c.Edit.SourceVolume != nil && *c.Edit.SourceVolume == 0
+}
+
+// HasTextOverlays reports whether any clip burns text overlays, which decides
+// whether the render worker must resolve a font file up front.
+func (p EditPlan) HasTextOverlays() bool {
+	for _, clip := range p.Clips {
+		if clip.Edit != nil && len(clip.Edit.TextOverlays) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *ClipEdit) validate(clipID string, sourceDuration float64) error {
+	if e == nil {
+		return nil
+	}
+	if e.Speed != 0 && (math.IsNaN(e.Speed) || e.Speed < minClipSpeed || e.Speed > maxClipSpeed) {
+		return fmt.Errorf("clip %s speed must be between 0.25 and 3", clipID)
+	}
+	if v := e.SourceVolume; v != nil && (math.IsNaN(*v) || *v < 0 || *v > maxSourceVolume) {
+		return fmt.Errorf("clip %s source_volume must be between 0 and 2", clipID)
+	}
+	if math.IsNaN(e.FadeInSeconds) || e.FadeInSeconds < 0 || e.FadeInSeconds > maxClipFadeSeconds {
+		return fmt.Errorf("clip %s fade_in_seconds must be between 0 and 5", clipID)
+	}
+	if math.IsNaN(e.FadeOutSeconds) || e.FadeOutSeconds < 0 || e.FadeOutSeconds > maxClipFadeSeconds {
+		return fmt.Errorf("clip %s fade_out_seconds must be between 0 and 5", clipID)
+	}
+	// Fades run in output time, so they must fit the sped-up duration.
+	if e.FadeInSeconds+e.FadeOutSeconds > sourceDuration/e.speed() {
+		return fmt.Errorf("clip %s fades must fit within the clip's output duration", clipID)
+	}
+	if len(e.TextOverlays) > maxTextOverlaysPerClip {
+		return fmt.Errorf("clip %s has at most 4 text overlays", clipID)
+	}
+	for _, overlay := range e.TextOverlays {
+		if err := overlay.validate(clipID, sourceDuration); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (o TextOverlay) validate(clipID string, clipDuration float64) error {
+	text := strings.TrimSpace(o.Text)
+	if text == "" {
+		return fmt.Errorf("clip %s text overlay text is required", clipID)
+	}
+	if len([]rune(text)) > maxTextOverlayRunes {
+		return fmt.Errorf("clip %s text overlay text must be at most 120 characters", clipID)
+	}
+	for _, r := range text {
+		// The render reads the text from a file with expansion=none, so every
+		// printable character is safe; only control characters break layout.
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("clip %s text overlay text must not contain control characters", clipID)
+		}
+	}
+	if math.IsNaN(o.PositionY) || math.IsInf(o.PositionY, 0) || o.PositionY < minVerticalPositionY || o.PositionY > maxVerticalPositionY {
+		return fmt.Errorf("clip %s text overlay position_y must be finite and between 0.025 and 0.975", clipID)
+	}
+	if o.FontSize != 0 && (o.FontSize < minOverlayFontSize || o.FontSize > maxOverlayFontSize) {
+		return fmt.Errorf("clip %s text overlay font_size must be between 24 and 120", clipID)
+	}
+	if s := o.StartSeconds; s != nil && (math.IsNaN(*s) || *s < 0 || *s >= clipDuration) {
+		return fmt.Errorf("clip %s text overlay start_seconds must be inside the clip", clipID)
+	}
+	if e := o.EndSeconds; e != nil && (math.IsNaN(*e) || *e <= 0 || *e > clipDuration) {
+		return fmt.Errorf("clip %s text overlay end_seconds must be inside the clip", clipID)
+	}
+	if o.StartSeconds != nil && o.EndSeconds != nil && *o.EndSeconds <= *o.StartSeconds {
+		return fmt.Errorf("clip %s text overlay end_seconds must be greater than start_seconds", clipID)
+	}
 	return nil
 }
 
@@ -423,6 +575,7 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 		plan.Clips[i].ID = strings.TrimSpace(plan.Clips[i].ID)
 		plan.Clips[i].KillfeedSeconds = normalizeKillfeedSeconds(plan.Clips[i].KillfeedSeconds)
 		plan.Clips[i].KillfeedKills = normalizeKillfeedKills(plan.Clips[i].KillfeedKills)
+		plan.Clips[i].Edit = normalizeClipEdit(plan.Clips[i].Edit)
 	}
 	plan.StreamerBanner.Nick = strings.TrimSpace(plan.StreamerBanner.Nick)
 	plan.Music.Key = strings.TrimSpace(plan.Music.Key)
@@ -436,7 +589,39 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 func normalizeClipRange(clip ClipRange) ClipRange {
 	clip.KillfeedSeconds = normalizeKillfeedSeconds(clip.KillfeedSeconds)
 	clip.KillfeedKills = normalizeKillfeedKills(clip.KillfeedKills)
+	clip.Edit = normalizeClipEdit(clip.Edit)
 	return clip
+}
+
+// normalizeClipEdit trims overlay text and collapses an all-defaults edit back
+// to nil so untouched clips keep their pre-edit plan shape. It deep-copies so
+// the caller's overlays are never mutated.
+func normalizeClipEdit(edit *ClipEdit) *ClipEdit {
+	if edit == nil {
+		return nil
+	}
+	normalized := *edit
+	if len(edit.TextOverlays) > 0 {
+		normalized.TextOverlays = make([]TextOverlay, len(edit.TextOverlays))
+		for i, overlay := range edit.TextOverlays {
+			overlay.Text = strings.TrimSpace(overlay.Text)
+			normalized.TextOverlays[i] = overlay
+		}
+	}
+	// Identity values render exactly like unset ones, so collapse them too;
+	// this keeps plans saved through any surface shape-identical.
+	if normalized.Speed == 1 {
+		normalized.Speed = 0
+	}
+	if normalized.SourceVolume != nil && *normalized.SourceVolume == 1 {
+		normalized.SourceVolume = nil
+	}
+	if normalized.Speed == 0 && normalized.SourceVolume == nil &&
+		normalized.FadeInSeconds == 0 && normalized.FadeOutSeconds == 0 &&
+		len(normalized.TextOverlays) == 0 {
+		return nil
+	}
+	return &normalized
 }
 
 // normalizeKillfeedKills trims and case-folds every kill's names, team sides,

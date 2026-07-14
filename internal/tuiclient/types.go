@@ -302,6 +302,9 @@ type ClipRange struct {
 	KillfeedSeconds []float64        `json:"killfeed_seconds,omitempty"`
 	KillfeedKills   [][]KillfeedKill `json:"killfeed_kills,omitempty"`
 	Title           string           `json:"title,omitempty"`
+	// Edit is the per-clip edit options (internal/streamclips.ClipEdit); the
+	// TUI round-trips it opaquely so saving a plan never drops web-made edits.
+	Edit json.RawMessage `json:"edit,omitempty"`
 }
 
 // KillfeedKill mirrors internal/streamclips.KillfeedKill: one CS2 kill notice,

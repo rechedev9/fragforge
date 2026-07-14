@@ -954,10 +954,10 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (configure an xAI key in FragForge Studio Settings or set XAI_API_KEY, set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, then restart)")
 	}
 	bannerFontPath := ""
-	if plan.StreamerBanner.Nick != "" {
+	if plan.StreamerBanner.Nick != "" || plan.HasTextOverlays() {
 		bannerFontPath = streamclips.FindBannerFont()
 		if bannerFontPath == "" {
-			return fmt.Errorf("render streamer banner: embedded font unavailable and no supported fallback font found")
+			return fmt.Errorf("render banner or text overlays: embedded font unavailable and no supported fallback font found")
 		}
 	}
 
@@ -999,6 +999,10 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		if err != nil {
 			return err
 		}
+		textPaths, err := writeClipOverlayTexts(workDir, clip)
+		if err != nil {
+			return err
+		}
 		outPath := filepath.Join(outDir, clip.ID+".mp4")
 		args, err := streamclips.BuildFFmpegArgs(streamclips.FFmpegInputs{
 			SourcePath:          sourcePath,
@@ -1007,6 +1011,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 			BannerFontPath:      bannerFontPath,
 			SourceHasAudio:      j.Probe.AudioCodec != "",
 			KillfeedNoticePaths: noticePaths,
+			TextOverlayPaths:    textPaths,
 		}, plan, clip)
 		if err != nil {
 			return err
@@ -1018,17 +1023,27 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		publishPath := outPath
 		publishClipID := clip.ID
 		if plan.Captions.Enabled {
-			if cfg.cloudCaptionsConfigured() && j.Probe.AudioCodec == "" {
+			switch {
+			case cfg.cloudCaptionsConfigured() && j.Probe.AudioCodec == "":
 				warnings = append(warnings, fmt.Sprintf("clip %s: source has no audio, publishing without captions", clip.ID))
-			} else {
+			case clip.SourceAudioMuted():
+				// Captions must describe what the viewer hears; a muted clip
+				// would otherwise get subtitles narrating inaudible speech.
+				warnings = append(warnings, fmt.Sprintf("clip %s: original audio is muted by the clip edit, publishing without captions", clip.ID))
+			default:
 				transcriptionPath := outPath
+				// Cues transcribed from the rendered clip are already in output
+				// time; cues from the source range must be mapped through the
+				// speed edit before burning onto the sped-up output.
+				cueSpeed := 1.0
 				if cfg.cloudCaptionsConfigured() {
 					transcriptionPath, err = w.extractCaptionSourceAudio(runCtx, cfg, workDir, sourcePath, clip)
 					if err != nil {
 						return err
 					}
+					cueSpeed = clip.EffectiveSpeed()
 				}
-				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, j.ID, variant, clip.ID, plan.Captions.Language)
+				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, cueSpeed, j.ID, variant, clip.ID, plan.Captions.Language)
 				if err != nil {
 					return err
 				}
@@ -1083,6 +1098,28 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	}
 
 	return nil
+}
+
+// writeClipOverlayTexts materializes one text file per overlay so drawtext can
+// read the user's text verbatim (expansion=none) instead of embedding it in
+// the filtergraph, where escaping arbitrary characters is unreliable.
+func writeClipOverlayTexts(workDir string, clip streamclips.ClipRange) ([]string, error) {
+	if clip.Edit == nil || len(clip.Edit.TextOverlays) == 0 {
+		return nil, nil
+	}
+	dir := filepath.Join(workDir, "overlay-text", clip.ID)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, err
+	}
+	paths := make([]string, len(clip.Edit.TextOverlays))
+	for i, overlay := range clip.Edit.TextOverlays {
+		textPath := filepath.Join(dir, fmt.Sprintf("overlay%d.txt", i))
+		if err := os.WriteFile(textPath, []byte(overlay.Text), 0o600); err != nil {
+			return nil, fmt.Errorf("write text overlay for clip %s overlay %d: %w", clip.ID, i, err)
+		}
+		paths[i] = textPath
+	}
+	return paths, nil
 }
 
 // renderClipKillfeedNotices renders every kill in clip.KillfeedKills to a
@@ -1168,13 +1205,19 @@ func (w *StreamRenderWorker) extractCaptionSourceAudio(ctx context.Context, cfg 
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
 // explicitly requested and a transcription backend is configured.
-func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
+func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, cueSpeed float64, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
 	cues, err := w.transcribe(ctx, transcriptionPath, workDir, language)
 	if err != nil {
 		if strings.Contains(err.Error(), "no words") {
 			return "", fmt.Sprintf("clip %s: transcription produced no words, publishing without captions", clipID), nil
 		}
 		return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
+	}
+	if cueSpeed != 1 {
+		for i := range cues {
+			cues[i].StartSeconds /= cueSpeed
+			cues[i].EndSeconds /= cueSpeed
+		}
 	}
 	sort.SliceStable(cues, func(i, j int) bool {
 		return cues[i].StartSeconds < cues[j].StartSeconds

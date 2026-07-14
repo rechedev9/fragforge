@@ -71,6 +71,7 @@ const COVERAGE: readonly CoverageCase[] = [
   { input: STREAM_INPUT, method: 'PUT', operation: 'streams.resume_initialization', route: '/api/stream-jobs/{id}/edit-plan' },
   { input: { ...STREAM_INPUT, plan: STREAM_PLAN }, method: 'PUT', operation: 'streams.update_edit_plan', route: '/api/stream-jobs/{id}/edit-plan' },
   { input: { ...STREAM_INPUT, enabled: true, language: 'es' }, method: 'PUT', operation: 'streams.configure_captions', route: '/api/stream-jobs/{id}/edit-plan' },
+  { input: { ...STREAM_INPUT, clip_id: 'clip-1', speed: 2 }, method: 'PUT', operation: 'streams.edit_clip', route: '/api/stream-jobs/{id}/edit-plan' },
   { input: STREAM_RENDER_INPUT, method: 'POST', operation: 'streams.start_render', route: '/api/stream-jobs/{id}/renders/{variant}' },
   { input: STREAM_RENDER_INPUT, method: 'GET', operation: 'streams.get_render', route: '/api/stream-jobs/{id}/renders/{variant}' },
   { input: {}, method: 'GET', operation: 'streams.list_killfeed_weapons', route: '/api/stream-killfeed/weapons' },
