@@ -838,6 +838,24 @@ type captionBackend struct {
 	transcribe func(ctx context.Context, mediaPath, workDir string) ([]captions.WordCue, error)
 }
 
+// attempt runs one backend and rejects a transcript that must not be burned in,
+// so a backend that fails and one that succeeds with garbage reach the caller as
+// the same shape of error. A backend can succeed and still hand back an unusable
+// transcript: gameplay audio makes every engine hallucinate, and on one real clip
+// xAI and Groq each returned two words stamped across 11.8s of 15s. Validating
+// here, rather than inside one backend, holds the fallback backend's output to
+// the same bar as the preferred one's.
+func (b captionBackend) attempt(ctx context.Context, mediaPath, workDir string) ([]captions.WordCue, error) {
+	cues, err := b.transcribe(ctx, mediaPath, workDir)
+	if err == nil {
+		err = captions.ValidateTranscript(cues)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", b.name, err)
+	}
+	return cues, nil
+}
+
 // captionBackends returns the configured transcription backends in preference
 // order: xAI, then Groq, then local whisper.
 func (c StreamRenderWorkerConfig) captionBackends(language string) []captionBackend {
@@ -885,41 +903,31 @@ func transcribeCaptionsWithFallback(ctx context.Context, mediaPath, workDir stri
 		return nil, fmt.Errorf("no captions transcription backend configured")
 	}
 	var unusableErrs, hardErrs []error
-	var unusableNames []string
 	for _, b := range backends {
-		cues, err := b.transcribe(ctx, mediaPath, workDir)
-		// A backend can succeed and still hand back a transcript that must not be
-		// burned in. Gameplay audio makes every engine hallucinate: on one real
-		// clip xAI and Groq each returned two words stamped across 11.8s of 15s.
-		// Validating here, rather than inside one backend, means the fallback
-		// backend's output is held to the same bar as the preferred one's.
+		cues, err := b.attempt(ctx, mediaPath, workDir)
 		if err == nil {
-			if err = captions.ValidateTranscript(cues); err == nil {
-				return cues, nil
-			}
-			err = fmt.Errorf("captions: %s %w", b.name, err)
+			return cues, nil
 		}
 		// A dead context is a hard failure even when this backend's transcript was
 		// merely unusable: %v keeps ErrUnusableTranscript out of the chain, so a
 		// cancelled render fails instead of publishing uncaptioned as though the
 		// audio simply had no speech.
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, fmt.Errorf("%s: %v: %w", b.name, err, ctxErr)
+			return nil, fmt.Errorf("%v: %w", err, ctxErr)
 		}
 		if errors.Is(err, captions.ErrUnusableTranscript) {
-			unusableErrs = append(unusableErrs, fmt.Errorf("%s: %w", b.name, err))
-			unusableNames = append(unusableNames, b.name)
+			unusableErrs = append(unusableErrs, err)
 		} else {
-			hardErrs = append(hardErrs, fmt.Errorf("%s: %w", b.name, err))
+			hardErrs = append(hardErrs, err)
 		}
 	}
 	if len(hardErrs) == 0 {
 		return nil, errors.Join(unusableErrs...)
 	}
-	// Summarize unusable transcripts without the soft marker: a hard failure
-	// must fail the render, not publish the clip uncaptioned.
-	if len(unusableNames) > 0 {
-		hardErrs = append(hardErrs, fmt.Errorf("%s produced an unusable transcript", strings.Join(unusableNames, ", ")))
+	// Fold the unusable transcripts in with %s, not %w: a hard failure must fail
+	// the render rather than publish the clip uncaptioned.
+	if len(unusableErrs) > 0 {
+		hardErrs = append(hardErrs, fmt.Errorf("unusable transcripts: %s", singleLine(errors.Join(unusableErrs...))))
 	}
 	return nil, errors.Join(hardErrs...)
 }

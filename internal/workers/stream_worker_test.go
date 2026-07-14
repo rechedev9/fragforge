@@ -836,7 +836,7 @@ func TestTranscribeCaptionsWithFallbackRejectsGarbledSuccessFromAnyBackend(t *te
 		if !errors.Is(err, captions.ErrUnusableTranscript) {
 			t.Errorf("got error %q, want it to wrap captions.ErrUnusableTranscript so the clip publishes uncaptioned", err)
 		}
-		if !strings.Contains(err.Error(), "Martínez") {
+		if !strings.Contains(err.Error(), "Hola") {
 			t.Errorf("got error %q, want it to name the offending word", err)
 		}
 	})

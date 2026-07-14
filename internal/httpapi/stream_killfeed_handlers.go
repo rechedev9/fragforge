@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 
+	xdraw "golang.org/x/image/draw"
+
 	"github.com/rechedev9/fragforge/internal/killfeedvision"
 	"github.com/rechedev9/fragforge/internal/streamclips"
 )
@@ -308,28 +310,19 @@ func encodeKillfeedCropPNG(frame image.Image, crop streamclips.CropRect) ([]byte
 
 // upscaleKillfeedCrop enlarges a killfeed crop before it is read. A 1080p
 // source crops to roughly 595x151, where player names are only a few pixels
-// tall and the vision model misreads them (verified: "bk667" read as "bk657",
-// an awp icon read as an ak47). Nearest-neighbour keeps the notice's hard
-// edges and flat colours crisp, which matters because a name's colour decides
-// its side. The crop is only enlarged, never shrunk, and the factor is capped
-// so an already-large crop is not blown up past the model's image budget.
-func upscaleKillfeedCrop(src *image.RGBA) image.Image {
+// tall and the vision model misreads them (verified: "bek667" read as "bk657",
+// an awp icon read as an ak47). Nearest-neighbour keeps the notice's hard edges
+// and flat colours crisp, which matters because a name's colour decides its
+// side. The crop is only enlarged, never shrunk, and the factor is capped so an
+// already-large crop is not blown up past the model's image budget.
+func upscaleKillfeedCrop(src image.Image) image.Image {
 	b := src.Bounds()
-	width, height := b.Dx(), b.Dy()
-	factor := min(killfeedCropTargetWidth/max(width, 1), killfeedCropMaxUpscale)
+	factor := min(killfeedCropTargetWidth/max(b.Dx(), 1), killfeedCropMaxUpscale)
 	if factor < 2 {
 		return src
 	}
-	dst := image.NewRGBA(image.Rect(0, 0, width*factor, height*factor))
-	for y := range height * factor {
-		srcOffset := src.PixOffset(b.Min.X, b.Min.Y+y/factor)
-		srcRow := src.Pix[srcOffset : srcOffset+width*4]
-		dstOffset := dst.PixOffset(0, y)
-		dstRow := dst.Pix[dstOffset : dstOffset+width*factor*4]
-		for x := range width * factor {
-			copy(dstRow[x*4:x*4+4], srcRow[(x/factor)*4:])
-		}
-	}
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx()*factor, b.Dy()*factor))
+	xdraw.NearestNeighbor.Scale(dst, dst.Bounds(), src, b, xdraw.Src, nil)
 	return dst
 }
 
