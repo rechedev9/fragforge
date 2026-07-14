@@ -1,2 +1,14 @@
 allowBuilds:
   sharp: true
+
+# Next's standalone output mirrors the installed node_modules layout. Under
+# pnpm's default (isolated) linker that layout is a graph of symlinks into the
+# .pnpm store, and the desktop installer copies the standalone tree into
+# build-resources: preserving those links needs Windows symlink privileges, and
+# dereferencing them never terminates because the store's links are circular.
+# Either way the copy crashes the build outright, which is what broke
+# `pnpm run dist` after the pnpm migration.
+#
+# A hoisted (flat) node_modules keeps the bundled web app a plain tree of real
+# files, which is what has to ship inside the Electron app regardless.
+nodeLinker: hoisted
