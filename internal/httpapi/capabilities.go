@@ -35,16 +35,20 @@ type Capabilities struct {
 	// XAIEnabled reports whether a stream render can burn in captions using the
 	// xAI cloud backend: an xAI API key is configured. The key itself is never
 	// reported, only this boolean.
-	XAIEnabled  bool
+	XAIEnabled bool
+	// GroqEnabled reports whether the Groq cloud captions fallback is
+	// configured: a Groq API key is set. The key itself is never reported,
+	// only this boolean.
+	GroqEnabled bool
 	RecordTools []CaptureTool // recorder, HLAE, CS2
 	RenderTools []CaptureTool // editor, ffmpeg
 	StreamTools []CaptureTool // yt-dlp, whisper binary, whisper model
 }
 
 // captionsEnabled reports whether at least one captions transcription
-// backend (xAI or local whisper) is configured.
+// backend (xAI, Groq, or local whisper) is configured.
 func (c Capabilities) captionsEnabled() bool {
-	return c.WhisperEnabled || c.XAIEnabled
+	return c.WhisperEnabled || c.XAIEnabled || c.GroqEnabled
 }
 
 // GetCapabilities handles GET /api/capabilities. It is read-only: the web UI
@@ -63,6 +67,7 @@ func (h *Handlers) GetCapabilities(w http.ResponseWriter, _ *http.Request) {
 			"ytdlp_enabled":   c.YtdlpEnabled,
 			"whisper_enabled": c.WhisperEnabled,
 			"xai_enabled":     c.XAIEnabled,
+			"groq_enabled":    c.GroqEnabled,
 			"tools":           resolveTools(c.StreamTools),
 		},
 	})
@@ -119,6 +124,6 @@ func (h *Handlers) requireCaptionsEnabled(w http.ResponseWriter) bool {
 	if h.capabilities.captionsEnabled() {
 		return true
 	}
-	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but no transcription backend is configured on this machine; configure an xAI key in FragForge Studio Settings (or set XAI_API_KEY), or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, then restart")
+	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but no transcription backend is configured on this machine; configure an xAI key in FragForge Studio Settings (or set XAI_API_KEY), set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, then restart")
 	return false
 }

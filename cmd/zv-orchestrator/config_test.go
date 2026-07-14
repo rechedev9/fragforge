@@ -230,6 +230,97 @@ func TestLoadConfigXAIAPIKey(t *testing.T) {
 	}
 }
 
+func TestLoadConfigGroqAPIKey(t *testing.T) {
+	tests := []struct {
+		name        string
+		env         map[string]string
+		wantKey     string
+		wantModel   string
+		wantCorrect string
+	}{
+		{
+			name:        "unset leaves groq disabled",
+			wantCorrect: defaultGroqCorrectionModel,
+		},
+		{
+			name:        "conventional GROQ_API_KEY",
+			env:         map[string]string{"GROQ_API_KEY": "groq-abc"},
+			wantKey:     "groq-abc",
+			wantCorrect: defaultGroqCorrectionModel,
+		},
+		{
+			name: "ZV_GROQ_API_KEY override wins",
+			env: map[string]string{
+				"GROQ_API_KEY":    "user-level-key",
+				"ZV_GROQ_API_KEY": "fragforge-key",
+			},
+			wantKey:     "fragforge-key",
+			wantCorrect: defaultGroqCorrectionModel,
+		},
+		{
+			name: "model and correction model overrides",
+			env: map[string]string{
+				"GROQ_API_KEY":             "groq-abc",
+				"ZV_GROQ_MODEL":            "whisper-large-v3",
+				"ZV_GROQ_CORRECTION_MODEL": "some-other-model",
+			},
+			wantKey:     "groq-abc",
+			wantModel:   "whisper-large-v3",
+			wantCorrect: "some-other-model",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("ZV_DATABASE_URL", "memory")
+			for name, value := range tt.env {
+				t.Setenv(name, value)
+			}
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("loadConfig error = %v", err)
+			}
+			if cfg.GroqAPIKey != tt.wantKey {
+				t.Fatalf("GroqAPIKey = %q, want %q", cfg.GroqAPIKey, tt.wantKey)
+			}
+			if cfg.GroqModel != tt.wantModel {
+				t.Fatalf("GroqModel = %q, want %q", cfg.GroqModel, tt.wantModel)
+			}
+			if cfg.GroqCorrectionModel != tt.wantCorrect {
+				t.Fatalf("GroqCorrectionModel = %q, want %q", cfg.GroqCorrectionModel, tt.wantCorrect)
+			}
+			if got, want := cfg.groqEnabled(), tt.wantKey != ""; got != want {
+				t.Fatalf("groqEnabled() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestClearGroqAPIKeyEnvironmentKeepsLoadedConfigOnlyInMemory(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ZV_DATABASE_URL", "memory")
+	t.Setenv("GROQ_API_KEY", "groq-team-secret")
+	t.Setenv("ZV_GROQ_API_KEY", "groq-override-secret")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig error = %v", err)
+	}
+	if err := clearGroqAPIKeyEnvironment(); err != nil {
+		t.Fatalf("clearGroqAPIKeyEnvironment error = %v", err)
+	}
+	if cfg.GroqAPIKey == "" {
+		t.Fatal("GroqAPIKey is empty after load, want the credential retained in config memory")
+	}
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, groqAPIKeyEnvironmentVariable) || strings.EqualFold(name, groqAPIKeyOverrideVariable) {
+			t.Fatalf("environment still contains %q after credential cleanup", name)
+		}
+	}
+}
+
 func TestClearXAIAPIKeyEnvironmentKeepsLoadedConfigOnlyInMemory(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ZV_DATABASE_URL", "memory")
@@ -293,6 +384,10 @@ func clearConfigEnv(t *testing.T) {
 		"ZV_CODEX_MODEL",
 		"ZV_AGENT_TIMEOUT",
 		"XAI_API_KEY",
+		"GROQ_API_KEY",
+		"ZV_GROQ_API_KEY",
+		"ZV_GROQ_MODEL",
+		"ZV_GROQ_CORRECTION_MODEL",
 		"FIRECRAWL_API_KEY",
 	} {
 		t.Setenv(key, "")
