@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Twitch } from 'lucide-react';
 import { streamsApi, type KillfeedKill, type NormalizedRect, type StreamClipRange, type StreamVariant } from '@/lib/api/streams';
 import {
+  activeTextOverlays,
   calculateCropCoverGeometry,
   clampStreamerBannerPosition,
   killfeedKillsForCue,
@@ -331,6 +332,7 @@ export function StreamPreview({
     ? resolveActiveKillfeedCue(clips, frameSeconds)
     : null;
   const activeKills = activeKillfeedCue !== null ? killfeedKillsForCue(clips, activeKillfeedCue) : [];
+  const activeOverlays = activeTextOverlays(clips, frameSeconds);
 
   const beginBannerDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || !onStreamerPositionChange) return;
@@ -365,7 +367,11 @@ export function StreamPreview({
   }, [bannerPosition, disabled, onStreamerPositionChange]);
 
   return (
-    <div ref={containerRef} className="relative mx-auto aspect-[9/16] w-full max-w-[220px] overflow-hidden rounded-xl border border-border bg-background shadow-lg">
+    <div
+      ref={containerRef}
+      className="relative mx-auto aspect-[9/16] w-full max-w-[220px] overflow-hidden rounded-xl border border-border bg-background shadow-lg"
+      style={{ containerType: 'size' }}
+    >
       <div className="flex h-full w-full flex-col">
         {faceLayout ? (
           <div style={{ height: `${facePct}%` }} className="w-full">
@@ -402,6 +408,20 @@ export function StreamPreview({
           visible={activeKillfeedCue !== null}
         />
       ) : null}
+      {activeOverlays.map((overlay, i) => (
+        <span
+          key={`${overlay.text}-${i}`}
+          className="pointer-events-none absolute left-0 w-full -translate-y-1/2 px-[4%] text-center font-[family-name:var(--font-display)] font-black leading-tight text-white"
+          style={{
+            top: `${overlay.position_y * 100}%`,
+            // Match the render: font_size output pixels on the 1920px-tall canvas.
+            fontSize: `${(((overlay.font_size ?? 64) || 64) / 1920) * 100}cqh`,
+            textShadow: '0 0 2px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.55)',
+          }}
+        >
+          {overlay.text}
+        </span>
+      ))}
       {streamerNick ? (
         <div
           role="slider"

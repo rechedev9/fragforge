@@ -54,6 +54,34 @@ export type KillfeedKill = {
   flash_assist?: boolean;
 };
 
+/**
+ * One burned-in text line, mirroring streamclips.TextOverlay. Times are
+ * relative to the clip start in source seconds; missing bounds extend to the
+ * clip edges. `position_y` is the normalized vertical center (0.025..0.975).
+ */
+export type StreamTextOverlay = {
+  text: string;
+  position_y: number;
+  start_seconds?: number;
+  end_seconds?: number;
+  /** Output pixels, 24..120; omitted means the default 64. */
+  font_size?: number;
+};
+
+/**
+ * Optional per-clip edit options, mirroring streamclips.ClipEdit. An absent
+ * object renders the clip untouched. `speed` is the playback rate (0.25..3),
+ * `source_volume` scales the original audio (0 mutes, up to 2), and the fades
+ * are measured in output (post-speed) seconds.
+ */
+export type StreamClipEdit = {
+  speed?: number;
+  source_volume?: number;
+  fade_in_seconds?: number;
+  fade_out_seconds?: number;
+  text_overlays?: StreamTextOverlay[];
+};
+
 export type StreamClipRange = {
   id: string;
   start_seconds: number;
@@ -66,6 +94,7 @@ export type StreamClipRange = {
    * renders synthetic notices instead.
    */
   killfeed_kills?: KillfeedKill[][];
+  edit?: StreamClipEdit;
 };
 
 export type StreamCaptions = { enabled: boolean; language: string };

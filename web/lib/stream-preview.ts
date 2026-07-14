@@ -1,4 +1,4 @@
-import type { KillfeedKill, NormalizedRect, StreamClipRange, StreamVariant } from './api/streams';
+import type { KillfeedKill, NormalizedRect, StreamClipRange, StreamTextOverlay, StreamVariant } from './api/streams';
 
 export type FrameSize = { width: number; height: number };
 
@@ -161,4 +161,27 @@ export function killfeedKillsForCue(clips: StreamClipRange[], cue: number): Kill
 export function representativeFrameTime(duration: number): number {
   if (!Number.isFinite(duration) || duration <= 0) return 0;
   return Math.max(0, Math.min(duration / 2, duration - 0.1));
+}
+
+/**
+ * The text overlays visible at `frameSeconds`. Overlay windows are relative to
+ * the owning clip's start in source seconds (matching the render's drawtext
+ * enable windows); missing bounds extend to the clip edges.
+ */
+export function activeTextOverlays(
+  clips: StreamClipRange[],
+  frameSeconds: number,
+): StreamTextOverlay[] {
+  if (!Number.isFinite(frameSeconds)) return [];
+  const active: StreamTextOverlay[] = [];
+  for (const clip of clips) {
+    if (frameSeconds < clip.start_seconds || frameSeconds >= clip.end_seconds) continue;
+    const relative = frameSeconds - clip.start_seconds;
+    for (const overlay of clip.edit?.text_overlays ?? []) {
+      if (overlay.start_seconds !== undefined && relative < overlay.start_seconds) continue;
+      if (overlay.end_seconds !== undefined && relative > overlay.end_seconds) continue;
+      active.push(overlay);
+    }
+  }
+  return active;
 }

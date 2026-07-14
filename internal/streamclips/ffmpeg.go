@@ -52,6 +52,10 @@ type FFmpegInputs struct {
 	// ordered top-first, and every PNG is streamclips.KillfeedNoticeHeight tall.
 	// A cue with no paths falls back to a frozen crop of the killfeed region.
 	KillfeedNoticePaths [][]string
+	// TextOverlayPaths holds materialized text files, index-aligned with the
+	// clip's Edit.TextOverlays. drawtext reads each file with expansion=none,
+	// so arbitrary user text never needs filtergraph escaping.
+	TextOverlayPaths []string
 }
 
 func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, error) {
@@ -79,6 +83,17 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 	if plan.StreamerBanner.Nick != "" && in.BannerFontPath == "" {
 		return nil, fmt.Errorf("streamer banner font path is required")
 	}
+	if clip.Edit != nil && len(clip.Edit.TextOverlays) > 0 {
+		if in.BannerFontPath == "" {
+			return nil, fmt.Errorf("text overlay font path is required")
+		}
+		if len(in.TextOverlayPaths) != len(clip.Edit.TextOverlays) {
+			return nil, fmt.Errorf(
+				"clip %s text overlay paths length %d must match %d text overlays",
+				clip.ID, len(in.TextOverlayPaths), len(clip.Edit.TextOverlays),
+			)
+		}
+	}
 	duration := clip.EndSeconds - clip.StartSeconds
 
 	// Notice PNGs are extra inputs after the source and the optional music input.
@@ -86,7 +101,7 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 	if in.MusicPath != "" {
 		noticeInputBase = 2
 	}
-	filter := buildFilterGraph(layout, plan, clip, in.KillfeedNoticePaths, in.BannerFontPath, duration, noticeInputBase)
+	filter := buildFilterGraph(layout, plan, clip, in.KillfeedNoticePaths, in.BannerFontPath, in.TextOverlayPaths, duration, noticeInputBase)
 
 	args := []string{
 		"-y",
@@ -96,6 +111,8 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 	}
 	audioMap := "0:a?"
 	shortest := false
+	srcFilters := sourceAudioFilters(clip.Edit)
+	fadeFilters := audioFadeFilters(clip.Edit, clip.OutputDurationSeconds())
 	if in.MusicPath != "" {
 		// Loop the track so it always covers the clip; amix/-shortest bound it.
 		args = append(args, "-stream_loop", "-1", "-i", in.MusicPath)
@@ -104,13 +121,40 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 			volume = defaultMusicVolume
 		}
 		if in.SourceHasAudio {
-			filter += fmt.Sprintf(";[1:a]volume=%s[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]", floatArg(volume))
+			// Gain and tempo edits apply to the source before the mix so the
+			// music keeps its own volume and pace; fades apply to the mix.
+			mixInput := "[0:a]"
+			if srcFilters != "" {
+				filter += ";[0:a]" + srcFilters + "[srca]"
+				mixInput = "[srca]"
+			}
+			filter += fmt.Sprintf(";[1:a]volume=%s[bgm];%s[bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0", floatArg(volume), mixInput)
+			if fadeFilters != "" {
+				filter += "," + fadeFilters
+			}
+			filter += "[a]"
 		} else {
 			// No original audio to bound the mix: -shortest ends with the video.
-			filter += fmt.Sprintf(";[1:a]volume=%s[a]", floatArg(volume))
+			filter += fmt.Sprintf(";[1:a]volume=%s", floatArg(volume))
+			if fadeFilters != "" {
+				filter += "," + fadeFilters
+			}
+			filter += "[a]"
 			shortest = true
 		}
 		audioMap = "[a]"
+	} else if in.SourceHasAudio {
+		chain := srcFilters
+		if fadeFilters != "" {
+			if chain != "" {
+				chain += ","
+			}
+			chain += fadeFilters
+		}
+		if chain != "" {
+			filter += ";[0:a]" + chain + "[a]"
+			audioMap = "[a]"
+		}
 	}
 	// Loop each notice PNG so it always covers the clip; the overlay enable window
 	// and eof_action=pass bound it. Order matches the filtergraph input indices.
@@ -142,19 +186,112 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 // Plans without killfeed cues retain the original graph byte-for-byte. Clips
 // with cues overlay a synthetic kill notice per cue (when a pre-rendered PNG is
 // supplied) or a WYSIWYG frozen crop of the killfeed region as a fallback.
-func buildFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, noticePaths [][]string, bannerFontPath string, duration float64, noticeInputBase int) string {
+func buildFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, noticePaths [][]string, bannerFontPath string, textPaths []string, duration float64, noticeInputBase int) string {
 	if len(clip.KillfeedSeconds) == 0 {
-		return buildStandardFilterGraph(layout, plan, bannerFontPath, duration)
+		return buildStandardFilterGraph(layout, plan, clip, bannerFontPath, textPaths, duration)
 	}
-	return buildKillfeedFilterGraph(layout, plan, clip, noticePaths, bannerFontPath, duration, noticeInputBase)
+	return buildKillfeedFilterGraph(layout, plan, clip, noticePaths, bannerFontPath, textPaths, duration, noticeInputBase)
 }
 
-func buildStandardFilterGraph(layout LayoutVariant, plan EditPlan, bannerFontPath string, duration float64) string {
+// videoTail is the filter chain every graph applies after the layout and any
+// banner/killfeed overlays: text overlays and the speed change first (both in
+// source time up to setpts), then boundary fades in output time, then the
+// grade and the output format. An unedited clip keeps the pre-edit chain.
+func videoTail(plan EditPlan, clip ClipRange, fontPath string, textPaths []string) string {
 	tail := ""
+	if clip.Edit != nil {
+		for i, overlay := range clip.Edit.TextOverlays {
+			tail += textOverlayFilter(overlay, fontPath, textPaths[i]) + ","
+		}
+		if speed := clip.Edit.speed(); speed != 1 {
+			tail += fmt.Sprintf("setpts=PTS/%s,", floatArg(speed))
+		}
+		outputDuration := clip.OutputDurationSeconds()
+		if fadeIn := clip.Edit.FadeInSeconds; fadeIn > 0 {
+			tail += fmt.Sprintf("fade=t=in:st=0:d=%s,", floatArg(fadeIn))
+		}
+		if fadeOut := clip.Edit.FadeOutSeconds; fadeOut > 0 {
+			tail += fmt.Sprintf("fade=t=out:st=%s:d=%s,", floatArg(outputDuration-fadeOut), floatArg(fadeOut))
+		}
+	}
 	if plan.Effects.Grade {
 		tail += gradeFilter + ","
 	}
-	tail += fmt.Sprintf("fps=%d,format=yuv420p[v]", outputFPS)
+	return tail + fmt.Sprintf("fps=%d,format=yuv420p[v]", outputFPS)
+}
+
+// textOverlayFilter burns one centered text line. The text comes from a
+// materialized file read with expansion=none, so no user character can reach
+// FFmpeg's filtergraph or drawtext expansion syntax. The enable window is in
+// source-relative seconds because it runs before the speed setpts.
+func textOverlayFilter(overlay TextOverlay, fontPath, textPath string) string {
+	size := overlay.FontSize
+	if size == 0 {
+		size = defaultOverlayFontSize
+	}
+	filter := fmt.Sprintf(
+		"drawtext=fontfile='%s':textfile='%s':expansion=none:fontcolor=white:fontsize=%d:borderw=3:bordercolor=black:"+
+			"shadowcolor=black@0.35:shadowx=2:shadowy=2:x=(w-text_w)/2:y=h*%s-text_h/2",
+		ffmpegFilterPath(fontPath), ffmpegFilterPath(textPath), size, floatArg(overlay.PositionY),
+	)
+	switch {
+	case overlay.StartSeconds != nil && overlay.EndSeconds != nil:
+		filter += fmt.Sprintf(`:enable='between(t\,%s\,%s)'`, floatArg(*overlay.StartSeconds), floatArg(*overlay.EndSeconds))
+	case overlay.StartSeconds != nil:
+		filter += fmt.Sprintf(`:enable='gte(t\,%s)'`, floatArg(*overlay.StartSeconds))
+	case overlay.EndSeconds != nil:
+		filter += fmt.Sprintf(`:enable='lte(t\,%s)'`, floatArg(*overlay.EndSeconds))
+	}
+	return filter
+}
+
+// sourceAudioFilters is the chain applied to the clip's original audio: gain
+// first, then the tempo chain. Empty means the stream passes through.
+func sourceAudioFilters(edit *ClipEdit) string {
+	if edit == nil {
+		return ""
+	}
+	var parts []string
+	if edit.SourceVolume != nil {
+		parts = append(parts, "volume="+floatArg(*edit.SourceVolume))
+	}
+	if speed := edit.speed(); speed != 1 {
+		parts = append(parts, atempoChain(speed))
+	}
+	return strings.Join(parts, ",")
+}
+
+// atempoChain expresses a rate in [0.25, 3] as chained atempo filters, since a
+// single atempo instance only covers [0.5, 2].
+func atempoChain(speed float64) string {
+	switch {
+	case speed > 2:
+		return "atempo=2.000000,atempo=" + floatArg(speed/2)
+	case speed < 0.5:
+		return "atempo=0.500000,atempo=" + floatArg(speed/0.5)
+	default:
+		return "atempo=" + floatArg(speed)
+	}
+}
+
+// audioFadeFilters fades the final audio at the clip boundaries in output
+// (post-speed) time, mirroring the video fades in videoTail.
+func audioFadeFilters(edit *ClipEdit, outputDuration float64) string {
+	if edit == nil {
+		return ""
+	}
+	var parts []string
+	if fadeIn := edit.FadeInSeconds; fadeIn > 0 {
+		parts = append(parts, fmt.Sprintf("afade=t=in:st=0:d=%s", floatArg(fadeIn)))
+	}
+	if fadeOut := edit.FadeOutSeconds; fadeOut > 0 {
+		parts = append(parts, fmt.Sprintf("afade=t=out:st=%s:d=%s", floatArg(outputDuration-fadeOut), floatArg(fadeOut)))
+	}
+	return strings.Join(parts, ",")
+}
+
+func buildStandardFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, bannerFontPath string, textPaths []string, duration float64) string {
+	tail := videoTail(plan, clip, bannerFontPath, textPaths)
 
 	outputLabel := ""
 	if plan.StreamerBanner.Nick != "" {
@@ -194,12 +331,8 @@ func buildStandardFilterGraph(layout LayoutVariant, plan EditPlan, bannerFontPat
 // them as looped inputs (stacked top-first); a cue without paths falls back to a
 // WYSIWYG frozen crop of plan.KillfeedCrop scaled to killfeedFrozenWidth. Both
 // share the same right margin and cue-timed enable window.
-func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, noticePaths [][]string, bannerFontPath string, duration float64, noticeInputBase int) string {
-	tail := ""
-	if plan.Effects.Grade {
-		tail += gradeFilter + ","
-	}
-	tail += fmt.Sprintf("fps=%d,format=yuv420p[v]", outputFPS)
+func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, noticePaths [][]string, bannerFontPath string, textPaths []string, duration float64, noticeInputBase int) string {
+	tail := videoTail(plan, clip, bannerFontPath, textPaths)
 
 	baseY := 64
 	if !layout.FullFrame {

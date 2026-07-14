@@ -104,6 +104,33 @@ const KILLFEED_KILL_PROPERTY: JsonObject = {
   required: ['attacker_side', 'attacker_name', 'victim_side', 'victim_name', 'weapon'],
   type: 'object',
 };
+const TEXT_OVERLAY_PROPERTY: JsonObject = {
+  additionalProperties: false,
+  description: 'One burned-in text line. Times are relative to the clip start in source seconds; omitted bounds extend to the clip edges.',
+  properties: {
+    end_seconds: { exclusiveMinimum: 0, type: 'number' },
+    font_size: { description: 'Output pixels; omit for the default 64.', maximum: 120, minimum: 24, type: 'integer' },
+    position_y: { description: 'Normalized vertical center of the text line.', maximum: 0.975, minimum: 0.025, type: 'number' },
+    start_seconds: { minimum: 0, type: 'number' },
+    text: { maxLength: 120, minLength: 1, type: 'string' },
+  },
+  required: ['text', 'position_y'],
+  type: 'object',
+};
+// Shared between the edit plan's clips[].edit object and streams.edit_clip.
+const CLIP_EDIT_OPTION_PROPERTIES: JsonObject = {
+  fade_in_seconds: { description: 'Fade from black/silence at the clip start, in output (post-speed) seconds.', maximum: 5, minimum: 0, type: 'number' },
+  fade_out_seconds: { description: 'Fade to black/silence at the clip end, in output (post-speed) seconds.', maximum: 5, minimum: 0, type: 'number' },
+  source_volume: { description: 'Original-audio gain: 0 mutes, 1 keeps, up to 2 boosts. Music keeps its own volume.', maximum: 2, minimum: 0, type: 'number' },
+  speed: { description: 'Playback rate; 1 keeps real time.', maximum: 3, minimum: 0.25, type: 'number' },
+  text_overlays: { items: TEXT_OVERLAY_PROPERTY, maxItems: 4, type: 'array' },
+};
+const CLIP_EDIT_PROPERTY: JsonObject = {
+  additionalProperties: false,
+  description: 'Optional per-clip edit options: playback speed, original-audio volume, boundary fades, and burned-in text overlays. Omit for an untouched clip.',
+  properties: CLIP_EDIT_OPTION_PROPERTIES,
+  type: 'object',
+};
 const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
   additionalProperties: false,
   description: 'Complete stream edit plan. Search with stream_job_id to retrieve the current plan before replacing it.',
@@ -122,6 +149,7 @@ const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
       items: {
         additionalProperties: false,
         properties: {
+          edit: CLIP_EDIT_PROPERTY,
           end_seconds: { exclusiveMinimum: 0, type: 'number' },
           id: SAFE_TOKEN_PROPERTY,
           killfeed_kills: {
@@ -684,6 +712,27 @@ const operations: readonly OperationDefinition[] = [
     run: configureStreamCaptions,
     title: 'Configure stream subtitles',
   },
+  {
+    category: 'streams',
+    description: 'Set one clip\'s edit options — playback speed, original-audio volume (0 mutes), boundary fades, and burned-in text overlays — while preserving the rest of the current stream edit plan. Sending a default value (speed 1, source_volume 1, fades 0, empty text_overlays) resets that option.',
+    inputSchema: objectSchema({
+      clip_id: SAFE_TOKEN_PROPERTY,
+      stream_job_id: UUID_PROPERTY,
+      ...CLIP_EDIT_OPTION_PROPERTIES,
+    }, ['stream_job_id', 'clip_id']),
+    keywords: ['edit', 'edicion', 'speed', 'velocidad', 'slow motion', 'camara lenta', 'volume', 'volumen', 'mute', 'silenciar', 'fade', 'fundido', 'text', 'texto', 'overlay'],
+    name: 'streams.edit_clip',
+    preview: (input) => ({
+      edit: without(input, 'stream_job_id', 'clip_id'),
+      steps: [
+        { method: 'GET', path: streamPath(input, '/edit-plan'), purpose: 'preserve the current edit plan' },
+        { method: 'PUT', path: streamPath(input, '/edit-plan'), purpose: 'replace only this clip\'s edit options inside that plan' },
+      ],
+    }),
+    risk: 'write',
+    run: editStreamClip,
+    title: 'Edit stream clip options',
+  },
   mutationOperation({ category: 'streams', description: 'Start a costly stream clip render from the saved edit plan, including xAI/Grok subtitles when enabled.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'vertical', 'render', 'captions', 'subtitles', 'subtitulos', 'xai', 'grok'], name: 'streams.start_render', path: (input) => streamRenderPath(input), risk: 'costly', title: 'Start stream render' }),
   readOperation({ category: 'streams', description: 'Read stream render progress and real video entries.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'render', 'videos'], name: 'streams.get_render', path: (input) => streamRenderPath(input), title: 'Get stream render state' }),
   readOperation({
@@ -953,7 +1002,7 @@ export async function discoverDynamicInputs(client: OrchestratorClient, operatio
     if (variant !== undefined) fields.push(renderArtifactCandidates(client, jobID, variant, renderArtifactKind(operation, input), signal));
   }
   const streamJobID = optionalStringInput(input, 'stream_job_id');
-  if (streamJobID !== undefined && (operation.name === 'streams.update_edit_plan' || operation.name === 'streams.configure_captions')) {
+  if (streamJobID !== undefined && (operation.name === 'streams.update_edit_plan' || operation.name === 'streams.configure_captions' || operation.name === 'streams.edit_clip')) {
     fields.push(streamEditPlanCurrentValue(client, streamJobID, signal));
   }
   if (streamJobID !== undefined && operation.name === 'artifacts.get_stream_url' && input.kind === 'video') {
@@ -1041,6 +1090,7 @@ export function validateJsonSchema(schema: JsonObject, value: JsonValue, path: s
   if (expectedType === 'array') {
     if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
     if (typeof schema.minItems === 'number' && value.length < schema.minItems) throw new Error(`${path} has too few items`);
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) throw new Error(`${path} has too many items`);
     const items = schema.items;
     if (isJsonObject(items)) value.forEach((item, index) => validateJsonSchema(items, item, `${path}[${index}]`));
     return;
@@ -1092,6 +1142,52 @@ function validateRules(rules: JsonObject): void {
   if (typeof minRound === 'number' && typeof maxRound === 'number' && maxRound !== 0 && maxRound < minRound) {
     throw new Error('arguments.rules.max_round must be zero or greater than or equal to min_round');
   }
+}
+
+/** The streams.edit_clip fields merged into the clip's edit object. */
+const CLIP_EDIT_OPTION_KEYS = ['speed', 'source_volume', 'fade_in_seconds', 'fade_out_seconds', 'text_overlays'] as const;
+
+/**
+ * Drops default-valued fields so a fully reset edit disappears from the plan,
+ * keeping the stored plan identical to one that was never edited.
+ */
+function pruneClipEditObject(edit: JsonObject): JsonObject | undefined {
+  const next: JsonObject = {};
+  if (typeof edit.speed === 'number' && edit.speed !== 1) next.speed = edit.speed;
+  if (typeof edit.source_volume === 'number' && edit.source_volume !== 1) next.source_volume = edit.source_volume;
+  if (typeof edit.fade_in_seconds === 'number' && edit.fade_in_seconds !== 0) next.fade_in_seconds = edit.fade_in_seconds;
+  if (typeof edit.fade_out_seconds === 'number' && edit.fade_out_seconds !== 0) next.fade_out_seconds = edit.fade_out_seconds;
+  if (Array.isArray(edit.text_overlays) && edit.text_overlays.length > 0) next.text_overlays = edit.text_overlays;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+async function editStreamClip(client: OrchestratorClient, input: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
+  const editPlanPath = streamPath(input, '/edit-plan');
+  const current = await client.request({ path: editPlanPath, signal });
+  if (!isJsonObject(current)) throw new Error('stream edit plan response must be an object');
+  const clipID = stringInput(input, 'clip_id');
+  const clips = Array.isArray(current.clips) ? current.clips : [];
+  const clipIDs = clips.filter(isJsonObject).flatMap((clip) => (typeof clip.id === 'string' ? [clip.id] : []));
+  if (!clipIDs.includes(clipID)) {
+    throw new Error(`arguments.clip_id ${JSON.stringify(clipID)} is not one of the plan's clips: ${clipIDs.join(', ')}`);
+  }
+  const updatedClips = clips.map((clip): JsonValue => {
+    if (!isJsonObject(clip) || clip.id !== clipID) return clip;
+    const merged: JsonObject = isJsonObject(clip.edit) ? { ...clip.edit } : {};
+    for (const key of CLIP_EDIT_OPTION_KEYS) {
+      if (input[key] !== undefined) merged[key] = input[key];
+    }
+    const next: JsonObject = { ...clip };
+    const pruned = pruneClipEditObject(merged);
+    if (pruned === undefined) delete next.edit;
+    else next.edit = pruned;
+    return next;
+  });
+  const updated: JsonObject = { ...current, clips: updatedClips };
+  validateJsonSchema(STREAM_EDIT_PLAN_PROPERTY, updated, 'stream edit plan');
+  validateStreamEditPlan(updated);
+  await validateLiveStreamEditPlan(client, updated, signal);
+  return client.request({ body: updated, method: 'PUT', path: editPlanPath, signal });
 }
 
 async function configureStreamCaptions(client: OrchestratorClient, input: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
@@ -1164,6 +1260,40 @@ function validateStreamEditPlan(plan: JsonObject): void {
     if (typeof value.id === 'string') {
       if (seen.has(value.id)) throw new Error(`arguments.plan.clips contains duplicate id ${value.id}`);
       seen.add(value.id);
+    }
+    if (isJsonObject(value.edit)) validateClipEdit(value.edit, value, index);
+  }
+}
+
+/**
+ * Cross-field checks the JSON schema cannot express, mirroring
+ * streamclips.ClipEdit.validate: fades must fit the sped-up output duration
+ * and overlay windows must stay inside the clip.
+ */
+function validateClipEdit(edit: JsonObject, clip: JsonObject, index: number): void {
+  const duration = typeof clip.start_seconds === 'number' && typeof clip.end_seconds === 'number'
+    ? clip.end_seconds - clip.start_seconds
+    : undefined;
+  const speed = typeof edit.speed === 'number' ? edit.speed : 1;
+  const fadeIn = typeof edit.fade_in_seconds === 'number' ? edit.fade_in_seconds : 0;
+  const fadeOut = typeof edit.fade_out_seconds === 'number' ? edit.fade_out_seconds : 0;
+  if (duration !== undefined && speed > 0 && fadeIn + fadeOut > duration / speed) {
+    throw new Error(`arguments.plan.clips[${index}].edit fades must fit within the clip's output duration`);
+  }
+  if (!Array.isArray(edit.text_overlays)) return;
+  for (const [overlayIndex, overlay] of edit.text_overlays.entries()) {
+    if (!isJsonObject(overlay)) continue;
+    const field = `arguments.plan.clips[${index}].edit.text_overlays[${overlayIndex}]`;
+    const start = typeof overlay.start_seconds === 'number' ? overlay.start_seconds : undefined;
+    const end = typeof overlay.end_seconds === 'number' ? overlay.end_seconds : undefined;
+    if (duration !== undefined && start !== undefined && start >= duration) {
+      throw new Error(`${field}.start_seconds must be inside the clip`);
+    }
+    if (duration !== undefined && end !== undefined && end > duration) {
+      throw new Error(`${field}.end_seconds must be inside the clip`);
+    }
+    if (start !== undefined && end !== undefined && end <= start) {
+      throw new Error(`${field}.end_seconds must be greater than start_seconds`);
     }
   }
 }

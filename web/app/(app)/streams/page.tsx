@@ -24,8 +24,10 @@ import {
   SERVICE_UNAVAILABLE_CODE,
   type KillfeedKill,
   type NormalizedRect,
+  type StreamClipEdit,
   type StreamClipRange,
   type StreamEditPlan,
+  type StreamTextOverlay,
   type StreamJob,
   type StreamRenderState,
   type StreamVariant,
@@ -143,6 +145,15 @@ function formatStreamTimestamp(seconds: number): string {
  */
 function planFingerprint(plan: StreamEditPlan): string {
   const rect = (r?: NormalizedRect) => (r ? [r.x, r.y, r.width, r.height] : null);
+  const overlay = (o: StreamTextOverlay) => [o.text, o.position_y, o.start_seconds ?? null, o.end_seconds ?? null, o.font_size ?? 0];
+  // Defaults collapse an absent edit and an all-defaults edit to the same key.
+  const edit = (e?: StreamClipEdit) => [
+    e?.speed ?? 1,
+    e?.source_volume ?? 1,
+    e?.fade_in_seconds ?? 0,
+    e?.fade_out_seconds ?? 0,
+    (e?.text_overlays ?? []).map(overlay),
+  ];
   return JSON.stringify({
     variant: plan.variant,
     face: rect(plan.face_crop),
@@ -155,6 +166,7 @@ function planFingerprint(plan: StreamEditPlan): string {
       c.title ?? '',
       c.killfeed_seconds ?? [],
       c.killfeed_kills ?? [],
+      edit(c.edit),
     ]),
     streamerNick: plan.streamer_banner?.nick?.trim() ?? '',
     streamerPosition: plan.streamer_banner?.position_y ?? null,
@@ -1183,6 +1195,25 @@ function LayoutGlyph({ variant, selected }: { variant: StreamVariant; selected: 
   );
 }
 
+/** Playback rates the render's chained atempo filters reproduce faithfully. */
+const CLIP_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
+/** Mirrors streamclips: at most 4 burned-in text overlays per clip. */
+const MAX_TEXT_OVERLAYS = 4;
+
+/**
+ * Drops default-valued fields so an untouched edit keeps the plan (and the
+ * render fingerprint) identical to a plan without an `edit` object at all.
+ */
+function pruneClipEdit(edit: StreamClipEdit): StreamClipEdit | undefined {
+  const next: StreamClipEdit = {};
+  if (edit.speed !== undefined && edit.speed !== 1) next.speed = edit.speed;
+  if (edit.source_volume !== undefined && edit.source_volume !== 1) next.source_volume = edit.source_volume;
+  if (edit.fade_in_seconds) next.fade_in_seconds = edit.fade_in_seconds;
+  if (edit.fade_out_seconds) next.fade_out_seconds = edit.fade_out_seconds;
+  if (edit.text_overlays && edit.text_overlays.length > 0) next.text_overlays = edit.text_overlays;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 function ClipEditor({
   clips,
   onChange,
@@ -1196,6 +1227,8 @@ function ClipEditor({
     onChange(clips.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const removeClip = (id: string) => onChange(clips.filter((c) => c.id !== id));
   const addClip = () => onChange([...clips, { id: nextClipId(), start_seconds: 0, end_seconds: 20, title: '' }]);
+  const updateEdit = (id: string, patch: Partial<StreamClipEdit>) =>
+    onChange(clips.map((c) => (c.id === id ? { ...c, edit: pruneClipEdit({ ...c.edit, ...patch }) } : c)));
 
   return (
     <div className="flex flex-col gap-4">
@@ -1272,10 +1305,246 @@ function ClipEditor({
                 </Button>
               </div>
               {invalid ? <p className="text-xs text-destructive">El fin debe ser posterior al inicio.</p> : null}
+              <ClipEditControls
+                clip={clip}
+                disabled={disabled}
+                onEditChange={(patch) => updateEdit(clip.id, patch)}
+              />
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Per-clip edit options (speed, original-audio volume, fades, text overlays),
+ * mirroring streamclips.ClipEdit. All controls emit through `onEditChange`,
+ * which prunes defaults so untouched clips keep their original plan shape.
+ */
+function ClipEditControls({
+  clip,
+  disabled,
+  onEditChange,
+}: {
+  clip: StreamClipRange;
+  disabled: boolean;
+  onEditChange: (patch: Partial<StreamClipEdit>) => void;
+}) {
+  const edit = clip.edit ?? {};
+  const speed = edit.speed ?? 1;
+  const sourceVolume = edit.source_volume ?? 1;
+  const overlays = edit.text_overlays ?? [];
+  const clipDuration = Math.max(0, clip.end_seconds - clip.start_seconds);
+
+  const updateOverlay = (index: number, patch: Partial<StreamTextOverlay>) =>
+    onEditChange({ text_overlays: overlays.map((o, i) => (i === index ? { ...o, ...patch } : o)) });
+  const removeOverlay = (index: number) =>
+    onEditChange({ text_overlays: overlays.filter((_, i) => i !== index) });
+  const addOverlay = () =>
+    onEditChange({ text_overlays: [...overlays, { text: '', position_y: 0.5 }] });
+
+  /** Empty input clears an optional numeric field; anything else sets it. */
+  const optionalSeconds = (value: string): number | undefined => (value === '' ? undefined : Number(value));
+
+  return (
+    <div className="mt-1 flex flex-col gap-3 border-t border-border/60 pt-3">
+      <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.22em] text-muted-foreground">
+        EDICIÓN
+      </span>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${clip.id}-speed`} className="text-xs text-muted-foreground">
+            Velocidad
+          </Label>
+          <Select
+            value={String(speed)}
+            disabled={disabled}
+            onValueChange={(value) => onEditChange({ speed: Number(value) })}
+          >
+            <SelectTrigger id={`${clip.id}-speed`} aria-label="Velocidad de reproducción" className="w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CLIP_SPEEDS.map((value) => (
+                <SelectItem key={value} value={String(value)}>
+                  {value}x
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${clip.id}-fade-in`} className="text-xs text-muted-foreground">
+            Fundido entrada (s)
+          </Label>
+          <Input
+            id={`${clip.id}-fade-in`}
+            type="number"
+            min={0}
+            max={5}
+            step="0.1"
+            value={edit.fade_in_seconds ?? 0}
+            disabled={disabled}
+            onChange={(e) => onEditChange({ fade_in_seconds: Number(e.target.value) })}
+            className="w-24"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${clip.id}-fade-out`} className="text-xs text-muted-foreground">
+            Fundido salida (s)
+          </Label>
+          <Input
+            id={`${clip.id}-fade-out`}
+            type="number"
+            min={0}
+            max={5}
+            step="0.1"
+            value={edit.fade_out_seconds ?? 0}
+            disabled={disabled}
+            onChange={(e) => onEditChange({ fade_out_seconds: Number(e.target.value) })}
+            className="w-24"
+          />
+        </div>
+        <div className="flex min-w-44 flex-1 flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor={`${clip.id}-source-volume`} className="text-xs text-muted-foreground">
+              Volumen original
+            </Label>
+            <span className="font-[family-name:var(--font-mono)] text-[11px] text-stream">
+              {sourceVolume === 0 ? 'Silencio' : `${Math.round(sourceVolume * 100)}%`}
+            </span>
+          </div>
+          <input
+            id={`${clip.id}-source-volume`}
+            type="range"
+            min={0}
+            max={2}
+            step="0.05"
+            value={sourceVolume}
+            disabled={disabled}
+            aria-label="Volumen del audio original"
+            aria-valuetext={sourceVolume === 0 ? 'Silencio' : `${Math.round(sourceVolume * 100)}%`}
+            onChange={(e) => onEditChange({ source_volume: Number(e.target.value) })}
+            className="min-h-10 w-full accent-[#9146ff] disabled:opacity-50"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Textos en pantalla</span>
+        <button
+          type="button"
+          onClick={addOverlay}
+          disabled={disabled || overlays.length >= MAX_TEXT_OVERLAYS}
+          className="inline-flex min-h-10 items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.14em] text-stream transition-opacity hover:opacity-80 disabled:pointer-events-none disabled:opacity-40"
+        >
+          <Plus className="size-3.5" />
+          AÑADIR TEXTO
+        </button>
+      </div>
+      {overlays.map((overlay, index) => (
+        <div key={index} className="flex flex-col gap-2 border border-border/60 bg-background/40 p-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex min-w-40 flex-1 flex-col gap-1">
+              <Label htmlFor={`${clip.id}-text-${index}`} className="text-xs text-muted-foreground">
+                Texto
+              </Label>
+              <Input
+                id={`${clip.id}-text-${index}`}
+                value={overlay.text}
+                maxLength={120}
+                disabled={disabled}
+                aria-invalid={overlay.text.trim() === ''}
+                onChange={(e) => updateOverlay(index, { text: e.target.value })}
+                placeholder="NICE SHOT"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`${clip.id}-text-${index}-start`} className="text-xs text-muted-foreground">
+                Desde (s)
+              </Label>
+              <Input
+                id={`${clip.id}-text-${index}-start`}
+                type="number"
+                min={0}
+                max={clipDuration}
+                step="0.1"
+                value={overlay.start_seconds ?? ''}
+                disabled={disabled}
+                onChange={(e) => updateOverlay(index, { start_seconds: optionalSeconds(e.target.value) })}
+                placeholder="0"
+                className="w-20"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`${clip.id}-text-${index}-end`} className="text-xs text-muted-foreground">
+                Hasta (s)
+              </Label>
+              <Input
+                id={`${clip.id}-text-${index}-end`}
+                type="number"
+                min={0}
+                max={clipDuration}
+                step="0.1"
+                value={overlay.end_seconds ?? ''}
+                disabled={disabled}
+                onChange={(e) => updateOverlay(index, { end_seconds: optionalSeconds(e.target.value) })}
+                placeholder={clipDuration.toFixed(1)}
+                className="w-20"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`${clip.id}-text-${index}-size`} className="text-xs text-muted-foreground">
+                Tamaño
+              </Label>
+              <Input
+                id={`${clip.id}-text-${index}-size`}
+                type="number"
+                min={24}
+                max={120}
+                step="1"
+                value={overlay.font_size ?? ''}
+                disabled={disabled}
+                onChange={(e) => updateOverlay(index, { font_size: optionalSeconds(e.target.value) })}
+                placeholder="64"
+                className="w-20"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={disabled}
+              onClick={() => removeOverlay(index)}
+              aria-label="Eliminar texto"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+          <div className="flex items-center gap-3">
+            <Label htmlFor={`${clip.id}-text-${index}-position`} className="shrink-0 text-xs text-muted-foreground">
+              Posición vertical
+            </Label>
+            <input
+              id={`${clip.id}-text-${index}-position`}
+              type="range"
+              min={0.025}
+              max={0.975}
+              step="0.005"
+              value={overlay.position_y}
+              disabled={disabled}
+              aria-valuetext={`${Math.round(overlay.position_y * 100)}% desde arriba`}
+              onChange={(e) => updateOverlay(index, { position_y: Number(e.target.value) })}
+              className="min-h-10 w-full accent-[#9146ff] disabled:opacity-50"
+            />
+            <span className="w-10 shrink-0 text-right font-[family-name:var(--font-mono)] text-[11px] text-stream">
+              {Math.round(overlay.position_y * 100)}%
+            </span>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

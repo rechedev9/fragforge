@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STREAMER_BANNER_MAX_POSITION,
+  activeTextOverlays,
   STREAMER_BANNER_MIN_POSITION,
   calculateCropCoverGeometry,
   clampStreamerBannerPosition,
@@ -306,4 +307,37 @@ test('undefined streamer banner position resets to the current layout default', 
   assert.equal(resolveStreamerBannerPosition('streamer-vertical-stack-40-60', undefined), 0.374);
   assert.equal(resolveStreamerBannerPosition('streamer-vertical-stack', undefined), 520 / 1920);
   assert.equal(resolveStreamerBannerPosition('streamer-fullframe-nocam', undefined), 0.2);
+});
+
+test('active text overlays follow the owning clip and their source-time window', () => {
+  const clips = [
+    {
+      id: 'clip-1',
+      start_seconds: 10,
+      end_seconds: 20,
+      edit: {
+        text_overlays: [
+          { text: 'always on', position_y: 0.2 },
+          { text: 'windowed', position_y: 0.6, start_seconds: 2, end_seconds: 4 },
+        ],
+      },
+    },
+    { id: 'clip-2', start_seconds: 30, end_seconds: 40 },
+  ];
+
+  assert.deepEqual(
+    activeTextOverlays(clips, 11).map((o) => o.text),
+    ['always on'],
+  );
+  assert.deepEqual(
+    activeTextOverlays(clips, 13).map((o) => o.text),
+    ['always on', 'windowed'],
+  );
+  assert.deepEqual(
+    activeTextOverlays(clips, 14.5).map((o) => o.text),
+    ['always on'],
+  );
+  assert.deepEqual(activeTextOverlays(clips, 25), []);
+  assert.deepEqual(activeTextOverlays(clips, 35), []);
+  assert.deepEqual(activeTextOverlays(clips, Number.NaN), []);
 });

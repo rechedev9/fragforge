@@ -954,10 +954,10 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (configure an xAI key in FragForge Studio Settings or set XAI_API_KEY, set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, then restart)")
 	}
 	bannerFontPath := ""
-	if plan.StreamerBanner.Nick != "" {
+	if plan.StreamerBanner.Nick != "" || plan.HasTextOverlays() {
 		bannerFontPath = streamclips.FindBannerFont()
 		if bannerFontPath == "" {
-			return fmt.Errorf("render streamer banner: embedded font unavailable and no supported fallback font found")
+			return fmt.Errorf("render banner or text overlays: embedded font unavailable and no supported fallback font found")
 		}
 	}
 
@@ -999,6 +999,10 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		if err != nil {
 			return err
 		}
+		textPaths, err := writeClipOverlayTexts(workDir, clip)
+		if err != nil {
+			return err
+		}
 		outPath := filepath.Join(outDir, clip.ID+".mp4")
 		args, err := streamclips.BuildFFmpegArgs(streamclips.FFmpegInputs{
 			SourcePath:          sourcePath,
@@ -1007,6 +1011,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 			BannerFontPath:      bannerFontPath,
 			SourceHasAudio:      j.Probe.AudioCodec != "",
 			KillfeedNoticePaths: noticePaths,
+			TextOverlayPaths:    textPaths,
 		}, plan, clip)
 		if err != nil {
 			return err
@@ -1092,6 +1097,28 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 // frozen crop of the killfeed region. Names are deterministic and files are
 // overwritten, so a redriven task stays idempotent. It returns nil when the
 // clip carries no kills at all.
+// writeClipOverlayTexts materializes one text file per overlay so drawtext can
+// read the user's text verbatim (expansion=none) instead of embedding it in
+// the filtergraph, where escaping arbitrary characters is unreliable.
+func writeClipOverlayTexts(workDir string, clip streamclips.ClipRange) ([]string, error) {
+	if clip.Edit == nil || len(clip.Edit.TextOverlays) == 0 {
+		return nil, nil
+	}
+	dir := filepath.Join(workDir, "overlay-text", clip.ID)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, err
+	}
+	paths := make([]string, len(clip.Edit.TextOverlays))
+	for i, overlay := range clip.Edit.TextOverlays {
+		textPath := filepath.Join(dir, fmt.Sprintf("overlay%d.txt", i))
+		if err := os.WriteFile(textPath, []byte(overlay.Text), 0o600); err != nil {
+			return nil, fmt.Errorf("write text overlay for clip %s overlay %d: %w", clip.ID, i, err)
+		}
+		paths[i] = textPath
+	}
+	return paths, nil
+}
+
 func renderClipKillfeedNotices(workDir string, clip streamclips.ClipRange) ([][]string, error) {
 	if len(clip.KillfeedKills) == 0 {
 		return nil, nil

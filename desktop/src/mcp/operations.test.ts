@@ -691,3 +691,164 @@ test('streams.configure_captions preserves a valid disabled face crop for full-f
     ['PUT', '/api/stream-jobs/stream-123/edit-plan'],
   ]);
 });
+
+function planWithClipEdit(edit: JsonValue): JsonObject {
+  return {
+    clips: [{ edit, end_seconds: 10, id: 'clip-1', start_seconds: 0 }],
+    face_crop: { height: 0.3, width: 0.25, x: 0, y: 0 },
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    variant: 'streamer-vertical-stack-40-60',
+  };
+}
+
+test('stream edit plan accepts and validates per-clip edit options', () => {
+  const editPlanOperation = operation('streams.update_edit_plan');
+  validateOperationInput(editPlanOperation, {
+    plan: planWithClipEdit({
+      fade_in_seconds: 0.5,
+      fade_out_seconds: 1,
+      source_volume: 0,
+      speed: 2,
+      text_overlays: [{ end_seconds: 3, font_size: 72, position_y: 0.3, start_seconds: 1, text: 'NICE SHOT' }],
+    }),
+    stream_job_id: STREAM_JOB_ID,
+  });
+
+  assert.throws(
+    () => validateOperationInput(editPlanOperation, { plan: planWithClipEdit({ speed: 5 }), stream_job_id: STREAM_JOB_ID }),
+    /speed/,
+  );
+  assert.throws(
+    () => validateOperationInput(editPlanOperation, {
+      plan: planWithClipEdit({ text_overlays: [{ end_seconds: 1, position_y: 0.5, start_seconds: 3, text: 'hi' }] }),
+      stream_job_id: STREAM_JOB_ID,
+    }),
+    /text_overlays\[0\].end_seconds must be greater than start_seconds/,
+  );
+  assert.throws(
+    () => validateOperationInput(editPlanOperation, {
+      plan: planWithClipEdit({ text_overlays: [{ position_y: 0.5, start_seconds: 12, text: 'hi' }] }),
+      stream_job_id: STREAM_JOB_ID,
+    }),
+    /text_overlays\[0\].start_seconds must be inside the clip/,
+  );
+  assert.throws(
+    () => validateOperationInput(editPlanOperation, {
+      // 10s source at 2.5x plays back in 4s; 4.5s of fades cannot fit.
+      plan: planWithClipEdit({ fade_in_seconds: 2.5, fade_out_seconds: 2, speed: 2.5 }),
+      stream_job_id: STREAM_JOB_ID,
+    }),
+    /fades must fit within the clip's output duration/,
+  );
+  assert.throws(
+    () => validateOperationInput(editPlanOperation, {
+      plan: planWithClipEdit({
+        text_overlays: [
+          { position_y: 0.1, text: '1' },
+          { position_y: 0.2, text: '2' },
+          { position_y: 0.3, text: '3' },
+          { position_y: 0.4, text: '4' },
+          { position_y: 0.5, text: '5' },
+        ],
+      }),
+      stream_job_id: STREAM_JOB_ID,
+    }),
+    /text_overlays has too many items/,
+  );
+});
+
+test('streams.edit_clip merges the edit into the saved plan and preserves everything else', async () => {
+  const currentPlan: JsonObject = {
+    captions: { enabled: true, language: 'es' },
+    clips: [
+      { end_seconds: 8, id: 'clip-1', start_seconds: 2 },
+      { edit: { speed: 0.5 }, end_seconds: 30, id: 'clip-2', start_seconds: 20 },
+    ],
+    face_crop: { height: 0.3, width: 0.25, x: 0, y: 0 },
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    schema_version: '1.0',
+    variant: 'streamer-vertical-stack-40-60',
+  };
+  const double = clientDouble((request, index) => {
+    if (index === 0) return currentPlan;
+    if (index === 1) return { variants: [{ full_frame: false, name: 'streamer-vertical-stack-40-60' }] };
+    if (index === 2) return request.body ?? null;
+    throw new Error('unexpected request');
+  });
+
+  const result = objectResult(await operation('streams.edit_clip').run(double.client, {
+    clip_id: 'clip-2',
+    source_volume: 0.5,
+    speed: 2,
+    stream_job_id: 'stream-123',
+    text_overlays: [{ position_y: 0.3, text: 'NICE' }],
+  }));
+
+  const clips = result.clips;
+  if (!Array.isArray(clips)) throw new Error('expected clips array');
+  assert.deepEqual(clips[0], { end_seconds: 8, id: 'clip-1', start_seconds: 2 });
+  assert.deepEqual(clips[1], {
+    edit: { source_volume: 0.5, speed: 2, text_overlays: [{ position_y: 0.3, text: 'NICE' }] },
+    end_seconds: 30,
+    id: 'clip-2',
+    start_seconds: 20,
+  });
+  assert.deepEqual(result.captions, currentPlan.captions);
+  assert.deepEqual(double.state.requests.map((request) => [request.method ?? 'GET', request.path]), [
+    ['GET', '/api/stream-jobs/stream-123/edit-plan'],
+    ['GET', '/api/stream-variants'],
+    ['PUT', '/api/stream-jobs/stream-123/edit-plan'],
+  ]);
+});
+
+test('streams.edit_clip resetting every option to its default drops the edit object', async () => {
+  const currentPlan: JsonObject = {
+    clips: [{ edit: { speed: 2 }, end_seconds: 10, id: 'clip-1', start_seconds: 0 }],
+    face_crop: { height: 0.3, width: 0.25, x: 0, y: 0 },
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    schema_version: '1.0',
+    variant: 'streamer-vertical-stack-40-60',
+  };
+  const double = clientDouble((request, index) => {
+    if (index === 0) return currentPlan;
+    if (index === 1) return { variants: [{ full_frame: false, name: 'streamer-vertical-stack-40-60' }] };
+    if (index === 2) return request.body ?? null;
+    throw new Error('unexpected request');
+  });
+
+  const result = objectResult(await operation('streams.edit_clip').run(double.client, {
+    clip_id: 'clip-1',
+    speed: 1,
+    stream_job_id: 'stream-123',
+  }));
+
+  const clips = result.clips;
+  if (!Array.isArray(clips)) throw new Error('expected clips array');
+  assert.deepEqual(clips[0], { end_seconds: 10, id: 'clip-1', start_seconds: 0 });
+});
+
+test('streams.edit_clip rejects an unknown clip id and lists the valid ones', async () => {
+  const currentPlan: JsonObject = {
+    clips: [
+      { end_seconds: 8, id: 'clip-1', start_seconds: 2 },
+      { end_seconds: 30, id: 'clip-2', start_seconds: 20 },
+    ],
+    face_crop: { height: 0.3, width: 0.25, x: 0, y: 0 },
+    gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
+    schema_version: '1.0',
+    variant: 'streamer-vertical-stack-40-60',
+  };
+  const double = clientDouble((_request, index) => {
+    if (index === 0) return currentPlan;
+    throw new Error('unexpected request');
+  });
+
+  await assert.rejects(
+    operation('streams.edit_clip').run(double.client, {
+      clip_id: 'clip-9',
+      speed: 2,
+      stream_job_id: 'stream-123',
+    }),
+    /arguments\.clip_id "clip-9" is not one of the plan's clips: clip-1, clip-2/,
+  );
+});
