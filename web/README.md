@@ -46,8 +46,8 @@ For frontend-only work, start a local orchestrator separately and then run:
 
 ```powershell
 cd web
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 Open `http://localhost:3000`. `ORCHESTRATOR_URL` is a server-side setting and
@@ -56,10 +56,10 @@ defaults to `http://127.0.0.1:8080`.
 Verification commands:
 
 ```powershell
-npm run typecheck
-npm run lint
-npm run test:unit
-npm run build
+pnpm run typecheck
+pnpm run lint
+pnpm run test:unit
+pnpm run build
 ```
 
 ## Desktop packaging

@@ -120,7 +120,7 @@ and start FragForge Studio before opening a new Codex or Claude Code session.
 Launch the client from the repository root (for example,
 `codex --cd C:\Users\reche\Documents\zackvideo`), not from `desktop/`: the
 checked-in `cwd = "."` and TypeScript entry paths are intentionally root-relative.
-From `desktop/`, the same server can be run directly with `npm run mcp`.
+From `desktop/`, the same server can be run directly with `pnpm run mcp`.
 Claude Code shows a newly discovered project MCP as pending until the user
 approves it once; this is expected trust behavior for `.mcp.json`.
 
@@ -131,7 +131,7 @@ override this without editing config:
 ```powershell
 $env:FRAGFORGE_ORCHESTRATOR_URL = "http://127.0.0.1:8080"
 $env:FRAGFORGE_MCP_TIMEOUT_MS = "30000"
-npm run mcp
+pnpm run mcp
 ```
 
 For a token-protected orchestrator, pass the token only through
@@ -209,7 +209,7 @@ failure:
 
 ```powershell
 cd desktop
-npm run eval:mcp:gate
+pnpm run eval:mcp:gate
 ```
 
 Every run writes timestamped JSON and Markdown plus `latest.json` and
@@ -217,26 +217,26 @@ Every run writes timestamped JSON and Markdown plus `latest.json` and
 root cause, rerun the gate, and require 100/100 on fresh runs. The gate always
 rebuilds `bin/zv-orchestrator.exe`, so a stale local binary cannot make a source
 change appear green. This complements, rather than replaces,
-`npm run test:mcp:e2e` and the packaged-launcher test.
+`pnpm run test:mcp:e2e` and the packaged-launcher test.
 
 ## Build the installer (on Windows)
 
-Prerequisites: Go 1.26+, Node.js + npm, and the web deps installed.
+Prerequisites: Go 1.26+, Node.js + pnpm, and the web deps installed.
 
 ```powershell
 # 1. From the repo root: build the Go binaries.
 .\scripts\build.ps1
 
 # 2. Install web deps (the assemble step runs the Next.js production build).
-cd web; npm install; cd ..
+cd web; pnpm install; cd ..
 
 # 3. Build the desktop app.
 cd desktop
-npm install
-npm run dist
+pnpm install
+pnpm run dist
 ```
 
-`npm run dist` runs `scripts/assemble.mjs` (builds the web in local mode and
+`pnpm run dist` runs `scripts/assemble.mjs` (builds the web in local mode and
 stages `zv-orchestrator.exe`, `zv-editor.exe`, `zv-recorder.exe`, and the
 standalone server into `build-resources/`), then `electron-builder` produces the
 installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
@@ -244,9 +244,9 @@ where `<version>` is the `version` field in `desktop/package.json`). The app
 then runs a mandatory stdio handshake against the real
 `dist-installer/win-unpacked/fragforge-mcp.cmd` and its packaged `app.asar`;
 the distribution command fails if either artifact is absent or unusable. Run
-that gate separately after packaging with `npm run test:mcp:packaged`. Run all
-MCP E2E tests with a mandatory real Go orchestrator using `npm run test:mcp:e2e`.
-Run the scored real-process feedback gate with `npm run eval:mcp:gate`.
+that gate separately after packaging with `pnpm run test:mcp:packaged`. Run all
+MCP E2E tests with a mandatory real Go orchestrator using `pnpm run test:mcp:e2e`.
+Run the scored real-process feedback gate with `pnpm run eval:mcp:gate`.
 The app icon lives at `build/icon.ico`, which electron-builder picks up
 automatically;
 `assemble.mjs` fails fast if it's missing. `zv-orchestrator.exe`,
@@ -261,18 +261,18 @@ without placing it in command history and use the separate build target:
 ```powershell
 $secureKey = Read-Host "xAI team API key" -AsSecureString
 $env:XAI_API_KEY = (New-Object System.Net.NetworkCredential("", $secureKey)).Password
-npm run dist:team
+pnpm run dist:team
 Remove-Item Env:XAI_API_KEY
 ```
 
-`npm run dist:team` refuses to run when the key is missing or malformed. It
+`pnpm run dist:team` refuses to run when the key is missing or malformed. It
 stores the credential in `resources/team/xai-api-key` inside the installed app
 only as the lowest-priority configured fallback: an inherited environment key
 or a per-user key saved from `/settings` wins. The ignored `build-resources/`
 and `dist-installer/` directories are its only local staging locations. This is
 convenience, not secret protection: anyone who receives the installer can
 extract and use the shared key, so distribute that edition only to people
-authorized to consume the team's xAI quota. Running the ordinary `npm run dist`
+authorized to consume the team's xAI quota. Running the ordinary `pnpm run dist`
 afterward replaces the staged key with an empty resource and produces the
 standard credential-free installer.
 
@@ -285,13 +285,13 @@ are intentionally out of scope for v2.
 ```powershell
 # From the repo root, once: build the Go binaries and the standalone bundle.
 .\scripts\build.ps1
-cd desktop; npm install
-npm run assemble        # builds the web + stages build-resources/
+cd desktop; pnpm install
+pnpm run assemble        # builds the web + stages build-resources/
 
 # In dev, src/main.ts resolves every bundled resource (zv-orchestrator.exe,
 # zv-editor.exe, zv-recorder.exe, the web server) from .\build-resources, the
-# same layout `npm run assemble` stages for packaging. Launch the Electron shell:
-npm start
+# same layout `pnpm run assemble` stages for packaging. Launch the Electron shell:
+pnpm start
 ```
 
 ## How it works

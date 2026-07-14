@@ -38,7 +38,7 @@ try {
 const sanitizedEnvironment = environmentWithoutXAIAPIKey();
 let failed = false;
 try {
-  execSync('npm run build', { cwd: desktop, env: sanitizedEnvironment, stdio: 'inherit' });
+  execSync('pnpm run build', { cwd: desktop, env: sanitizedEnvironment, stdio: 'inherit' });
   execSync(teamBuild
     ? 'node scripts/assemble.mjs --team-xai-key'
     : 'node scripts/assemble.mjs', {
@@ -51,7 +51,7 @@ try {
     env: sanitizedEnvironment,
     stdio: 'inherit',
   });
-  execSync('npm run test:mcp:packaged', {
+  execSync('pnpm run test:mcp:packaged', {
     cwd: desktop,
     env: sanitizedEnvironment,
     stdio: 'inherit',
