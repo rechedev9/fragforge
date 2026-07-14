@@ -416,6 +416,101 @@ func TestXAITranscriber_CompleteFirstResponseUsesOneRequest(t *testing.T) {
 	}
 }
 
+func TestXAITranscriber_RetriesImplausibleWordDurations(t *testing.T) {
+	// Reproduces a real render: xAI's first attempt returns two words
+	// stretched across most of a 15s CS2 clip (span ratio 0.787, above the
+	// 0.5 partial threshold, so the span check alone accepts it) instead of
+	// the many short words the source audio's speech actually contains.
+	garbled := `{
+  "duration": 15,
+  "language": "Spanish",
+  "words": [
+    {"text":"Hola","start":0,"end":3.66},
+    {"text":"Martínez","start":3.66,"end":11.8}
+  ]
+}`
+	clean := `{
+  "duration": 15,
+  "language": "Spanish",
+  "words": [
+    {"text":"Vamos,","start":0.1,"end":0.4},
+    {"text":"vamos,","start":0.4,"end":0.7},
+    {"text":"vamos!","start":0.7,"end":1.1},
+    {"text":"Que","start":8.2,"end":8.4},
+    {"text":"golazo.","start":8.4,"end":8.9}
+  ]
+}`
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			_, _ = w.Write([]byte(garbled))
+			return
+		}
+		_, _ = w.Write([]byte(clean))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "gameplay.wav")
+	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cues, err := (XAITranscriber{APIKey: "secret-key", BaseURL: server.URL}).Transcribe(context.Background(), mediaPath, dir)
+	if err != nil {
+		t.Fatalf("Transcribe returned error: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if got, want := len(cues), 5; got != want {
+		t.Fatalf("cues = %d, want %d: %+v", got, want, cues)
+	}
+	if got, want := cues[0].Word, "Vamos,"; got != want {
+		t.Fatalf("first cue = %q, want %q", got, want)
+	}
+}
+
+func TestXAITranscriptHasImplausibleWordDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		cues []WordCue
+		want bool
+	}{
+		{
+			name: "typical spoken words",
+			cues: []WordCue{
+				{Word: "gg", StartSeconds: 0, EndSeconds: 0.4},
+				{Word: "wp", StartSeconds: 0.4, EndSeconds: 0.9},
+			},
+			want: false,
+		},
+		{
+			name: "drawn out but plausible shout",
+			cues: []WordCue{{Word: "noooo", StartSeconds: 0, EndSeconds: 2.4}},
+			want: false,
+		},
+		{
+			name: "implausibly long single word",
+			cues: []WordCue{{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8}},
+			want: true,
+		},
+		{
+			name: "no cues",
+			cues: nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := xaiTranscriptHasImplausibleWordDuration(tt.cues); got != tt.want {
+				t.Fatalf("xaiTranscriptHasImplausibleWordDuration(%+v) = %v, want %v", tt.cues, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWaitForXAIRetryHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
