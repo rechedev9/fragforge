@@ -5,10 +5,37 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
+func TestRunFFmpegWithOptionalLogRecordsStartFailure(t *testing.T) {
+	t.Parallel()
+	logPath := filepath.Join(t.TempDir(), "logs", "render.log")
+	missingFFmpeg := filepath.Join(t.TempDir(), "missing-ffmpeg")
+
+	err := runFFmpegWithOptionalLog(
+		context.Background(),
+		[]string{missingFFmpeg, "-version"},
+		"render short",
+		logPath,
+	)
+	if err == nil {
+		t.Fatal("runFFmpegWithOptionalLog error = nil, want start failure")
+	}
+	content, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read render log: %v", readErr)
+	}
+	if got := strings.TrimSpace(string(content)); got == "" {
+		t.Fatal("render log is empty, want process start error")
+	} else if !strings.Contains(got, "ffmpeg render short") {
+		t.Fatalf("render log = %q, want labeled process error", got)
+	}
+}
+
 func TestNormalizeRenderJobs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		jobs int
@@ -28,6 +55,7 @@ func TestNormalizeRenderJobs(t *testing.T) {
 }
 
 func TestRunRendersShortsConcurrently(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	ffmpegPath := fakeFFmpeg(t, dir)
@@ -77,6 +105,7 @@ func TestRunRendersShortsConcurrently(t *testing.T) {
 }
 
 func TestRunParallelFailingShortReturnsError(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -97,6 +126,7 @@ func TestRunParallelFailingShortReturnsError(t *testing.T) {
 }
 
 func TestRunRejectsNegativeRenderJobs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 

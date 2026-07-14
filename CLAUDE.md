@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `AGENTS.md` is a tracked symbolic link to this file, so both agents always read identical instructions.
 Edit `CLAUDE.md` only; never replace the `AGENTS.md` symlink with a regular file.
-The `.githooks/pre-commit` hook rejects commits when the symlink is missing or points anywhere other than `CLAUDE.md`.
+The `.githooks/pre-commit` hook rejects a broken `AGENTS.md` symlink and, on `main`, runs change-aware Go/TypeScript/CI gates before a commit becomes pushable.
 
 ## Project
 
@@ -123,8 +123,9 @@ scripts/go-gate.sh                          # main gate: fmt, vet, build, tests
 scripts/go-gate.sh --no-format              # gate without formatting unrelated dirty files
 scripts/go-gate.sh --race                   # race-sensitive changes
 scripts/go-gate.sh --security               # security/dependency-sensitive changes
-scripts/go-gate.sh --race --security --build  # full gate for risky PRs
+scripts/go-gate.sh --race --security --build  # full gate for risky changes
 scripts/go-format-changed.sh                # format all changed Go files (or pass explicit paths)
+bash scripts/ci-check.sh                    # validate GitHub Actions with pinned actionlint
 ```
 
 Orchestrator (HTTP API + workers) runs fully in-process with `ZV_DATABASE_URL=memory`: it uses an in-memory job repository and an inline queue, no external services needed:
@@ -229,6 +230,11 @@ Testing:
 TypeScript style for `web/` lives in `web/CLAUDE.md`.
 
 ## Operational rules
+
+Git delivery:
+
+- Work directly on `main`. Do not create feature branches or open pull requests.
+- Direct-to-`main` is a delivery preference, not permission to commit or push; those actions still require an explicit user request.
 
 Codex agent limit:
 

@@ -1,14 +1,18 @@
 name: CI
 
+permissions:
+  contents: read
+
+env:
+  CI: true
+  PNPM_VERSION: 11.9.0
+
 on:
   push:
-  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * 0'
   workflow_dispatch:
-    inputs:
-      run_windows_gate:
-        description: Also run the windows-latest Go gate on this ref
-        type: boolean
-        default: true
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -18,8 +22,45 @@ jobs:
   repo-integrity:
     name: Repo integrity
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      installer_changed: ${{ steps.installer-changes.outputs.changed }}
+      go_dependencies_changed: ${{ steps.installer-changes.outputs.go_dependencies_changed }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect installer-relevant changes
+        id: installer-changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "push" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "go_dependencies_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "go_dependencies_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$BEFORE_SHA" "$HEAD_SHA" -- \
+            .github/workflows/ci.yml desktop web scripts/build.ps1 \
+            cmd/zv-orchestrator cmd/zv-editor cmd/zv-recorder internal \
+            effects overlays data/music/catalog.json go.mod go.sum; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          if git diff --quiet "$BEFORE_SHA" "$HEAD_SHA" -- go.mod go.sum; then
+            echo "go_dependencies_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go_dependencies_changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: AGENTS.md must be a symlink to CLAUDE.md
         run: |
@@ -38,9 +79,18 @@ jobs:
             exit 1
           fi
 
+      - name: Shell script syntax
+        shell: bash
+        run: |
+          while IFS= read -r script; do
+            bash -n "$script"
+          done < <(git ls-files '*.sh' '.githooks/*')
+
   go:
-    name: Go gate (ubuntu, every push)
+    name: Go gate (ubuntu)
+    needs: repo-integrity
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -49,34 +99,40 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Cache staticcheck/govulncheck binaries
+      - name: Cache Go quality tools
         uses: actions/cache@v4
         with:
           path: ~/go/bin
           key: ${{ runner.os }}-go-tools-staticcheck2025.1.1-govulncheck1.4.0
 
-      - name: Install staticcheck and govulncheck
+      - name: Install staticcheck
         shell: bash
-        run: |
-          command -v staticcheck >/dev/null || go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
-          command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
+        run: command -v staticcheck >/dev/null || go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+
+      - name: Install govulncheck
+        if: needs.repo-integrity.outputs.go_dependencies_changed == 'true'
+        shell: bash
+        run: command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
+
+      - name: Validate GitHub Actions workflows
+        shell: bash
+        run: bash scripts/ci-check.sh
 
       - name: go-gate (fmt, vet, build, test, zv check, staticcheck)
         shell: bash
         run: scripts/go-gate.sh --build
 
       - name: govulncheck (informational)
+        if: needs.repo-integrity.outputs.go_dependencies_changed == 'true'
         shell: bash
         continue-on-error: true
         run: govulncheck ./...
 
   go-windows:
     name: Go gate (windows-latest fidelity)
-    # Full Windows-fidelity re-run: automatic on every push to main (the safety
-    # net after landing), plus on-demand via workflow_dispatch for verifying
-    # this job itself on a branch without waiting for a main push.
-    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event.inputs.run_windows_gate == 'true'
+    needs: repo-integrity
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -85,30 +141,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Cache staticcheck/govulncheck binaries
-        uses: actions/cache@v4
-        with:
-          path: ~/go/bin
-          key: ${{ runner.os }}-go-tools-staticcheck2025.1.1-govulncheck1.4.0
-
-      - name: Install staticcheck and govulncheck
+      - name: go-gate (fmt, vet, build, test, zv check; race on deep runs)
         shell: bash
         run: |
-          command -v staticcheck >/dev/null || go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
-          command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
-
-      - name: go-gate (fmt, vet, build, test, zv check, staticcheck)
-        shell: bash
-        run: scripts/go-gate.sh --build
-
-      - name: govulncheck (informational)
-        shell: bash
-        continue-on-error: true
-        run: govulncheck ./...
+          args=(--build --no-staticcheck)
+          if [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            args+=(--race)
+          fi
+          scripts/go-gate.sh "${args[@]}"
 
   web:
-    name: web (lint, typecheck, unit)
+    name: web (lint, typecheck, unit, build)
+    needs: repo-integrity
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
@@ -117,7 +163,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
@@ -129,10 +175,13 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run test:unit
+      - run: pnpm run build
 
   desktop:
-    name: desktop (lint, typecheck, unit)
+    name: desktop (lint, typecheck, unit, build)
+    needs: repo-integrity
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: desktop
@@ -141,7 +190,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
@@ -152,13 +201,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
       - run: pnpm run typecheck
-      # No Go binaries are built in this job, so bin/zv-orchestrator.exe never
-      # exists and the MCP e2e specs matched by this glob stay self-skipped.
+      # Real-process and packaged-artifact E2Es are explicitly environment-gated
+      # and run only through their dedicated commands.
       - run: pnpm run test:unit
+      - run: pnpm run build
 
   landing:
     name: landing (build)
+    needs: repo-integrity
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: landing
@@ -167,7 +219,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
@@ -177,3 +229,59 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+
+  installer-windows:
+    name: desktop installer (windows-latest)
+    needs: repo-integrity
+    if: needs.repo-integrity.outputs.installer_changed == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: |
+            desktop/pnpm-lock.yaml
+            web/pnpm-lock.yaml
+
+      - name: Install web dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build bundled Go binaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          go build -o bin/zv-orchestrator.exe ./cmd/zv-orchestrator
+          go build -o bin/zv-editor.exe ./cmd/zv-editor
+          go build -o bin/zv-recorder.exe ./cmd/zv-recorder
+
+      - name: Create CI-only local music placeholders
+        shell: pwsh
+        run: |
+          $catalog = Get-Content data/music/catalog.json -Raw | ConvertFrom-Json
+          foreach ($track in $catalog.tracks) {
+            if ($track.downloadUrl -or -not $track.id -or -not $track.ext) { continue }
+            $path = Join-Path data/music "$($track.id).$($track.ext)"
+            [IO.File]::WriteAllBytes($path, [Text.Encoding]::ASCII.GetBytes("ID3"))
+          }
+
+      - name: Build and verify Windows installer
+        working-directory: desktop
+        run: pnpm run dist

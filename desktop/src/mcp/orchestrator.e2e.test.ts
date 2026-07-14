@@ -13,14 +13,14 @@ const MUTATION_TOKEN = 'real-e2e-local-token';
 const REQUIRE_REAL_ORCHESTRATOR_ENV = 'FRAGFORGE_REQUIRE_REAL_ORCHESTRATOR';
 
 test('real stdio MCP drives the real in-memory orchestrator without media tools', { timeout: 30_000 }, async (t) => {
+  if (process.env[REQUIRE_REAL_ORCHESTRATOR_ENV] !== '1') {
+    t.skip('run pnpm run test:mcp:e2e to verify the real orchestrator');
+    return;
+  }
   const repositoryRoot = path.resolve(process.cwd(), '..');
   const orchestratorExe = path.join(repositoryRoot, 'bin', 'zv-orchestrator.exe');
   if (!existsSync(orchestratorExe)) {
-    if (process.env[REQUIRE_REAL_ORCHESTRATOR_ENV] === '1') {
-      assert.fail(`required real orchestrator is missing: ${orchestratorExe}`);
-    }
-    t.skip('build bin/zv-orchestrator.exe before the real orchestrator E2E');
-    return;
+    assert.fail(`required real orchestrator is missing: ${orchestratorExe}`);
   }
 
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'fragforge-mcp-real-e2e-'));

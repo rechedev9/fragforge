@@ -19,6 +19,10 @@ const NATURAL_EXIT_GRACE_MS = 250;
 const FORCED_EXIT_TIMEOUT_MS = 2_000;
 
 test('the packaged desktop contains its sandboxed settings preload', { timeout: 5_000 }, (t) => {
+  if (!requirePackagedMCP) {
+    t.skip('run pnpm run test:mcp:packaged to verify packaged artifacts');
+    return;
+  }
   if (process.platform !== 'win32') {
     unavailable(t, 'the packaged FragForge application is a Windows-only artifact');
     return;
@@ -42,6 +46,10 @@ test('the packaged desktop contains its sandboxed settings preload', { timeout: 
 });
 
 test('the real unpacked installer launches its MCP entry from app.asar', { timeout: 10_000 }, async (t) => {
+  if (!requirePackagedMCP) {
+    t.skip('run pnpm run test:mcp:packaged to verify packaged artifacts');
+    return;
+  }
   if (process.platform !== 'win32') {
     unavailable(t, 'the packaged FragForge launcher is a Windows-only artifact');
     return;
@@ -125,7 +133,7 @@ test('the real unpacked installer launches its MCP entry from app.asar', { timeo
 });
 
 function unavailable(t: TestContext, message: string): void {
-  if (requirePackagedMCP) assert.fail(`${message}; run npm run dist to build and verify it`);
+  if (requirePackagedMCP) assert.fail(`${message}; run pnpm run dist to build and verify it`);
   t.skip(message);
 }
 

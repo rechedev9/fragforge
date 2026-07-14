@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/rechedev9/fragforge/internal/recording"
@@ -235,6 +236,9 @@ func (p *shortPackRenderer) fail(err error) error {
 func runFFmpegWithOptionalLog(ctx context.Context, command []string, label, logPath string) error {
 	output, err := runFFmpegOutput(ctx, command, label)
 	if err != nil && logPath != "" {
+		if strings.TrimSpace(output) == "" {
+			output = err.Error() + "\n"
+		}
 		_ = writeLogFile(logPath, output)
 	}
 	return err

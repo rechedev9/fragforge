@@ -74,8 +74,8 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         }
     }
 
-    Invoke-Step "go test ./... -count=1" {
-        & go test ./... -count=1
+    Invoke-Step "go test ./... -count=1 -timeout 3m" {
+        & go test ./... -count=1 -timeout 3m
         if ($LASTEXITCODE -ne 0) {
             throw "go test failed"
         }

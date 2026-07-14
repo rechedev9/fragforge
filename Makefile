@@ -14,7 +14,7 @@ build:
 	go build -o bin/zv-tui ./cmd/zv-tui
 
 test:
-	go test ./... -count=1
+	go test ./... -count=1 -timeout 3m
 	go run ./cmd/zv check
 
 check:

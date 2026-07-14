@@ -28,8 +28,8 @@ if [ "${#files[@]}" -eq 0 ]; then
   exit 0
 fi
 
-if command -v goimports >/dev/null 2>&1; then
-  goimports -w "${files[@]}"
+if goimports_path="$(go_tool_path goimports)"; then
+  "$goimports_path" -w "${files[@]}"
 else
   gofmt -w "${files[@]}"
 fi

@@ -3,17 +3,21 @@ package editor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/rechedev9/fragforge/internal/killplan"
 )
 
 func TestRunDryRunWritesManifestsPromptsAndDoesNotExecuteFFmpeg(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -62,6 +66,7 @@ func TestRunDryRunWritesManifestsPromptsAndDoesNotExecuteFFmpeg(t *testing.T) {
 }
 
 func TestRunDryRunFiltersSegmentsAndLimit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -92,6 +97,7 @@ func TestRunDryRunFiltersSegmentsAndLimit(t *testing.T) {
 }
 
 func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -193,6 +199,7 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 }
 
 func TestRunRejectsInvalidVideoEncodingOptions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 
@@ -220,6 +227,7 @@ func TestRunRejectsInvalidVideoEncodingOptions(t *testing.T) {
 }
 
 func TestRunSkipExistingReusesRenderedFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -263,6 +271,7 @@ func TestRunSkipExistingReusesRenderedFiles(t *testing.T) {
 }
 
 func TestRunNoCoversSkipsCoverOutputs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -289,6 +298,7 @@ func TestRunNoCoversSkipsCoverOutputs(t *testing.T) {
 }
 
 func TestRunCoverFailureIsWarningOnly(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -312,6 +322,7 @@ func TestRunCoverFailureIsWarningOnly(t *testing.T) {
 }
 
 func TestRunShortRenderFailureWritesLog(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
@@ -332,12 +343,15 @@ func TestRunShortRenderFailureWritesLog(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read render log: %v", readErr)
 	}
-	if !strings.Contains(string(b), "short render failed") {
-		t.Fatalf("render log missing failure output:\n%s", b)
+	if got := strings.TrimSpace(string(b)); got == "" {
+		t.Fatal("render log is empty, want ffmpeg output or process start error")
+	} else if !strings.Contains(got, "short render failed") && !strings.Contains(got, "ffmpeg short edit") {
+		t.Fatalf("render log missing failure diagnostic:\n%s", b)
 	}
 }
 
 func TestRunAutoDiscoversKillPlanFromPipelineResult(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	result := testRecordingResult(dir)
 	result.Plan.DemoMap = ""
@@ -421,65 +435,69 @@ func writeJSONFile(t *testing.T, path string, value any) {
 	}
 }
 
-func fakeFFmpeg(t *testing.T, dir string) string {
-	return fakeFFmpegWithCoverFailure(t, dir, false)
+var (
+	fakeFFmpegOnce       sync.Once
+	fakeFFmpegDir        string
+	fakeFFmpegPath       string
+	fakeFFmpegCoverPath  string
+	fakeFFmpegShortPath  string
+	fakeFFmpegFixtureErr error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if err := removeFakeFFmpegFixture(); err != nil {
+		fmt.Fprintf(os.Stderr, "remove fake ffmpeg fixture: %v\n", err)
+		code = 1
+	}
+	os.Exit(code)
 }
 
-func fakeFFmpegFailingCovers(t *testing.T, dir string) string {
-	return fakeFFmpegWithCoverFailure(t, dir, true)
-}
-
-func fakeFFmpegFailingShorts(t *testing.T, dir string) string {
+func fakeFFmpeg(t *testing.T, _ string) string {
 	t.Helper()
+	ensureFakeFFmpegFixture(t)
+	return fakeFFmpegPath
+}
+
+func fakeFFmpegFailingCovers(t *testing.T, _ string) string {
+	t.Helper()
+	ensureFakeFFmpegFixture(t)
+	return fakeFFmpegCoverPath
+}
+
+func fakeFFmpegFailingShorts(t *testing.T, _ string) string {
+	t.Helper()
+	ensureFakeFFmpegFixture(t)
+	return fakeFFmpegShortPath
+}
+
+func ensureFakeFFmpegFixture(t *testing.T) {
+	t.Helper()
+	fakeFFmpegOnce.Do(buildFakeFFmpegFixture)
+	if fakeFFmpegFixtureErr != nil {
+		t.Fatalf("build fake ffmpeg fixture: %v", fakeFFmpegFixtureErr)
+	}
+}
+
+func buildFakeFFmpegFixture() {
+	fakeFFmpegDir, fakeFFmpegFixtureErr = os.MkdirTemp("", "zv-editor-fake-ffmpeg-*")
+	if fakeFFmpegFixtureErr != nil {
+		return
+	}
+	ext := ""
 	if runtime.GOOS == "windows" {
-		src := filepath.Join(dir, "fake-ffmpeg-failing-short.go")
+		ext = ".exe"
+	}
+	fakeFFmpegPath = filepath.Join(fakeFFmpegDir, "ffmpeg"+ext)
+	fakeFFmpegCoverPath = filepath.Join(fakeFFmpegDir, "ffmpeg-fail-cover"+ext)
+	fakeFFmpegShortPath = filepath.Join(fakeFFmpegDir, "ffmpeg-fail-short"+ext)
+
+	if runtime.GOOS == "windows" {
+		src := filepath.Join(fakeFFmpegDir, "fake-ffmpeg.go")
 		body := `package main
 
 import (
 	"fmt"
-	"os"
-	"strings"
-)
-
-func main() {
-	out := ""
-	if len(os.Args) > 1 {
-		out = os.Args[len(os.Args)-1]
-	}
-	if strings.HasSuffix(out, ".mp4") {
-		_, _ = fmt.Fprintln(os.Stderr, "short render failed")
-		os.Exit(2)
-	}
-}
-`
-		if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		path := filepath.Join(dir, "ffmpeg-failing-short.exe")
-		goExe, err := exec.LookPath("go")
-		if err != nil {
-			t.Fatalf("find go toolchain: %v", err)
-		}
-		if out, err := exec.Command(goExe, "build", "-o", path, src).CombinedOutput(); err != nil {
-			t.Fatalf("build fake ffmpeg: %v\n%s", err, out)
-		}
-		return path
-	}
-	path := filepath.Join(dir, "ffmpeg-failing-short")
-	body := "#!/bin/sh\nlast=\nfor arg in \"$@\"; do last=\"$arg\"; done\ncase \"$last\" in *.mp4) echo short render failed >&2; exit 2;; esac\n"
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-func fakeFFmpegWithCoverFailure(t *testing.T, dir string, failCovers bool) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		src := filepath.Join(dir, "fake-ffmpeg.go")
-		body := `package main
-
-import (
 	"os"
 	"path/filepath"
 	"strings"
@@ -489,49 +507,64 @@ func main() {
 	if len(os.Args) < 2 {
 		return
 	}
+	mode := strings.ToLower(filepath.Base(os.Args[0]))
 	out := os.Args[len(os.Args)-1]
-	if out == "-" {
-		// Null-muxer runs (quality checks) produce no output file.
-		return
-	}
-	if ` + boolLiteral(failCovers) + ` && strings.HasSuffix(out, ".cover.jpg") {
+	if strings.Contains(mode, "fail-short") && strings.HasSuffix(out, ".mp4") {
+		_, _ = fmt.Fprintln(os.Stderr, "short render failed")
 		os.Exit(2)
+	}
+	if strings.Contains(mode, "fail-cover") && strings.HasSuffix(out, ".cover.jpg") {
+		os.Exit(2)
+	}
+	if out == "-" {
+		return
 	}
 	_ = os.MkdirAll(filepath.Dir(out), 0755)
 	_ = os.WriteFile(out, []byte("fake"), 0644)
 }
 `
 		if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
+			fakeFFmpegFixtureErr = err
+			return
 		}
-		path := filepath.Join(dir, "ffmpeg.exe")
 		goExe, err := exec.LookPath("go")
 		if err != nil {
-			t.Fatalf("find go toolchain: %v", err)
+			fakeFFmpegFixtureErr = fmt.Errorf("find go toolchain: %w", err)
+			return
 		}
-		if out, err := exec.Command(goExe, "build", "-o", path, src).CombinedOutput(); err != nil {
-			t.Fatalf("build fake ffmpeg: %v\n%s", err, out)
+		if out, err := exec.Command(goExe, "build", "-o", fakeFFmpegPath, src).CombinedOutput(); err != nil {
+			fakeFFmpegFixtureErr = fmt.Errorf("go build: %w: %s", err, out)
+			return
 		}
-		if _, err := os.Stat(path); err != nil {
-			t.Fatal(err)
+	} else {
+		body := "#!/bin/sh\nlast=\nfor arg in \"$@\"; do last=\"$arg\"; done\nmode=$(basename \"$0\")\ncase \"$mode:$last\" in *fail-short*:*.mp4) echo short render failed >&2; exit 2;; *fail-cover*:*.cover.jpg) exit 2;; *:-) exit 0;; esac\nmkdir -p \"$(dirname \"$last\")\"\nprintf fake > \"$last\"\n"
+		if err := os.WriteFile(fakeFFmpegPath, []byte(body), 0o755); err != nil {
+			fakeFFmpegFixtureErr = err
+			return
 		}
-		return path
 	}
-	path := filepath.Join(dir, "ffmpeg")
-	failScript := ""
-	if failCovers {
-		failScript = "case \"$last\" in *.cover.jpg) exit 2;; esac\n"
+	for _, path := range []string{fakeFFmpegCoverPath, fakeFFmpegShortPath} {
+		if err := os.Link(fakeFFmpegPath, path); err != nil {
+			fakeFFmpegFixtureErr = fmt.Errorf("link %s: %w", path, err)
+			return
+		}
 	}
-	body := "#!/bin/sh\nlast=\nfor arg in \"$@\"; do last=\"$arg\"; done\ncase \"$last\" in -) exit 0;; esac\n" + failScript + "mkdir -p \"$(dirname \"$last\")\"\nprintf fake > \"$last\"\n"
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
 }
 
-func boolLiteral(v bool) string {
-	if v {
-		return "true"
+func removeFakeFFmpegFixture() error {
+	if fakeFFmpegDir == "" {
+		return nil
 	}
-	return "false"
+	var err error
+	for attempt := 0; attempt < 40; attempt++ {
+		err = os.RemoveAll(fakeFFmpegDir)
+		if err == nil {
+			return nil
+		}
+		if runtime.GOOS != "windows" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return err
 }

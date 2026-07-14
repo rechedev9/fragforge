@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func installFakeSubcommands(t *testing.T, binDir string, names ...string) {
@@ -35,26 +36,37 @@ func installFakeDelegatedSubcommands(t *testing.T, binDir string) {
 }
 
 var (
-	fakeSubcommandBytesOnce sync.Once
-	fakeSubcommandBytes     []byte
-	fakeSubcommandBytesErr  error
+	fakeSubcommandMasterOnce sync.Once
+	fakeSubcommandMasterDir  string
+	fakeSubcommandMasterPath string
+	fakeSubcommandMasterErr  error
 )
 
 func writeFakeSubcommandExecutable(t *testing.T, dst string) {
 	t.Helper()
-	fakeSubcommandBytesOnce.Do(func() {
+	fakeSubcommandMasterOnce.Do(func() {
 		currentExe, err := os.Executable()
 		if err != nil {
-			fakeSubcommandBytesErr = fmt.Errorf("current executable: %w", err)
+			fakeSubcommandMasterErr = fmt.Errorf("current executable: %w", err)
 			return
 		}
-		fakeSubcommandBytes, fakeSubcommandBytesErr = os.ReadFile(currentExe)
+		fakeSubcommandMasterDir, fakeSubcommandMasterErr = os.MkdirTemp("", "zv-fake-subcommand-*")
+		if fakeSubcommandMasterErr != nil {
+			return
+		}
+		fakeSubcommandMasterPath = filepath.Join(fakeSubcommandMasterDir, executableName("zv-fake-subcommand"))
+		contents, err := os.ReadFile(currentExe)
+		if err != nil {
+			fakeSubcommandMasterErr = fmt.Errorf("read current executable: %w", err)
+			return
+		}
+		fakeSubcommandMasterErr = os.WriteFile(fakeSubcommandMasterPath, contents, 0o755)
 	})
-	if fakeSubcommandBytesErr != nil {
-		t.Fatal(fakeSubcommandBytesErr)
+	if fakeSubcommandMasterErr != nil {
+		t.Fatal(fakeSubcommandMasterErr)
 	}
-	if err := os.WriteFile(dst, fakeSubcommandBytes, 0o755); err != nil {
-		t.Fatalf("write fake subcommand %s: %v", dst, err)
+	if err := os.Link(fakeSubcommandMasterPath, dst); err != nil {
+		copyFile(t, fakeSubcommandMasterPath, dst)
 	}
 }
 
@@ -1729,8 +1741,12 @@ var (
 	cachedZVBinaryErr    error
 )
 
-func buildZVBinary(t *testing.T, tempDir string) string {
+func buildZVBinary(t *testing.T, _ string) string {
 	t.Helper()
+	// Every binary E2E test calls this helper. The sole E2E test that mutates
+	// process-wide environment and working-directory state deliberately does
+	// not, so these expensive subprocess tests can safely run concurrently.
+	t.Parallel()
 	cachedZVBinaryOnce.Do(func() {
 		cachedZVBinaryDir, cachedZVBinaryErr = os.MkdirTemp("", "zv-test-bin-*")
 		if cachedZVBinaryErr != nil {
@@ -1744,9 +1760,36 @@ func buildZVBinary(t *testing.T, tempDir string) string {
 		t.Fatalf("go build ./cmd/zv: %v\n%s", cachedZVBinaryErr, cachedZVBinaryOutput)
 	}
 
-	exe := filepath.Join(tempDir, executableName("zv"))
-	copyFile(t, cachedZVBinaryPath, exe)
+	testBinDir, err := os.MkdirTemp(cachedZVBinaryDir, "case-*")
+	if err != nil {
+		t.Fatalf("create test binary directory: %v", err)
+	}
+	exe := filepath.Join(testBinDir, executableName("zv"))
+	// A hardlink gives tests the private path needed for adjacent fake
+	// subcommands without rewriting and rescanning the 40 MB executable for
+	// every case on Windows. Fall back for filesystems without hardlinks.
+	if err := os.Link(cachedZVBinaryPath, exe); err != nil {
+		copyFile(t, cachedZVBinaryPath, exe)
+	}
 	return exe
+}
+
+func removeAllTestArtifacts(path string) error {
+	if path == "" {
+		return nil
+	}
+	var err error
+	for attempt := 0; attempt < 40; attempt++ {
+		err = os.RemoveAll(path)
+		if err == nil {
+			return nil
+		}
+		if runtime.GOOS != "windows" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return err
 }
 
 func runZVBinary(t *testing.T, exe, dir string, args ...string) string {

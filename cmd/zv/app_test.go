@@ -34,13 +34,30 @@ func TestMain(m *testing.M) {
 		os.Setenv("ZV_DATA_DIR", obsDir)
 	}
 	code := m.Run()
-	if cachedZVBinaryDir != "" {
-		_ = os.RemoveAll(cachedZVBinaryDir)
-	}
-	if obsDir != "" {
-		_ = os.RemoveAll(obsDir)
+	for _, dir := range []string{cachedZVBinaryDir, fakeSubcommandMasterDir, obsDir} {
+		if err := removeAllTestArtifacts(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "test cleanup %s: %v\n", dir, err)
+			code = 1
+		}
 	}
 	os.Exit(code)
+}
+
+func TestRemoveAllTestArtifacts(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "artifacts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir artifacts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "artifact.txt"), []byte("test"), 0o600); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	if err := removeAllTestArtifacts(dir); err != nil {
+		t.Fatalf("remove artifacts: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat removed artifacts error = %v, want os.ErrNotExist", err)
+	}
 }
 
 func runFakeSubcommand() int {

@@ -10,6 +10,7 @@ import { isJsonObject } from './json.ts';
 const REQUEST_TIMEOUT_MS = 3_000;
 const NATURAL_EXIT_GRACE_MS = 250;
 const FORCED_EXIT_TIMEOUT_MS = 2_000;
+const REQUIRE_BUILT_MCP_ENV = 'FRAGFORGE_REQUIRE_BUILT_MCP';
 
 test('the real TypeScript stdio entry interoperates end to end without stdout contamination', { timeout: 10_000 }, async (t) => {
   const orchestrator = createServer((request, response) => {
@@ -78,10 +79,13 @@ test('the real TypeScript stdio entry interoperates end to end without stdout co
 });
 
 test('the packaged Windows launcher uses Electron Node mode with working stdio', { timeout: 10_000 }, async (t) => {
+  if (process.env[REQUIRE_BUILT_MCP_ENV] !== '1') {
+    t.skip('run pnpm run test:mcp:e2e to verify the built launcher');
+    return;
+  }
   const compiledEntry = path.join(process.cwd(), 'dist', 'mcp', 'stdio.js');
   if (!existsSync(compiledEntry)) {
-    t.skip('run npm run build before the packaged-launcher E2E');
-    return;
+    assert.fail(`required built MCP entry is missing: ${compiledEntry}`);
   }
   const child = spawn(
     'cmd.exe',

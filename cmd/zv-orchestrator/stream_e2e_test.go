@@ -35,6 +35,7 @@ import (
 // cleanly when ffmpeg/ffprobe are not on PATH, since it cannot fake the
 // encoder without losing the point of the test.
 func TestStreamRenderE2E(t *testing.T) {
+	t.Parallel()
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("ffmpeg not found on PATH, skipping real stream-render e2e")
@@ -45,10 +46,11 @@ func TestStreamRenderE2E(t *testing.T) {
 	}
 
 	srv, sourcePath := newStreamE2EServer(t, ffmpegPath, ffprobePath)
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	client := srv.Client()
 
 	t.Run("40-60 vertical stack renders correct geometry", func(t *testing.T) {
+		t.Parallel()
 		id := uploadStreamSource(t, client, srv.URL, sourcePath)
 
 		plan := streamclips.EditPlan{
@@ -96,6 +98,7 @@ func TestStreamRenderE2E(t *testing.T) {
 	})
 
 	t.Run("fullframe-nocam renders successfully with center gameplay pixel", func(t *testing.T) {
+		t.Parallel()
 		id := uploadStreamSource(t, client, srv.URL, sourcePath)
 
 		plan := streamclips.EditPlan{
@@ -124,6 +127,7 @@ func TestStreamRenderE2E(t *testing.T) {
 	})
 
 	t.Run("fullframe staggered killfeed notices are absent before cue and visible per row at cue", func(t *testing.T) {
+		t.Parallel()
 		id := uploadStreamSource(t, client, srv.URL, sourcePath)
 		plan := streamclips.EditPlan{
 			Variant:      streamclips.VariantStreamerFullframeNoCam,
@@ -178,6 +182,7 @@ func TestStreamRenderE2E(t *testing.T) {
 	})
 
 	t.Run("confirmed kills render a synthetic notice at the cue", func(t *testing.T) {
+		t.Parallel()
 		id := uploadStreamSource(t, client, srv.URL, sourcePath)
 		plan := streamclips.EditPlan{
 			Variant:      streamclips.VariantStreamerFullframeNoCam,
@@ -231,6 +236,7 @@ func TestStreamRenderE2E(t *testing.T) {
 	})
 
 	t.Run("moved banner slides in and out", func(t *testing.T) {
+		t.Parallel()
 		if streamclips.FindBannerFont() == "" {
 			t.Skip("supported bold system font not found, skipping real banner e2e")
 		}
@@ -269,6 +275,7 @@ func TestStreamRenderE2E(t *testing.T) {
 	})
 
 	t.Run("unknown variant returns 400 listing valid variants", func(t *testing.T) {
+		t.Parallel()
 		id := uploadStreamSource(t, client, srv.URL, sourcePath)
 
 		req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/stream-jobs/"+id.String()+"/renders/not-a-real-variant", nil)

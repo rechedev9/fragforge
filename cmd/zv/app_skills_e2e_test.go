@@ -549,6 +549,7 @@ func TestZVBinaryUtilityShortsSkillRecordWorkflowDocumentsCaptureToolsEndToEnd(t
 }
 
 func TestZVBinaryCurrentDocsAndSkillsRecordExamplesDocumentDryRunOrCaptureToolsEndToEnd(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	type publishedRecordCommand struct {
 		source  string

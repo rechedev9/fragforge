@@ -40,3 +40,33 @@ ensure_go_toolchain() {
     return 127
   fi
 }
+
+go_tool_path() {
+  local name="$1"
+  local found
+  found="$(command -v "$name" 2>/dev/null || command -v "$name.exe" 2>/dev/null || true)"
+  if [ -n "$found" ]; then
+    printf '%s\n' "$found"
+    return 0
+  fi
+
+  local bin_dir
+  bin_dir="$(go env GOBIN)"
+  if [ -z "$bin_dir" ]; then
+    bin_dir="$(go env GOPATH)/bin"
+  fi
+  case "$bin_dir" in
+    [A-Za-z]:\\*)
+      if command -v wslpath >/dev/null 2>&1; then
+        bin_dir="$(wslpath -u "$bin_dir")"
+      fi
+      ;;
+  esac
+  for found in "$bin_dir/$name" "$bin_dir/$name.exe"; do
+    if [ -x "$found" ]; then
+      printf '%s\n' "$found"
+      return 0
+    fi
+  done
+  return 1
+}

@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "oxlint",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --test \"lib/**/*.test.ts\""
+    "test:unit": "node --test --test-reporter=dot \"lib/**/*.test.ts\""
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

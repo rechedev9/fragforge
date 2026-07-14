@@ -1,7 +1,8 @@
 #!/bin/sh
-# Keep AGENTS.md as a symbolic link to CLAUDE.md.
-# CLAUDE.md is the single source of truth for agent instructions; edit it only.
-set -e
+# Keep repository invariants and direct-to-main changes green before a commit
+# becomes pushable. CLAUDE.md is the single source of truth for agent
+# instructions; edit it only.
+set -eu
 
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
@@ -9,4 +10,48 @@ cd "$root"
 if [ ! -L AGENTS.md ] || [ "$(readlink AGENTS.md)" != "CLAUDE.md" ]; then
   echo "pre-commit: AGENTS.md must be a symbolic link to CLAUDE.md" >&2
   exit 1
+fi
+
+branch="$(git branch --show-current)"
+if [ "$branch" != "main" ]; then
+  echo "pre-commit: commits must be made directly on main (current: ${branch:-detached HEAD})" >&2
+  exit 1
+fi
+
+. scripts/go-env.sh
+ensure_go_toolchain
+
+changed="$(mktemp)"
+trap 'rm -f "$changed"' EXIT
+git diff --cached --name-only --diff-filter=ACMR >"$changed"
+
+if grep -Eq '^\.github/workflows/|^scripts/ci-check\.sh$' "$changed"; then
+  bash scripts/ci-check.sh
+fi
+
+if grep -Eq '(^|/)(cmd|internal)/|\.go$|^go\.(mod|sum)$|^effects/|^overlays/|^scripts/go-|^Makefile$' "$changed"; then
+  bash scripts/go-gate.sh --no-format --no-staticcheck --build
+else
+  go run ./cmd/zv check
+fi
+
+if grep -Eq '^web/' "$changed"; then
+  pnpm --dir web install --frozen-lockfile
+  pnpm --dir web run lint
+  pnpm --dir web run typecheck
+  pnpm --dir web run test:unit
+  pnpm --dir web run build
+fi
+
+if grep -Eq '^desktop/' "$changed"; then
+  pnpm --dir desktop install --frozen-lockfile
+  pnpm --dir desktop run lint
+  pnpm --dir desktop run typecheck
+  pnpm --dir desktop run test:unit
+  pnpm --dir desktop run build
+fi
+
+if grep -Eq '^landing/' "$changed"; then
+  pnpm --dir landing install --frozen-lockfile
+  pnpm --dir landing run build
 fi
