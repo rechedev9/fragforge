@@ -28,27 +28,18 @@ type Capabilities struct {
 	// YtdlpEnabled reports whether acquisition-by-URL (POST /api/stream-jobs
 	// with a source_url) can run: a yt-dlp binary is configured.
 	YtdlpEnabled bool
-	// WhisperEnabled reports whether a stream render can burn in captions using
-	// the local whisper.cpp backend: both a whisper-cli binary and a model
-	// file are configured.
-	WhisperEnabled bool
 	// XAIEnabled reports whether a stream render can burn in captions using the
 	// xAI cloud backend: an xAI API key is configured. The key itself is never
 	// reported, only this boolean.
-	XAIEnabled bool
-	// GroqEnabled reports whether the Groq cloud captions fallback is
-	// configured: a Groq API key is set. The key itself is never reported,
-	// only this boolean.
-	GroqEnabled bool
+	XAIEnabled  bool
 	RecordTools []CaptureTool // recorder, HLAE, CS2
 	RenderTools []CaptureTool // editor, ffmpeg
-	StreamTools []CaptureTool // yt-dlp, whisper binary, whisper model
+	StreamTools []CaptureTool // yt-dlp
 }
 
-// captionsEnabled reports whether at least one captions transcription
-// backend (xAI, Groq, or local whisper) is configured.
+// captionsEnabled reports whether the sole stream-caption backend is configured.
 func (c Capabilities) captionsEnabled() bool {
-	return c.WhisperEnabled || c.XAIEnabled || c.GroqEnabled
+	return c.XAIEnabled
 }
 
 // GetCapabilities handles GET /api/capabilities. It is read-only: the web UI
@@ -64,11 +55,9 @@ func (h *Handlers) GetCapabilities(w http.ResponseWriter, _ *http.Request) {
 		"render":  map[string]any{"enabled": c.RenderEnabled, "tools": resolveTools(c.RenderTools)},
 		"compose": map[string]any{"enabled": c.ComposeEnabled},
 		"stream": map[string]any{
-			"ytdlp_enabled":   c.YtdlpEnabled,
-			"whisper_enabled": c.WhisperEnabled,
-			"xai_enabled":     c.XAIEnabled,
-			"groq_enabled":    c.GroqEnabled,
-			"tools":           resolveTools(c.StreamTools),
+			"ytdlp_enabled": c.YtdlpEnabled,
+			"xai_enabled":   c.XAIEnabled,
+			"tools":         resolveTools(c.StreamTools),
 		},
 	})
 }
@@ -116,14 +105,13 @@ func (h *Handlers) requireYtdlpEnabled(w http.ResponseWriter) bool {
 }
 
 // requireCaptionsEnabled reports whether burned-in captions are configured,
-// via either the xAI cloud backend or the local whisper backend. When
-// neither is, it writes a 409 naming the env vars to set, so starting a
-// render with captions enabled fails fast instead of the worker failing
-// mid-render.
+// via xAI. When it is not configured, it writes a 409 naming the setting to
+// use, so starting a render with captions enabled fails fast instead of the
+// worker failing mid-render.
 func (h *Handlers) requireCaptionsEnabled(w http.ResponseWriter) bool {
 	if h.capabilities.captionsEnabled() {
 		return true
 	}
-	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but no transcription backend is configured on this machine; configure an xAI key in FragForge Studio Settings (or set XAI_API_KEY), set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, then restart")
+	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but xAI is not configured on this machine; configure an xAI key in FragForge Studio Settings (or set XAI_API_KEY), then restart")
 	return false
 }

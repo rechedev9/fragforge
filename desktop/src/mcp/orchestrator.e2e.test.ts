@@ -78,7 +78,7 @@ test('real stdio MCP drives the real in-memory orchestrator without media tools'
   const status = await callTool(client, 'execute', { operation: 'studio.status' });
   assert.equal(structured(status).status, 'completed');
   assert.match(JSON.stringify(status), /"record"/);
-  assert.match(JSON.stringify(status), /"xai_enabled":true/, 'MCP must expose Grok subtitle readiness without exposing the API key');
+  assert.match(JSON.stringify(status), /"xai_enabled":true/, 'MCP must expose xAI subtitle readiness without exposing the API key');
   assert.equal(JSON.stringify(status).includes('mcp-e2e-placeholder-not-a-secret'), false);
 
   const streamVariants = await callTool(client, 'execute', { operation: 'catalog.stream_variants' });

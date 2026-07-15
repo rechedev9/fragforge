@@ -24,7 +24,7 @@ const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
  * uses the upstream field names so this route can stream the multipart body
  * unchanged instead of buffering and rebuilding it. Mirrors the
  * /api/demos/* contract: a 503 `{code: service_unavailable}` when the
- * orchestrator is unreachable, and the orchestrator's own 409 (yt-dlp/whisper
+ * orchestrator is unreachable, and the orchestrator's own 409 (for example, yt-dlp
  * unconfigured) passes through with its message so the UI can surface it.
  */
 export async function POST(request: Request): Promise<Response> {

@@ -9,6 +9,7 @@ import {
   defaultStreamerBannerPosition,
   killfeedKillsForCue,
   killfeedNoticePlacement,
+  killfeedSampleFrameSeconds,
   proportionalEvenKillfeedHeight,
   resolveActiveKillfeedCue,
   representativeFrameTime,
@@ -150,7 +151,7 @@ test('killfeed cues use half-open clip boundaries', () => {
   assert.equal(resolveActiveKillfeedCue(clips, 20), null);
 });
 
-test('killfeed visibility clips lead and trail windows to the clip', () => {
+test('killfeed visibility starts at the exact cue and clips the trail to the clip', () => {
   const clips = [{
     id: 'clipped-window',
     start_seconds: 10,
@@ -159,7 +160,9 @@ test('killfeed visibility clips lead and trail windows to the clip', () => {
   }];
 
   assert.equal(resolveActiveKillfeedCue(clips, 9.999), null);
-  assert.equal(resolveActiveKillfeedCue(clips, 10), 10.2);
+  assert.equal(resolveActiveKillfeedCue(clips, 10), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 10.199), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 10.2), 10.2);
   assert.equal(resolveActiveKillfeedCue(clips, 12), null);
   assert.equal(resolveActiveKillfeedCue(clips, 12.001), null);
 });
@@ -194,8 +197,8 @@ test('overlapping killfeed windows select the latest cue timestamp', () => {
     killfeed_seconds: [12, 10, 11],
   }];
 
-  assert.equal(resolveActiveKillfeedCue(clips, 11.649), 11);
-  assert.equal(resolveActiveKillfeedCue(clips, 11.65), 12);
+  assert.equal(resolveActiveKillfeedCue(clips, 11.999), 11);
+  assert.equal(resolveActiveKillfeedCue(clips, 12), 12);
   assert.equal(resolveActiveKillfeedCue(clips, 12.8), 12);
 });
 
@@ -215,13 +218,28 @@ test('killfeed cue resolution uses absolute source time across multiple clips', 
     },
   ];
 
-  assert.equal(resolveActiveKillfeedCue(clips, 0.649), null);
-  assert.equal(resolveActiveKillfeedCue(clips, 0.65), 1);
+  assert.equal(resolveActiveKillfeedCue(clips, 0.999), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 1), 1);
   assert.equal(resolveActiveKillfeedCue(clips, 3.8), 1);
   assert.equal(resolveActiveKillfeedCue(clips, 15), null);
-  assert.equal(resolveActiveKillfeedCue(clips, 21.65), 22);
+  assert.equal(resolveActiveKillfeedCue(clips, 21.999), null);
+  assert.equal(resolveActiveKillfeedCue(clips, 22), 22);
   assert.equal(resolveActiveKillfeedCue(clips, 24.8), 22);
   assert.equal(resolveActiveKillfeedCue(clips, 24.801), null);
+});
+
+test('killfeed sampling waits for the notice without moving its display cue', () => {
+  const clips = [{
+    id: 'sample-delay',
+    start_seconds: 0,
+    end_seconds: 10,
+    killfeed_seconds: [7.58, 9.9, 9.99],
+  }];
+
+  assert.equal(killfeedSampleFrameSeconds(clips, 7.58), 7.93);
+  assert.equal(killfeedSampleFrameSeconds(clips, 9.9), 9.95);
+  assert.equal(killfeedSampleFrameSeconds(clips, 9.99), 9.99);
+  assert.equal(killfeedSampleFrameSeconds(clips, 3), 3);
 });
 
 test('synthetic notice placement stacks 48px notices with an 8px gap from the base top', () => {

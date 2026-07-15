@@ -876,6 +876,7 @@ function StreamEditor({
                 <div id="killfeed-clean-controls" className="flex flex-col gap-4">
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     Ajusta el recorte para que cubra holgadamente el área de la killfeed: es la región que se congela sin kills y la que lee la IA.
+                    Coloca el cursor en el instante exacto de la kill; FragForge leerá automáticamente un fotograma posterior, cuando el aviso ya esté dibujado.
                     El fotograma elegido también actualiza la preview 9:16.
                   </p>
                   <CropPicker

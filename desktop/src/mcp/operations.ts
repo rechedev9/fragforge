@@ -142,10 +142,10 @@ const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
   properties: {
     captions: {
       additionalProperties: false,
-      description: 'Burned-in subtitles generated locally through the configured xAI/Grok speech-to-text capability.',
+      description: 'Burned-in subtitles generated through the configured xAI speech-to-text capability.',
       properties: {
         enabled: { type: 'boolean' },
-        language: { description: 'Whisper language code such as es or en; omit for automatic detection.', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$', type: 'string' },
+        language: { description: 'xAI speech-to-text language code such as es or en; omit for automatic detection.', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$', type: 'string' },
       },
       required: ['enabled'],
       type: 'object',
@@ -701,7 +701,7 @@ const operations: readonly OperationDefinition[] = [
     description: 'Enable, disable, or change burned-in subtitles while preserving the rest of the current stream edit plan.',
     inputSchema: objectSchema({
       enabled: { type: 'boolean' },
-      language: { description: 'Whisper language code such as es or en; omit for automatic detection.', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$', type: 'string' },
+      language: { description: 'xAI speech-to-text language code such as es or en; omit for automatic detection.', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$', type: 'string' },
       stream_job_id: UUID_PROPERTY,
     }, ['stream_job_id', 'enabled']),
     keywords: ['captions', 'caption', 'subtitles', 'subtitle', 'subtitulos', 'subtitulo', 'transcription', 'speech to text', 'stt', 'xai', 'grok'],
@@ -738,7 +738,7 @@ const operations: readonly OperationDefinition[] = [
     run: editStreamClip,
     title: 'Edit stream clip options',
   },
-  mutationOperation({ category: 'streams', description: 'Start a costly stream clip render from the saved edit plan, including xAI/Grok subtitles when enabled.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'vertical', 'render', 'captions', 'subtitles', 'subtitulos', 'xai', 'grok'], name: 'streams.start_render', path: (input) => streamRenderPath(input), risk: 'costly', title: 'Start stream render' }),
+  mutationOperation({ category: 'streams', description: 'Start a costly stream clip render from the saved edit plan, including xAI subtitles when enabled.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'vertical', 'render', 'captions', 'subtitles', 'subtitulos', 'xai', 'grok'], name: 'streams.start_render', path: (input) => streamRenderPath(input), risk: 'costly', title: 'Start stream render' }),
   readOperation({ category: 'streams', description: 'Read stream render progress and real video entries.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'render', 'videos'], name: 'streams.get_render', path: (input) => streamRenderPath(input), title: 'Get stream render state' }),
   readOperation({
     category: 'streams',

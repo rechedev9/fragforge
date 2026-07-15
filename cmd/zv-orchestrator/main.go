@@ -42,8 +42,8 @@ func run() error {
 	if err := clearXAIAPIKeyEnvironment(); err != nil {
 		return fmt.Errorf("config: clear xai credential from process environment: %w", err)
 	}
-	if err := clearGroqAPIKeyEnvironment(); err != nil {
-		return fmt.Errorf("config: clear groq credential from process environment: %w", err)
+	if err := clearLegacyCaptionCredentialsEnvironment(); err != nil {
+		return fmt.Errorf("config: clear legacy caption credential from process environment: %w", err)
 	}
 	if err := clearDiscoverySecretEnvironment(); err != nil {
 		return fmt.Errorf("config: clear discovery credential from process environment: %w", err)
@@ -167,16 +167,11 @@ func run() error {
 	}
 	if cfg.streamRenderWorkerEnabled() && streamRepo != nil {
 		streamWorker := workers.NewStreamRenderWorker(streamRepo, store, workers.StreamRenderWorkerConfig{
-			WorkDir:             cfg.MediaWorkDir,
-			FFmpegPath:          cfg.FFmpegPath,
-			Timeout:             cfg.RenderTimeout,
-			MusicDir:            cfg.MusicDir,
-			WhisperPath:         cfg.WhisperPath,
-			WhisperModelPath:    cfg.WhisperModelPath,
-			XAIAPIKey:           cfg.XAIAPIKey,
-			GroqAPIKey:          cfg.GroqAPIKey,
-			GroqModel:           cfg.GroqModel,
-			GroqCorrectionModel: cfg.GroqCorrectionModel,
+			WorkDir:    cfg.MediaWorkDir,
+			FFmpegPath: cfg.FFmpegPath,
+			Timeout:    cfg.RenderTimeout,
+			MusicDir:   cfg.MusicDir,
+			XAIAPIKey:  cfg.XAIAPIKey,
 		})
 		taskHandlers[tasks.TypeRenderStreamClip] = streamWorker.HandleRenderStreamClip
 		log.Printf("worker: stream render enabled")

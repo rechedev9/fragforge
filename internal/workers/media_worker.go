@@ -220,34 +220,17 @@ type StreamRenderWorkerConfig struct {
 	// MusicPlan can mix under the clip audio (same directory the songs API and
 	// the reel render worker use).
 	MusicDir string
-	// WhisperPath and WhisperModelPath configure the local whisper.cpp
-	// captions transcription pass (internal/captions.Transcriber). Both must
-	// be set for it to run.
-	WhisperPath      string
-	WhisperModelPath string
-	// XAIAPIKey configures the xAI cloud captions pass
-	// (internal/captions.XAITranscriber). It is the preferred backend when set:
+	// XAIAPIKey configures the only supported stream-caption transcription pass
+	// (internal/captions.XAITranscriber):
 	// the worker extracts the selected source-audio range to speech-oriented
 	// WAV, then xAI transcribes it with word-level timestamps (see
 	// NewStreamRenderWorker).
 	XAIAPIKey string
-	// GroqAPIKey, GroqModel, and GroqCorrectionModel configure the Groq cloud
-	// captions fallback (internal/captions.GroqTranscriber). GroqModel and
-	// GroqCorrectionModel are optional and default inside GroqTranscriber when
-	// empty. Groq runs only when a preferred backend fails or produces an
-	// empty transcript: xAI has been observed returning no words for clips
-	// with sparse speech buried in gameplay audio that Groq transcribes.
-	GroqAPIKey          string
-	GroqModel           string
-	GroqCorrectionModel string
 	//
-	// A render honours EditPlan.Captions.Enabled only when at least one
-	// backend is configured; the HTTP layer rejects a render start with
-	// captions enabled before none is configured (see requireCaptionsEnabled),
-	// but the worker still checks defensively since it may run a redriven task
-	// from before the config changed. Backends form a fallback chain ordered
-	// xAI, Groq, local whisper (see captionBackends and
-	// transcribeCaptionsWithFallback).
+	// A render honours EditPlan.Captions.Enabled only when xAI is configured;
+	// the HTTP layer rejects a render start otherwise (see
+	// requireCaptionsEnabled), but the worker still checks defensively since it
+	// may run a redriven task from before the config changed.
 }
 
 // RecordWorker handles the "record:demo" Asynq task.
@@ -807,9 +790,7 @@ type StreamRenderWorker struct {
 	storage storage.Storage
 	cfg     StreamRenderWorkerConfig
 	runner  commandRunner
-	// transcribe runs the captions transcription pass. It defaults to
-	// captions.Transcriber (whisper-cli), but is a seam so tests can fake
-	// transcription without a real whisper binary/model on disk.
+	// transcribe runs the xAI captions pass, with a seam for unit tests.
 	transcribe func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error)
 }
 
@@ -820,116 +801,43 @@ func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, c
 		cfg:     cfg,
 		runner:  execCommandRunner{},
 	}
-	// Backends form a fallback chain in preference order (xAI, Groq, local
-	// whisper): the next backend runs when the previous one fails or produces
-	// an empty transcript, so one backend missing sparse speech does not
-	// silently publish the clip uncaptioned while another backend could have
-	// transcribed it.
+	// Stream captions intentionally use xAI only. An unusable xAI transcript
+	// publishes without captions rather than substituting text from another
+	// engine; a transport/auth failure remains a hard render error.
 	w.transcribe = func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error) {
-		return transcribeCaptionsWithFallback(ctx, mediaPath, workDir, w.cfg.captionBackends(language))
+		x := captions.XAITranscriber{APIKey: w.cfg.XAIAPIKey, Language: language}
+		return transcribeCaptionsWithXAI(ctx, mediaPath, workDir, x.Transcribe)
 	}
 	return w
 }
 
-// captionBackend pairs a configured transcription backend with the stable
-// name used in fallback-chain error messages.
-type captionBackend struct {
-	name       string
-	transcribe func(ctx context.Context, mediaPath, workDir string) ([]captions.WordCue, error)
-}
-
-// attempt runs one backend and rejects a transcript that must not be burned in,
-// so a backend that fails and one that succeeds with garbage reach the caller as
-// the same shape of error. A backend can succeed and still hand back an unusable
-// transcript: gameplay audio makes every engine hallucinate, and on one real clip
-// xAI and Groq each returned two words stamped across 11.8s of 15s. Validating
-// here, rather than inside one backend, holds the fallback backend's output to
-// the same bar as the preferred one's.
-func (b captionBackend) attempt(ctx context.Context, mediaPath, workDir string) ([]captions.WordCue, error) {
-	cues, err := b.transcribe(ctx, mediaPath, workDir)
-	if err == nil {
-		err = captions.ValidateTranscript(cues)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", b.name, err)
-	}
-	return cues, nil
-}
-
-// captionBackends returns the configured transcription backends in preference
-// order: xAI, then Groq, then local whisper.
-func (c StreamRenderWorkerConfig) captionBackends(language string) []captionBackend {
-	var backends []captionBackend
-	if c.xaiConfigured() {
-		x := captions.XAITranscriber{
-			APIKey:   c.XAIAPIKey,
-			Language: language,
-		}
-		backends = append(backends, captionBackend{name: "xai", transcribe: x.Transcribe})
-	}
-	if c.groqConfigured() {
-		g := captions.GroqTranscriber{
-			APIKey:          c.GroqAPIKey,
-			Model:           c.GroqModel,
-			CorrectionModel: c.GroqCorrectionModel,
-			Language:        language,
-			FFmpegPath:      c.FFmpegPath,
-		}
-		backends = append(backends, captionBackend{name: "groq", transcribe: g.Transcribe})
-	}
-	if c.whisperConfigured() {
-		t := captions.Transcriber{BinaryPath: c.WhisperPath, ModelPath: c.WhisperModelPath, Language: language}
-		backends = append(backends, captionBackend{name: "whisper", transcribe: t.Transcribe})
-	}
-	return backends
-}
-
-// singleLine flattens an error for a render warning. Every backend's failure is
-// collected with errors.Join, which separates them with newlines, and a warning
-// is surfaced as one line of text.
+// singleLine flattens an error for a one-line render warning.
 func singleLine(err error) string {
 	return strings.Join(strings.Fields(err.Error()), " ")
 }
 
-// transcribeCaptionsWithFallback tries each backend in order and returns the
-// first usable transcript. A backend that returns captions.ErrUnusableTranscript
-// (an empty transcript, or one whose word timings are too implausible to burn
-// in) is a soft failure: the next backend runs, and when every backend is
-// unusable the error stays soft so burnClipCaptions publishes the clip
-// uncaptioned. Any other failure is hard and is returned as such, so the render
-// fails instead of silently downgrading a transcription outage to a warning.
-func transcribeCaptionsWithFallback(ctx context.Context, mediaPath, workDir string, backends []captionBackend) ([]captions.WordCue, error) {
-	if len(backends) == 0 {
-		return nil, fmt.Errorf("no captions transcription backend configured")
+// transcribeCaptionsWithXAI validates the single supported backend's result.
+// An unusable transcript remains a soft error for burnClipCaptions; a dead
+// context is always hard, even if xAI happened to return unusable cues while
+// cancellation was propagating.
+func transcribeCaptionsWithXAI(ctx context.Context, mediaPath, workDir string, transcribe func(context.Context, string, string) ([]captions.WordCue, error)) ([]captions.WordCue, error) {
+	cues, err := transcribe(ctx, mediaPath, workDir)
+	if err == nil {
+		// Gameplay audio can make speech-to-text hallucinate; a real bad result
+		// stretched two words across 11.8s of a 15s clip. Nothing reaches the burn
+		// step without passing the shared transcript-quality gate.
+		err = captions.ValidateTranscript(cues)
 	}
-	var unusableErrs, hardErrs []error
-	for _, b := range backends {
-		cues, err := b.attempt(ctx, mediaPath, workDir)
+	if err != nil {
+		err = fmt.Errorf("xai: %w", err)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
 		if err == nil {
-			return cues, nil
+			return nil, ctxErr
 		}
-		// A dead context is a hard failure even when this backend's transcript was
-		// merely unusable: %v keeps ErrUnusableTranscript out of the chain, so a
-		// cancelled render fails instead of publishing uncaptioned as though the
-		// audio simply had no speech.
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, fmt.Errorf("%v: %w", err, ctxErr)
-		}
-		if errors.Is(err, captions.ErrUnusableTranscript) {
-			unusableErrs = append(unusableErrs, err)
-		} else {
-			hardErrs = append(hardErrs, err)
-		}
+		return nil, fmt.Errorf("%v: %w", err, ctxErr)
 	}
-	if len(hardErrs) == 0 {
-		return nil, errors.Join(unusableErrs...)
-	}
-	// Fold the unusable transcripts in with %s, not %w: a hard failure must fail
-	// the render rather than publish the clip uncaptioned.
-	if len(unusableErrs) > 0 {
-		hardErrs = append(hardErrs, fmt.Errorf("unusable transcripts: %s", singleLine(errors.Join(unusableErrs...))))
-	}
-	return nil, errors.Join(hardErrs...)
+	return cues, err
 }
 
 func (w *StreamRenderWorker) HandleRenderStreamClip(ctx context.Context, t *asynq.Task) error {
@@ -979,7 +887,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		return fmt.Errorf("edit plan has no clips")
 	}
 	if plan.Captions.Enabled && !cfg.captionsConfigured() {
-		return fmt.Errorf("edit plan enables captions but no transcription backend is configured (configure an xAI key in FragForge Studio Settings or set XAI_API_KEY, set GROQ_API_KEY, or set ZV_WHISPER_PATH and ZV_WHISPER_MODEL, then restart)")
+		return fmt.Errorf("edit plan enables captions but xAI is not configured (configure an xAI key in FragForge Studio Settings or set XAI_API_KEY, then restart)")
 	}
 	bannerFontPath := ""
 	if plan.StreamerBanner.Nick != "" || plan.HasTextOverlays() {
@@ -1052,7 +960,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		publishClipID := clip.ID
 		if plan.Captions.Enabled {
 			switch {
-			case cfg.cloudCaptionsConfigured() && j.Probe.AudioCodec == "":
+			case cfg.xaiConfigured() && j.Probe.AudioCodec == "":
 				warnings = append(warnings, fmt.Sprintf("clip %s: source has no audio, publishing without captions", clip.ID))
 			case clip.SourceAudioMuted():
 				// Captions must describe what the viewer hears; a muted clip
@@ -1064,7 +972,7 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 				// time; cues from the source range must be mapped through the
 				// speed edit before burning onto the sped-up output.
 				cueSpeed := 1.0
-				if cfg.cloudCaptionsConfigured() {
+				if cfg.xaiConfigured() {
 					transcriptionPath, err = w.extractCaptionSourceAudio(runCtx, cfg, workDir, sourcePath, clip)
 					if err != nil {
 						return err
@@ -1197,8 +1105,8 @@ func writeKillfeedNoticePNG(path string, kill streamclips.KillfeedKill) error {
 }
 
 // extractCaptionSourceAudio materializes the selected range from the original
-// stream source as speech-oriented mono PCM WAV for the cloud transcription
-// backends. xAI proved materially more reliable on this input than on the
+// stream source as speech-oriented mono PCM WAV for xAI transcription. xAI
+// proved materially more reliable on this input than on the
 // already composed/re-encoded vertical MP4, especially when the speaker
 // switches between Spanish and English.
 func (w *StreamRenderWorker) extractCaptionSourceAudio(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, sourcePath string, clip streamclips.ClipRange) (string, error) {
@@ -1226,10 +1134,10 @@ func (w *StreamRenderWorker) extractCaptionSourceAudio(ctx context.Context, cfg 
 	return out, nil
 }
 
-// burnClipCaptions transcribes transcriptionPath with the configured caption backend and burns the resulting
-// karaoke captions into a second copy, <clipID>_captioned.mp4, next to
-// clipPath. It returns the captioned file's path on success. If every backend
-// produced an unusable transcript, it returns ("", warning, nil) so the caller
+// burnClipCaptions transcribes transcriptionPath with xAI and burns the
+// resulting karaoke captions into a second copy, <clipID>_captioned.mp4, next to
+// clipPath. It returns the captioned file's path on success. If xAI produces an
+// unusable transcript, it returns ("", warning, nil) so the caller
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
 // explicitly requested and a transcription backend is configured.
@@ -1328,35 +1236,16 @@ func (c StreamRenderWorkerConfig) timeoutDuration() time.Duration {
 	return d
 }
 
-// whisperConfigured reports whether both the whisper binary and model path
-// are set, the minimum needed to run a local captions transcription pass.
-func (c StreamRenderWorkerConfig) whisperConfigured() bool {
-	return c.WhisperPath != "" && c.WhisperModelPath != ""
-}
-
-// groqConfigured reports whether a Groq API key is set, the minimum needed to
-// run the Groq captions fallback.
-func (c StreamRenderWorkerConfig) groqConfigured() bool {
-	return c.GroqAPIKey != ""
-}
-
-// cloudCaptionsConfigured reports whether a cloud transcription backend (xAI
-// or Groq) is configured; both transcribe the speech-oriented WAV extracted
-// from the original source range rather than the composed clip.
-func (c StreamRenderWorkerConfig) cloudCaptionsConfigured() bool {
-	return c.xaiConfigured() || c.groqConfigured()
-}
-
 // xaiConfigured reports whether an xAI API key is set, the minimum needed to
 // run the xAI cloud captions transcription pass.
 func (c StreamRenderWorkerConfig) xaiConfigured() bool {
 	return c.XAIAPIKey != ""
 }
 
-// captionsConfigured reports whether any captions transcription backend
-// (xAI or local whisper) is configured.
+// captionsConfigured reports whether the only supported stream-caption
+// backend is configured.
 func (c StreamRenderWorkerConfig) captionsConfigured() bool {
-	return c.cloudCaptionsConfigured() || c.whisperConfigured()
+	return c.xaiConfigured()
 }
 
 // Encoder settings for the captions burn-in pass, matching the first render

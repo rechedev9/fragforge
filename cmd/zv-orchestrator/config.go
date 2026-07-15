@@ -13,49 +13,41 @@ import (
 )
 
 type config struct {
-	HTTPAddr            string
-	DatabaseURL         string
-	DataDir             string
-	WorkerConcurrency   int
-	MediaWorkDir        string
-	RecorderPath        string
-	ComposerPath        string
-	EditorPath          string
-	HLAEPath            string
-	CS2Path             string
-	RecordHUD           string
-	FFmpegPath          string
-	FFprobePath         string
-	MusicDir            string
-	RecordTimeout       string
-	ComposeTimeout      string
-	RenderTimeout       string
-	MutationToken       string
-	DiscoverySecret     string
-	CodexPath           string
-	CodexModel          string
-	AgentTimeout        string
-	YtdlpPath           string
-	WhisperPath         string
-	WhisperModelPath    string
-	XAIAPIKey           string
-	GroqAPIKey          string
-	GroqModel           string
-	GroqCorrectionModel string
-	FirecrawlAPIKey     string
+	HTTPAddr          string
+	DatabaseURL       string
+	DataDir           string
+	WorkerConcurrency int
+	MediaWorkDir      string
+	RecorderPath      string
+	ComposerPath      string
+	EditorPath        string
+	HLAEPath          string
+	CS2Path           string
+	RecordHUD         string
+	FFmpegPath        string
+	FFprobePath       string
+	MusicDir          string
+	RecordTimeout     string
+	ComposeTimeout    string
+	RenderTimeout     string
+	MutationToken     string
+	DiscoverySecret   string
+	CodexPath         string
+	CodexModel        string
+	AgentTimeout      string
+	YtdlpPath         string
+	XAIAPIKey         string
+	FirecrawlAPIKey   string
 }
 
 const (
 	databaseURLMemory                  = "memory"
 	xaiAPIKeyEnvironmentVariable       = "XAI_API_KEY"
-	groqAPIKeyEnvironmentVariable      = "GROQ_API_KEY"
-	groqAPIKeyOverrideVariable         = "ZV_GROQ_API_KEY"
 	mutationTokenEnvironmentVariable   = "ZV_MUTATION_TOKEN"
-	discoverySecretEnvironmentVariable = "ZV_DISCOVERY_SECRET"
 	firecrawlAPIKeyEnvironmentVariable = "FIRECRAWL_API_KEY"
-	// defaultGroqCorrectionModel post-corrects Groq transcripts contextually;
-	// see internal/captions.GroqTranscriber.CorrectionModel.
-	defaultGroqCorrectionModel = "llama-3.3-70b-versatile"
+	legacyGroqAPIKeyVariable           = "GROQ_API_KEY"
+	legacyGroqAPIKeyOverrideVariable   = "ZV_GROQ_API_KEY"
+	discoverySecretEnvironmentVariable = "ZV_DISCOVERY_SECRET"
 	// databaseURLSQLite selects the on-disk SQLite job repository. Accepts the
 	// bare value "sqlite" (stores <DataDir>/jobs.db) or "sqlite:<path>".
 	databaseURLSQLite = "sqlite"
@@ -73,36 +65,27 @@ func sqlitePath(url, dataDir string) string {
 
 func loadConfig() (config, error) {
 	c := config{
-		HTTPAddr:         envOr("ZV_HTTP_ADDR", "127.0.0.1:8080"),
-		DatabaseURL:      os.Getenv("ZV_DATABASE_URL"),
-		DataDir:          envOr("ZV_DATA_DIR", "./data"),
-		MediaWorkDir:     os.Getenv("ZV_MEDIA_WORK_DIR"),
-		RecorderPath:     os.Getenv("ZV_RECORDER_PATH"),
-		ComposerPath:     os.Getenv("ZV_COMPOSER_PATH"),
-		EditorPath:       os.Getenv("ZV_EDITOR_PATH"),
-		HLAEPath:         os.Getenv("ZV_HLAE_PATH"),
-		CS2Path:          os.Getenv("ZV_CS2_PATH"),
-		RecordHUD:        os.Getenv("ZV_RECORD_HUD"),
-		FFmpegPath:       os.Getenv("ZV_FFMPEG_PATH"),
-		FFprobePath:      os.Getenv("ZV_FFPROBE_PATH"),
-		MusicDir:         os.Getenv("ZV_MUSIC_DIR"),
-		MutationToken:    os.Getenv(mutationTokenEnvironmentVariable),
-		DiscoverySecret:  os.Getenv(discoverySecretEnvironmentVariable),
-		CodexPath:        os.Getenv("ZV_CODEX_PATH"),
-		CodexModel:       os.Getenv("ZV_CODEX_MODEL"),
-		YtdlpPath:        os.Getenv("ZV_YTDLP_PATH"),
-		WhisperPath:      os.Getenv("ZV_WHISPER_PATH"),
-		WhisperModelPath: os.Getenv("ZV_WHISPER_MODEL"),
-		// Cloud transcription credentials are not auto-detected because an API
-		// key cannot be probed on PATH or disk. xAI is the preferred captions
-		// backend; Groq is the fallback when xAI fails or finds no words.
+		HTTPAddr:        envOr("ZV_HTTP_ADDR", "127.0.0.1:8080"),
+		DatabaseURL:     os.Getenv("ZV_DATABASE_URL"),
+		DataDir:         envOr("ZV_DATA_DIR", "./data"),
+		MediaWorkDir:    os.Getenv("ZV_MEDIA_WORK_DIR"),
+		RecorderPath:    os.Getenv("ZV_RECORDER_PATH"),
+		ComposerPath:    os.Getenv("ZV_COMPOSER_PATH"),
+		EditorPath:      os.Getenv("ZV_EDITOR_PATH"),
+		HLAEPath:        os.Getenv("ZV_HLAE_PATH"),
+		CS2Path:         os.Getenv("ZV_CS2_PATH"),
+		RecordHUD:       os.Getenv("ZV_RECORD_HUD"),
+		FFmpegPath:      os.Getenv("ZV_FFMPEG_PATH"),
+		FFprobePath:     os.Getenv("ZV_FFPROBE_PATH"),
+		MusicDir:        os.Getenv("ZV_MUSIC_DIR"),
+		MutationToken:   os.Getenv(mutationTokenEnvironmentVariable),
+		DiscoverySecret: os.Getenv(discoverySecretEnvironmentVariable),
+		CodexPath:       os.Getenv("ZV_CODEX_PATH"),
+		CodexModel:      os.Getenv("ZV_CODEX_MODEL"),
+		YtdlpPath:       os.Getenv("ZV_YTDLP_PATH"),
+		// The xAI credential is not auto-detected because an API key cannot be
+		// probed on PATH or disk. It is the only stream-caption backend.
 		XAIAPIKey: os.Getenv(xaiAPIKeyEnvironmentVariable),
-		// GROQ_API_KEY is the key's conventional name across Groq's own tooling;
-		// ZV_GROQ_API_KEY is an explicit override for when a user-level
-		// GROQ_API_KEY is set for something unrelated.
-		GroqAPIKey:          firstNonEmpty(os.Getenv(groqAPIKeyOverrideVariable), os.Getenv(groqAPIKeyEnvironmentVariable)),
-		GroqModel:           os.Getenv("ZV_GROQ_MODEL"),
-		GroqCorrectionModel: envOr("ZV_GROQ_CORRECTION_MODEL", defaultGroqCorrectionModel),
 		// Firecrawl enriches strategy suggestions with public CS2 trend
 		// references. It is optional and never sent to the web renderer.
 		FirecrawlAPIKey: os.Getenv(firecrawlAPIKeyEnvironmentVariable),
@@ -159,13 +142,15 @@ func clearXAIAPIKeyEnvironment() error {
 	return clearEnvironmentVariable(xaiAPIKeyEnvironmentVariable)
 }
 
-// clearGroqAPIKeyEnvironment does the same for the Groq captions fallback
-// credential, in both its conventional and override names.
-func clearGroqAPIKeyEnvironment() error {
-	if err := clearEnvironmentVariable(groqAPIKeyEnvironmentVariable); err != nil {
+// clearLegacyCaptionCredentialsEnvironment keeps credentials from older
+// Groq-enabled installations out of media subprocesses. FragForge no longer
+// reads or uses either variable, but an upgraded process may still inherit
+// them from the user's environment.
+func clearLegacyCaptionCredentialsEnvironment() error {
+	if err := clearEnvironmentVariable(legacyGroqAPIKeyVariable); err != nil {
 		return err
 	}
-	return clearEnvironmentVariable(groqAPIKeyOverrideVariable)
+	return clearEnvironmentVariable(legacyGroqAPIKeyOverrideVariable)
 }
 
 // clearDiscoverySecretEnvironment prevents media and agent subprocesses from
@@ -225,16 +210,8 @@ func (c config) ytdlpEnabled() bool {
 	return c.YtdlpPath != ""
 }
 
-func (c config) whisperEnabled() bool {
-	return c.WhisperPath != "" && c.WhisperModelPath != ""
-}
-
 func (c config) xaiEnabled() bool {
 	return c.XAIAPIKey != ""
-}
-
-func (c config) groqEnabled() bool {
-	return c.GroqAPIKey != ""
 }
 
 func (c config) firecrawlEnabled() bool {
@@ -261,9 +238,7 @@ func (c config) captureCapabilities(src captureToolSource) httpapi.Capabilities 
 		ComposeEnabled: c.composeWorkerEnabled(),
 		RenderEnabled:  c.renderWorkerEnabled(),
 		YtdlpEnabled:   c.ytdlpEnabled(),
-		WhisperEnabled: c.whisperEnabled(),
 		XAIEnabled:     c.xaiEnabled(),
-		GroqEnabled:    c.groqEnabled(),
 		RecordTools: []httpapi.CaptureTool{
 			tool("ZV_RECORDER_PATH", c.RecorderPath),
 			tool("ZV_HLAE_PATH", c.HLAEPath),
@@ -275,8 +250,6 @@ func (c config) captureCapabilities(src captureToolSource) httpapi.Capabilities 
 		},
 		StreamTools: []httpapi.CaptureTool{
 			tool("ZV_YTDLP_PATH", c.YtdlpPath),
-			tool("ZV_WHISPER_PATH", c.WhisperPath),
-			tool("ZV_WHISPER_MODEL", c.WhisperModelPath),
 		},
 	}
 }
@@ -334,15 +307,6 @@ func durationEnv(key, def string) (string, error) {
 		return "", fmt.Errorf("%s must be a positive duration, got %q", key, raw)
 	}
 	return d.String(), nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func envOr(key, def string) string {

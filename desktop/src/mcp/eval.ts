@@ -1137,8 +1137,6 @@ function minimalOrchestratorEnvironment(
     ZV_HLAE_PATH: unavailable('hlae.exe'),
     ZV_HTTP_ADDR: `127.0.0.1:${port}`,
     ZV_RECORDER_PATH: unavailable('zv-recorder.exe'),
-    ZV_WHISPER_MODEL: unavailable('model.bin'),
-    ZV_WHISPER_PATH: unavailable('whisper.exe'),
     ZV_YTDLP_PATH: unavailable('yt-dlp.exe'),
   };
 }

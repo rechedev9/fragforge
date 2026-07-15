@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -94,6 +95,27 @@ func TestReadStreamKillfeedReturnsParsedKills(t *testing.T) {
 	got := body.Kills[0]
 	if got.AttackerName != "hero" || got.VictimName != "villain" || got.Weapon != weapon || !got.Headshot {
 		t.Fatalf("kill = %#v, want the parsed hero/villain notice", got)
+	}
+}
+
+func TestReadStreamKillfeedSamplesAfterCueButInsideClip(t *testing.T) {
+	h, id := killfeedReadHandlers(t, "", "ffmpeg", "xai_test")
+	var sampledAt float64
+	h.killfeedFrame = func(_ context.Context, _ string, seconds float64) (image.Image, error) {
+		sampledAt = seconds
+		return nil, errors.New("stop after recording sample time")
+	}
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/killfeed-read", strings.NewReader(`{"clip_id":"clip-1","cue_seconds":4.9}`))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 from the test sentinel; body=%s", rw.Code, rw.Body.String())
+	}
+	if want := 4.95; math.Abs(sampledAt-want) > 1e-9 {
+		t.Fatalf("sampled frame = %.3f, want %.3f so the read cannot drift into the next clip", sampledAt, want)
 	}
 }
 

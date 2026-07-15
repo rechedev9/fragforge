@@ -68,7 +68,7 @@ The runtime precedence is:
 
 1. `XAI_API_KEY` inherited by the desktop process.
 2. The current Windows user's encrypted key saved from `/settings`.
-3. No xAI credential (local whisper.cpp can still be used when configured).
+3. No xAI credential (stream captions remain unavailable).
 
 There is no shared-key or team build mode. Packaging strips `XAI_API_KEY` from
 the build, web, and electron-builder environments, and the installer manifest

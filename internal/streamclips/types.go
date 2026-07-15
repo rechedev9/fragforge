@@ -182,7 +182,8 @@ type StreamerBannerPlan struct {
 }
 
 // CaptionsPlan opts a stream render into a burned-in karaoke caption pass.
-// Language is a whisper language code ("es", "en", ...); empty means "auto".
+// Language is an xAI speech-to-text language code ("es", "en", ...); empty
+// means automatic detection.
 // Nothing is required when Enabled is false.
 type CaptionsPlan struct {
 	Enabled  bool   `json:"enabled"`

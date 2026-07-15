@@ -56,6 +56,17 @@ func TestGetCapabilitiesReportsPerToolStatus(t *testing.T) {
 	if !got.Stream.XAIEnabled {
 		t.Error("stream.xai_enabled = false, want true")
 	}
+	var raw struct {
+		Stream map[string]json.RawMessage `json:"stream"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw capabilities: %v", err)
+	}
+	for _, removed := range []string{"groq_enabled", "whisper_enabled"} {
+		if _, ok := raw.Stream[removed]; ok {
+			t.Errorf("stream capabilities still report removed field %q", removed)
+		}
+	}
 	want := map[string][2]bool{ // [configured, accessible]
 		"ZV_RECORDER_PATH": {true, true},
 		"ZV_HLAE_PATH":     {true, false},

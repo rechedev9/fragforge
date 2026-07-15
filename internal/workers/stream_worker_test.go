@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -245,6 +244,7 @@ func TestStreamRenderWorkerRendersSyntheticKillfeedNotices(t *testing.T) {
 	}
 	repo := newFakeStreamRepo(streamclips.Job{
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
 	})
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		out := args[len(args)-1]
@@ -530,6 +530,7 @@ func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
 	}
 	repo := newFakeStreamRepo(streamclips.Job{
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
 	})
 
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -541,14 +542,13 @@ func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
 	}}
 
 	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
-		WorkDir:          t.TempDir(),
-		FFmpegPath:       "ffmpeg",
-		WhisperPath:      "whisper-cli",
-		WhisperModelPath: "model.bin",
+		WorkDir:    t.TempDir(),
+		FFmpegPath: "ffmpeg",
+		XAIAPIKey:  "xai_test",
 	})
 	w.runner = runner
 	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
-		return nil, fmt.Errorf("captions: whisper transcript contains no words: %w", captions.ErrUnusableTranscript)
+		return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
 	}
 
 	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
@@ -559,9 +559,10 @@ func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
 		t.Fatalf("HandleRenderStreamClip error = %v", err)
 	}
 
-	// Only the render pass ran; no caption burn pass since there were no cues.
-	if len(runner.calls) != 1 {
-		t.Fatalf("runner calls = %d, want 1 (render only)", len(runner.calls))
+	// The render and xAI source-audio extraction ran; no caption burn pass since
+	// there were no usable cues.
+	if len(runner.calls) != 2 {
+		t.Fatalf("runner calls = %d, want 2 (render + xAI audio extraction)", len(runner.calls))
 	}
 	wantKey, err := streamclips.RenderVideoKey(id, streamclips.VariantStreamer4060, "clip-001")
 	if err != nil {
@@ -580,380 +581,76 @@ func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
 	}
 }
 
-// --- captions backend selection --------------------------------------------
+// --- xAI-only captions ------------------------------------------------------
 
-func TestStreamRenderWorkerConfig_CaptionsBackendSelection(t *testing.T) {
-	tests := []struct {
-		name           string
-		cfg            StreamRenderWorkerConfig
-		wantWhisper    bool
-		wantXAI        bool
-		wantGroq       bool
-		wantCaptioning bool
-	}{
-		{
-			name:           "none configured",
-			cfg:            StreamRenderWorkerConfig{},
-			wantWhisper:    false,
-			wantXAI:        false,
-			wantGroq:       false,
-			wantCaptioning: false,
-		},
-		{
-			name:           "xai only",
-			cfg:            StreamRenderWorkerConfig{XAIAPIKey: "xai_test"},
-			wantWhisper:    false,
-			wantXAI:        true,
-			wantGroq:       false,
-			wantCaptioning: true,
-		},
-		{
-			name:           "groq only",
-			cfg:            StreamRenderWorkerConfig{GroqAPIKey: "groq_test"},
-			wantWhisper:    false,
-			wantXAI:        false,
-			wantGroq:       true,
-			wantCaptioning: true,
-		},
-		{
-			name:           "whisper only",
-			cfg:            StreamRenderWorkerConfig{WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
-			wantWhisper:    true,
-			wantXAI:        false,
-			wantGroq:       false,
-			wantCaptioning: true,
-		},
-		{
-			name:           "whisper missing model path is not configured",
-			cfg:            StreamRenderWorkerConfig{WhisperPath: "whisper-cli"},
-			wantWhisper:    false,
-			wantXAI:        false,
-			wantGroq:       false,
-			wantCaptioning: false,
-		},
-		{
-			name:           "all configured",
-			cfg:            StreamRenderWorkerConfig{XAIAPIKey: "xai_test", GroqAPIKey: "groq_test", WhisperPath: "whisper-cli", WhisperModelPath: "model.bin"},
-			wantWhisper:    true,
-			wantXAI:        true,
-			wantGroq:       true,
-			wantCaptioning: true,
-		},
+func TestStreamRenderWorkerConfigCaptionsRequireXAI(t *testing.T) {
+	if (StreamRenderWorkerConfig{}).captionsConfigured() {
+		t.Fatal("captionsConfigured() = true without xAI, want false")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.cfg.whisperConfigured(); got != tt.wantWhisper {
-				t.Errorf("whisperConfigured() = %v, want %v", got, tt.wantWhisper)
-			}
-			if got := tt.cfg.xaiConfigured(); got != tt.wantXAI {
-				t.Errorf("xaiConfigured() = %v, want %v", got, tt.wantXAI)
-			}
-			if got := tt.cfg.groqConfigured(); got != tt.wantGroq {
-				t.Errorf("groqConfigured() = %v, want %v", got, tt.wantGroq)
-			}
-			if got := tt.cfg.captionsConfigured(); got != tt.wantCaptioning {
-				t.Errorf("captionsConfigured() = %v, want %v", got, tt.wantCaptioning)
-			}
-		})
+	if !(StreamRenderWorkerConfig{XAIAPIKey: "xai_test"}).captionsConfigured() {
+		t.Fatal("captionsConfigured() = false with xAI, want true")
 	}
 }
 
-func TestStreamRenderWorkerConfigCaptionBackendOrder(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  StreamRenderWorkerConfig
-		want []string
-	}{
-		{
-			name: "none configured",
-			cfg:  StreamRenderWorkerConfig{},
-			want: nil,
-		},
-		{
-			name: "xai only",
-			cfg:  StreamRenderWorkerConfig{XAIAPIKey: "xai_test"},
-			want: []string{"xai"},
-		},
-		{
-			name: "groq only",
-			cfg:  StreamRenderWorkerConfig{GroqAPIKey: "groq_test"},
-			want: []string{"groq"},
-		},
-		{
-			name: "xai preferred, then groq, then whisper",
-			cfg: StreamRenderWorkerConfig{
-				XAIAPIKey:        "xai_test",
-				GroqAPIKey:       "groq_test",
-				WhisperPath:      "whisper-cli",
-				WhisperModelPath: "model.bin",
-			},
-			want: []string{"xai", "groq", "whisper"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got []string
-			for _, b := range tt.cfg.captionBackends("auto") {
-				got = append(got, b.name)
-			}
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("captionBackends() order = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestTranscribeCaptionsWithFallbackFirstSuccessSkipsRest(t *testing.T) {
-	want := []captions.WordCue{{Word: "nice", StartSeconds: 0.5, EndSeconds: 1}}
-	var calls []string
-	backends := []captionBackend{
-		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			calls = append(calls, "xai")
+func TestTranscribeCaptionsWithXAIValidatesTheOnlyBackend(t *testing.T) {
+	t.Run("usable transcript", func(t *testing.T) {
+		want := []captions.WordCue{{Word: "nice", StartSeconds: 0.5, EndSeconds: 1}}
+		transcribe := func(context.Context, string, string) ([]captions.WordCue, error) {
 			return want, nil
-		}},
-		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			calls = append(calls, "groq")
-			return nil, errors.New("must not be called")
-		}},
-	}
-	got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
-	if err != nil {
-		t.Fatalf("transcribeCaptionsWithFallback error = %v", err)
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("got cues %v, want %v", got, want)
-	}
-	if !slices.Equal(calls, []string{"xai"}) {
-		t.Errorf("backend calls = %v, want only xai", calls)
-	}
-}
-
-func TestTranscribeCaptionsWithFallbackUsesNextBackendOnNoWords(t *testing.T) {
-	// Regression for a real clip with sparse Spanish speech ("Hola Martínez" in
-	// 15s of gameplay audio): xAI returned an empty transcript on every attempt
-	// while Groq transcribed it. The chain must fall back to the next
-	// configured backend instead of publishing the clip uncaptioned.
-	want := []captions.WordCue{{Word: "Hola", StartSeconds: 1, EndSeconds: 1.4}, {Word: "Martínez", StartSeconds: 1.4, EndSeconds: 2}}
-	var calls []string
-	backends := []captionBackend{
-		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			calls = append(calls, "xai")
-			return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
-		}},
-		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			calls = append(calls, "groq")
-			return want, nil
-		}},
-	}
-	got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
-	if err != nil {
-		t.Fatalf("transcribeCaptionsWithFallback error = %v", err)
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("got cues %v, want %v", got, want)
-	}
-	if !slices.Equal(calls, []string{"xai", "groq"}) {
-		t.Errorf("backend calls = %v, want xai then groq", calls)
-	}
-}
-
-func TestTranscribeCaptionsWithFallbackAllUnusablePublishesUncaptioned(t *testing.T) {
-	backends := []captionBackend{
-		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
-		}},
-		{name: "whisper", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			return nil, fmt.Errorf("captions: whisper transcript contains no words: %w", captions.ErrUnusableTranscript)
-		}},
-	}
-	_, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
-	if err == nil {
-		t.Fatal("transcribeCaptionsWithFallback returned nil error, want an unusable-transcript error")
-	}
-	// burnClipCaptions keys on this sentinel to publish the clip uncaptioned
-	// instead of failing the render.
-	if !errors.Is(err, captions.ErrUnusableTranscript) {
-		t.Errorf("got error %q, want it to wrap captions.ErrUnusableTranscript", err.Error())
-	}
-}
-
-// A garbled transcript (real words, but timings so implausible one caption card
-// would freeze over most of the clip) must be treated like an empty one: fall
-// through to the next backend rather than burning in text nobody said.
-func TestTranscribeCaptionsWithFallbackGarbledTranscriptFallsThrough(t *testing.T) {
-	want := []captions.WordCue{{Word: "Vamos", StartSeconds: 1, EndSeconds: 1.4}}
-	var calls []string
-	backends := []captionBackend{
-		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			calls = append(calls, "xai")
-			return nil, fmt.Errorf(
-				"captions: xai transcript has implausible word timings (%q spans %.2fs): %w",
-				"Martínez", 8.14, captions.ErrUnusableTranscript,
-			)
-		}},
-		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			calls = append(calls, "groq")
-			return want, nil
-		}},
-	}
-	got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
-	if err != nil {
-		t.Fatalf("transcribeCaptionsWithFallback error = %v", err)
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("got cues %v, want the groq transcript %v", got, want)
-	}
-	if !slices.Equal(calls, []string{"xai", "groq"}) {
-		t.Errorf("backend calls = %v, want xai then groq", calls)
-	}
-}
-
-// A backend can succeed and still return a transcript nobody said: on a real
-// 15s clip both xAI and Groq stamped two words across 11.8s. The chain must
-// reject a garbled transcript from ANY backend, not just from the preferred
-// one, and must not burn it in when it is the last backend left.
-func TestTranscribeCaptionsWithFallbackRejectsGarbledSuccessFromAnyBackend(t *testing.T) {
-	garbled := []captions.WordCue{
-		{Word: "Hola", StartSeconds: 0, EndSeconds: 3.66},
-		{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8},
-	}
-	good := []captions.WordCue{{Word: "Vamos", StartSeconds: 1, EndSeconds: 1.4}}
-
-	t.Run("garbled preferred backend falls through to a good one", func(t *testing.T) {
-		var calls []string
-		backends := []captionBackend{
-			{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-				calls = append(calls, "xai")
-				return garbled, nil
-			}},
-			{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-				calls = append(calls, "groq")
-				return good, nil
-			}},
 		}
-		got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+		got, err := transcribeCaptionsWithXAI(context.Background(), "clip.wav", t.TempDir(), transcribe)
 		if err != nil {
-			t.Fatalf("transcribeCaptionsWithFallback error = %v", err)
+			t.Fatalf("transcribeCaptionsWithXAI error = %v", err)
 		}
-		if !slices.Equal(got, good) {
-			t.Errorf("got cues %v, want the usable transcript %v", got, good)
-		}
-		if !slices.Equal(calls, []string{"xai", "groq"}) {
-			t.Errorf("backend calls = %v, want xai then groq", calls)
+		if len(got) != 1 || got[0] != want[0] {
+			t.Fatalf("got cues %v, want %v", got, want)
 		}
 	})
 
-	t.Run("every backend garbled publishes uncaptioned", func(t *testing.T) {
-		backends := []captionBackend{
-			{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-				return garbled, nil
-			}},
-			{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-				return garbled, nil
-			}},
+	t.Run("garbled transcript stays soft and never falls back", func(t *testing.T) {
+		transcribe := func(context.Context, string, string) ([]captions.WordCue, error) {
+			return []captions.WordCue{{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8}}, nil
 		}
-		got, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
+		got, err := transcribeCaptionsWithXAI(context.Background(), "clip.wav", t.TempDir(), transcribe)
 		if err == nil {
-			t.Fatalf("got cues %v, want an unusable-transcript error rather than garbled captions", got)
+			t.Fatalf("got cues %v, want unusable-transcript error", got)
 		}
 		if !errors.Is(err, captions.ErrUnusableTranscript) {
-			t.Errorf("got error %q, want it to wrap captions.ErrUnusableTranscript so the clip publishes uncaptioned", err)
+			t.Fatalf("error = %v, want ErrUnusableTranscript", err)
 		}
-		if !strings.Contains(err.Error(), "Hola") {
-			t.Errorf("got error %q, want it to name the offending word", err)
+	})
+
+	t.Run("transport failure is hard", func(t *testing.T) {
+		transcribe := func(context.Context, string, string) ([]captions.WordCue, error) {
+			return nil, errors.New("status 500")
+		}
+		_, err := transcribeCaptionsWithXAI(context.Background(), "clip.wav", t.TempDir(), transcribe)
+		if err == nil || !strings.Contains(err.Error(), "status 500") {
+			t.Fatalf("error = %v, want xAI transport failure", err)
+		}
+		if errors.Is(err, captions.ErrUnusableTranscript) {
+			t.Fatalf("error = %v, transport failure must not publish uncaptioned", err)
+		}
+	})
+
+	t.Run("cancelled context is hard", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		transcribe := func(context.Context, string, string) ([]captions.WordCue, error) {
+			cancel()
+			return []captions.WordCue{{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8}}, nil
+		}
+		_, err := transcribeCaptionsWithXAI(ctx, "clip.wav", t.TempDir(), transcribe)
+		if err == nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context cancellation", err)
+		}
+		if errors.Is(err, captions.ErrUnusableTranscript) {
+			t.Fatalf("error = %v, cancellation must not publish uncaptioned", err)
 		}
 	})
 }
 
-// A cancelled render must fail, not quietly publish uncaptioned: "the audio had
-// no usable speech" and "we gave up half way" are different outcomes, and only
-// the first one may downgrade to a warning.
-func TestTranscribeCaptionsWithFallbackCancelledContextIsHard(t *testing.T) {
-	garbled := []captions.WordCue{{Word: "Martínez", StartSeconds: 3.66, EndSeconds: 11.8}}
-	ctx, cancel := context.WithCancel(context.Background())
-	backends := []captionBackend{
-		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			cancel()
-			return garbled, nil
-		}},
-		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			t.Error("groq must not run after the context is cancelled")
-			return nil, nil
-		}},
-	}
-	_, err := transcribeCaptionsWithFallback(ctx, "clip.wav", t.TempDir(), backends)
-	if err == nil {
-		t.Fatal("transcribeCaptionsWithFallback returned nil error, want a cancellation error")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("got error %q, want it to wrap context.Canceled", err)
-	}
-	if errors.Is(err, captions.ErrUnusableTranscript) {
-		t.Errorf("got error %q, want cancellation not to be downgraded to a publish-uncaptioned warning", err)
-	}
-}
-
-func TestTranscribeCaptionsWithFallbackHardErrorFailsRender(t *testing.T) {
-	// One backend producing an unusable transcript must not mask another
-	// backend's hard failure as a warning: captions were explicitly requested,
-	// so the render fails and the user sees the real error.
-	backends := []captionBackend{
-		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
-		}},
-		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			return nil, fmt.Errorf("captions: groq transcription request failed (status 500)")
-		}},
-	}
-	_, err := transcribeCaptionsWithFallback(context.Background(), "clip.wav", t.TempDir(), backends)
-	if err == nil {
-		t.Fatal("transcribeCaptionsWithFallback returned nil error, want an error")
-	}
-	if errors.Is(err, captions.ErrUnusableTranscript) {
-		t.Errorf("got error %q, want the hard failure not to be downgraded to a soft warning", err.Error())
-	}
-	if !strings.Contains(err.Error(), "status 500") {
-		t.Errorf("got error %q, want it to surface the groq failure", err.Error())
-	}
-}
-
-func TestTranscribeCaptionsWithFallbackStopsOnCancelledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	var calls []string
-	backends := []captionBackend{
-		{name: "xai", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			calls = append(calls, "xai")
-			cancel()
-			return nil, fmt.Errorf("captions: xai transcription interrupted: %w", context.Canceled)
-		}},
-		{name: "groq", transcribe: func(context.Context, string, string) ([]captions.WordCue, error) {
-			calls = append(calls, "groq")
-			return nil, errors.New("must not be called after cancellation")
-		}},
-	}
-	_, err := transcribeCaptionsWithFallback(ctx, "clip.wav", t.TempDir(), backends)
-	if err == nil {
-		t.Fatal("transcribeCaptionsWithFallback returned nil error, want a context error")
-	}
-	if !slices.Equal(calls, []string{"xai"}) {
-		t.Errorf("backend calls = %v, want the chain to stop at xai after cancellation", calls)
-	}
-}
-
-func TestNewStreamRenderWorker_PrefersXAIWhenWhisperAlsoConfigured(t *testing.T) {
-	// The transcribe seam is built once in NewStreamRenderWorker from cfg; when
-	// both backends are configured it must choose xAI rather than local whisper.
-	// A cancelled context stops xAI before network access, while selecting local
-	// Whisper would fail on the intentionally missing binary.
-	repo := newFakeStreamRepo()
-	store := newFakeStorage()
-	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
-		XAIAPIKey:        "xai_test",
-		WhisperPath:      filepath.Join(t.TempDir(), "does-not-exist-whisper-cli.exe"),
-		WhisperModelPath: filepath.Join(t.TempDir(), "does-not-exist-model.bin"),
-	})
-
+func TestNewStreamRenderWorkerUsesXAI(t *testing.T) {
+	w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{XAIAPIKey: "xai_test"})
 	dir := t.TempDir()
 	mediaPath := filepath.Join(dir, "clip.mp4")
 	if err := os.WriteFile(mediaPath, []byte("fake media"), 0o644); err != nil {
@@ -963,14 +660,10 @@ func TestNewStreamRenderWorker_PrefersXAIWhenWhisperAlsoConfigured(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := w.transcribe(ctx, mediaPath, dir, "en")
-	if err == nil {
-		t.Fatal("transcribe returned nil error, want a context error")
-	}
-	if strings.Contains(err.Error(), "whisper binary not found") {
-		t.Fatalf("got error %q, selection used local whisper instead of xai", err.Error())
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("transcribe error = %v, want xAI context cancellation", err)
 	}
 }
-
 func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, true)
@@ -982,7 +675,7 @@ func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) 
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
 	})
 
-	// Neither XAIAPIKey nor Whisper*Path is set: the worker must fail fast
+	// XAIAPIKey is not set: the worker must fail fast
 	// (defensively, even though the HTTP layer already gates this) rather than
 	// launch ffmpeg and then fail deep into the render.
 	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{FFmpegPath: "ffmpeg"})
@@ -995,8 +688,8 @@ func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) 
 	if err == nil {
 		t.Fatal("HandleRenderStreamClip returned nil error, want an error")
 	}
-	if !strings.Contains(err.Error(), "no transcription backend is configured") {
-		t.Fatalf("got error %q, want it to mention no transcription backend is configured", err.Error())
+	if !strings.Contains(err.Error(), "xAI is not configured") {
+		t.Fatalf("got error %q, want it to mention that xAI is not configured", err.Error())
 	}
 }
 

@@ -10,6 +10,7 @@ import {
   clampStreamerBannerPosition,
   killfeedKillsForCue,
   killfeedNoticePlacement,
+  killfeedSampleFrameSeconds,
   proportionalEvenKillfeedHeight,
   resolveActiveKillfeedCue,
   resolveStreamerBannerPosition,
@@ -404,7 +405,7 @@ export function StreamPreview({
         <KillfeedOverlayFrame
           videoSrc={videoSrc}
           rect={killfeedCrop}
-          frameSeconds={activeKillfeedCue ?? frameSeconds}
+          frameSeconds={activeKillfeedCue === null ? frameSeconds : killfeedSampleFrameSeconds(clips, activeKillfeedCue)}
           topPixels={killfeedTop}
           visible={activeKillfeedCue !== null}
         />

@@ -67,7 +67,8 @@ export function calculateCropCoverGeometry(
 }
 
 const KILLFEED_WIDTH = 620;
-const KILLFEED_LEAD_SECONDS = 0.35;
+const KILLFEED_SAMPLE_DELAY_SECONDS = 0.35;
+const KILLFEED_SAMPLE_END_GUARD_SECONDS = 0.05;
 const KILLFEED_TAIL_SECONDS = 2.8;
 
 export function proportionalEvenKillfeedHeight(
@@ -97,7 +98,7 @@ export function resolveActiveKillfeedCue(
       ) {
         continue;
       }
-      const visibleFrom = Math.max(clip.start_seconds, cue - KILLFEED_LEAD_SECONDS);
+      const visibleFrom = cue;
       const visibleThrough = Math.min(clip.end_seconds, cue + KILLFEED_TAIL_SECONDS);
       if (
         frameSeconds >= visibleFrom &&
@@ -110,6 +111,22 @@ export function resolveActiveKillfeedCue(
     }
   }
   return activeCue;
+}
+
+/**
+ * Returns the later source frame used to read/freeze a cue while keeping the
+ * cue itself as the exact instant the rendered notice becomes visible.
+ */
+export function killfeedSampleFrameSeconds(clips: StreamClipRange[], cue: number): number {
+  for (const clip of clips) {
+    if ((clip.killfeed_seconds ?? []).includes(cue)) {
+      return Math.min(
+        cue + KILLFEED_SAMPLE_DELAY_SECONDS,
+        Math.max(cue, clip.end_seconds - KILLFEED_SAMPLE_END_GUARD_SECONDS),
+      );
+    }
+  }
+  return cue;
 }
 
 // Synthetic notice stack geometry, in output pixels on the 1080x1920 canvas,

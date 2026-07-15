@@ -105,7 +105,7 @@ func (h *Handlers) ReadStreamKillfeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	frame, err := h.killfeedFrame(r.Context(), j.SourcePath, req.CueSeconds+streamclips.KillfeedSampleDelaySeconds)
+	frame, err := h.killfeedFrame(r.Context(), j.SourcePath, streamclips.KillfeedSampleSeconds(req.CueSeconds, clip.EndSeconds))
 	if err != nil {
 		internalError(w, "extract killfeed frame", err)
 		return

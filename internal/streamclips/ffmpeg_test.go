@@ -248,7 +248,7 @@ func TestBuildFFmpegArgsBuildsNoticeOverlayGraph(t *testing.T) {
 	wantFilter := strings.Join(append(
 		append([]string{`[0:v]split=2[facein][gamein]`}, stackedLayoutBranches...),
 		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
-		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[content]`,
 		`[content]fps=60,format=yuv420p[v]`,
 	), ";")
 	if got := filterComplexArg(t, args); got != wantFilter {
@@ -321,9 +321,9 @@ func TestBuildFFmpegArgsMixesNoticesAndFrozenCropFallback(t *testing.T) {
 		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
 		`[2:v]format=rgba,setpts=PTS-STARTPTS[notice0_1]`,
 		`[killfeedin1]trim=start=2.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed1]`,
-		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[kfover0]`,
-		`[kfover0][notice0_1]overlay=x=W-w-24:y=896:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[kfover1]`,
-		`[kfover1][killfeed1]overlay=x=W-w-24:y=840:enable='between(t\,1.650000\,4.800000)':eof_action=pass:shortest=0[content]`,
+		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[kfover0]`,
+		`[kfover0][notice0_1]overlay=x=W-w-24:y=896:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[kfover1]`,
+		`[kfover1][killfeed1]overlay=x=W-w-24:y=840:enable='between(t\,2.000000\,4.800000)':eof_action=pass:shortest=0[content]`,
 		`[content]fps=60,format=yuv420p[v]`,
 	), ";")
 	if got := filterComplexArg(t, args); got != wantFilter {
@@ -355,7 +355,7 @@ func TestBuildFFmpegArgsFrozenCropFallbackGeometry(t *testing.T) {
 	wantFilter := strings.Join(append(
 		append([]string{`[0:v]split=3[facein][gamein][killfeedin0]`}, stackedLayoutBranches...),
 		`[killfeedin0]trim=start=1.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0]`,
-		`[layout][killfeed0]overlay=x=W-w-24:y=840:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[layout][killfeed0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[content]`,
 		`[content]fps=60,format=yuv420p[v]`,
 	), ";")
 	if got := filterComplexArg(t, args); got != wantFilter {
@@ -434,6 +434,26 @@ func TestKillfeedFreezeOffsetNeverTrimsPastTheClip(t *testing.T) {
 	}
 }
 
+func TestKillfeedSampleSecondsSeparatesReadDelayFromCueTiming(t *testing.T) {
+	tests := []struct {
+		name    string
+		cue     float64
+		clipEnd float64
+		want    float64
+	}{
+		{name: "normal cue samples after the kill", cue: 7.58, clipEnd: 15.15, want: 7.93},
+		{name: "near-end cue stays inside its clip", cue: 9.9, clipEnd: 10, want: 9.95},
+		{name: "cue inside the end guard never rewinds", cue: 9.99, clipEnd: 10, want: 9.99},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := KillfeedSampleSeconds(tt.cue, tt.clipEnd); math.Abs(got-tt.want) > 1e-9 {
+				t.Fatalf("KillfeedSampleSeconds(%v, %v) = %v, want %v", tt.cue, tt.clipEnd, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildFFmpegArgsFullframeNoticeGraphOmitsDegenerateSplit(t *testing.T) {
 	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
 	clip := ClipRange{
@@ -460,7 +480,7 @@ func TestBuildFFmpegArgsFullframeNoticeGraphOmitsDegenerateSplit(t *testing.T) {
 	wantFilter := strings.Join([]string{
 		`[0:v]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[layout]`,
 		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
-		`[layout][notice0_0]overlay=x=W-w-24:y=64:enable='between(t\,0.650000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[layout][notice0_0]overlay=x=W-w-24:y=64:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[content]`,
 		`[content]fps=60,format=yuv420p[v]`,
 	}, ";")
 	got := filterComplexArg(t, args)

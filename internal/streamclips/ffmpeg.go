@@ -28,12 +28,10 @@ const (
 	killfeedNoticeStackGap = 8
 	// KillfeedSampleDelaySeconds is how long after a cue a killfeed frame is
 	// sampled: at the cue itself the newest notice may not be drawn at all, and
-	// its highlight ring is still fading in. Both readers of a cue frame wait it
-	// out — the xAI vision reader (httpapi.ReadStreamKillfeed) and the frozen-crop
-	// fallback (killfeedFreezeOffset) — so the two never disagree about which
-	// kills a cue shows. killfeedLeadTime must stay at least this long.
+	// its highlight ring is still fading in. Sampling is deliberately separate
+	// from display timing: a cue is the exact kill instant, so the rendered
+	// notice starts at the cue rather than inheriting this read delay.
 	KillfeedSampleDelaySeconds = 0.35
-	killfeedLeadTime           = 0.35
 	killfeedTrailTime          = 2.8
 	// killfeedFreezeEndGuard keeps a delayed freeze sample clear of the clip's
 	// final frame, so trim=start always lands on a frame that exists.
@@ -438,7 +436,7 @@ func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRang
 	var overlays []overlay
 	for i := range clip.KillfeedSeconds {
 		relative := clip.KillfeedSeconds[i] - clip.StartSeconds
-		start := math.Max(0, relative-killfeedLeadTime)
+		start := math.Max(0, relative)
 		end := math.Min(duration, relative+killfeedTrailTime)
 		if hasNotices(i) {
 			for j := range noticePaths[i] {
@@ -576,7 +574,15 @@ func ffmpegFilterPath(value string) string {
 // same physical reason. The offset is clamped inside the clip so a cue at the
 // very end still resolves to a real frame instead of trimming past the last one.
 func killfeedFreezeOffset(relative, duration float64) float64 {
-	return min(relative+KillfeedSampleDelaySeconds, max(relative, duration-killfeedFreezeEndGuard))
+	return KillfeedSampleSeconds(relative, duration)
+}
+
+// KillfeedSampleSeconds maps an exact kill cue onto the later frame used for
+// vision/frozen-crop sampling. It keeps the sample inside the owning clip so a
+// cue near the end cannot read the following scene, while never moving before
+// the cue itself.
+func KillfeedSampleSeconds(cue, clipEnd float64) float64 {
+	return min(cue+KillfeedSampleDelaySeconds, max(cue, clipEnd-killfeedFreezeEndGuard))
 }
 
 func cropFilter(c CropRect) string {

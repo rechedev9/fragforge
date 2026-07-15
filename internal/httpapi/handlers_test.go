@@ -3051,7 +3051,7 @@ func TestStartStreamRenderPreservesRenderedStateWhenFinishedTaskIsStillDuplicate
 	}
 }
 
-func TestStartStreamRenderRejectsCaptionsWithoutWhisper(t *testing.T) {
+func TestStartStreamRenderRejectsCaptionsWithoutXAI(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	id := uuid.New()
 	plan := streamclips.DefaultEditPlan()
@@ -3062,7 +3062,7 @@ func TestStartStreamRenderRejectsCaptionsWithoutWhisper(t *testing.T) {
 	}
 	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON}
 	queue := &fakeQueue{}
-	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo)) // no WithCapabilities -> WhisperEnabled/XAIEnabled false
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo)) // no WithCapabilities -> XAIEnabled false
 	r := Routes(h)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+streamclips.DefaultVariant().Name, nil)
