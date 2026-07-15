@@ -58,9 +58,12 @@ const xaiSuccessBodyMax int64 = 64 << 20
 // per-region language detection or automatic quality retries. It never logs or
 // returns the API key.
 type XAITranscriber struct {
-	APIKey   string
-	BaseURL  string // defaults to "https://api.x.ai/v1"
-	Language string // ISO code (e.g. "es", "en"), or "auto"/"" to let xAI detect
+	APIKey  string
+	BaseURL string // defaults to "https://api.x.ai/v1"
+	// Language controls inverse text formatting (numbers, currencies, units).
+	// xAI transcribes multilingual speech regardless; "auto"/empty disables
+	// formatting because the REST API requires a language when format=true.
+	Language string
 
 	// HTTPClient performs the upload. A nil client falls back to one with
 	// defaultXAIHTTPTimeout, generous enough for a large single-request upload.
@@ -106,9 +109,9 @@ func (x XAITranscriber) transcribe(ctx context.Context, mediaPath string) ([]byt
 	writer := multipart.NewWriter(pw)
 	go func() {
 		// The xAI docs require the file field to be positioned last in the
-		// payload, so the optional language field is written before it. Omit the
-		// language field entirely for "auto"/empty so xAI detects it, rather than
-		// sending a literal "auto".
+		// payload, so the optional formatting fields are written before it. Omit
+		// them for "auto"/empty; language does not constrain recognition and the
+		// REST API rejects format=true without an explicit language.
 		if lang := strings.TrimSpace(x.Language); lang != "" && !strings.EqualFold(lang, "auto") {
 			if err := writer.WriteField("format", "true"); err != nil {
 				_ = pw.CloseWithError(fmt.Errorf("captions: building xai request: %w", err))

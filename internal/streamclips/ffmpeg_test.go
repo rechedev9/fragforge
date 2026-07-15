@@ -185,6 +185,145 @@ func TestNormalizeEditPlanSortsAndDeduplicatesKillfeedCuesWithoutMutatingCaller(
 	}
 }
 
+func TestNormalizeEditPlanSortsKillfeedKillsWithTheirCues(t *testing.T) {
+	first := validKill()
+	first.VictimName = "first"
+	second := validKill()
+	second.VictimName = "second"
+	plan := EditPlan{Clips: []ClipRange{{
+		ID:              "clip-001",
+		StartSeconds:    0,
+		EndSeconds:      10,
+		KillfeedSeconds: []float64{8, 2},
+		KillfeedKills:   [][]KillfeedKill{{second}, {first}},
+	}}}
+
+	normalized := NormalizeEditPlan(plan)
+	got := normalized.Clips[0]
+	if !slices.Equal(got.KillfeedSeconds, []float64{2, 8}) {
+		t.Fatalf("killfeed cues = %v, want [2 8]", got.KillfeedSeconds)
+	}
+	if got.KillfeedKills[0][0].VictimName != "first" || got.KillfeedKills[1][0].VictimName != "second" {
+		t.Fatalf("killfeed kills = %+v, want first/second aligned with sorted cues", got.KillfeedKills)
+	}
+}
+
+func TestNormalizeEditPlanMergesKillsAtDuplicateCues(t *testing.T) {
+	first := validKill()
+	first.VictimName = "first"
+	second := validKill()
+	second.VictimName = "second"
+	plan := EditPlan{Clips: []ClipRange{{
+		ID:              "clip-001",
+		StartSeconds:    0,
+		EndSeconds:      10,
+		KillfeedSeconds: []float64{2, 2, 2},
+		KillfeedKills:   [][]KillfeedKill{{first}, {second}, {first}},
+	}}}
+
+	got := NormalizeEditPlan(plan).Clips[0]
+	if !slices.Equal(got.KillfeedSeconds, []float64{2}) {
+		t.Fatalf("killfeed cues = %v, want [2]", got.KillfeedSeconds)
+	}
+	if len(got.KillfeedKills) != 1 || !slices.Equal(got.KillfeedKills[0], []KillfeedKill{first, second}) {
+		t.Fatalf("killfeed kills = %+v, want both unique kills at the duplicate cue", got.KillfeedKills)
+	}
+}
+
+func TestNormalizeEditPlanMigratesLegacyCumulativeKillfeedSnapshots(t *testing.T) {
+	first := validKill()
+	first.VictimName = "first"
+	second := validKill()
+	second.VictimName = "second"
+	third := validKill()
+	third.VictimName = "third"
+	plan := EditPlan{
+		SchemaVersion: "1.0",
+		Clips: []ClipRange{{
+			ID:              "clip-001",
+			StartSeconds:    0,
+			EndSeconds:      10,
+			KillfeedSeconds: []float64{2, 3, 4, 5},
+			KillfeedKills: [][]KillfeedKill{
+				{first},
+				{}, // unresolved cue must not reset the observed snapshot
+				{first, second},
+				{second, third},
+			},
+		}},
+	}
+
+	got := NormalizeEditPlan(plan)
+	if got.SchemaVersion != EditPlanSchemaVersion {
+		t.Fatalf("schema version = %q, want %q", got.SchemaVersion, EditPlanSchemaVersion)
+	}
+	want := [][]KillfeedKill{{first}, nil, {second}, {third}}
+	if !slices.EqualFunc(got.Clips[0].KillfeedKills, want, slices.Equal) {
+		t.Fatalf("killfeed events = %+v, want %+v", got.Clips[0].KillfeedKills, want)
+	}
+	if len(plan.Clips[0].KillfeedKills[2]) != 2 {
+		t.Fatalf("caller snapshots mutated: %+v", plan.Clips[0].KillfeedKills)
+	}
+}
+
+func TestEditPlanValidateForSourceDurationRejectsOverrun(t *testing.T) {
+	plan := DefaultEditPlan()
+	plan.Clips = []ClipRange{{ID: "clip-001", StartSeconds: 0, EndSeconds: 20}}
+
+	err := plan.ValidateForSourceDuration(15.15)
+	if err == nil || !strings.Contains(err.Error(), "exceeds source duration 15.150") {
+		t.Fatalf("ValidateForSourceDuration error = %v, want source-duration overrun", err)
+	}
+
+	plan.Clips[0].EndSeconds = 15.15
+	if err := plan.ValidateForSourceDuration(15.15); err != nil {
+		t.Fatalf("ValidateForSourceDuration exact bound error = %v", err)
+	}
+}
+
+func TestMigrateLegacySourceDurationOnlyFitsHistoricalTwentySecondDefault(t *testing.T) {
+	kill := KillfeedKill{AttackerSide: "CT", AttackerName: "a", VictimSide: "T", VictimName: "b", Weapon: "awp"}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &CropRect{X: 0.8, Y: 0, Width: 0.2, Height: 0.2}
+	plan.Clips = []ClipRange{
+		{
+			ID:              "legacy",
+			StartSeconds:    0,
+			EndSeconds:      20,
+			KillfeedSeconds: []float64{2.5, 16},
+			KillfeedKills:   [][]KillfeedKill{{kill}, {kill}},
+		},
+		{ID: "outside", StartSeconds: 18, EndSeconds: 20},
+	}
+
+	got, changed := MigrateLegacySourceDuration(plan, 15.15)
+	if !changed {
+		t.Fatal("MigrateLegacySourceDuration changed = false, want true")
+	}
+	if len(got.Clips) != 1 || got.Clips[0].EndSeconds != 15.15 {
+		t.Fatalf("migrated clips = %+v, want one clip ending at 15.15", got.Clips)
+	}
+	if !slices.Equal(got.Clips[0].KillfeedSeconds, []float64{2.5}) || len(got.Clips[0].KillfeedKills) != 1 {
+		t.Fatalf("migrated killfeed = %v / %+v, want only in-range cue and kills", got.Clips[0].KillfeedSeconds, got.Clips[0].KillfeedKills)
+	}
+	if plan.Clips[0].EndSeconds != 20 || len(plan.Clips[0].KillfeedSeconds) != 2 {
+		t.Fatalf("caller mutated: %+v", plan.Clips[0])
+	}
+	if err := got.ValidateForSourceDuration(15.15); err != nil {
+		t.Fatalf("migrated plan validation error = %v", err)
+	}
+
+	custom := DefaultEditPlan()
+	custom.Clips = []ClipRange{{ID: "custom", StartSeconds: 0, EndSeconds: 19}}
+	unchanged, changed := MigrateLegacySourceDuration(custom, 15.15)
+	if changed || unchanged.Clips[0].EndSeconds != 19 {
+		t.Fatalf("custom overrun was migrated: changed=%v plan=%+v", changed, unchanged)
+	}
+	if err := unchanged.ValidateForSourceDuration(15.15); err == nil {
+		t.Fatal("custom overrun validation succeeded, want strict rejection")
+	}
+}
+
 func TestBuildFFmpegArgsCreatesVerticalStackCommand(t *testing.T) {
 	plan := DefaultEditPlan()
 	plan.Clips = []ClipRange{{ID: "clip-001", StartSeconds: 1.5, EndSeconds: 4.25}}
@@ -322,7 +461,7 @@ func TestBuildFFmpegArgsMixesNoticesAndFrozenCropFallback(t *testing.T) {
 		`[2:v]format=rgba,setpts=PTS-STARTPTS[notice0_1]`,
 		`[killfeedin1]trim=start=2.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed1]`,
 		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[kfover0]`,
-		`[kfover0][notice0_1]overlay=x=W-w-24:y=896:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[kfover1]`,
+		`[kfover0][notice0_1]overlay=x=W-w-24:y=840+56*(between(t\,1.000000\,3.800000)):enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[kfover1]`,
 		`[kfover1][killfeed1]overlay=x=W-w-24:y=840:enable='between(t\,2.000000\,4.800000)':eof_action=pass:shortest=0[content]`,
 		`[content]fps=60,format=yuv420p[v]`,
 	), ";")
@@ -332,6 +471,39 @@ func TestBuildFFmpegArgsMixesNoticesAndFrozenCropFallback(t *testing.T) {
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-loop 1 -i n0.png -loop 1 -i n1.png") {
 		t.Fatalf("both notice PNGs must be looped inputs in order: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsReflowsOverlappingNoticeEvents(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	clip := ClipRange{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{11, 11.125, 14},
+	}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:          "source.mp4",
+		OutputPath:          "out.mp4",
+		KillfeedNoticePaths: [][]string{{"n0.png"}, {"n1.png"}, {"n2.png"}},
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+
+	filter := filterComplexArg(t, args)
+	wants := []string{
+		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)'`,
+		`[kfover0][notice1_0]overlay=x=W-w-24:y=840+56*(between(t\,1.000000\,3.800000)):enable='between(t\,1.125000\,3.925000)'`,
+		`[kfover1][notice2_0]overlay=x=W-w-24:y=840:enable='between(t\,4.000000\,5.000000)'`,
+	}
+	for _, want := range wants {
+		if !strings.Contains(filter, want) {
+			t.Errorf("filter_complex missing %q: %s", want, filter)
+		}
 	}
 }
 

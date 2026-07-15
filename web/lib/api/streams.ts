@@ -54,6 +54,18 @@ export type KillfeedKill = {
   flash_assist?: boolean;
 };
 
+export type KillfeedReadEvent = {
+  cue_seconds: number;
+  kills: KillfeedKill[];
+};
+
+export type KillfeedReadResult = {
+  kills: KillfeedKill[];
+  cue_seconds: number;
+  aligned: boolean;
+  events: KillfeedReadEvent[];
+};
+
 /**
  * One burned-in text line, mirroring streamclips.TextOverlay. Times are
  * relative to the clip start in source seconds; missing bounds extend to the
@@ -158,8 +170,8 @@ export interface StreamsApiClient {
   listKillfeedWeapons(): Promise<string[]>;
   /** Renders one kill notice to the exact synthetic PNG the render uses. */
   previewKillfeedNotice(kill: KillfeedKill): Promise<Blob>;
-  /** Reads the confirmed kills visible at a cue with the xAI vision reader. */
-  readKillfeed(id: string, clipId: string, cueSeconds: number): Promise<KillfeedKill[]>;
+  /** Reads visible kills and aligns cumulative rows to their source events. */
+  readKillfeed(id: string, clipId: string, cueSeconds: number): Promise<KillfeedReadResult>;
 }
 
 /** Throws an Error (carrying any upstream `code`) for a non-2xx response. */
@@ -255,15 +267,27 @@ export class RealStreamsApiClient implements StreamsApiClient {
     return res.blob();
   }
 
-  async readKillfeed(id: string, clipId: string, cueSeconds: number): Promise<KillfeedKill[]> {
-    const data = await readJson<{ kills?: KillfeedKill[] }>(
+  async readKillfeed(id: string, clipId: string, cueSeconds: number): Promise<KillfeedReadResult> {
+    const data = await readJson<{
+      kills?: KillfeedKill[];
+      cue_seconds?: number;
+      aligned?: boolean;
+      events?: KillfeedReadEvent[];
+    }>(
       await fetch(`/api/streams/${id}/killfeed-read`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clip_id: clipId, cue_seconds: cueSeconds }),
       }),
     );
-    return data.kills ?? [];
+    const kills = data.kills ?? [];
+    const alignedCue = data.cue_seconds ?? cueSeconds;
+    return {
+      kills,
+      cue_seconds: alignedCue,
+      aligned: data.aligned ?? false,
+      events: data.events ?? [{ cue_seconds: alignedCue, kills }],
+    };
   }
 }
 

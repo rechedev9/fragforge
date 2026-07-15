@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { downloadFile } from './http-download.ts';
@@ -15,6 +16,8 @@ export interface RuntimeToolProvisioningOptions {
   platform?: NodeJS.Platform;
   signal?: AbortSignal;
   maxInstallTimeMs?: number;
+  bundledHLAEArchive?: string;
+  sha256File?: (filePath: string) => string;
   download?: typeof downloadFile;
   extractArchive?: (archive: string, destination: string, signal: AbortSignal) => Promise<void>;
 }
@@ -46,9 +49,9 @@ const FFMPEG_RELEASE_DIR = 'ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1';
 const FFMPEG_EXE = path.join(FFMPEG_RELEASE_DIR, 'bin', 'ffmpeg.exe');
 const FFPROBE_EXE = path.join(FFMPEG_RELEASE_DIR, 'bin', 'ffprobe.exe');
 
-// Third-party binaries that cannot be bundled in the installer are pinned and
-// installed below userData. Explicit paths are passed to the Go orchestrator,
-// which keeps the desktop boot boundary independent from host PATH contents.
+// Runtime tools are pinned and installed below userData. HLAE is sourced from
+// the installer bundle when present; larger tools retain verified downloads.
+// Explicit paths keep the desktop boot boundary independent from host PATH.
 const RUNTIME_TOOLS: Record<RuntimeToolName, RuntimeToolSpec> = {
   hlae: {
     ...PINNED_HLAE_TOOL,
@@ -101,6 +104,7 @@ export async function provisionRuntimeTools(
     provisionRuntimeTool(options, 'ytdlp', onStatus),
   ]);
   throwIfProvisioningAborted(options.signal);
+  if (hlae) cleanupObsoleteHLAEVersions(options.toolsDir, options.logLine);
   return runtimeToolEnvironment({ hlae, ffmpeg, ytdlp });
 }
 
@@ -228,8 +232,24 @@ async function installRuntimeTool(
   const archive = path.join(stagingDir, 'download.zip');
 
   try {
-    options.logLine(`[tools] downloading ${name} ${tool.version}...\n`);
-    const digest = await (options.download ?? downloadFile)(tool.url, partialDownload, { signal, onProgress });
+    const bundledArchive = name === 'hlae' ? options.bundledHLAEArchive : undefined;
+    let digest: string;
+    if (bundledArchive && fs.existsSync(bundledArchive)) {
+      options.logLine(`[tools] installing ${name} ${tool.version} from bundled archive...\n`);
+      digest = copyBundledArchive(
+        bundledArchive,
+        partialDownload,
+        signal,
+        onProgress,
+        options.sha256File,
+      );
+    } else {
+      if (bundledArchive) {
+        options.logLine(`[tools] bundled ${name} archive missing; falling back to verified download\n`);
+      }
+      options.logLine(`[tools] downloading ${name} ${tool.version}...\n`);
+      digest = await (options.download ?? downloadFile)(tool.url, partialDownload, { signal, onProgress });
+    }
     if (digest !== tool.sha256) {
       throw new Error(`sha256 mismatch: got ${digest}, want ${tool.sha256}`);
     }
@@ -255,6 +275,48 @@ async function installRuntimeTool(
     return executable;
   } finally {
     fs.rmSync(stagingDir, { recursive: true, force: true });
+  }
+}
+
+function copyBundledArchive(
+  source: string,
+  destination: string,
+  signal: AbortSignal,
+  onProgress: (received: number, total: number | undefined) => void,
+  digestFile: (filePath: string) => string = sha256File,
+): string {
+  throwIfProvisioningAborted(signal);
+  fs.copyFileSync(source, destination);
+  throwIfProvisioningAborted(signal);
+  const size = fs.statSync(destination).size;
+  onProgress(size, size);
+  return digestFile(destination);
+}
+
+function sha256File(filePath: string): string {
+  return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function cleanupObsoleteHLAEVersions(toolsDir: string, logLine: (text: string) => void): void {
+  const parent = path.join(toolsDir, 'hlae');
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(parent, { withFileTypes: true });
+  } catch (err) {
+    logLine(`[tools] could not inspect obsolete HLAE installs in ${parent}: ${String(err)}\n`);
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === PINNED_HLAE_TOOL.version) continue;
+    if (!/^\d+\.\d+\.\d+$/.test(entry.name)) continue;
+    const obsolete = path.join(parent, entry.name);
+    try {
+      fs.rmSync(obsolete, { recursive: true, force: true });
+      logLine(`[tools] removed obsolete HLAE ${entry.name}\n`);
+    } catch (err) {
+      logLine(`[tools] could not remove obsolete HLAE ${obsolete}: ${String(err)}\n`);
+    }
   }
 }
 

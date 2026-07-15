@@ -3,6 +3,7 @@ package streamclips
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -96,8 +97,10 @@ type iconCacheEntry struct {
 // when several render workers request it concurrently.
 var scaledIconCache sync.Map
 
-// noticeFace is the parsed Rajdhani-Bold face used for player names.
-var noticeFace = sync.OnceValues(func() (font.Face, error) {
+// noticeFont is the parsed Rajdhani-Bold font used for player names. Parsed
+// opentype.Font values are immutable and safe to share; font.Face values are
+// not concurrency-safe because they reuse glyph caches and mask buffers.
+var noticeFont = sync.OnceValues(func() (*opentype.Font, error) {
 	data, err := noticeAssets.ReadFile(assetsRoot + "/Rajdhani-Bold.ttf")
 	if err != nil {
 		return nil, fmt.Errorf("reading notice font: %w", err)
@@ -105,6 +108,14 @@ var noticeFace = sync.OnceValues(func() (font.Face, error) {
 	parsed, err := opentype.Parse(data)
 	if err != nil {
 		return nil, fmt.Errorf("parsing notice font: %w", err)
+	}
+	return parsed, nil
+})
+
+func newNoticeFace() (font.Face, error) {
+	parsed, err := noticeFont()
+	if err != nil {
+		return nil, err
 	}
 	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
 		Size:    nameFontSize,
@@ -115,7 +126,7 @@ var noticeFace = sync.OnceValues(func() (font.Face, error) {
 		return nil, fmt.Errorf("building notice face: %w", err)
 	}
 	return face, nil
-})
+}
 
 // WeaponKeys returns the sorted weapon icon keys (".png" stripped) that a kill
 // notice may reference. The flashbang_assist icon is excluded because it is an
@@ -158,14 +169,14 @@ func RenderNotice(kill KillfeedKill) (*image.RGBA, error) {
 		return nil, fmt.Errorf("kill notice: unknown weapon %q", kill.Weapon)
 	}
 
-	face, err := noticeFace()
+	face, err := newNoticeFace()
 	if err != nil {
 		return nil, err
 	}
 
 	elements, err := buildElements(kill, attacker, victim, face)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, face.Close())
 	}
 
 	width := noticeHPadding*2 + elementsWidth(elements)
@@ -197,6 +208,9 @@ func RenderNotice(kill KillfeedKill) (*image.RGBA, error) {
 			drawer.DrawString(el.text)
 		}
 		x += el.width
+	}
+	if err := face.Close(); err != nil {
+		return nil, fmt.Errorf("closing notice face: %w", err)
 	}
 	return canvas, nil
 }

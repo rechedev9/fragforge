@@ -120,17 +120,23 @@ test('installs uncached tools through staging and publishes only complete versio
   const toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-tools-'));
   t.after(() => fs.rmSync(toolsDir, { recursive: true, force: true }));
   const statuses: string[] = [];
+  const bundledHLAEArchive = path.join(toolsDir, 'bundled', 'hlae_2_191_0.zip');
+  fs.mkdirSync(path.dirname(bundledHLAEArchive), { recursive: true });
+  fs.writeFileSync(bundledHLAEArchive, 'bundled official archive fixture');
 
   const env = await provisionRuntimeTools(
     {
       toolsDir,
+      bundledHLAEArchive,
       logLine: () => {},
       platform: 'win32',
       download: async (url, destination, { onProgress } = {}) => {
+        assert.doesNotMatch(url, /advancedfx/);
         fs.writeFileSync(destination, 'downloaded');
         onProgress?.(10, 10);
         return digestFor(url);
       },
+      sha256File: () => digestFor('advancedfx'),
       extractArchive: async (_archive, destination) => {
         if (destination.includes(`${path.sep}hlae${path.sep}`)) {
           fs.writeFileSync(path.join(destination, 'HLAE.exe'), 'installed');
@@ -164,6 +170,31 @@ test('installs uncached tools through staging and publishes only complete versio
     assert.equal(fs.existsSync(`${installDir}.previous`), false);
     assert.equal(fs.existsSync(path.join(installDir, '.fragforge-install.json')), true);
   }
+});
+
+test('removes obsolete versioned HLAE caches after the pinned version is ready', async (t) => {
+  const toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-tools-'));
+  t.after(() => fs.rmSync(toolsDir, { recursive: true, force: true }));
+  seedCompleteHLAE(toolsDir);
+  seedCompleteFFmpeg(toolsDir);
+  seedCompleteYtdlp(toolsDir);
+  const obsolete = path.join(toolsDir, 'hlae', '2.190.2');
+  const unrelated = path.join(toolsDir, 'hlae', 'manual-backup');
+  fs.mkdirSync(obsolete, { recursive: true });
+  fs.mkdirSync(unrelated, { recursive: true });
+  fs.writeFileSync(path.join(obsolete, 'HLAE.exe'), 'old');
+  const logs: string[] = [];
+
+  const env = await provisionRuntimeTools({
+    toolsDir,
+    logLine: (line) => logs.push(line),
+    platform: 'win32',
+  });
+
+  assert.equal(typeof env.ZV_HLAE_PATH, 'string');
+  assert.equal(fs.existsSync(obsolete), false);
+  assert.equal(fs.existsSync(unrelated), true);
+  assert.match(logs.join(''), /removed obsolete HLAE 2\.190\.2/);
 });
 
 test('rejects a hash mismatch without publishing the failed tool', async (t) => {

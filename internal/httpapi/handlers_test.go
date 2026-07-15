@@ -2660,6 +2660,171 @@ func TestPutStreamEditPlanRejectsLargeJSONBody(t *testing.T) {
 	}
 }
 
+func TestPutStreamEditPlanRejectsClipPastProbedSourceDuration(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	streamRepo.jobs[id] = streamclips.Job{
+		ID:         id,
+		Status:     streamclips.StatusUploaded,
+		SourcePath: streamclips.SourceKey(id),
+		Probe:      streamclips.SourceProbe{DurationSeconds: 15.15},
+	}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{}, WithStreamRepository(streamRepo))
+	plan := streamclips.DefaultEditPlan()
+	plan.Clips = []streamclips.ClipRange{{ID: "clip-001", StartSeconds: 0, EndSeconds: 20}}
+	body, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := chi.NewRouter()
+	r.Put("/api/stream-jobs/{id}/edit-plan", h.PutStreamEditPlan)
+	req := httptest.NewRequest(http.MethodPut, "/api/stream-jobs/"+id.String()+"/edit-plan", bytes.NewReader(body))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), "exceeds source duration 15.150") {
+		t.Fatalf("body = %s, want source-duration error", rw.Body.String())
+	}
+	if streamRepo.jobs[id].Status != streamclips.StatusUploaded {
+		t.Fatalf("job status = %s, want uploaded because invalid plan was not saved", streamRepo.jobs[id].Status)
+	}
+}
+
+func TestStartStreamRenderAcceptsLegacyTwentySecondPlanWithoutPersistingMigration(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	id := uuid.New()
+	plan := streamclips.DefaultEditPlan()
+	plan.Clips = []streamclips.ClipRange{{ID: "legacy", StartSeconds: 0, EndSeconds: 20}}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRepo.jobs[id] = streamclips.Job{
+		ID:         id,
+		Status:     streamclips.StatusReady,
+		SourcePath: streamclips.SourceKey(id),
+		Probe:      streamclips.SourceProbe{DurationSeconds: 15.15},
+		EditPlan:   planJSON,
+	}
+	h := NewHandlers(newFakeRepo(), store, queue, WithStreamRepository(streamRepo))
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+plan.Variant, nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	var saved streamclips.EditPlan
+	if err := json.Unmarshal(streamRepo.jobs[id].EditPlan, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Clips[0].EndSeconds, 20.0; got != want {
+		t.Fatalf("saved legacy end_seconds = %.2f, want unchanged %.2f", got, want)
+	}
+	if _, ok := store.puts[streamclips.EditPlanKey(id)]; ok {
+		t.Fatal("render start persisted an in-memory legacy migration")
+	}
+	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeRenderStreamClip {
+		t.Fatalf("queue = %#v, want one stream render", queue.enqueued)
+	}
+}
+
+func TestStartStreamRenderRejectsBeforePersistingPartialLegacyMigration(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	id := uuid.New()
+	plan := streamclips.DefaultEditPlan()
+	plan.Clips = []streamclips.ClipRange{
+		{ID: "legacy", StartSeconds: 0, EndSeconds: 20},
+		{ID: "custom-overrun", StartSeconds: 0, EndSeconds: 19},
+	}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRepo.jobs[id] = streamclips.Job{
+		ID:         id,
+		Status:     streamclips.StatusReady,
+		SourcePath: streamclips.SourceKey(id),
+		Probe:      streamclips.SourceProbe{DurationSeconds: 15.15},
+		EditPlan:   planJSON,
+	}
+	h := NewHandlers(newFakeRepo(), store, queue, WithStreamRepository(streamRepo))
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+plan.Variant, nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	var persisted streamclips.EditPlan
+	if err := json.Unmarshal(streamRepo.jobs[id].EditPlan, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if gotLegacy, gotCustom := persisted.Clips[0].EndSeconds, persisted.Clips[1].EndSeconds; gotLegacy != 20 || gotCustom != 19 {
+		t.Fatalf("persisted clip ends = [%.0f %.0f], want unchanged [20 19]", gotLegacy, gotCustom)
+	}
+	if _, ok := store.puts[streamclips.EditPlanKey(id)]; ok {
+		t.Fatal("invalid partially migrated edit-plan artifact was written")
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("invalid plan enqueued work: %#v", queue.enqueued)
+	}
+}
+
+func TestStartStreamRenderRejectsLegacyPlanWhollyPastEOFWithoutPersisting(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	store := newFakeStorage()
+	queue := &fakeQueue{}
+	id := uuid.New()
+	plan := streamclips.DefaultEditPlan()
+	plan.Clips = []streamclips.ClipRange{{ID: "legacy", StartSeconds: 16, EndSeconds: 20}}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRepo.jobs[id] = streamclips.Job{
+		ID:         id,
+		Status:     streamclips.StatusReady,
+		SourcePath: streamclips.SourceKey(id),
+		Probe:      streamclips.SourceProbe{DurationSeconds: 15.15},
+		EditPlan:   planJSON,
+	}
+	h := NewHandlers(newFakeRepo(), store, queue, WithStreamRepository(streamRepo))
+	r := Routes(h)
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+plan.Variant, nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	if !strings.Contains(rw.Body.String(), "no clips") {
+		t.Fatalf("body = %s, want no-clips migration error", rw.Body.String())
+	}
+	var persisted streamclips.EditPlan
+	if err := json.Unmarshal(streamRepo.jobs[id].EditPlan, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if gotStart, gotEnd := persisted.Clips[0].StartSeconds, persisted.Clips[0].EndSeconds; gotStart != 16 || gotEnd != 20 {
+		t.Fatalf("persisted legacy clip = %.2f-%.2f, want unchanged 16-20", gotStart, gotEnd)
+	}
+	if _, ok := store.puts[streamclips.EditPlanKey(id)]; ok {
+		t.Fatal("empty migrated edit-plan artifact was written")
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("empty plan enqueued work: %#v", queue.enqueued)
+	}
+}
+
 func TestStreamVideoRejectsUnsafeClipID(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	id := uuid.New()

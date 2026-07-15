@@ -81,13 +81,15 @@ type CropRect struct {
 }
 
 type ClipRange struct {
-	ID              string           `json:"id"`
-	StartSeconds    float64          `json:"start_seconds"`
-	EndSeconds      float64          `json:"end_seconds"`
-	KillfeedSeconds []float64        `json:"killfeed_seconds,omitempty"`
-	KillfeedKills   [][]KillfeedKill `json:"killfeed_kills,omitempty"`
-	Title           string           `json:"title,omitempty"`
-	Edit            *ClipEdit        `json:"edit,omitempty"`
+	ID              string    `json:"id"`
+	StartSeconds    float64   `json:"start_seconds"`
+	EndSeconds      float64   `json:"end_seconds"`
+	KillfeedSeconds []float64 `json:"killfeed_seconds,omitempty"`
+	// KillfeedKills is index-aligned with KillfeedSeconds. Each inner slice
+	// contains only the notices born at that cue, not a cumulative snapshot.
+	KillfeedKills [][]KillfeedKill `json:"killfeed_kills,omitempty"`
+	Title         string           `json:"title,omitempty"`
+	Edit          *ClipEdit        `json:"edit,omitempty"`
 }
 
 // Clip edit limits. Speed stays within what chained atempo filters reproduce
@@ -172,6 +174,8 @@ type EditPlan struct {
 	Effects        EffectsPlan        `json:"effects,omitzero"`
 	UpdatedAt      time.Time          `json:"updated_at"`
 }
+
+const EditPlanSchemaVersion = "1.1"
 
 // StreamerBannerPlan adds an optional branded separator to the rendered
 // vertical clip. An empty Nick keeps the render visually unchanged.
@@ -300,7 +304,7 @@ func NewRenderState(id uuid.UUID, variant string, status Status, warnings []stri
 func DefaultEditPlan() EditPlan {
 	variant := DefaultVariant()
 	return EditPlan{
-		SchemaVersion: "1.0",
+		SchemaVersion: EditPlanSchemaVersion,
 		Variant:       variant.Name,
 		FaceCrop:      variant.DefaultFaceCrop,
 		GameplayCrop:  variant.DefaultGameplayCrop,
@@ -361,6 +365,87 @@ func (p EditPlan) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ValidateForSourceDuration validates the edit plan and also proves every clip
+// range fits inside the probed source media. A zero duration means the source
+// has not been probed and preserves the structural-only validation behavior.
+func (p EditPlan) ValidateForSourceDuration(durationSeconds float64) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if math.IsNaN(durationSeconds) || math.IsInf(durationSeconds, 0) || durationSeconds < 0 {
+		return fmt.Errorf("source duration must be finite and >= 0")
+	}
+	if durationSeconds == 0 {
+		return nil
+	}
+	const durationToleranceSeconds = 0.001
+	for _, clip := range p.Clips {
+		if clip.EndSeconds > durationSeconds+durationToleranceSeconds {
+			return fmt.Errorf(
+				"clip %s end_seconds %.3f exceeds source duration %.3f",
+				clip.ID, clip.EndSeconds, durationSeconds,
+			)
+		}
+	}
+	return nil
+}
+
+const legacyInitialClipEndSeconds = 20.0
+
+// MigrateLegacySourceDuration fits only the historical fixed 20-second clip
+// endpoint to a shorter probed source. Older Studio versions persisted that
+// default before media duration was loaded, so rejecting it during render
+// would strand otherwise valid jobs after an upgrade. Other overruns remain
+// untouched and fail ValidateForSourceDuration, preserving strict validation
+// for newly submitted or genuinely invalid plans.
+func MigrateLegacySourceDuration(plan EditPlan, durationSeconds float64) (EditPlan, bool) {
+	const tolerance = 0.001
+	if durationSeconds <= 0 || durationSeconds >= legacyInitialClipEndSeconds-tolerance ||
+		math.IsNaN(durationSeconds) || math.IsInf(durationSeconds, 0) {
+		return plan, false
+	}
+
+	plan = NormalizeEditPlan(plan)
+	clips := make([]ClipRange, 0, len(plan.Clips))
+	changed := false
+	for _, clip := range plan.Clips {
+		if math.Abs(clip.EndSeconds-legacyInitialClipEndSeconds) > tolerance || clip.EndSeconds <= durationSeconds+tolerance {
+			clips = append(clips, clip)
+			continue
+		}
+		changed = true
+		if clip.StartSeconds >= durationSeconds {
+			continue
+		}
+		clip.EndSeconds = durationSeconds
+		if len(clip.KillfeedSeconds) > 0 {
+			cues := make([]float64, 0, len(clip.KillfeedSeconds))
+			alignedKills := clip.KillfeedKills != nil && len(clip.KillfeedKills) == len(clip.KillfeedSeconds)
+			kills := clip.KillfeedKills
+			if alignedKills {
+				kills = make([][]KillfeedKill, 0, len(clip.KillfeedKills))
+			}
+			for i, cue := range clip.KillfeedSeconds {
+				if cue < clip.StartSeconds || cue >= clip.EndSeconds {
+					continue
+				}
+				cues = append(cues, cue)
+				if alignedKills {
+					kills = append(kills, clip.KillfeedKills[i])
+				}
+			}
+			clip.KillfeedSeconds = cues
+			clip.KillfeedKills = kills
+		}
+		clips = append(clips, clip)
+	}
+	if !changed {
+		return plan, false
+	}
+	plan.Clips = clips
+	return NormalizeEditPlan(plan), true
 }
 
 func (c CropRect) Validate(label string) error {
@@ -560,8 +645,9 @@ func validKillSide(side string) bool {
 }
 
 func NormalizeEditPlan(plan EditPlan) EditPlan {
-	if plan.SchemaVersion == "" {
-		plan.SchemaVersion = "1.0"
+	legacyKillfeedSnapshots := plan.SchemaVersion == "" || plan.SchemaVersion == "1.0"
+	if legacyKillfeedSnapshots {
+		plan.SchemaVersion = EditPlanSchemaVersion
 	}
 	if plan.Variant == "" {
 		plan.Variant = DefaultVariant().Name
@@ -573,10 +659,11 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 		plan.Clips = append([]ClipRange(nil), plan.Clips...)
 	}
 	for i := range plan.Clips {
+		plan.Clips[i] = normalizeClipRange(plan.Clips[i])
+		if legacyKillfeedSnapshots {
+			plan.Clips[i].KillfeedKills = killfeedSnapshotsToEvents(plan.Clips[i].KillfeedKills)
+		}
 		plan.Clips[i].ID = strings.TrimSpace(plan.Clips[i].ID)
-		plan.Clips[i].KillfeedSeconds = normalizeKillfeedSeconds(plan.Clips[i].KillfeedSeconds)
-		plan.Clips[i].KillfeedKills = normalizeKillfeedKills(plan.Clips[i].KillfeedKills)
-		plan.Clips[i].Edit = normalizeClipEdit(plan.Clips[i].Edit)
 	}
 	plan.StreamerBanner.Nick = strings.TrimSpace(plan.StreamerBanner.Nick)
 	plan.Music.Key = strings.TrimSpace(plan.Music.Key)
@@ -587,9 +674,41 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 	}
 	return plan
 }
+
+// killfeedSnapshotsToEvents migrates the cumulative snapshots stored by edit
+// plan schema 1.0 into the birth-only event deltas consumed by schema 1.1. An
+// empty entry means an unresolved frozen-crop cue, not an observed empty
+// snapshot, so it does not reset the previous observed snapshot.
+func killfeedSnapshotsToEvents(snapshots [][]KillfeedKill) [][]KillfeedKill {
+	if len(snapshots) == 0 {
+		return snapshots
+	}
+	events := make([][]KillfeedKill, len(snapshots))
+	var previous map[KillfeedKill]struct{}
+	for i, snapshot := range snapshots {
+		if len(snapshot) == 0 {
+			continue
+		}
+		current := make(map[KillfeedKill]struct{}, len(snapshot))
+		for _, kill := range snapshot {
+			if _, duplicate := current[kill]; duplicate {
+				continue
+			}
+			current[kill] = struct{}{}
+			if _, existed := previous[kill]; !existed {
+				events[i] = append(events[i], kill)
+			}
+		}
+		previous = current
+	}
+	return events
+}
+
 func normalizeClipRange(clip ClipRange) ClipRange {
-	clip.KillfeedSeconds = normalizeKillfeedSeconds(clip.KillfeedSeconds)
-	clip.KillfeedKills = normalizeKillfeedKills(clip.KillfeedKills)
+	clip.KillfeedSeconds, clip.KillfeedKills = normalizeKillfeedPlanEntries(
+		clip.KillfeedSeconds,
+		clip.KillfeedKills,
+	)
 	clip.Edit = normalizeClipEdit(clip.Edit)
 	return clip
 }
@@ -672,4 +791,59 @@ func normalizeKillfeedSeconds(cues []float64) []float64 {
 		writeIndex++
 	}
 	return normalized[:writeIndex]
+}
+
+// normalizeKillfeedPlanEntries sorts and deduplicates cues without breaking
+// the index alignment of their kill events. When kills are omitted (or the
+// input is already invalid because lengths differ), cue-only normalization is
+// retained and Validate reports any remaining length mismatch.
+func normalizeKillfeedPlanEntries(cues []float64, kills [][]KillfeedKill) ([]float64, [][]KillfeedKill) {
+	normalizedKills := normalizeKillfeedKills(kills)
+	if len(cues) == 0 || len(normalizedKills) == 0 || len(normalizedKills) != len(cues) {
+		return normalizeKillfeedSeconds(cues), normalizedKills
+	}
+
+	type entry struct {
+		cue   float64
+		kills []KillfeedKill
+	}
+	entries := make([]entry, len(cues))
+	for i, cue := range cues {
+		entries[i] = entry{cue: cue, kills: normalizedKills[i]}
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].cue < entries[j].cue
+	})
+
+	deduped := entries[:0]
+	for _, current := range entries {
+		if len(deduped) > 0 && deduped[len(deduped)-1].cue == current.cue {
+			deduped[len(deduped)-1].kills = mergeKillfeedKills(deduped[len(deduped)-1].kills, current.kills)
+			continue
+		}
+		deduped = append(deduped, current)
+	}
+
+	normalizedCues := make([]float64, len(deduped))
+	normalizedKills = make([][]KillfeedKill, len(deduped))
+	for i, current := range deduped {
+		normalizedCues[i] = current.cue
+		normalizedKills[i] = current.kills
+	}
+	return normalizedCues, normalizedKills
+}
+
+func mergeKillfeedKills(existing, incoming []KillfeedKill) []KillfeedKill {
+	merged := make([]KillfeedKill, 0, len(existing)+len(incoming))
+	seen := make(map[KillfeedKill]struct{}, len(existing)+len(incoming))
+	for _, kills := range [][]KillfeedKill{existing, incoming} {
+		for _, kill := range kills {
+			if _, ok := seen[kill]; ok {
+				continue
+			}
+			seen[kill] = struct{}{}
+			merged = append(merged, kill)
+		}
+	}
+	return merged
 }

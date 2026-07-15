@@ -99,8 +99,12 @@ type Handlers struct {
 	xaiAPIKey             string
 	killfeedVisionBaseURL string
 	// killfeedFrame extracts a single source frame at atSeconds. It defaults to
-	// an ffmpeg-backed extractor; tests replace it so they never shell out.
-	killfeedFrame func(ctx context.Context, sourceKey string, atSeconds float64) (image.Image, error)
+	// an ffmpeg-backed extractor; killfeedTimeline extracts a short, low-rate
+	// frame sequence in one ffmpeg process; killfeedNoticeRows detects highlighted
+	// rows. Tests replace these seams so they never shell out.
+	killfeedFrame      func(ctx context.Context, sourceKey string, atSeconds float64) (image.Image, error)
+	killfeedTimeline   func(ctx context.Context, sourceKey string, startSeconds, endSeconds float64, crop *streamclips.CropRect) ([]timedKillfeedRows, error)
+	killfeedNoticeRows func(image.Image, *streamclips.CropRect) []streamclips.NoticeRow
 }
 
 type Option func(*Handlers)
@@ -190,6 +194,12 @@ func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts
 	}
 	if h.killfeedFrame == nil {
 		h.killfeedFrame = h.extractKillfeedFrame
+	}
+	if h.killfeedTimeline == nil {
+		h.killfeedTimeline = h.extractKillfeedTimeline
+	}
+	if h.killfeedNoticeRows == nil {
+		h.killfeedNoticeRows = streamclips.DetectNoticeRows
 	}
 	return h
 }

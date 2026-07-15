@@ -193,10 +193,15 @@ and accepts the speech-oriented WAV extracted from the selected source range.
 The endpoint does not take a model name;
 xAI prices batch speech-to-text separately from streaming; check the
 [current Voice API pricing](https://x.ai/api/voice).
-Stream captions use xAI only. Each captioned clip makes one transcription
-request. If xAI returns no usable words or implausible word timings, the clip is
-published uncaptioned with a warning rather than substituting a transcript from
-another engine.
+Stream captions use xAI only. A normal captioned clip makes one transcription
+request. If the whole-range result is unusable, FragForge makes one
+speech-enhanced locator request and then re-transcribes at most four short,
+padded regions from the original audio that collectively cover the selected
+range; locator timings choose useful boundaries, but locator text is never
+published. If complete bounded coverage is not possible or those independent
+region reads still produce no usable words or implausible
+timings, the clip is published uncaptioned with a warning rather than burning a
+hallucinated transcript or substituting another engine.
 
 Source builds and every desktop installer do not contain a credential.
 In the installed desktop app, each Windows user can open `/settings` and save

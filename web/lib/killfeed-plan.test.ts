@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addClipCue, normalizeClipKillfeed, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from './killfeed-plan.ts';
+import { addClipCue, applyClipKillfeedRead, fitPlanToSourceDuration, initialStreamClipEnd, normalizeClipKillfeed, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from './killfeed-plan.ts';
 import type { KillfeedKill, StreamClipRange, StreamEditPlan } from './api/streams.ts';
 
 const KILL: KillfeedKill = {
@@ -10,6 +10,13 @@ const KILL: KillfeedKill = {
   victim_name: 'villain',
   weapon: 'ak47',
 };
+
+test('initialStreamClipEnd keeps the 20-second default while respecting short sources', () => {
+  assert.equal(initialStreamClipEnd(15.15), 15.15);
+  assert.equal(initialStreamClipEnd(120), 20);
+  assert.equal(initialStreamClipEnd(0), 20);
+  assert.equal(initialStreamClipEnd(Number.NaN), 20);
+});
 
 function clip(overrides: Partial<StreamClipRange> = {}): StreamClipRange {
   return { id: 'clip-1', start_seconds: 0, end_seconds: 20, ...overrides };
@@ -48,6 +55,15 @@ test('normalizeClipKillfeed dedupes cues, preferring the entry with kills', () =
   assert.deepEqual(normalized.killfeed_kills, [[KILL]]);
 });
 
+test('normalizeClipKillfeed merges unique kills from duplicate populated cues', () => {
+  const other: KillfeedKill = { ...KILL, victim_name: 'second' };
+  const normalized = normalizeClipKillfeed(
+    clip({ killfeed_seconds: [7, 7, 7], killfeed_kills: [[KILL], [other], [KILL]] }),
+  );
+  assert.deepEqual(normalized.killfeed_seconds, [7]);
+  assert.deepEqual(normalized.killfeed_kills, [[KILL, other]]);
+});
+
 test('normalizeKillfeedPlan strips cues and kills when there is no killfeed crop', () => {
   const plan: StreamEditPlan = {
     schema_version: '1.0',
@@ -57,6 +73,67 @@ test('normalizeKillfeedPlan strips cues and kills when there is no killfeed crop
   const normalized = normalizeKillfeedPlan(plan);
   assert.equal('killfeed_seconds' in normalized.clips[0], false);
   assert.equal('killfeed_kills' in normalized.clips[0], false);
+});
+
+test('normalizeKillfeedPlan migrates schema 1.0 cumulative snapshots to event deltas', () => {
+  const second: KillfeedKill = { ...KILL, victim_name: 'second' };
+  const third: KillfeedKill = { ...KILL, victim_name: 'third' };
+  const plan: StreamEditPlan = {
+    schema_version: '1.0',
+    variant: 'streamer-vertical-stack-40-60',
+    killfeed_crop: { x: 0.68, y: 0.04, width: 0.31, height: 0.14 },
+    clips: [clip({
+      killfeed_seconds: [2, 3, 4, 5],
+      killfeed_kills: [[KILL], [], [KILL, second], [second, third]],
+    })],
+  };
+
+  const normalized = normalizeKillfeedPlan(plan);
+
+  assert.equal(normalized.schema_version, '1.1');
+  assert.deepEqual(normalized.clips[0].killfeed_kills, [[KILL], [], [second], [third]]);
+  assert.deepEqual(plan.clips[0].killfeed_kills, [[KILL], [], [KILL, second], [second, third]]);
+});
+
+test('fitPlanToSourceDuration clamps legacy ranges and aligned killfeed data to EOF', () => {
+  const plan: StreamEditPlan = {
+    schema_version: '1.0',
+    variant: 'streamer-vertical-stack-40-60',
+    killfeed_crop: { x: 0.68, y: 0.04, width: 0.31, height: 0.14 },
+    clips: [
+      clip({
+        end_seconds: 20,
+        killfeed_seconds: [8, 16],
+        killfeed_kills: [[KILL], [{ ...KILL, victim_name: 'past-eof' }]],
+      }),
+    ],
+  };
+
+  const fitted = fitPlanToSourceDuration(plan, 15.15);
+  assert.equal(fitted.clips[0].end_seconds, 15.15);
+  assert.deepEqual(fitted.clips[0].killfeed_seconds, [8]);
+  assert.deepEqual(fitted.clips[0].killfeed_kills, [[KILL]]);
+  assert.equal(plan.clips[0].end_seconds, 20, 'caller plan must stay unchanged');
+});
+
+test('fitPlanToSourceDuration preserves custom overruns for strict backend validation', () => {
+  const plan: StreamEditPlan = {
+    schema_version: '1.0',
+    variant: 'streamer-vertical-stack-40-60',
+    clips: [
+      clip({ id: 'custom-overrun', end_seconds: 19 }),
+      clip({ id: 'custom-past-eof', start_seconds: 16, end_seconds: 19 }),
+    ],
+  };
+
+  const fitted = fitPlanToSourceDuration(plan, 15.15);
+  assert.deepEqual(
+    fitted.clips.map(({ id, start_seconds, end_seconds }) => ({ id, start_seconds, end_seconds })),
+    [
+      { id: 'custom-overrun', start_seconds: 0, end_seconds: 19 },
+      { id: 'custom-past-eof', start_seconds: 16, end_seconds: 19 },
+    ],
+  );
 });
 
 test('setClipCueKills replaces only the targeted cue kills and stays aligned', () => {
@@ -69,6 +146,90 @@ test('setClipCueKills replaces only the targeted cue kills and stays aligned', (
 test('setClipCueKills is a no-op for an unknown cue', () => {
   const base = clip({ killfeed_seconds: [4], killfeed_kills: [[KILL]] });
   assert.equal(setClipCueKills(base, 99, []), base);
+});
+
+test('applyClipKillfeedRead replaces cumulative snapshots with aligned event deltas', () => {
+  const second: KillfeedKill = { ...KILL, victim_name: 'second' };
+  const third: KillfeedKill = { ...KILL, victim_name: 'third' };
+  const base = clip({
+    killfeed_seconds: [7.575, 8.51],
+    killfeed_kills: [[KILL, second], [KILL, second, third]],
+  });
+
+  const updated = applyClipKillfeedRead(base, 8.51, [
+    { cue_seconds: 2.5, kills: [KILL] },
+    { cue_seconds: 2.6, kills: [second] },
+    { cue_seconds: 8.4, kills: [third] },
+  ]);
+
+  assert.deepEqual(updated.killfeed_seconds, [2.5, 2.6, 8.4]);
+  assert.deepEqual(updated.killfeed_kills, [[KILL], [second], [third]]);
+});
+
+test('applyClipKillfeedRead is idempotent across near-identical detector times', () => {
+  const base = clip({ killfeed_seconds: [2.5], killfeed_kills: [[KILL]] });
+  const updated = applyClipKillfeedRead(base, 2.5, [
+    { cue_seconds: 2.504, kills: [KILL] },
+  ]);
+  assert.deepEqual(updated.killfeed_seconds, [2.504]);
+  assert.deepEqual(updated.killfeed_kills, [[KILL]]);
+});
+
+test('applyClipKillfeedRead preserves unrelated kills from a cumulative cue', () => {
+  const unrelated: KillfeedKill = { ...KILL, victim_name: 'manual-kill' };
+  const base = clip({
+    killfeed_seconds: [8.51],
+    killfeed_kills: [[KILL, unrelated]],
+  });
+
+  const updated = applyClipKillfeedRead(base, 8.51, [
+    { cue_seconds: 2.5, kills: [KILL] },
+  ]);
+
+  assert.deepEqual(updated.killfeed_seconds, [2.5, 8.51]);
+  assert.deepEqual(updated.killfeed_kills, [[KILL], [unrelated]]);
+});
+
+test('applyClipKillfeedRead preserves unresolved cues outside the read interval', () => {
+  const base = clip({
+    killfeed_seconds: [2, 8.51, 12],
+    killfeed_kills: [[], [KILL], []],
+  });
+
+  const updated = applyClipKillfeedRead(base, 8.51, [
+    { cue_seconds: 8.25, kills: [KILL] },
+  ]);
+
+  assert.deepEqual(updated.killfeed_seconds, [2, 8.25, 12]);
+  assert.deepEqual(updated.killfeed_kills, [[], [KILL], []]);
+});
+
+test('applyClipKillfeedRead preserves unrelated unresolved cues inside the read interval', () => {
+  const base = clip({
+    killfeed_seconds: [2.7, 8.51],
+    killfeed_kills: [[], [KILL]],
+  });
+
+  const updated = applyClipKillfeedRead(base, 8.51, [
+    { cue_seconds: 2.5, kills: [KILL] },
+  ]);
+
+  assert.deepEqual(updated.killfeed_seconds, [2.5, 2.7]);
+  assert.deepEqual(updated.killfeed_kills, [[KILL], []]);
+});
+
+test('applyClipKillfeedRead clears stale kills when the requested snapshot is empty', () => {
+  const base = clip({
+    killfeed_seconds: [4],
+    killfeed_kills: [[KILL]],
+  });
+
+  const updated = applyClipKillfeedRead(base, 4, [
+    { cue_seconds: 4, kills: [] },
+  ]);
+
+  assert.deepEqual(updated.killfeed_seconds, [4]);
+  assert.equal(updated.killfeed_kills, undefined);
 });
 
 test('addClipCue inserts a cue and keeps kills aligned', () => {

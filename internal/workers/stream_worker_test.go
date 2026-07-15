@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -521,7 +522,7 @@ func TestStreamRenderWorkerPublishesUncaptionedWhenXAISourceHasNoAudio(t *testin
 	}
 }
 
-func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
+func TestStreamRenderWorkerRetriesSpeechEnhancedAudioForUneditedClipThenPublishesWarning(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, true)
 	planJSON, err := json.Marshal(plan)
@@ -559,10 +560,13 @@ func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
 		t.Fatalf("HandleRenderStreamClip error = %v", err)
 	}
 
-	// The render and xAI source-audio extraction ran; no caption burn pass since
-	// there were no usable cues.
-	if len(runner.calls) != 2 {
-		t.Fatalf("runner calls = %d, want 2 (render + xAI audio extraction)", len(runner.calls))
+	// The render, ordinary extraction, and bounded speech-locator pass ran; no
+	// recovery windows or caption burn pass since the locator found no words.
+	if len(runner.calls) != 3 {
+		t.Fatalf("runner calls = %d, want 3 (render + ordinary and enhanced xAI audio extraction)", len(runner.calls))
+	}
+	if got := argValue(runner.calls[2].args, "-af"); got != captionSpeechEnhanceFilter {
+		t.Fatalf("speech-enhanced -af = %q, want %q", got, captionSpeechEnhanceFilter)
 	}
 	wantKey, err := streamclips.RenderVideoKey(id, streamclips.VariantStreamer4060, "clip-001")
 	if err != nil {
@@ -579,6 +583,231 @@ func TestStreamRenderWorkerPublishesUncaptionedOnZeroCueWarning(t *testing.T) {
 	if !strings.Contains(string(store.files[stateKey]), "no words") {
 		t.Fatalf("render state missing zero-cue warning: %s", store.files[stateKey])
 	}
+}
+
+func TestTranscribeCaptionCuesUsesSpeechRegionRecovery(t *testing.T) {
+	w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+	var paths []string
+	w.transcribe = func(_ context.Context, mediaPath, _, _ string) ([]captions.WordCue, error) {
+		paths = append(paths, mediaPath)
+		return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
+	}
+	recoveryCalls := 0
+	cues, err := w.transcribeCaptionCues(context.Background(), "ordinary.wav", t.TempDir(), "auto", func() ([]captions.WordCue, error) {
+		recoveryCalls++
+		return []captions.WordCue{{Word: "hola", StartSeconds: 1, EndSeconds: 1.4}}, nil
+	})
+	if err != nil {
+		t.Fatalf("transcribeCaptionCues error = %v", err)
+	}
+	if recoveryCalls != 1 || len(paths) != 1 || paths[0] != "ordinary.wav" {
+		t.Fatalf("recovery calls = %d, paths = %v; want one ordinary pass then recovery", recoveryCalls, paths)
+	}
+	if len(cues) != 1 || cues[0].Word != "hola" {
+		t.Fatalf("cues = %+v, want recovered transcript", cues)
+	}
+}
+
+func TestTranscribeCaptionCuesKeepsCancellationHard(t *testing.T) {
+	t.Run("after ordinary transcript", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+		w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+			cancel()
+			return nil, fmt.Errorf("captions: no words: %w", captions.ErrUnusableTranscript)
+		}
+		retryCalled := false
+		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", func() ([]captions.WordCue, error) {
+			retryCalled = true
+			return nil, nil
+		})
+		if !errors.Is(err, context.Canceled) || errors.Is(err, captions.ErrUnusableTranscript) {
+			t.Fatalf("error = %v, want only context cancellation", err)
+		}
+		if retryCalled {
+			t.Fatal("speech retry ran after context cancellation")
+		}
+	})
+
+	t.Run("while extracting retry audio", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+		w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+			return nil, fmt.Errorf("captions: no words: %w", captions.ErrUnusableTranscript)
+		}
+		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", func() ([]captions.WordCue, error) {
+			cancel()
+			return nil, errors.New("ffmpeg canceled")
+		})
+		if !errors.Is(err, context.Canceled) || errors.Is(err, captions.ErrUnusableTranscript) {
+			t.Fatalf("error = %v, want only context cancellation", err)
+		}
+	})
+
+	t.Run("during enhanced transcript", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+		w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+			return nil, fmt.Errorf("captions: no words: %w", captions.ErrUnusableTranscript)
+		}
+		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", func() ([]captions.WordCue, error) {
+			cancel()
+			return nil, fmt.Errorf("captions: no words: %w", captions.ErrUnusableTranscript)
+		})
+		if !errors.Is(err, context.Canceled) || errors.Is(err, captions.ErrUnusableTranscript) {
+			t.Fatalf("error = %v, want only context cancellation", err)
+		}
+	})
+}
+
+func TestCaptionRecoveryWindowsCoversClipAroundLocatorEnvelopeAndCaps(t *testing.T) {
+	proposal := []captions.WordCue{
+		{Word: "garbled-a", StartSeconds: 5.94, EndSeconds: 6.24},
+		{Word: "garbled-b", StartSeconds: 6.26, EndSeconds: 8.51},
+		{Word: "garbled-c", StartSeconds: 9.45, EndSeconds: 11.85},
+	}
+	windows, err := captionRecoveryWindows(proposal, 15.15)
+	if err != nil {
+		t.Fatalf("captionRecoveryWindows error = %v", err)
+	}
+	if got, want := len(windows), 4; got != want {
+		t.Fatalf("windows = %+v, want %d", windows, want)
+	}
+	assertNear := func(label string, got, want float64) {
+		t.Helper()
+		if math.Abs(got-want) > 0.0001 {
+			t.Fatalf("%s = %.4f, want %.4f", label, got, want)
+		}
+	}
+	assertNear("leading extract start", windows[0].ExtractStart, 0)
+	assertNear("leading extract end", windows[0].ExtractEnd, 6.2)
+	assertNear("speech extract start", windows[1].ExtractStart, 5.4)
+	assertNear("speech extract end", windows[1].ExtractEnd, 12.1)
+	assertNear("trailing extract start", windows[2].ExtractStart, 11.3)
+	assertNear("trailing extract end", windows[2].ExtractEnd, 13.9)
+	assertNear("tail extract start", windows[3].ExtractStart, 13.1)
+	assertNear("tail extract end", windows[3].ExtractEnd, 15.15)
+	for i := range windows {
+		if i == 0 {
+			assertNear("ownership starts at clip start", windows[i].KeepStart, 0)
+		} else {
+			assertNear("ownership ranges are contiguous", windows[i].KeepStart, windows[i-1].KeepEnd)
+		}
+		if got, want := windows[i].KeepEndInclusive, i == len(windows)-1; got != want {
+			t.Fatalf("window %d KeepEndInclusive = %v, want %v", i, got, want)
+		}
+	}
+	assertNear("ownership ends at clip end", windows[len(windows)-1].KeepEnd, 15.15)
+
+	long, err := captionRecoveryWindows([]captions.WordCue{{Word: "bad", StartSeconds: 0, EndSeconds: 11.8}}, 15.15)
+	if err != nil {
+		t.Fatalf("long captionRecoveryWindows error = %v", err)
+	}
+	if got, want := len(long), 4; got != want {
+		t.Fatalf("long windows = %+v, want %d", long, want)
+	}
+	for i, window := range long {
+		if window.KeepEnd-window.KeepStart > captionRecoveryCoreSeconds+1e-6 {
+			t.Fatalf("long window %d ownership = %.3fs, exceeds %.3fs", i, window.KeepEnd-window.KeepStart, captionRecoveryCoreSeconds)
+		}
+	}
+
+	centered, err := captionRecoveryWindows([]captions.WordCue{{Word: "center", StartSeconds: 7.4, EndSeconds: 7.6}}, 15)
+	if err != nil {
+		t.Fatalf("centered captionRecoveryWindows error = %v", err)
+	}
+	if got, want := len(centered), 4; got != want {
+		t.Fatalf("centered windows = %+v, want minimum %d", centered, want)
+	}
+	wantCentered := [][2]float64{{0, 5}, {5, 10}, {10, 13.5}, {13.5, 15}}
+	for i, window := range centered {
+		assertNear(fmt.Sprintf("centered window %d start", i), window.KeepStart, wantCentered[i][0])
+		assertNear(fmt.Sprintf("centered window %d end", i), window.KeepEnd, wantCentered[i][1])
+	}
+
+	tooMany := []captions.WordCue{{Word: "center", StartSeconds: 14, EndSeconds: 15}}
+	if _, err := captionRecoveryWindows(tooMany, 30); !errors.Is(err, captions.ErrUnusableTranscript) {
+		t.Fatalf("too many windows error = %v, want ErrUnusableTranscript", err)
+	}
+}
+
+func TestRecoverCaptionTranscriptUsesEnhancedTextOnlyAsLocator(t *testing.T) {
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("audio"), 0o644)
+	}}
+	w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+	w.runner = runner
+	w.transcribe = func(_ context.Context, mediaPath, _, _ string) ([]captions.WordCue, error) {
+		switch {
+		case strings.HasSuffix(mediaPath, "-speech.wav"):
+			return []captions.WordCue{
+				{Word: "bogus-a", StartSeconds: 5.94, EndSeconds: 6.24},
+				{Word: "bogus-b", StartSeconds: 6.26, EndSeconds: 8.51},
+				{Word: "bogus-c", StartSeconds: 9.45, EndSeconds: 11.85},
+			}, nil
+		case strings.HasSuffix(mediaPath, "-region-00.wav"):
+			return nil, fmt.Errorf("no early speech: %w", captions.ErrUnusableTranscript)
+		case strings.HasSuffix(mediaPath, "-region-01.wav"):
+			return []captions.WordCue{
+				{Word: "Lal.", StartSeconds: 0.54, EndSeconds: 0.84},
+				{Word: "Are", StartSeconds: 0.82, EndSeconds: 1.02},
+				{Word: "you", StartSeconds: 1.04, EndSeconds: 1.20},
+				{Word: "happy?", StartSeconds: 1.22, EndSeconds: 2.30},
+				{Word: "Yeah,", StartSeconds: 3.05, EndSeconds: 3.33},
+				{Word: "I'm", StartSeconds: 3.35, EndSeconds: 3.43},
+				{Word: "happy.", StartSeconds: 3.45, EndSeconds: 3.68},
+				{Word: "Alright,", StartSeconds: 3.70, EndSeconds: 5.91},
+				{Word: "Martinez.", StartSeconds: 5.93, EndSeconds: 6.43},
+			}, nil
+		case strings.HasSuffix(mediaPath, "-region-02.wav"):
+			return nil, fmt.Errorf("no middle-tail speech: %w", captions.ErrUnusableTranscript)
+		case strings.HasSuffix(mediaPath, "-region-03.wav"):
+			return []captions.WordCue{{Word: "Haha.", StartSeconds: 0.34, EndSeconds: 1.99}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected transcription path %s", mediaPath)
+		}
+	}
+
+	dir := t.TempDir()
+	ordinary := filepath.Join(dir, "clip.wav")
+	clip := streamclips.ClipRange{ID: "clip", StartSeconds: 0, EndSeconds: 15.15}
+	got, err := w.recoverCaptionTranscript(context.Background(), StreamRenderWorkerConfig{FFmpegPath: "ffmpeg"}, dir, "source.mp4", ordinary, clip, "auto")
+	if err != nil {
+		t.Fatalf("recoverCaptionTranscript error = %v", err)
+	}
+	if gotWords := wordsOf(got); strings.Contains(gotWords, "bogus") || gotWords != "Lal. Are you happy? Yeah, I'm happy. Alright, Martinez. Haha." {
+		t.Fatalf("recovered words = %q, want only independently transcribed region words", gotWords)
+	}
+	if gotStart, wantStart := got[0].StartSeconds, 5.94; math.Abs(gotStart-wantStart) > 0.0001 {
+		t.Fatalf("first recovered start = %.3f, want %.3f", gotStart, wantStart)
+	}
+	if got, want := len(runner.calls), 5; got != want {
+		t.Fatalf("runner calls = %d, want %d (locator + complete four-region coverage)", got, want)
+	}
+	if got, want := argValue(runner.calls[1].args, "-ss"), "0.000"; got != want {
+		t.Fatalf("leading region -ss = %q, want %q", got, want)
+	}
+	if got, want := argValue(runner.calls[2].args, "-ss"), "5.400"; got != want {
+		t.Fatalf("speech region -ss = %q, want %q", got, want)
+	}
+	if got, want := argValue(runner.calls[3].args, "-ss"), "11.300"; got != want {
+		t.Fatalf("trailing region -ss = %q, want %q", got, want)
+	}
+	if got, want := argValue(runner.calls[4].args, "-ss"), "13.100"; got != want {
+		t.Fatalf("tail region -ss = %q, want %q", got, want)
+	}
+}
+
+func wordsOf(cues []captions.WordCue) string {
+	words := make([]string, len(cues))
+	for i, cue := range cues {
+		words[i] = cue.Word
+	}
+	return strings.Join(words, " ")
 }
 
 // --- xAI-only captions ------------------------------------------------------
@@ -690,6 +919,44 @@ func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "xAI is not configured") {
 		t.Fatalf("got error %q, want it to mention that xAI is not configured", err.Error())
+	}
+}
+
+func TestStreamRenderWorkerMigratesAlreadyQueuedLegacyDuration(t *testing.T) {
+	store := newFakeStorage()
+	id := uuid.New()
+	store.files[streamclips.SourceKey(id)] = []byte("source")
+	plan := streamclips.DefaultEditPlan()
+	plan.Clips = []streamclips.ClipRange{{ID: "legacy", StartSeconds: 0, EndSeconds: 20}}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID:         id,
+		Status:     streamclips.StatusReady,
+		SourcePath: streamclips.SourceKey(id),
+		Probe:      streamclips.SourceProbe{DurationSeconds: 15.15},
+		EditPlan:   planJSON,
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("video"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{WorkDir: t.TempDir(), FFmpegPath: "ffmpeg"})
+	w.runner = runner
+	task, err := tasks.NewRenderStreamClipTask(id, plan.Variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+	if got, want := argValue(runner.calls[0].args, "-t"), "15.150"; got != want {
+		t.Fatalf("render -t = %q, want migrated duration %q", got, want)
 	}
 }
 

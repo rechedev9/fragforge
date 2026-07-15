@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -39,6 +41,16 @@ const (
 	killfeedCropTargetWidth = 1600
 	// killfeedCropMaxUpscale bounds that enlargement.
 	killfeedCropMaxUpscale = 3
+	// A CS2 notice remains visible for several seconds. Looking back eight
+	// seconds is enough to recover every row in the current snapshot without
+	// scanning an entire VOD.
+	killfeedAlignmentLookbackSeconds = 8
+	killfeedTimelineFPS              = 8
+	killfeedRowStabilityMatches      = 2
+	// Compressed or effect-heavy frames can hide an otherwise persistent border
+	// for several samples. One second bridges those observed gaps while still
+	// separating an expired notice from a later identical notice.
+	killfeedMaxObservationGapSeconds = 1
 )
 
 // WithFFmpegPath configures the ffmpeg binary used to extract a cue frame for
@@ -63,6 +75,25 @@ func WithXAIKey(key string) Option {
 type readKillfeedRequest struct {
 	ClipID     string  `json:"clip_id"`
 	CueSeconds float64 `json:"cue_seconds"`
+}
+
+type readKillfeedEvent struct {
+	CueSeconds float64                    `json:"cue_seconds"`
+	Kills      []streamclips.KillfeedKill `json:"kills"`
+}
+
+type timedKillfeedRows struct {
+	Seconds      float64
+	Bounds       image.Rectangle
+	Rows         []streamclips.NoticeRow
+	Fingerprints []killfeedRowFingerprint
+}
+
+type readKillfeedResponse struct {
+	Kills      []streamclips.KillfeedKill `json:"kills"`
+	CueSeconds float64                    `json:"cue_seconds"`
+	Aligned    bool                       `json:"aligned"`
+	Events     []readKillfeedEvent        `json:"events"`
 }
 
 // ReadStreamKillfeed extracts the cue frame from the stream source, crops it to
@@ -90,6 +121,7 @@ func (h *Handlers) ReadStreamKillfeed(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "load stream edit plan", err)
 		return
 	}
+	plan = streamclips.NormalizeEditPlan(plan)
 	if plan.KillfeedCrop == nil {
 		writeError(w, http.StatusBadRequest, "edit plan has no killfeed_crop configured")
 		return
@@ -128,7 +160,207 @@ func (h *Handlers) ReadStreamKillfeed(w http.ResponseWriter, r *http.Request) {
 	if kills == nil {
 		kills = []streamclips.KillfeedKill{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"kills": kills})
+	events, aligned := h.alignKillfeedEvents(
+		r.Context(),
+		j.SourcePath,
+		clip,
+		*plan.KillfeedCrop,
+		frame,
+		streamclips.KillfeedSampleSeconds(req.CueSeconds, clip.EndSeconds),
+		kills,
+	)
+	if len(events) == 0 {
+		events = []readKillfeedEvent{{
+			CueSeconds: req.CueSeconds,
+			Kills:      fallbackKillfeedEventKills(clip, req.CueSeconds, kills),
+		}}
+	}
+	responseCue := req.CueSeconds
+	if len(events) == 1 {
+		responseCue = events[0].CueSeconds
+	}
+	writeJSON(w, http.StatusOK, readKillfeedResponse{
+		Kills:      kills,
+		CueSeconds: responseCue,
+		Aligned:    aligned,
+		Events:     events,
+	})
+}
+
+// fallbackKillfeedEventKills converts an unaligned cumulative vision snapshot
+// into one best-effort delta. Kills already represented by a recent earlier
+// cue stay at their original birth time instead of being emitted a second time.
+func fallbackKillfeedEventKills(clip streamclips.ClipRange, cue float64, snapshot []streamclips.KillfeedKill) []streamclips.KillfeedKill {
+	seen := make(map[streamclips.KillfeedKill]struct{})
+	for i, eventCue := range clip.KillfeedSeconds {
+		if eventCue >= cue || eventCue < cue-killfeedAlignmentLookbackSeconds || i >= len(clip.KillfeedKills) {
+			continue
+		}
+		for _, kill := range clip.KillfeedKills[i] {
+			seen[kill] = struct{}{}
+		}
+	}
+	delta := make([]streamclips.KillfeedKill, 0, len(snapshot))
+	for _, kill := range snapshot {
+		if _, exists := seen[kill]; exists {
+			continue
+		}
+		seen[kill] = struct{}{}
+		delta = append(delta, kill)
+	}
+	return delta
+}
+
+// alignKillfeedEvents converts the cumulative, top-to-bottom snapshot returned
+// by vision into actual notice-birth events. Each target row is followed
+// independently by visual content through one low-rate timeline extraction: compressed notice
+// borders can make the detector intermittently miss one row, so using raw row
+// counts creates false transitions. Any detector mismatch or timeline failure
+// safely falls back to the user's cue.
+func (h *Handlers) alignKillfeedEvents(
+	ctx context.Context,
+	sourceKey string,
+	clip streamclips.ClipRange,
+	crop streamclips.CropRect,
+	targetFrame image.Image,
+	targetSeconds float64,
+	kills []streamclips.KillfeedKill,
+) ([]readKillfeedEvent, bool) {
+	targetRows := h.killfeedNoticeRows(targetFrame, &crop)
+	if len(targetRows) == 0 || len(targetRows) != len(kills) {
+		return nil, false
+	}
+	targetFingerprints := fingerprintKillfeedRows(targetFrame, targetRows)
+	if !distinctKillfeedFingerprints(targetFingerprints) {
+		return nil, false
+	}
+
+	lowerBound := max(clip.StartSeconds, targetSeconds-killfeedAlignmentLookbackSeconds)
+	timeline, err := h.killfeedTimeline(ctx, sourceKey, lowerBound, targetSeconds, &crop)
+	if err != nil {
+		return nil, false
+	}
+	// The batched timeline may include its end timestamp. Replace that sample
+	// with the separately decoded target frame so one instant cannot satisfy the
+	// multi-sample stability rule twice.
+	distinct := timeline[:0]
+	for _, sample := range timeline {
+		if math.Abs(sample.Seconds-targetSeconds) <= 1e-6 {
+			continue
+		}
+		distinct = append(distinct, sample)
+	}
+	timeline = distinct
+	timeline = append(timeline, timedKillfeedRows{
+		Seconds:      targetSeconds,
+		Bounds:       targetFrame.Bounds(),
+		Rows:         targetRows,
+		Fingerprints: targetFingerprints,
+	})
+	sort.SliceStable(timeline, func(i, j int) bool {
+		return timeline[i].Seconds < timeline[j].Seconds
+	})
+
+	events := make([]readKillfeedEvent, 0, len(targetRows))
+	scanStartsAtClipBoundary := lowerBound <= clip.StartSeconds+1e-6
+	for i := range targetRows {
+		onset, ok := h.findKillfeedRowOnset(
+			targetFingerprints[i], timeline, i == len(targetRows)-1, scanStartsAtClipBoundary,
+		)
+		if !ok {
+			return nil, false
+		}
+		// A complete border becomes detectable one sampled frame after its slide
+		// begins. Back up by that bounded interval so the synthetic row starts
+		// with the source notice rather than after it has fully settled.
+		cue := max(clip.StartSeconds, onset-1.0/killfeedTimelineFPS)
+		events = append(events, readKillfeedEvent{
+			CueSeconds: math.Round(cue*1000) / 1000,
+			Kills:      []streamclips.KillfeedKill{kills[i]},
+		})
+	}
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].CueSeconds < events[j].CueSeconds
+	})
+	if len(events) == 0 {
+		return nil, false
+	}
+	merged := events[:0]
+	for _, event := range events {
+		if len(merged) > 0 && merged[len(merged)-1].CueSeconds == event.CueSeconds {
+			merged[len(merged)-1].Kills = append(merged[len(merged)-1].Kills, event.Kills...)
+			continue
+		}
+		merged = append(merged, event)
+	}
+	return merged, true
+}
+
+func (h *Handlers) findKillfeedRowOnset(
+	targetFingerprint killfeedRowFingerprint,
+	timeline []timedKillfeedRows,
+	allowTargetOnly, scanStartsAtClipBoundary bool,
+) (float64, bool) {
+	// Match visual content across every detected row position. Content identity
+	// follows a notice through list reflow. Walking backward from the target
+	// observation anchors the result to the notice that is still visible there,
+	// rather than an expired earlier notice with identical text and weapon.
+	lastMatch := -1
+	for i := len(timeline) - 1; i >= 0; i-- {
+		if timelineContainsKillfeedRow(timeline[i], targetFingerprint) {
+			lastMatch = i
+			break
+		}
+	}
+	if lastMatch < 0 {
+		return 0, false
+	}
+
+	start := lastMatch
+	matches := 1
+	for i := lastMatch - 1; i >= 0; i-- {
+		if timeline[lastMatch].Seconds-timeline[i].Seconds > killfeedMaxObservationGapSeconds {
+			break
+		}
+		if !timelineContainsKillfeedRow(timeline[i], targetFingerprint) {
+			continue
+		}
+		start = i
+		lastMatch = i
+		matches++
+	}
+	// A matching run that reaches the first sample is left-censored when the
+	// bounded lookback began in the middle of the clip: the notice may have
+	// appeared at any earlier time, so the scan boundary is not evidence of a
+	// birth. It is safe only when that sample is also the clip boundary.
+	if start == 0 && !scanStartsAtClipBoundary {
+		return 0, false
+	}
+	if matches >= killfeedRowStabilityMatches ||
+		(allowTargetOnly && start == len(timeline)-1 && matches == 1) {
+		return timeline[start].Seconds, true
+	}
+	return 0, false
+}
+
+func timelineContainsKillfeedRow(sample timedKillfeedRows, targetFingerprint killfeedRowFingerprint) bool {
+	for _, fingerprint := range sample.Fingerprints {
+		if matchingKillfeedFingerprint(targetFingerprint, fingerprint) {
+			return true
+		}
+	}
+	return false
+}
+
+func distinctKillfeedFingerprints(fingerprints []killfeedRowFingerprint) bool {
+	for i := range fingerprints {
+		for j := i + 1; j < len(fingerprints); j++ {
+			if matchingKillfeedFingerprint(fingerprints[i], fingerprints[j]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // PreviewStreamKillfeedNotice renders a single kill notice supplied in the body
@@ -216,6 +448,26 @@ func (h *Handlers) extractKillfeedFrame(ctx context.Context, sourceKey string, a
 	return h.ffmpegFramePNG(ctx, srcName, atSeconds)
 }
 
+// extractKillfeedTimeline decodes an eight-fps, 1080-high timeline in one
+// ffmpeg process. This is materially faster than launching one process per
+// alignment sample; frames are reduced to row observations as they are decoded,
+// and temporary PNGs stay bounded to an eight-second window.
+func (h *Handlers) extractKillfeedTimeline(ctx context.Context, sourceKey string, startSeconds, endSeconds float64, crop *streamclips.CropRect) ([]timedKillfeedRows, error) {
+	if resolver, ok := h.storage.(sourcePathResolver); ok {
+		srcName, err := resolver.ResolvePath(sourceKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve stream source path: %w", err)
+		}
+		return h.ffmpegTimelinePNGs(ctx, srcName, startSeconds, endSeconds, crop)
+	}
+	srcName, cleanup, err := h.materializeSource(sourceKey)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	return h.ffmpegTimelinePNGs(ctx, srcName, startSeconds, endSeconds, crop)
+}
+
 // materializeSource copies the stream source to a temporary file for storages
 // that cannot expose a local path. The caller must invoke cleanup.
 func (h *Handlers) materializeSource(sourceKey string) (string, func(), error) {
@@ -268,6 +520,67 @@ func (h *Handlers) ffmpegFramePNG(ctx context.Context, srcName string, atSeconds
 		return nil, fmt.Errorf("ffmpeg extract frame: %w", runErr)
 	}
 	return decodePNGFile(frameName)
+}
+
+func (h *Handlers) ffmpegTimelinePNGs(ctx context.Context, srcName string, startSeconds, endSeconds float64, crop *streamclips.CropRect) ([]timedKillfeedRows, error) {
+	if endSeconds <= startSeconds {
+		return nil, nil
+	}
+	dir, err := os.MkdirTemp("", "zv-killfeed-timeline-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	pattern := filepath.Join(dir, "frame-%06d.png")
+	filter := fmt.Sprintf("fps=%d,scale=-2:1080", killfeedTimelineFPS)
+	args := []string{
+		"-y",
+		"-loglevel", "error",
+		"-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64),
+		"-t", strconv.FormatFloat(endSeconds-startSeconds, 'f', 3, 64),
+		"-i", srcName,
+		"-vf", filter,
+		"-an", "-sn", "-dn",
+		"-start_number", "0",
+		pattern,
+	}
+	// #nosec G204 -- ffmpegPath is operator-configured and args are passed without a shell.
+	cmd := exec.CommandContext(ctx, h.ffmpegPath, args...)
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		if text := strings.TrimSpace(string(out)); text != "" {
+			return nil, fmt.Errorf("ffmpeg extract killfeed timeline: %w: %s", runErr, text)
+		}
+		return nil, fmt.Errorf("ffmpeg extract killfeed timeline: %w", runErr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	frames := make([]timedKillfeedRows, 0, len(entries))
+	for i, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".png" {
+			continue
+		}
+		seconds := startSeconds + float64(i)/killfeedTimelineFPS
+		if seconds > endSeconds+1.0/killfeedTimelineFPS {
+			break
+		}
+		frame, err := decodePNGFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		rows := h.killfeedNoticeRows(frame, crop)
+		frames = append(frames, timedKillfeedRows{
+			Seconds:      seconds,
+			Bounds:       frame.Bounds(),
+			Rows:         rows,
+			Fingerprints: fingerprintKillfeedRows(frame, rows),
+		})
+	}
+	if len(frames) == 0 {
+		return nil, fmt.Errorf("ffmpeg extracted no killfeed timeline frames")
+	}
+	return frames, nil
 }
 
 func decodePNGFile(path string) (image.Image, error) {

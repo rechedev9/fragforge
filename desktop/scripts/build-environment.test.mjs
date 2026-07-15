@@ -34,4 +34,8 @@ test('desktop manifest exposes one credential-free distribution path', () => {
     resources.some((resource) => /(?:credential|xai-api-key)/i.test(`${resource.from} ${resource.to}`)),
     false,
   );
+  assert.equal(
+    resources.some((resource) => resource.from === 'build-resources/hlae' && resource.to === 'hlae'),
+    true,
+  );
 });

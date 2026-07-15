@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { environmentWithoutXAIAPIKey } from './build-environment.mjs';
+import { readPinnedHLAETool, verifyBundledHLAE } from './hlae-bundle.mjs';
 import { releasePaths, verifyReleaseChecksums, writeReleaseChecksums } from './release-integrity.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,11 @@ try {
     env: sanitizedEnvironment,
     stdio: 'inherit',
   });
+  const hlae = readPinnedHLAETool(desktop);
+  verifyBundledHLAE(
+    join(desktop, 'dist-installer', 'win-unpacked', 'resources', 'hlae', hlae.archiveName),
+    hlae,
+  );
   execSync('pnpm run test:mcp:packaged', {
     cwd: desktop,
     env: sanitizedEnvironment,

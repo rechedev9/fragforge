@@ -52,7 +52,7 @@ import {
   resolveStreamerBannerPosition,
   representativeFrameTime,
 } from '@/lib/stream-preview';
-import { addClipCue, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from '@/lib/killfeed-plan';
+import { addClipCue, applyClipKillfeedRead, fitPlanToSourceDuration, initialStreamClipEnd, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from '@/lib/killfeed-plan';
 import { CLIP_SPEEDS, clipEditIssue, DEFAULT_OVERLAY_FONT_SIZE, MAX_OVERLAY_FONT_SIZE, MAX_TEXT_OVERLAYS, MIN_OVERLAY_FONT_SIZE } from '@/lib/clip-edit';
 
 /** Accent styling shared by every purple range slider in this editor. */
@@ -118,13 +118,17 @@ function nextClipId(): string {
   return `clip-${Date.now()}-${clipSeq}`;
 }
 
-function blankPlan(variant: StreamVariant = 'streamer-vertical-stack-40-60'): StreamEditPlan {
+function blankPlan(
+  durationSeconds = 0,
+  variant: StreamVariant = 'streamer-vertical-stack-40-60',
+): StreamEditPlan {
+  const clipEnd = initialStreamClipEnd(durationSeconds);
   return {
-    schema_version: '1.0',
+    schema_version: '1.1',
     variant,
     face_crop: DEFAULT_FACE_CROP,
     gameplay_crop: FULL_FRAME,
-    clips: [{ id: nextClipId(), start_seconds: 0, end_seconds: 20, title: '' }],
+    clips: [{ id: nextClipId(), start_seconds: 0, end_seconds: clipEnd, title: '' }],
     captions: { enabled: false, language: 'auto' },
   };
 }
@@ -220,18 +224,22 @@ function LocalStreamsPage() {
 
   const loadEditor = useCallback(async (j: StreamJob) => {
     setJob(j);
+    const duration = j.probe?.duration_seconds ?? 0;
     try {
-      const loadedPlan = normalizeKillfeedPlan(j.edit_plan ?? (await streamsApi.getEditPlan(j.id)));
+      const loadedPlan = fitPlanToSourceDuration(
+        normalizeKillfeedPlan(j.edit_plan ?? (await streamsApi.getEditPlan(j.id))),
+        duration,
+      );
       setPlan(
         loadedPlan.clips.length > 0
           ? loadedPlan
           : {
               ...loadedPlan,
-              clips: [{ id: nextClipId(), start_seconds: 0, end_seconds: 20, title: '' }],
+              clips: [{ id: nextClipId(), start_seconds: 0, end_seconds: initialStreamClipEnd(duration), title: '' }],
             },
       );
     } catch {
-      setPlan(blankPlan());
+      setPlan(blankPlan(duration));
     }
     setStage('editing');
   }, []);
@@ -351,15 +359,16 @@ function LocalStreamsPage() {
 
   const createShorts = useCallback(async () => {
     if (!job || !plan) return;
-    if (!clipsAreValid(plan.clips)) {
+    const fittedPlan = fitPlanToSourceDuration(plan, job.probe?.duration_seconds ?? 0);
+    if (!clipsAreValid(fittedPlan.clips)) {
       setError('Cada clip necesita un fin posterior a su inicio.');
       return;
     }
-    if (!STREAMER_NICK_RE.test(plan.streamer_banner?.nick?.trim() ?? '')) {
+    if (!STREAMER_NICK_RE.test(fittedPlan.streamer_banner?.nick?.trim() ?? '')) {
       setError('El nick debe tener hasta 25 letras, números o guiones bajos.');
       return;
     }
-    const editIssue = clipEditIssue(plan.clips);
+    const editIssue = clipEditIssue(fittedPlan.clips);
     if (editIssue !== null) {
       setError(editIssue);
       return;
@@ -367,7 +376,7 @@ function LocalStreamsPage() {
     setError(null);
     setSaving(true);
     try {
-      const saved = await streamsApi.putEditPlan(job.id, plan);
+      const saved = await streamsApi.putEditPlan(job.id, fittedPlan);
       setPlan(saved);
       setRenderedPlan(saved);
       setStage('rendering');
@@ -632,6 +641,7 @@ function StreamEditor({
   const [weapons, setWeapons] = useState<string[]>([]);
   const [readingCueKey, setReadingCueKey] = useState<string | null>(null);
   const [readErrors, setReadErrors] = useState<Record<string, string>>({});
+  const [killfeedReadNotice, setKillfeedReadNotice] = useState<string | null>(null);
   const killfeedEnabled = plan.killfeed_crop !== undefined;
 
   useEffect(() => {
@@ -663,9 +673,20 @@ function StreamEditor({
       // Persist first so the orchestrator can locate this clip/cue for the job;
       // the read endpoint reads the saved plan, not the in-memory edits.
       const saved = await streamsApi.putEditPlan(job.id, plan);
-      const kills = await streamsApi.readKillfeed(job.id, clip.id, cue);
-      const clips = saved.clips.map((c) => (c.id === clip.id ? setClipCueKills(c, cue, kills) : c));
+      const read = await streamsApi.readKillfeed(job.id, clip.id, cue);
+      const clips = saved.clips.map((c) =>
+        c.id === clip.id ? applyClipKillfeedRead(c, cue, read.events) : c,
+      );
       onPlanChange({ ...saved, clips });
+      if (read.aligned && read.events.length > 0) {
+        const newest = read.events[read.events.length - 1];
+        setPreviewSeconds(newest.cue_seconds);
+        setKillfeedReadNotice(
+          `IA ajustó ${read.events.length === 1 ? 'la marca' : `${read.events.length} marcas`} al instante real de ${read.events.length === 1 ? 'la kill' : 'las kills'}.`,
+        );
+      } else {
+        setKillfeedReadNotice('No se pudo detectar el borde temporal; se conservó la marca elegida.');
+      }
     } catch (err) {
       const message =
         (err as { code?: string } | null)?.code === XAI_KEY_MISSING_CODE
@@ -876,9 +897,14 @@ function StreamEditor({
                 <div id="killfeed-clean-controls" className="flex flex-col gap-4">
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     Ajusta el recorte para que cubra holgadamente el área de la killfeed: es la región que se congela sin kills y la que lee la IA.
-                    Coloca el cursor en el instante exacto de la kill; FragForge leerá automáticamente un fotograma posterior, cuando el aviso ya esté dibujado.
+                    Coloca el cursor cerca de una kill visible; FragForge leerá un fotograma posterior y buscará hacia atrás el instante exacto en que apareció cada aviso.
                     El fotograma elegido también actualiza la preview 9:16.
                   </p>
+                  {killfeedReadNotice ? (
+                    <p role="status" className="text-xs text-stream">
+                      {killfeedReadNotice}
+                    </p>
+                  ) : null}
                   <CropPicker
                     videoSrc={videoSrc}
                     rect={plan.killfeed_crop ?? DEFAULT_KILLFEED_CROP}
@@ -1103,13 +1129,18 @@ function StreamEditor({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="auto">Detección automática</SelectItem>
-                    <SelectItem value="es">Español</SelectItem>
-                    <SelectItem value="en">Inglés</SelectItem>
+                    <SelectItem value="auto">Sin formato adicional</SelectItem>
+                    <SelectItem value="es">Formato español</SelectItem>
+                    <SelectItem value="en">Formato inglés</SelectItem>
                   </SelectContent>
                 </Select>
               ) : null}
             </div>
+            {plan.captions?.enabled ? (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                xAI transcribe voz multilingüe automáticamente. Esta opción solo formatea números, monedas y unidades; no fuerza el idioma hablado.
+              </p>
+            ) : null}
           </div>
         </div>
 

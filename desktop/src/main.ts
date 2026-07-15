@@ -26,6 +26,7 @@ import { escapeHtml } from './escaping';
 import { validateWindowState, type WindowState } from './window-state';
 import { lastLines } from './log-tail';
 import { provisionRuntimeTools, RUNTIME_TOOL_LABELS } from './runtime-tools';
+import { PINNED_HLAE_TOOL } from './hlae-tool';
 import { ProcessSession, type LaunchedProcess } from './process-session';
 import { waitForDesktopServices } from './service-health';
 import { provisionMusicLibrary } from './music-library';
@@ -513,15 +514,16 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
     if (!attempt.controller.signal.aborted) logLine(`[music] provision failed: ${String(err)}\n`);
   });
 
-  setLoadingStatus('Descargando herramientas (~110 MB, solo el primer arranque)…');
+  setLoadingStatus('Preparando herramientas (solo el primer arranque)…');
   const toolEnv = await provisionRuntimeTools(
     {
       toolsDir: path.join(app.getPath('userData'), 'tools'),
+      bundledHLAEArchive: resourcePath('hlae', PINNED_HLAE_TOOL.archiveName),
       logLine,
       signal: attempt.controller.signal,
     },
     (name, detail) =>
-      setLoadingStatus(`Descargando ${RUNTIME_TOOL_LABELS[name]}${detail ? ` (${detail})` : ''}…`),
+      setLoadingStatus(`Preparando ${RUNTIME_TOOL_LABELS[name]}${detail ? ` (${detail})` : ''}…`),
   );
   assertBootAttemptActive(attempt);
 

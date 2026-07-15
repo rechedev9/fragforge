@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -880,7 +881,10 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		return fmt.Errorf("decode edit plan: %w", err)
 	}
 	plan = streamclips.NormalizeEditPlan(plan)
-	if err := plan.Validate(); err != nil {
+	if migrated, changed := streamclips.MigrateLegacySourceDuration(plan, j.Probe.DurationSeconds); changed {
+		plan = migrated
+	}
+	if err := plan.ValidateForSourceDuration(j.Probe.DurationSeconds); err != nil {
 		return err
 	}
 	if len(plan.Clips) == 0 {
@@ -968,18 +972,29 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 				warnings = append(warnings, fmt.Sprintf("clip %s: original audio is muted by the clip edit, publishing without captions", clip.ID))
 			default:
 				transcriptionPath := outPath
+				var recoverTranscription func() ([]captions.WordCue, error)
 				// Cues transcribed from the rendered clip are already in output
 				// time; cues from the source range must be mapped through the
 				// speed edit before burning onto the sped-up output.
 				cueSpeed := 1.0
 				if cfg.xaiConfigured() {
+					// Both edited and unedited clips use source-range audio. When the
+					// ordinary whole-range transcript is unusable, an enhanced pass is
+					// used only to locate speech regions; short slices from the original
+					// audio are transcribed again so enhancer hallucinations are never
+					// published as captions. Edits only change cueSpeed.
 					transcriptionPath, err = w.extractCaptionSourceAudio(runCtx, cfg, workDir, sourcePath, clip)
 					if err != nil {
 						return err
 					}
+					recoverTranscription = func() ([]captions.WordCue, error) {
+						return w.recoverCaptionTranscript(
+							runCtx, cfg, workDir, sourcePath, transcriptionPath, clip, plan.Captions.Language,
+						)
+					}
 					cueSpeed = clip.EffectiveSpeed()
 				}
-				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, cueSpeed, j.ID, variant, clip.ID, plan.Captions.Language)
+				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, recoverTranscription, cueSpeed, j.ID, variant, clip.ID, plan.Captions.Language)
 				if err != nil {
 					return err
 				}
@@ -1061,10 +1076,10 @@ func writeClipOverlayTexts(workDir string, clip streamclips.ClipRange) ([]string
 // renderClipKillfeedNotices renders every kill in clip.KillfeedKills to a
 // synthetic CS2 kill-notice PNG under <workDir>/killfeed/<clipID>/cue<i>_<j>.png
 // and returns the paths index-aligned with clip.KillfeedSeconds (top-first per
-// cue). A cue with no kills gets a nil entry so BuildFFmpegArgs falls back to a
-// frozen crop of the killfeed region. Names are deterministic and files are
-// overwritten, so a redriven task stays idempotent. It returns nil when the
-// clip carries no kills at all.
+// event cue). A cue with no kills gets a nil entry so BuildFFmpegArgs falls
+// back to a frozen crop of the killfeed region. Names are deterministic and
+// files are overwritten, so a redriven task stays idempotent. It returns nil
+// when the clip carries no kills at all.
 func renderClipKillfeedNotices(workDir string, clip streamclips.ClipRange) ([][]string, error) {
 	if len(clip.KillfeedKills) == 0 {
 		return nil, nil
@@ -1134,6 +1149,312 @@ func (w *StreamRenderWorker) extractCaptionSourceAudio(ctx context.Context, cfg 
 	return out, nil
 }
 
+// captionSpeechEnhanceFilter is the bounded recovery pass for mixed stream
+// audio where ordinary mono STT returns no usable words. dialoguenhance pulls
+// correlated center speech from stereo game audio; the remaining filters keep
+// the voice band intelligible and normalize speech without the timestamp delay
+// introduced by loudnorm. aformat also makes the pass valid for mono sources.
+const captionSpeechEnhanceFilter = "aformat=channel_layouts=stereo,dialoguenhance=original=0.15:enhance=3:voice=16,pan=mono|c0=FC,highpass=f=120,lowpass=f=7000,speechnorm=e=4:c=2:r=0.0001:f=0.0001"
+
+func (w *StreamRenderWorker) extractSpeechEnhancedCaptionAudio(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, sourcePath string, clip streamclips.ClipRange) (string, error) {
+	dir := filepath.Join(workDir, "caption-source-audio")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", fmt.Errorf("create xai caption audio directory: %w", err)
+	}
+	out := filepath.Join(dir, clip.ID+"-speech.wav")
+	duration := clip.EndSeconds - clip.StartSeconds
+	args := []string{
+		"-y",
+		"-ss", strconv.FormatFloat(clip.StartSeconds, 'f', 3, 64),
+		"-t", strconv.FormatFloat(duration, 'f', 3, 64),
+		"-i", sourcePath,
+		"-map", "0:a:0",
+		"-vn", "-sn", "-dn",
+		"-af", captionSpeechEnhanceFilter,
+		"-c:a", "pcm_s16le",
+		"-ac", "1",
+		"-ar", "16000",
+		out,
+	}
+	if _, err := w.runner.Run(ctx, cfg.FFmpegPath, args...); err != nil {
+		return "", fmt.Errorf("extract speech-enhanced audio for xai captions on clip %s: %w", clip.ID, err)
+	}
+	return out, nil
+}
+
+const (
+	// The enhanced whole-range pass is a speech locator, not trusted text.
+	// More lead-in than lead-out preserves clipped consonants without adding
+	// enough trailing gameplay to smear the short independent request.
+	captionRecoveryPadBeforeSeconds = 0.5
+	captionRecoveryPadAfterSeconds  = 0.25
+	captionRecoveryTimeQuantum      = 0.1
+	// Short requests fixed the real 15.15s stream artifact while ten-second and
+	// whole-range requests smeared several utterances into five bogus words.
+	// Seven-second ownership regions keep enough sentence context without
+	// recreating that failure. The cap bounds paid xAI calls and render latency.
+	captionRecoveryCoreSeconds = 7.0
+	captionRecoveryMaxWindows  = 4
+	// When the call budget permits, keep the final ownership range short. Batch
+	// STT otherwise dropped a quiet closing laugh behind preceding gameplay.
+	captionRecoveryTailCoreSeconds = 1.5
+)
+
+type captionRecoveryWindow struct {
+	ExtractStart     float64
+	ExtractEnd       float64
+	KeepStart        float64
+	KeepEnd          float64
+	KeepEndInclusive bool
+}
+
+// captionRecoveryWindows turns the enhanced pass's outer word timings into a
+// small, bounded set of padded regions that cover the complete selected clip.
+// Text from that pass is deliberately ignored: its first and last timings only
+// choose useful ownership boundaries around the likely speech envelope. Full
+// coverage matters because the locator can miss a quiet reply or laugh. Long
+// ownership regions are split into overlapping extraction windows, while the
+// disjoint Keep ranges prevent duplicate words at a boundary. If complete
+// coverage needs more than the paid-call cap, recovery fails soft instead of
+// publishing a transcript known to be partial.
+func captionRecoveryWindows(proposal []captions.WordCue, duration float64) ([]captionRecoveryWindow, error) {
+	if duration <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+		return nil, fmt.Errorf("caption recovery needs a finite positive duration: %w", captions.ErrUnusableTranscript)
+	}
+	valid := make([]captions.WordCue, 0, len(proposal))
+	for _, cue := range proposal {
+		if math.IsNaN(cue.StartSeconds) || math.IsInf(cue.StartSeconds, 0) ||
+			math.IsNaN(cue.EndSeconds) || math.IsInf(cue.EndSeconds, 0) ||
+			cue.EndSeconds <= cue.StartSeconds || cue.EndSeconds <= 0 || cue.StartSeconds >= duration {
+			continue
+		}
+		cue.StartSeconds = max(cue.StartSeconds, 0)
+		cue.EndSeconds = min(cue.EndSeconds, duration)
+		valid = append(valid, cue)
+	}
+	if len(valid) == 0 {
+		return nil, fmt.Errorf("speech locator returned no timed words: %w", captions.ErrUnusableTranscript)
+	}
+	sort.SliceStable(valid, func(i, j int) bool { return valid[i].StartSeconds < valid[j].StartSeconds })
+
+	type ownershipRegion struct{ start, end float64 }
+	speechStart := valid[0].StartSeconds
+	speechEnd := valid[0].EndSeconds
+	for _, cue := range valid[1:] {
+		speechEnd = max(speechEnd, cue.EndSeconds)
+	}
+	// Do not spend a separate request on a sub-padding sliver at either edge.
+	if speechStart <= captionRecoveryPadBeforeSeconds {
+		speechStart = 0
+	}
+	if duration-speechEnd <= captionRecoveryPadAfterSeconds {
+		speechEnd = duration
+	}
+	minimumParts := max(1, int(math.Ceil(duration/captionRecoveryCoreSeconds)))
+	if minimumParts > captionRecoveryMaxWindows {
+		return nil, fmt.Errorf("complete caption recovery needs more than %d windows: %w", captionRecoveryMaxWindows, captions.ErrUnusableTranscript)
+	}
+	anchoredRegions := make([]ownershipRegion, 0, 3)
+	anchoredParts := 0
+	for _, region := range []ownershipRegion{
+		{start: 0, end: speechStart},
+		{start: speechStart, end: speechEnd},
+		{start: speechEnd, end: duration},
+	} {
+		if region.end-region.start > 1e-6 {
+			anchoredRegions = append(anchoredRegions, region)
+			anchoredParts += max(1, int(math.Ceil((region.end-region.start)/captionRecoveryCoreSeconds)))
+		}
+	}
+	regions := anchoredRegions
+	if anchoredParts != minimumParts {
+		// A very narrow centered envelope can fragment otherwise adjacent audio
+		// into extra requests. Fall back to the minimum globally even partitioned
+		// coverage instead of treating each locator boundary as mandatory.
+		regions = []ownershipRegion{{start: 0, end: duration}}
+	}
+
+	var cores []ownershipRegion
+	for _, region := range regions {
+		parts := max(1, int(math.Ceil((region.end-region.start)/captionRecoveryCoreSeconds)))
+		coreSeconds := (region.end - region.start) / float64(parts)
+		for part := range parts {
+			coreStart := region.start + float64(part)*coreSeconds
+			coreEnd := region.start + float64(part+1)*coreSeconds
+			cores = append(cores, ownershipRegion{start: coreStart, end: coreEnd})
+		}
+	}
+	if len(cores) < captionRecoveryMaxWindows {
+		last := &cores[len(cores)-1]
+		if last.end-last.start > captionRecoveryTailCoreSeconds+1e-6 {
+			end := last.end
+			last.end = end - captionRecoveryTailCoreSeconds
+			cores = append(cores, ownershipRegion{start: last.end, end: end})
+		}
+	}
+
+	windows := make([]captionRecoveryWindow, 0, len(cores))
+	for _, core := range cores {
+		extractStart := math.Floor((core.start-captionRecoveryPadBeforeSeconds)/captionRecoveryTimeQuantum) * captionRecoveryTimeQuantum
+		extractEnd := math.Ceil((core.end+captionRecoveryPadAfterSeconds)/captionRecoveryTimeQuantum) * captionRecoveryTimeQuantum
+		windows = append(windows, captionRecoveryWindow{
+			ExtractStart: extractStart,
+			ExtractEnd:   extractEnd,
+			KeepStart:    core.start,
+			KeepEnd:      core.end,
+		})
+	}
+	windows[0].ExtractStart = max(0, windows[0].ExtractStart)
+	windows[len(windows)-1].ExtractEnd = min(duration, windows[len(windows)-1].ExtractEnd)
+	// Only the final ownership range includes its upper boundary. At every
+	// internal boundary the following range owns a word centered exactly there.
+	windows[len(windows)-1].KeepEndInclusive = true
+	return windows, nil
+}
+
+func (w *StreamRenderWorker) extractCaptionRecoveryWindow(
+	ctx context.Context,
+	cfg StreamRenderWorkerConfig,
+	ordinaryPath string,
+	index int,
+	window captionRecoveryWindow,
+) (string, error) {
+	ext := filepath.Ext(ordinaryPath)
+	out := strings.TrimSuffix(ordinaryPath, ext) + fmt.Sprintf("-region-%02d.wav", index)
+	args := []string{
+		"-y",
+		"-ss", strconv.FormatFloat(window.ExtractStart, 'f', 3, 64),
+		"-t", strconv.FormatFloat(window.ExtractEnd-window.ExtractStart, 'f', 3, 64),
+		"-i", ordinaryPath,
+		"-map", "0:a:0",
+		"-vn", "-sn", "-dn",
+		"-c:a", "pcm_s16le",
+		"-ac", "1",
+		"-ar", "16000",
+		out,
+	}
+	if _, err := w.runner.Run(ctx, cfg.FFmpegPath, args...); err != nil {
+		return "", fmt.Errorf("extract caption recovery window %d: %w", index+1, err)
+	}
+	return out, nil
+}
+
+// recoverCaptionTranscript uses the enhanced whole-range transcript only as a
+// coarse speech locator, then transcribes short windows cut from ordinary
+// source audio. This is intentionally an independent evidence pass: the words
+// produced by dialoguenhance are never burned into the video.
+func (w *StreamRenderWorker) recoverCaptionTranscript(
+	ctx context.Context,
+	cfg StreamRenderWorkerConfig,
+	workDir, sourcePath, ordinaryPath string,
+	clip streamclips.ClipRange,
+	language string,
+) ([]captions.WordCue, error) {
+	enhancedPath, err := w.extractSpeechEnhancedCaptionAudio(ctx, cfg, workDir, sourcePath, clip)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, fmt.Errorf("speech locator unavailable (%v): %w", err, captions.ErrUnusableTranscript)
+	}
+	proposal, proposalErr := w.transcribe(ctx, enhancedPath, workDir, language)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if proposalErr != nil && !errors.Is(proposalErr, captions.ErrUnusableTranscript) {
+		return nil, fmt.Errorf("speech locator transcription: %w", proposalErr)
+	}
+	windows, err := captionRecoveryWindows(proposal, clip.EndSeconds-clip.StartSeconds)
+	if err != nil {
+		if proposalErr != nil {
+			return nil, fmt.Errorf("%v; %w", proposalErr, err)
+		}
+		return nil, err
+	}
+
+	var recovered []captions.WordCue
+	var unusable []error
+	for i, window := range windows {
+		windowPath, err := w.extractCaptionRecoveryWindow(ctx, cfg, ordinaryPath, i, window)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			return nil, fmt.Errorf("%v: %w", err, captions.ErrUnusableTranscript)
+		}
+		windowCues, err := w.transcribe(ctx, windowPath, workDir, language)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if err != nil {
+			if errors.Is(err, captions.ErrUnusableTranscript) {
+				unusable = append(unusable, fmt.Errorf("window %d: %w", i+1, err))
+				continue
+			}
+			return nil, fmt.Errorf("transcribe recovery window %d: %w", i+1, err)
+		}
+		for _, cue := range windowCues {
+			cue.StartSeconds += window.ExtractStart
+			cue.EndSeconds += window.ExtractStart
+			center := (cue.StartSeconds + cue.EndSeconds) / 2
+			if center < window.KeepStart || center > window.KeepEnd ||
+				(center == window.KeepEnd && !window.KeepEndInclusive) {
+				continue
+			}
+			recovered = append(recovered, cue)
+		}
+	}
+	if len(recovered) == 0 {
+		return nil, fmt.Errorf("caption recovery windows produced no usable words (%v): %w", errors.Join(unusable...), captions.ErrUnusableTranscript)
+	}
+	sort.SliceStable(recovered, func(i, j int) bool { return recovered[i].StartSeconds < recovered[j].StartSeconds })
+	recovered = normalizeRecoveredCaptionCues(recovered)
+	if err := captions.ValidateTranscript(recovered); err != nil {
+		return recovered, fmt.Errorf("recovered transcript: %w", err)
+	}
+	return recovered, nil
+}
+
+func normalizeRecoveredCaptionCues(cues []captions.WordCue) []captions.WordCue {
+	normalized := cues[:0]
+	for _, cue := range cues {
+		if n := len(normalized); n > 0 && cue.StartSeconds < normalized[n-1].EndSeconds {
+			cue.StartSeconds = normalized[n-1].EndSeconds
+			if cue.EndSeconds <= cue.StartSeconds {
+				continue
+			}
+		}
+		normalized = append(normalized, cue)
+	}
+	return normalized
+}
+
+func (w *StreamRenderWorker) transcribeCaptionCues(
+	ctx context.Context,
+	transcriptionPath, workDir, language string,
+	recoverTranscription func() ([]captions.WordCue, error),
+) ([]captions.WordCue, error) {
+	cues, err := w.transcribe(ctx, transcriptionPath, workDir, language)
+	if err == nil || !errors.Is(err, captions.ErrUnusableTranscript) || recoverTranscription == nil {
+		return cues, err
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+
+	recovered, recoveryErr := recoverTranscription()
+	if recoveryErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if errors.Is(recoveryErr, captions.ErrUnusableTranscript) {
+			return nil, fmt.Errorf("%v; speech-region recovery: %w", err, recoveryErr)
+		}
+		return nil, fmt.Errorf("speech-region recovery: %w", recoveryErr)
+	}
+	return recovered, nil
+}
+
 // burnClipCaptions transcribes transcriptionPath with xAI and burns the
 // resulting karaoke captions into a second copy, <clipID>_captioned.mp4, next to
 // clipPath. It returns the captioned file's path on success. If xAI produces an
@@ -1141,9 +1462,12 @@ func (w *StreamRenderWorker) extractCaptionSourceAudio(ctx context.Context, cfg 
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
 // explicitly requested and a transcription backend is configured.
-func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, cueSpeed float64, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
-	cues, err := w.transcribe(ctx, transcriptionPath, workDir, language)
+func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, recoverTranscription func() ([]captions.WordCue, error), cueSpeed float64, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
+	cues, err := w.transcribeCaptionCues(ctx, transcriptionPath, workDir, language, recoverTranscription)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
+		}
 		if errors.Is(err, captions.ErrUnusableTranscript) {
 			return "", fmt.Sprintf("clip %s: no usable transcript (%s), publishing without captions", clipID, singleLine(err)), nil
 		}

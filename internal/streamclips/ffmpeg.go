@@ -53,8 +53,9 @@ type FFmpegInputs struct {
 	BannerFontPath string // resolved bold font file; required when the banner has a nick
 	SourceHasAudio bool
 	// KillfeedNoticePaths holds pre-rendered synthetic kill-notice PNG paths,
-	// index-aligned with the normalized clip's killfeed cues. Each cue's list is
-	// ordered top-first, and every PNG is streamclips.KillfeedNoticeHeight tall.
+	// index-aligned with the normalized clip's killfeed event cues. Each cue's
+	// list is ordered top-first, and every PNG is
+	// streamclips.KillfeedNoticeHeight tall.
 	// A cue with no paths falls back to a frozen crop of the killfeed region.
 	KillfeedNoticePaths [][]string
 	// TextOverlayPaths holds materialized text files, index-aligned with the
@@ -339,10 +340,11 @@ func buildStandardFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRang
 }
 
 // buildKillfeedFilterGraph composes the layout, then overlays one killfeed
-// element per cue on the top-right. A cue with pre-rendered notice PNGs overlays
-// them as looped inputs (stacked top-first); a cue without paths falls back to a
-// WYSIWYG frozen crop of plan.KillfeedCrop scaled to killfeedFrozenWidth. Both
-// share the same right margin and cue-timed enable window.
+// event per cue on the top-right. A cue with pre-rendered notice PNGs overlays
+// them as looped inputs (stacked top-first across all still-live events); a cue
+// without paths falls back to a WYSIWYG frozen crop of plan.KillfeedCrop scaled
+// to killfeedFrozenWidth. Both share the same right margin and cue-timed enable
+// window.
 func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, noticePaths [][]string, bannerFontPath string, textPaths []string, duration float64, noticeInputBase int) string {
 	tail := videoTail(plan, clip, bannerFontPath, textPaths)
 
@@ -426,29 +428,63 @@ func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRang
 		))
 	}
 
-	// Ordered overlays: stacked notices per cue, or a single frozen strip.
+	// Ordered overlays: synthetic event notices reflow around every earlier
+	// notice that is still alive, while a cue without structured kills uses one
+	// frozen strip. KillfeedKills contains event deltas rather than cumulative
+	// snapshots, so independently timed cues must participate in the same stack.
 	type overlay struct {
 		label string
-		y     int
+		y     string
+		start float64
+		end   float64
+	}
+	type noticeLifetime struct {
 		start float64
 		end   float64
 	}
 	var overlays []overlay
+	var priorNotices []noticeLifetime
 	for i := range clip.KillfeedSeconds {
 		relative := clip.KillfeedSeconds[i] - clip.StartSeconds
 		start := math.Max(0, relative)
 		end := math.Min(duration, relative+killfeedTrailTime)
 		if hasNotices(i) {
 			for j := range noticePaths[i] {
+				y := strconv.Itoa(baseY)
+				var activeEarlier []string
+				for _, prior := range priorNotices {
+					// between() is inclusive, so keep the expression when the
+					// lifetimes only share their boundary frame as well.
+					if prior.end < start || prior.start > end {
+						continue
+					}
+					activeEarlier = append(activeEarlier, fmt.Sprintf(
+						"between(t\\,%s\\,%s)", floatArg(prior.start), floatArg(prior.end),
+					))
+				}
+				if len(activeEarlier) > 0 {
+					y = fmt.Sprintf(
+						"%d+%d*(%s)",
+						baseY,
+						KillfeedNoticeHeight+killfeedNoticeStackGap,
+						strings.Join(activeEarlier, "+"),
+					)
+				}
 				overlays = append(overlays, overlay{
 					label: fmt.Sprintf("notice%d_%d", i, j),
-					y:     baseY + j*(KillfeedNoticeHeight+killfeedNoticeStackGap),
+					y:     y,
 					start: start, end: end,
 				})
+				priorNotices = append(priorNotices, noticeLifetime{start: start, end: end})
 			}
 			continue
 		}
-		overlays = append(overlays, overlay{label: fmt.Sprintf("killfeed%d", i), y: baseY, start: start, end: end})
+		overlays = append(overlays, overlay{
+			label: fmt.Sprintf("killfeed%d", i),
+			y:     strconv.Itoa(baseY),
+			start: start,
+			end:   end,
+		})
 	}
 
 	baseLabel := "layout"
@@ -458,7 +494,7 @@ func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRang
 			out = fmt.Sprintf("kfover%d", k)
 		}
 		parts = append(parts, fmt.Sprintf(
-			"[%s][%s]overlay=x=W-w-24:y=%d:enable='between(t\\,%s\\,%s)':eof_action=pass:shortest=0[%s]",
+			"[%s][%s]overlay=x=W-w-24:y=%s:enable='between(t\\,%s\\,%s)':eof_action=pass:shortest=0[%s]",
 			baseLabel, ov.label, ov.y, floatArg(ov.start), floatArg(ov.end), out,
 		))
 		baseLabel = out

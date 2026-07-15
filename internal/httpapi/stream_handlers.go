@@ -365,7 +365,7 @@ func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	plan = streamclips.NormalizeEditPlan(plan)
 	plan.UpdatedAt = time.Now().UTC()
-	if err := plan.Validate(); err != nil {
+	if err := plan.ValidateForSourceDuration(j.Probe.DurationSeconds); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -401,6 +401,21 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 	plan, err := h.currentStreamEditPlan(j)
 	if err != nil {
 		internalError(w, "load stream edit plan", err)
+		return
+	}
+	plan = streamclips.NormalizeEditPlan(plan)
+	hadClipsBeforeMigration := len(plan.Clips) > 0
+	migrationApplied := false
+	if migrated, changed := streamclips.MigrateLegacySourceDuration(plan, j.Probe.DurationSeconds); changed {
+		plan = migrated
+		migrationApplied = true
+	}
+	if err := plan.ValidateForSourceDuration(j.Probe.DurationSeconds); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if migrationApplied && hadClipsBeforeMigration && len(plan.Clips) == 0 {
+		writeError(w, http.StatusBadRequest, "stream edit plan has no clips after source-duration migration")
 		return
 	}
 	if plan.Captions.Enabled && !h.requireCaptionsEnabled(w) {

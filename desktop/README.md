@@ -25,12 +25,13 @@ the browser's `localStorage`, which is keyed by origin (`host:port`). Electron
 also rotates a random `discovery_secret` in that file on every boot; it is used
 only to authenticate the matching local orchestrator to the MCP.
 
-On first boot the app provisions the official HLAE 2.191.0 release, FFmpeg, and
-yt-dlp (~110 MB total) into `<userData>/tools`, each verified against a pinned
-sha256 digest, plus the music catalog. Every download is best-effort, so an
-offline first boot just leaves that feature unconfigured until the next launch.
-The HLAE version is intentionally fixed instead of following the latest release
-so every desktop build uses the same official package. The window
+The installer bundles the official HLAE 2.191.0 release. On first boot the app
+installs it alongside FFmpeg and yt-dlp into `<userData>/tools`, each verified
+against a pinned sha256 digest, plus the music catalog. HLAE is available
+offline; the remaining downloads are best-effort and retry on the next launch.
+After the current HLAE package is verified, Studio removes older versioned HLAE
+caches. The HLAE version is intentionally fixed instead of following the latest
+release so every desktop build uses the same official package. The window
 lands on `/matches` (the app shell/dashboard, not a single flow), since Studio
 has both the demo-upload path and the Twitch stream-clips path.
 
@@ -293,8 +294,8 @@ pnpm start
    `web`), rotates a 32-byte discovery secret, and persists all three atomically
    in `<userData>/ports.json`.
 2. Kicks off music catalog provisioning in the background, and awaits
-   provisioning of HLAE/FFmpeg/yt-dlp into `<userData>/tools` (first boot
-   only; later boots return the cached installs instantly).
+   provisioning of bundled HLAE plus FFmpeg/yt-dlp into `<userData>/tools`
+   (first boot only; later boots return the cached installs instantly).
 3. Spawns `zv-orchestrator.exe` directly - without a `zv.exe serve`
    intermediary - so quitting the app reliably kills the real server (`ZV_DATABASE_URL=sqlite`,
    `ZV_DATA_DIR=<userData>/data`, `ZV_HTTP_ADDR=127.0.0.1:<orchPort>`, the

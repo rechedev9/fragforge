@@ -1,6 +1,6 @@
 {
   "name": "fragforge-studio",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
@@ -52,6 +52,10 @@
       {
         "from": "build-resources/bin",
         "to": "bin"
+      },
+      {
+        "from": "build-resources/hlae",
+        "to": "hlae"
       },
       {
         "from": "build-resources/music",

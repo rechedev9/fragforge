@@ -1,6 +1,7 @@
 // Assembles the resources electron-builder bundles into the installer:
 //   build-resources/bin/   -> zv-orchestrator.exe, zv-editor.exe, zv-recorder.exe
 //   build-resources/web/   -> the Next.js standalone server, ready to run
+//   build-resources/hlae/  -> pinned official HLAE release archive
 //   build-resources/music/ -> catalog.json (track metadata; audio is downloaded on first boot)
 //
 // The Next standalone output does NOT include .next/static or public, so we copy
@@ -12,6 +13,7 @@ import { existsSync, rmSync, mkdirSync, cpSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { environmentWithoutXAIAPIKey } from './build-environment.mjs';
+import { stageBundledHLAE } from './hlae-bundle.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = join(here, '..');
@@ -81,6 +83,14 @@ if (existsSync(publicDir)) cpSync(publicDir, join(out, 'web', 'public'), { recur
 cpSync(zvOrchestrator, join(out, 'bin', 'zv-orchestrator.exe'));
 cpSync(zvEditor, join(out, 'bin', 'zv-editor.exe'));
 cpSync(zvRecorder, join(out, 'bin', 'zv-recorder.exe'));
+
+// HLAE: ship the exact official release in the installer. Both this staging
+// step and runtime provisioning verify the pinned digest before using it.
+console.log('[assemble] downloading and verifying official HLAE...');
+await stageBundledHLAE({
+  desktopDirectory: desktop,
+  destinationDirectory: join(out, 'hlae'),
+});
 
 // Music: catalog.json plus any local-only audio (tracks without a downloadUrl,
 // e.g. the AI-generated ones). Remote CC0/CC-BY tracks are still downloaded by

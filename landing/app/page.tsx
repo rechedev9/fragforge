@@ -23,8 +23,8 @@ import HeroForge from "@/components/hero-forge";
 import Reveal from "@/components/reveal";
 
 const DOWNLOAD_URL =
-  "https://github.com/rechedev9/fragforge/releases/download/v2.2.2/FragForge.Studio.Setup.2.2.2.exe";
-const RELEASE_VERSION = "v2.2.2";
+  "https://github.com/rechedev9/fragforge/releases/download/v2.2.3/FragForge.Studio.Setup.2.2.3.exe";
+const RELEASE_VERSION = "v2.2.3";
 const REPO_URL = "https://github.com/rechedev9/fragforge";
 
 function Corners() {
@@ -106,7 +106,7 @@ const STEPS = [
 const REQUIREMENTS: { icon: LucideIcon; label: string; detail: string }[] = [
   { icon: MonitorCheck, label: "Windows 10 / 11", detail: "64-bit desktop" },
   { icon: Gamepad2, label: "Counter-Strike 2", detail: "Installed through Steam" },
-  { icon: Film, label: "Official HLAE", detail: "Installed automatically" },
+  { icon: Film, label: "Official HLAE 2.191.0", detail: "Bundled and installed automatically" },
   { icon: Zap, label: "Dedicated GPU", detail: "Recommended for capture" },
   { icon: HardDrive, label: "~1 GB", detail: "Free disk space" },
 ];

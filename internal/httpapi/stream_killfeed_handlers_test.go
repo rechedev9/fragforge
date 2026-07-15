@@ -68,6 +68,32 @@ func killfeedReadHandlers(t *testing.T, xaiURL, ffmpegPath, xaiKey string) (*Han
 	return h, id
 }
 
+func encodedNoticeCountFrame(count int) *image.RGBA {
+	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	frame.SetRGBA(0, 0, color.RGBA{R: uint8(count), A: 255})
+	yPositions := []int{73, 109, 143}
+	for i := range min(count, len(yPositions)) {
+		xStart := 1610 + i*100
+		for y := yPositions[i] + 5; y < yPositions[i]+20; y++ {
+			for x := xStart; x < xStart+70; x++ {
+				frame.SetRGBA(x, y, color.RGBA{R: 230, G: 230, B: 230, A: 255})
+			}
+		}
+	}
+	return frame
+}
+
+func encodedNoticeRows(frame image.Image, _ *streamclips.CropRect) []streamclips.NoticeRow {
+	red, _, _, _ := frame.At(0, 0).RGBA()
+	count := int(red >> 8)
+	yPositions := []int{73, 109, 143}
+	rows := make([]streamclips.NoticeRow, min(count, len(yPositions)))
+	for i := range rows {
+		rows[i] = streamclips.NoticeRow{X: 1600, Y: yPositions[i], Width: 300, Height: 34}
+	}
+	return rows
+}
+
 func TestReadStreamKillfeedReturnsParsedKills(t *testing.T) {
 	weapon := streamclips.WeaponKeys()[0]
 	killsJSON := `{"kills":[{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"villain","weapon":"` + weapon + `","headshot":true}]}`
@@ -95,6 +121,308 @@ func TestReadStreamKillfeedReturnsParsedKills(t *testing.T) {
 	got := body.Kills[0]
 	if got.AttackerName != "hero" || got.VictimName != "villain" || got.Weapon != weapon || !got.Headshot {
 		t.Fatalf("kill = %#v, want the parsed hero/villain notice", got)
+	}
+}
+
+func TestReadStreamKillfeedAlignsCumulativeSnapshotToNoticeBirths(t *testing.T) {
+	weapon := streamclips.WeaponKeys()[0]
+	killsJSON := `{"kills":[` +
+		`{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"first","weapon":"` + weapon + `"},` +
+		`{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"second","weapon":"` + weapon + `"},` +
+		`{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"third","weapon":"` + weapon + `"}` +
+		`]}`
+	srv := fakeXAIKillfeedServer(t, killsJSON)
+	h, id := killfeedReadHandlers(t, srv.URL, "ffmpeg", "xai_test")
+	h.killfeedFrame = func(_ context.Context, _ string, seconds float64) (image.Image, error) {
+		count := 0
+		switch {
+		case seconds >= 4:
+			count = 3
+		case seconds >= 2.6:
+			count = 2
+		case seconds >= 2.5:
+			count = 1
+		}
+		return encodedNoticeCountFrame(count), nil
+	}
+	h.killfeedNoticeRows = encodedNoticeRows
+	h.killfeedTimeline = func(_ context.Context, _ string, start, end float64, crop *streamclips.CropRect) ([]timedKillfeedRows, error) {
+		var frames []timedKillfeedRows
+		for seconds := start; seconds <= end; seconds += 1.0 / killfeedTimelineFPS {
+			frame, err := h.killfeedFrame(context.Background(), "source", seconds)
+			if err != nil {
+				return nil, err
+			}
+			rows := h.killfeedNoticeRows(frame, crop)
+			frames = append(frames, timedKillfeedRows{
+				Seconds:      seconds,
+				Bounds:       frame.Bounds(),
+				Rows:         rows,
+				Fingerprints: fingerprintKillfeedRows(frame, rows),
+			})
+		}
+		return frames, nil
+	}
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/killfeed-read", strings.NewReader(`{"clip_id":"clip-1","cue_seconds":4.5}`))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	var body readKillfeedResponse
+	if err := json.Unmarshal(rw.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rw.Body.String())
+	}
+	if !body.Aligned {
+		t.Fatalf("aligned = false, want true; body=%s", rw.Body.String())
+	}
+	if len(body.Events) != 3 {
+		t.Fatalf("events = %+v, want three notice-birth events", body.Events)
+	}
+	if math.Abs(body.Events[0].CueSeconds-2.375) > 0.02 || len(body.Events[0].Kills) != 1 || body.Events[0].Kills[0].VictimName != "first" {
+		t.Fatalf("first event = %+v, want first kill aligned just before its first stable row", body.Events[0])
+	}
+	if math.Abs(body.Events[1].CueSeconds-2.5) > 0.02 || len(body.Events[1].Kills) != 1 || body.Events[1].Kills[0].VictimName != "second" {
+		t.Fatalf("second event = %+v, want second kill aligned just before its first stable row", body.Events[1])
+	}
+	if math.Abs(body.Events[2].CueSeconds-3.875) > 0.02 || len(body.Events[2].Kills) != 1 || body.Events[2].Kills[0].VictimName != "third" {
+		t.Fatalf("third event = %+v, want only the new third kill just before its first stable row", body.Events[2])
+	}
+}
+
+func TestAlignKillfeedEventsDoesNotDoubleCountTargetEndpoint(t *testing.T) {
+	targetFrame := encodedNoticeCountFrame(2)
+	targetRows := encodedNoticeRows(targetFrame, nil)
+	targetFingerprints := fingerprintKillfeedRows(targetFrame, targetRows)
+	if !distinctKillfeedFingerprints(targetFingerprints) {
+		t.Fatal("test target fingerprints are not distinct")
+	}
+	h := &Handlers{killfeedNoticeRows: encodedNoticeRows}
+	h.killfeedTimeline = func(context.Context, string, float64, float64, *streamclips.CropRect) ([]timedKillfeedRows, error) {
+		return []timedKillfeedRows{
+			{Seconds: 4.25, Bounds: targetFrame.Bounds(), Fingerprints: []killfeedRowFingerprint{targetFingerprints[1]}},
+			{Seconds: 4.375, Bounds: targetFrame.Bounds(), Fingerprints: []killfeedRowFingerprint{targetFingerprints[1]}},
+			// The first row exists only in this endpoint observation. alignKillfeedEvents
+			// separately appends targetFrame at the same timestamp.
+			{Seconds: 4.5, Bounds: targetFrame.Bounds(), Rows: targetRows, Fingerprints: targetFingerprints},
+		}, nil
+	}
+	kills := []streamclips.KillfeedKill{
+		{AttackerSide: "CT", AttackerName: "hero", VictimSide: "T", VictimName: "first", Weapon: "awp"},
+		{AttackerSide: "CT", AttackerName: "hero", VictimSide: "T", VictimName: "second", Weapon: "awp"},
+	}
+	events, aligned := h.alignKillfeedEvents(
+		context.Background(), "source", streamclips.ClipRange{StartSeconds: 0, EndSeconds: 5},
+		streamclips.CropRect{X: 0.7, Y: 0.05, Width: 0.28, Height: 0.2}, targetFrame, 4.5, kills,
+	)
+	if aligned || events != nil {
+		t.Fatalf("aligned = %v, events = %+v; want fallback when a non-newest row has only one distinct observation", aligned, events)
+	}
+}
+
+func TestFallbackKillfeedEventKillsSubtractsRecentEvents(t *testing.T) {
+	first := streamclips.KillfeedKill{AttackerSide: "CT", AttackerName: "hero", VictimSide: "T", VictimName: "first", Weapon: "awp"}
+	second := streamclips.KillfeedKill{AttackerSide: "CT", AttackerName: "hero", VictimSide: "T", VictimName: "second", Weapon: "awp"}
+	clip := streamclips.ClipRange{
+		KillfeedSeconds: []float64{2},
+		KillfeedKills:   [][]streamclips.KillfeedKill{{first}},
+	}
+
+	got := fallbackKillfeedEventKills(clip, 3, []streamclips.KillfeedKill{first, second})
+	if len(got) != 1 || got[0] != second {
+		t.Fatalf("fallback delta = %+v, want only second kill", got)
+	}
+}
+
+func TestFindKillfeedRowOnsetIgnoresExpiredOlderOccupant(t *testing.T) {
+	bounds := image.Rect(0, 0, 1920, 1080)
+	target := streamclips.NoticeRow{X: 1600, Y: 73, Width: 300, Height: 34}
+	oldFingerprint := killfeedRowFingerprint{features: 64}
+	oldFingerprint.bits[1] = ^uint64(0)
+	targetFingerprint := killfeedRowFingerprint{features: 64}
+	targetFingerprint.bits[0] = ^uint64(0)
+	withFingerprint := func(seconds float64, fingerprint killfeedRowFingerprint) timedKillfeedRows {
+		return timedKillfeedRows{
+			Seconds: seconds, Bounds: bounds,
+			Rows: []streamclips.NoticeRow{target}, Fingerprints: []killfeedRowFingerprint{fingerprint},
+		}
+	}
+	withoutTarget := func(seconds float64) timedKillfeedRows {
+		return timedKillfeedRows{Seconds: seconds, Bounds: bounds}
+	}
+	timeline := []timedKillfeedRows{
+		withFingerprint(0, oldFingerprint),
+		withFingerprint(0.125, oldFingerprint),
+		withoutTarget(0.25),
+		withoutTarget(0.375),
+		withoutTarget(0.5),
+		withoutTarget(0.625),
+		withFingerprint(0.75, targetFingerprint),
+		withoutTarget(0.875), // one bounded detector miss in the final run
+		withFingerprint(1, targetFingerprint),
+		withFingerprint(1.125, targetFingerprint),
+	}
+
+	got, ok := (&Handlers{}).findKillfeedRowOnset(targetFingerprint, timeline, false, false)
+	if !ok {
+		t.Fatal("findKillfeedRowOnset ok = false, want final stable occupancy")
+	}
+	if got != 0.75 {
+		t.Fatalf("onset = %.3f, want 0.750 after the older row occupant expired", got)
+	}
+}
+
+func TestFindKillfeedRowOnsetDistinguishesContinuousSlotReplacement(t *testing.T) {
+	bounds := image.Rect(0, 0, 1920, 1080)
+	target := streamclips.NoticeRow{X: 1600, Y: 73, Width: 300, Height: 34}
+	oldFingerprint := killfeedRowFingerprint{features: 64}
+	oldFingerprint.bits[0] = ^uint64(0)
+	targetFingerprint := killfeedRowFingerprint{features: 64}
+	targetFingerprint.bits[1] = ^uint64(0)
+	sample := func(seconds float64, fingerprint killfeedRowFingerprint) timedKillfeedRows {
+		return timedKillfeedRows{
+			Seconds: seconds, Bounds: bounds,
+			Rows: []streamclips.NoticeRow{target}, Fingerprints: []killfeedRowFingerprint{fingerprint},
+		}
+	}
+	timeline := []timedKillfeedRows{
+		sample(0, oldFingerprint),
+		sample(0.125, oldFingerprint),
+		sample(0.25, targetFingerprint),
+		sample(0.375, targetFingerprint),
+		sample(0.5, targetFingerprint),
+	}
+
+	got, ok := (&Handlers{}).findKillfeedRowOnset(targetFingerprint, timeline, false, false)
+	if !ok {
+		t.Fatal("findKillfeedRowOnset ok = false, want target fingerprint run")
+	}
+	if got != 0.25 {
+		t.Fatalf("onset = %.3f, want 0.250 after continuous slot replacement", got)
+	}
+}
+
+func TestFindKillfeedRowOnsetTracksNoticeAcrossRowReflow(t *testing.T) {
+	bounds := image.Rect(0, 0, 1920, 1080)
+	fingerprint := killfeedRowFingerprint{features: 64}
+	fingerprint.bits[0] = ^uint64(0)
+	sample := func(seconds float64, y int) timedKillfeedRows {
+		return timedKillfeedRows{
+			Seconds: seconds, Bounds: bounds,
+			Rows:         []streamclips.NoticeRow{{X: 1600, Y: y, Width: 300, Height: 34}},
+			Fingerprints: []killfeedRowFingerprint{fingerprint},
+		}
+	}
+	timeline := []timedKillfeedRows{
+		sample(0, 73),
+		sample(0.125, 73),
+		sample(0.25, 143),
+		sample(0.375, 143),
+	}
+
+	got, ok := (&Handlers{}).findKillfeedRowOnset(fingerprint, timeline, false, true)
+	if !ok || got != 0 {
+		t.Fatalf("onset = %.3f, ok = %v; want birth at 0 before row reflow", got, ok)
+	}
+}
+
+func TestFindKillfeedRowOnsetAnchorsRepeatedContentToTargetRun(t *testing.T) {
+	bounds := image.Rect(0, 0, 1920, 1080)
+	fingerprint := killfeedRowFingerprint{features: 64}
+	fingerprint.bits[0] = ^uint64(0)
+	row := streamclips.NoticeRow{X: 1600, Y: 73, Width: 300, Height: 34}
+	matched := func(seconds float64) timedKillfeedRows {
+		return timedKillfeedRows{
+			Seconds: seconds, Bounds: bounds,
+			Rows: []streamclips.NoticeRow{row}, Fingerprints: []killfeedRowFingerprint{fingerprint},
+		}
+	}
+	timeline := []timedKillfeedRows{
+		matched(0),
+		matched(0.125),
+		{Seconds: 0.25, Bounds: bounds},
+		{Seconds: 0.75, Bounds: bounds},
+		matched(1.5),
+		matched(1.625),
+		matched(1.75),
+	}
+
+	got, ok := (&Handlers{}).findKillfeedRowOnset(fingerprint, timeline, false, false)
+	if !ok || got != 1.5 {
+		t.Fatalf("onset = %.3f, ok = %v; want target-connected run at 1.500", got, ok)
+	}
+}
+
+func TestFindKillfeedRowOnsetBridgesBoundedDetectorGap(t *testing.T) {
+	bounds := image.Rect(0, 0, 1920, 1080)
+	fingerprint := killfeedRowFingerprint{features: 64}
+	fingerprint.bits[0] = ^uint64(0)
+	row := streamclips.NoticeRow{X: 1600, Y: 73, Width: 300, Height: 34}
+	matched := func(seconds float64) timedKillfeedRows {
+		return timedKillfeedRows{
+			Seconds: seconds, Bounds: bounds,
+			Rows: []streamclips.NoticeRow{row}, Fingerprints: []killfeedRowFingerprint{fingerprint},
+		}
+	}
+	timeline := []timedKillfeedRows{matched(0), matched(0.125)}
+	for seconds := 0.25; seconds < 1; seconds += 0.125 {
+		timeline = append(timeline, timedKillfeedRows{Seconds: seconds, Bounds: bounds})
+	}
+	timeline = append(timeline, matched(1))
+
+	got, ok := (&Handlers{}).findKillfeedRowOnset(fingerprint, timeline, false, true)
+	if !ok || got != 0 {
+		t.Fatalf("onset = %.3f, ok = %v; want 0 across bounded detector gap", got, ok)
+	}
+}
+
+func TestFindKillfeedRowOnsetRejectsLeftCensoredLookbackBoundary(t *testing.T) {
+	bounds := image.Rect(0, 0, 1920, 1080)
+	fingerprint := killfeedRowFingerprint{features: 64}
+	fingerprint.bits[0] = ^uint64(0)
+	row := streamclips.NoticeRow{X: 1600, Y: 73, Width: 300, Height: 34}
+	matched := func(seconds float64) timedKillfeedRows {
+		return timedKillfeedRows{
+			Seconds: seconds, Bounds: bounds,
+			Rows: []streamclips.NoticeRow{row}, Fingerprints: []killfeedRowFingerprint{fingerprint},
+		}
+	}
+	timeline := []timedKillfeedRows{matched(12), matched(12.125), matched(12.25)}
+
+	if onset, ok := (&Handlers{}).findKillfeedRowOnset(fingerprint, timeline, false, false); ok {
+		t.Fatalf("onset = %.3f, ok = true; want fallback for a row already present at the lookback boundary", onset)
+	}
+	if onset, ok := (&Handlers{}).findKillfeedRowOnset(fingerprint, timeline, false, true); !ok || onset != 12 {
+		t.Fatalf("clip-boundary onset = %.3f, ok = %v; want 12.000", onset, ok)
+	}
+}
+
+func TestReadStreamKillfeedFallsBackWhenVisionAndDetectorCountsDisagree(t *testing.T) {
+	weapon := streamclips.WeaponKeys()[0]
+	killsJSON := `{"kills":[` +
+		`{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"first","weapon":"` + weapon + `"},` +
+		`{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"second","weapon":"` + weapon + `"}` +
+		`]}`
+	srv := fakeXAIKillfeedServer(t, killsJSON)
+	h, id := killfeedReadHandlers(t, srv.URL, "ffmpeg", "xai_test")
+	h.killfeedNoticeRows = func(image.Image, *streamclips.CropRect) []streamclips.NoticeRow {
+		return []streamclips.NoticeRow{{X: 1600, Y: 73, Width: 300, Height: 34}}
+	}
+	r := Routes(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/killfeed-read", strings.NewReader(`{"clip_id":"clip-1","cue_seconds":2}`))
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	var body readKillfeedResponse
+	if err := json.Unmarshal(rw.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rw.Body.String())
+	}
+	if body.Aligned || len(body.Events) != 1 || body.Events[0].CueSeconds != 2 || len(body.Events[0].Kills) != 2 {
+		t.Fatalf("fallback response = %+v, want both kills kept at requested cue", body)
 	}
 }
 

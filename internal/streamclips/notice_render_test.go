@@ -2,9 +2,11 @@ package streamclips
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/png"
 	"path"
+	"sync"
 	"testing"
 )
 
@@ -190,6 +192,37 @@ func TestLoadIconConcurrentCallersShareCachedImage(t *testing.T) {
 		if img != first {
 			t.Fatal("concurrent callers received different cached images")
 		}
+	}
+}
+
+func TestRenderNoticeConcurrentCallersUseIndependentFontFaces(t *testing.T) {
+	const (
+		callers    = 32
+		iterations = 20
+	)
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for caller := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			kill := baseKill()
+			kill.AttackerName = fmt.Sprintf("player%d", caller)
+			for range iterations {
+				if _, err := RenderNotice(kill); err != nil {
+					errs <- err
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("RenderNotice: %v", err)
 	}
 }
 
