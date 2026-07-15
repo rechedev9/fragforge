@@ -98,7 +98,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/go/bin
-          key: ${{ runner.os }}-go-tools-staticcheck2025.1.1-govulncheck1.4.0
+          key: ${{ runner.os }}-go-tools-${{ hashFiles('go.mod') }}-staticcheck2025.1.1-govulncheck1.4.0
 
       - name: Install staticcheck
         shell: bash
