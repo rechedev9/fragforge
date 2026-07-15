@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -48,6 +47,9 @@ func run() error {
 	}
 	if err := clearDiscoverySecretEnvironment(); err != nil {
 		return fmt.Errorf("config: clear discovery credential from process environment: %w", err)
+	}
+	if err := clearSubprocessCredentialEnvironment(); err != nil {
+		return fmt.Errorf("config: clear subprocess credentials from process environment: %w", err)
 	}
 	// Auto-detect HLAE/CS2/recorder/editor/ffmpeg on the host so capture and
 	// rendering work without the user setting env vars; explicit env still wins.
@@ -233,11 +235,7 @@ func run() error {
 		httpapi.WithGenerateIntentStore(generateIntents),
 		httpapi.WithPublishAssistantTrends(youtubeTrends),
 	)
-	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.Routes(handlers),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := newOrchestratorHTTPServer(cfg.HTTPAddr, httpapi.Routes(handlers))
 	httpRuntime, err := prepareHTTPServer(srv)
 	if err != nil {
 		return fmt.Errorf("http: %w", err)

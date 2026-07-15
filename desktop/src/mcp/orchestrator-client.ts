@@ -365,6 +365,9 @@ export class OrchestratorClient {
 }
 
 async function validateUpload(filePath: string, extensions: ReadonlySet<string>, label: string, maxBytes: number): Promise<void> {
+  if (isWindowsRemoteOrDevicePath(filePath)) {
+    throw new Error(`${label}_path must point to a local drive`);
+  }
   if (!path.isAbsolute(filePath)) throw new Error(`${label}_path must be absolute`);
   if (!extensions.has(path.extname(filePath).toLowerCase())) {
     throw new Error(`${label}_path must use one of: ${[...extensions].sort().join(', ')}`);
@@ -373,6 +376,18 @@ async function validateUpload(filePath: string, extensions: ReadonlySet<string>,
   if (!info.isFile()) throw new Error(`${label}_path must point to a file`);
   if (info.size === 0) throw new Error(`${label}_path must not be empty`);
   if (info.size > maxBytes) throw new Error(`${label}_path exceeds the ${formatByteLimit(maxBytes)} limit`);
+}
+
+/** Rejects Windows paths that can initiate network access or escape Win32 drive semantics. */
+function isWindowsRemoteOrDevicePath(filePath: string): boolean {
+  // UNC paths accept both slash styles. Device and NT object-manager paths use
+  // forms such as \\?\, \\.\, or \??\ and must be rejected before stat().
+  if (/^(?:\\\\|\/\/)/.test(filePath) || /^\\(?:\?\?|\?|\.)\\/.test(filePath)) return true;
+  // On Windows, an absolute root-relative path (\Windows\...) depends on the
+  // process's current drive. Uploads must name their local drive explicitly.
+  return process.platform === 'win32'
+    && /^[\\/]/.test(filePath)
+    && !/^[A-Za-z]:[\\/]/.test(filePath);
 }
 
 async function readBoundedResponseText(response: Response, maxBytes: number): Promise<string> {

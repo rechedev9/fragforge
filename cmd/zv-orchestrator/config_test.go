@@ -117,6 +117,30 @@ func TestClearDiscoverySecretEnvironmentKeepsLoadedConfigOnlyInMemory(t *testing
 	}
 }
 
+func TestClearSubprocessCredentialEnvironmentKeepsLoadedConfigOnlyInMemory(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ZV_DATABASE_URL", "memory")
+	t.Setenv(mutationTokenEnvironmentVariable, "mutation-secret")
+	t.Setenv(firecrawlAPIKeyEnvironmentVariable, "firecrawl-secret")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig error = %v", err)
+	}
+	if err := clearSubprocessCredentialEnvironment(); err != nil {
+		t.Fatalf("clearSubprocessCredentialEnvironment error = %v", err)
+	}
+	if cfg.MutationToken == "" || cfg.FirecrawlAPIKey == "" {
+		t.Fatal("loaded config lost a credential after environment cleanup")
+	}
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, mutationTokenEnvironmentVariable) || strings.EqualFold(name, firecrawlAPIKeyEnvironmentVariable) {
+			t.Fatalf("environment still contains %q after credential cleanup", name)
+		}
+	}
+}
+
 func TestLoadConfigAllowsPartialRecordWorkerConfig(t *testing.T) {
 	// Regression: a partially-set record trio must not kill the boot. The
 	// desktop app passes only ZV_HLAE_PATH (its provisioned HLAE) and relies on

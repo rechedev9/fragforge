@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readBoundedText } from '@/lib/api/bounded-request-body';
 import { jobUrl, mutationHeaders, forwardError, callOrchestrator, serviceUnavailable } from '../../_lib';
 
 export const runtime = 'nodejs';
@@ -13,8 +14,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   const url = jobUrl(jobId, '/parse');
   if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
 
-  const { steamId } = (await request.json()) as { steamId?: string };
-  if (!steamId) {
+  const incoming = await readBoundedText(request);
+  if (!incoming.ok) return NextResponse.json({ error: incoming.error }, { status: incoming.status });
+  let requestBody: { steamId?: unknown };
+  try {
+    requestBody = JSON.parse(incoming.text || '{}') as { steamId?: unknown };
+  } catch {
+    return NextResponse.json({ error: 'invalid json body' }, { status: 400 });
+  }
+  const { steamId } = requestBody;
+  if (typeof steamId !== 'string' || !steamId) {
     return NextResponse.json({ error: 'steamId required' }, { status: 400 });
   }
 

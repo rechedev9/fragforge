@@ -15,8 +15,14 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
+
+// DefaultMaxBytes matches the direct stream-upload ceiling. URL acquisition
+// uses the same limit so yt-dlp cannot fill the local disk with an unbounded
+// VOD before the worker timeout expires.
+const DefaultMaxBytes int64 = 8 << 30
 
 // Sentinel errors classified from yt-dlp stderr. Callers can use errors.Is to
 // branch on them; Download always wraps the underlying yt-dlp output as
@@ -30,6 +36,8 @@ var (
 	// ErrUnavailable means the source exists but cannot currently be
 	// downloaded (geo-restricted, expired, private).
 	ErrUnavailable = errors.New("vodfetch: source unavailable")
+	// ErrTooLarge means the source exceeds the configured download ceiling.
+	ErrTooLarge = errors.New("vodfetch: source exceeds maximum size")
 )
 
 // SourceKind classifies a URL so callers can special-case Twitch clips and
@@ -60,6 +68,7 @@ func (k SourceKind) String() string {
 
 var twitchVODPath = regexp.MustCompile(`^/videos/\d+/?$`)
 var twitchClipPath = regexp.MustCompile(`^/[^/]+/clip/[^/]+/?$`)
+var reflectedURLPattern = regexp.MustCompile(`https?://[^\s<>"']+`)
 
 // nonVideoExts are file extensions whose URLs are direct links to a non-video
 // asset: an image pasted from a clipboard uploader (the reported case was a
@@ -85,7 +94,9 @@ var nonVideoExts = map[string]bool{
 func ClassifySource(rawURL string) (SourceKind, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return SourceOther, fmt.Errorf("parse url: %w", err)
+		// url.Parse errors can quote the input. Keep credentials and signed
+		// query parameters out of callers' logs even for malformed URLs.
+		return SourceOther, errors.New("parse url")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return SourceOther, fmt.Errorf("unsupported url scheme %q, want http or https", u.Scheme)
@@ -142,6 +153,8 @@ type Fetcher struct {
 	// BinaryPath is the yt-dlp executable to run. Defaults to "yt-dlp" (found
 	// via PATH) when empty.
 	BinaryPath string
+	// MaxBytes caps the downloaded file. Values <= 0 use DefaultMaxBytes.
+	MaxBytes int64
 	// Runner executes BinaryPath. Defaults to execCommandRunner when nil.
 	Runner CommandRunner
 }
@@ -166,6 +179,13 @@ func (f Fetcher) runner() CommandRunner {
 	return execCommandRunner{}
 }
 
+func (f Fetcher) maxBytes() int64 {
+	if f.MaxBytes > 0 {
+		return f.MaxBytes
+	}
+	return DefaultMaxBytes
+}
+
 // Download fetches url into destPath as an MP4. It is idempotent: if
 // destPath already exists, Download returns its size without invoking
 // yt-dlp. Otherwise it downloads into a temp file in destPath's directory
@@ -175,10 +195,15 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 	if _, err := ClassifySource(rawURL); err != nil {
 		return Result{}, fmt.Errorf("classify source: %w", err)
 	}
+	maxBytes := f.maxBytes()
+	source := redactedURL(rawURL)
 
 	if info, err := os.Stat(destPath); err == nil {
 		if info.IsDir() {
 			return Result{}, fmt.Errorf("dest path %q is a directory", destPath)
+		}
+		if info.Size() > maxBytes {
+			return Result{}, fmt.Errorf("download %s: %w (limit %d bytes)", source, ErrTooLarge, maxBytes)
 		}
 		return Result{Path: destPath, Bytes: info.Size()}, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -186,8 +211,11 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 	}
 
 	destDir := filepath.Dir(destPath)
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("create dest dir: %w", err)
+	}
+	if err := os.Chmod(destDir, 0o700); err != nil {
+		return Result{}, fmt.Errorf("restrict dest dir permissions: %w", err)
 	}
 
 	tmp, err := os.CreateTemp(destDir, filepath.Base(destPath)+".*.part")
@@ -211,6 +239,7 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 		"--merge-output-format", "mp4",
 		"--no-playlist",
 		"--no-progress",
+		"--max-filesize", strconv.FormatInt(maxBytes, 10),
 		"-o", tmpPath,
 		rawURL,
 	}
@@ -219,7 +248,7 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 	if runErr != nil {
 		_ = os.Remove(tmpPath)
 		if ctx.Err() != nil {
-			return Result{}, fmt.Errorf("download %s: %w", rawURL, ctx.Err())
+			return Result{}, fmt.Errorf("download %s: %w", source, ctx.Err())
 		}
 		return Result{}, classifyError(rawURL, stderr, runErr)
 	}
@@ -230,7 +259,15 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 	}
 	if info.Size() == 0 {
 		_ = os.Remove(tmpPath)
-		return Result{}, fmt.Errorf("download %s: yt-dlp produced an empty file", rawURL)
+		return Result{}, fmt.Errorf("download %s: yt-dlp produced an empty file", source)
+	}
+	if info.Size() > maxBytes {
+		_ = os.Remove(tmpPath)
+		return Result{}, fmt.Errorf("download %s: %w (limit %d bytes)", source, ErrTooLarge, maxBytes)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		_ = os.Remove(tmpPath)
+		return Result{}, fmt.Errorf("restrict downloaded file permissions: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, destPath); err != nil {
@@ -244,21 +281,51 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 // classifyError maps yt-dlp stderr text to a typed sentinel error, falling
 // back to a generic wrapped error when no known pattern matches.
 func classifyError(rawURL, stderr string, runErr error) error {
-	text := strings.ToLower(stderr)
+	source := redactedURL(rawURL)
+	sanitized := sanitizedErrorText(rawURL, stderr)
+	line := firstLine(sanitized)
+	text := strings.ToLower(sanitized)
 
 	switch {
 	case strings.Contains(text, "404") || strings.Contains(text, "does not exist") || strings.Contains(text, "not found"):
-		return fmt.Errorf("download %s: %w: %s", rawURL, ErrNotFound, firstLine(stderr))
+		return fmt.Errorf("download %s: %w: %s", source, ErrNotFound, line)
 	case strings.Contains(text, "subscriber") || strings.Contains(text, "login") || strings.Contains(text, "authentication") || strings.Contains(text, "sign in"):
-		return fmt.Errorf("download %s: %w: %s", rawURL, ErrAuthRequired, firstLine(stderr))
+		return fmt.Errorf("download %s: %w: %s", source, ErrAuthRequired, line)
 	case strings.Contains(text, "geo") || strings.Contains(text, "expired") || strings.Contains(text, "unavailable") || strings.Contains(text, "private"):
-		return fmt.Errorf("download %s: %w: %s", rawURL, ErrUnavailable, firstLine(stderr))
+		return fmt.Errorf("download %s: %w: %s", source, ErrUnavailable, line)
 	}
 
 	if trimmed := strings.TrimSpace(stderr); trimmed != "" {
-		return fmt.Errorf("download %s: yt-dlp failed: %w: %s", rawURL, runErr, firstLine(stderr))
+		return fmt.Errorf("download %s: %w: %s", source, redactedCommandError{err: runErr}, line)
 	}
-	return fmt.Errorf("download %s: yt-dlp failed: %w", rawURL, runErr)
+	return fmt.Errorf("download %s: %w", source, redactedCommandError{err: runErr})
+}
+
+// redactedCommandError preserves errors.Is/errors.As without reflecting an
+// external command's potentially sensitive error text into logs.
+type redactedCommandError struct{ err error }
+
+func (e redactedCommandError) Error() string { return "yt-dlp command failed" }
+func (e redactedCommandError) Unwrap() error { return e.err }
+
+// redactedURL retains enough source context for diagnostics while removing
+// the three URL components that commonly carry credentials.
+func redactedURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "[redacted-url]"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	u.Fragment = ""
+	u.RawFragment = ""
+	return u.String()
+}
+
+func sanitizedErrorText(rawURL, stderr string) string {
+	text := strings.ReplaceAll(stderr, rawURL, redactedURL(rawURL))
+	return reflectedURLPattern.ReplaceAllStringFunc(text, redactedURL)
 }
 
 // firstLine returns the first non-empty line of s, trimmed, so error

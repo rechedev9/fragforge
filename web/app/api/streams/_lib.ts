@@ -5,6 +5,8 @@ import {
   forwardError,
   serviceUnavailable,
   proxyStream,
+  callOrchestratorStreamingUpload,
+  UPLOAD_BODY_LIMIT_EXCEEDED,
 } from '../demos/_lib';
 
 /**
@@ -14,7 +16,16 @@ import {
  * /api/demos/*: every route goes through callOrchestrator and a bare fetch
  * failure never turns into a code-less 500.
  */
-export { orchestratorUrl, callOrchestrator, mutationHeaders, forwardError, serviceUnavailable, proxyStream };
+export {
+  orchestratorUrl,
+  callOrchestrator,
+  mutationHeaders,
+  forwardError,
+  serviceUnavailable,
+  proxyStream,
+  callOrchestratorStreamingUpload,
+  UPLOAD_BODY_LIMIT_EXCEEDED,
+};
 
 const UUID_RE = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 

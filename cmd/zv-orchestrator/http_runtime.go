@@ -6,7 +6,22 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 )
+
+const (
+	orchestratorReadHeaderTimeout = 10 * time.Second
+	orchestratorIdleTimeout       = 60 * time.Second
+)
+
+func newOrchestratorHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: orchestratorReadHeaderTimeout,
+		IdleTimeout:       orchestratorIdleTimeout,
+	}
+}
 
 // preparedHTTPServer reserves the configured address before workers start, so
 // a bind conflict is a synchronous startup error instead of a later health-check

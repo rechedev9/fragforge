@@ -1,76 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import {
   normalizeXAIAPIKey,
-  resolveXAIAPIKey,
   resolveXAIAPIKeyDetails,
   takeXAIAPIKeyFromEnvironment,
 } from './xai-api-key.ts';
 
-test('prefers an explicit local xAI API key without reading the bundle', () => {
-  const key = resolveXAIAPIKey({
-    environmentValue: '  local-team-key  ',
-    bundledPath: 'unused',
-    readFile: () => {
-      throw new Error('bundled key should not be read');
-    },
+test('prefers an explicit environment xAI API key over the stored value', () => {
+  const resolved = resolveXAIAPIKeyDetails({
+    environmentValue: '  environment-key  ',
+    storedValue: 'stored-key',
   });
 
-  assert.equal(key, 'local-team-key');
+  assert.deepEqual(resolved, { apiKey: 'environment-key', source: 'environment' });
 });
 
-test('loads the packaged team xAI API key when no local override exists', (t) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-team-key-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const bundledPath = path.join(directory, 'xai-api-key');
-  fs.writeFileSync(bundledPath, '  packaged-team-key  ');
-
-  assert.equal(resolveXAIAPIKey({ bundledPath }), 'packaged-team-key');
-});
-
-test('reports source details and applies environment, stored, team precedence', () => {
-  let reads = 0;
-  const readFile = (): string => {
-    reads += 1;
-    return 'team-key';
-  };
-
+test('reports source details for environment, stored, and unconfigured states', () => {
   assert.deepEqual(
     resolveXAIAPIKeyDetails({
       environmentValue: ' environment-key ',
       storedValue: 'stored-key',
-      bundledPath: 'unused',
-      readFile,
     }),
     { apiKey: 'environment-key', source: 'environment' },
   );
   assert.deepEqual(
     resolveXAIAPIKeyDetails({
       storedValue: ' stored-key ',
-      bundledPath: 'unused',
-      readFile,
     }),
     { apiKey: 'stored-key', source: 'stored' },
   );
-  assert.deepEqual(
-    resolveXAIAPIKeyDetails({ bundledPath: 'unused', readFile }),
-    { apiKey: 'team-key', source: 'team' },
-  );
-  assert.equal(reads, 1);
-});
-
-test('treats a missing or empty packaged key as an unconfigured normal build', (t) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-team-key-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const bundledPath = path.join(directory, 'xai-api-key');
-
-  assert.equal(resolveXAIAPIKey({ bundledPath }), undefined);
-  fs.writeFileSync(bundledPath, '  ');
-  assert.equal(resolveXAIAPIKey({ bundledPath }), undefined);
-  assert.deepEqual(resolveXAIAPIKeyDetails({ bundledPath }), { source: 'none' });
+  assert.deepEqual(resolveXAIAPIKeyDetails({}), { source: 'none' });
 });
 
 test('rejects unsafe key contents without echoing the value', () => {
@@ -82,7 +41,7 @@ test('rejects unsafe key contents without echoing the value', () => {
 
   for (const value of unsafeValues) {
     assert.throws(
-      () => resolveXAIAPIKey({ environmentValue: value, bundledPath: 'unused' }),
+      () => resolveXAIAPIKeyDetails({ environmentValue: value }),
       (err: unknown) => err instanceof Error
         && /single non-empty line no longer than 4096 bytes/.test(err.message)
         && !err.message.includes(value),
@@ -106,16 +65,4 @@ test('captures the canonical xAI key and clears every casing variant', () => {
   assert.equal(takeXAIAPIKeyFromEnvironment(environment), 'canonical-key');
   assert.deepEqual(environment, { KEEP_ME: 'yes' });
   assert.equal(takeXAIAPIKeyFromEnvironment(environment), undefined);
-});
-
-test('reports packaged key read failures without exposing file contents', () => {
-  assert.throws(
-    () => resolveXAIAPIKey({
-      bundledPath: 'team/xai-api-key',
-      readFile: () => {
-        throw new Error('access denied');
-      },
-    }),
-    /could not read the packaged team xAI API key: access denied/,
-  );
 });

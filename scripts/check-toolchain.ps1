@@ -95,10 +95,10 @@ if ($CheckNpxPackages) {
         Add-Check "hyperframes CLI" $false "npx unavailable" $false
         Add-Check "opensrc CLI" $false "npx unavailable" $false
     } else {
-        $hyperframesOutput = & npx --yes hyperframes --version 2>&1
+        $hyperframesOutput = & npx --yes hyperframes@0.6.40 --version 2>&1
         Add-Check "hyperframes CLI" ($LASTEXITCODE -eq 0) (($hyperframesOutput | Select-Object -First 1) -join "") $false
 
-        $opensrcOutput = & npx --yes opensrc --version 2>&1
+        $opensrcOutput = & npx --yes opensrc@0.7.3 --version 2>&1
         Add-Check "opensrc CLI" ($LASTEXITCODE -eq 0) (($opensrcOutput | Select-Object -First 1) -join "") $false
     }
 }

@@ -89,8 +89,11 @@ func DefaultDir() string {
 // New opens (or creates) a Recorder rooted at dir, loading any counters
 // persisted by a previous process so counts accumulate across CLI invocations.
 func New(dir string) (*Recorder, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create obs dir: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("restrict obs dir permissions: %w", err)
 	}
 	r := &Recorder{dir: dir, counters: map[string]int64{}}
 	if err := r.load(); err != nil {
@@ -207,11 +210,14 @@ func (r *Recorder) appendJournal(ev Event) error {
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
-	f, err := os.OpenFile(r.JournalPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(r.JournalPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open journal: %w", err)
 	}
 	defer f.Close()
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("restrict journal permissions: %w", err)
+	}
 	if _, err := f.Write(append(b, '\n')); err != nil {
 		return fmt.Errorf("append journal: %w", err)
 	}

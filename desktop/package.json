@@ -2,6 +2,7 @@
   "name": "fragforge-studio",
   "version": "2.2.1",
   "private": true,
+  "packageManager": "pnpm@11.9.0",
   "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
   "author": "FragForge",
   "main": "dist/main.js",
@@ -17,10 +18,9 @@
     "eval:mcp:gate": "go build -o ../bin/zv-orchestrator.exe ../cmd/zv-orchestrator && pnpm run eval:mcp",
     "mcp": "node --no-warnings --experimental-strip-types src/mcp/stdio.ts",
     "assemble": "node scripts/assemble.mjs",
-    "assemble:team": "node scripts/assemble.mjs --team-xai-key",
     "start": "pnpm run build && electron .",
     "dist": "node scripts/dist.mjs",
-    "dist:team": "node scripts/dist.mjs --team-xai-key"
+    "verify:dist-integrity": "node scripts/verify-dist-integrity.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -56,10 +56,6 @@
       {
         "from": "build-resources/music",
         "to": "music"
-      },
-      {
-        "from": "build-resources/team/xai-api-key",
-        "to": "team/xai-api-key"
       }
     ],
     "extraFiles": [

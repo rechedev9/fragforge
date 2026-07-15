@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { provisionMusicLibrary } from './music-library.ts';
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 function temporaryLibrary(t: test.TestContext): {
   bundledMusicDir: string;
@@ -37,12 +43,12 @@ test('copies bundled tracks and downloads remote tracks sequentially', async (t)
   fs.writeFileSync(path.join(paths.musicDir, 'existing.mp3'), 'keep me');
   const catalog = {
     tracks: [
-      { id: 'existing', ext: 'mp3', downloadUrl: 'https://example.test/existing' },
+      { id: 'existing', ext: 'mp3', downloadUrl: 'https://example.test/existing', sha256: sha256('keep me') },
       { id: 'local', ext: 'mp3' },
       { id: 'missing-local', ext: 'ogg' },
-      { id: 'first', ext: 'mp3', downloadUrl: 'https://example.test/first' },
-      { id: 'broken', ext: 'mp3', downloadUrl: 'https://example.test/broken' },
-      { id: 'last', ext: 'wav', downloadUrl: 'https://example.test/last' },
+      { id: 'first', ext: 'mp3', downloadUrl: 'https://example.test/first', sha256: sha256('https://example.test/first') },
+      { id: 'broken', ext: 'mp3', downloadUrl: 'https://example.test/broken', sha256: sha256('unused') },
+      { id: 'last', ext: 'wav', downloadUrl: 'https://example.test/last', sha256: sha256('https://example.test/last') },
       { id: '', ext: 'mp3', downloadUrl: 'https://example.test/invalid' },
       'not a track',
     ],
@@ -65,7 +71,7 @@ test('copies bundled tracks and downloads remote tracks sequentially', async (t)
       try {
         if (url.endsWith('/broken')) throw new Error('offline');
         fs.writeFileSync(destination, url);
-        return 'test-sha256';
+        return sha256(url);
       } finally {
         activeDownloads -= 1;
       }
@@ -107,8 +113,8 @@ test('stops before the next track when boot is cancelled', async (t) => {
   fs.mkdirSync(paths.bundledMusicDir, { recursive: true });
   fs.writeFileSync(path.join(paths.bundledMusicDir, 'catalog.json'), JSON.stringify({
     tracks: [
-      { id: 'first', ext: 'mp3', downloadUrl: 'https://example.test/first' },
-      { id: 'second', ext: 'mp3', downloadUrl: 'https://example.test/second' },
+      { id: 'first', ext: 'mp3', downloadUrl: 'https://example.test/first', sha256: sha256('https://example.test/first') },
+      { id: 'second', ext: 'mp3', downloadUrl: 'https://example.test/second', sha256: sha256('https://example.test/second') },
     ],
   }));
   const controller = new AbortController();
@@ -122,12 +128,81 @@ test('stops before the next track when boot is cancelled', async (t) => {
       downloads.push(url);
       fs.writeFileSync(destination, url);
       controller.abort();
-      return 'test-sha256';
+      return sha256(url);
     },
   });
 
   assert.deepEqual(downloads, ['https://example.test/first']);
   assert.equal(fs.existsSync(path.join(paths.musicDir, 'second.mp3')), false);
+});
+
+test('removes a downloaded remote track when its sha256 mismatches', async (t) => {
+  const paths = temporaryLibrary(t);
+  fs.mkdirSync(paths.bundledMusicDir, { recursive: true });
+  fs.writeFileSync(path.join(paths.bundledMusicDir, 'catalog.json'), JSON.stringify({
+    tracks: [{
+      id: 'remote',
+      ext: 'mp3',
+      downloadUrl: 'https://example.test/remote',
+      sha256: sha256('expected audio'),
+    }],
+  }));
+  const logs: string[] = [];
+
+  await provisionMusicLibrary({
+    ...paths,
+    signal: new AbortController().signal,
+    logLine: (line) => logs.push(line),
+    download: async (_url, destination) => {
+      fs.writeFileSync(destination, 'substituted audio');
+      return sha256('substituted audio');
+    },
+  });
+
+  assert.equal(fs.existsSync(path.join(paths.musicDir, 'remote.mp3')), false);
+  assert.deepEqual(logs, ['[music] skip remote: Error: sha256 mismatch\n']);
+});
+
+test('rejects a remote track without a valid sha256 and removes an unverified cached file', async (t) => {
+  const paths = temporaryLibrary(t);
+  fs.mkdirSync(paths.bundledMusicDir, { recursive: true });
+  fs.mkdirSync(paths.musicDir, { recursive: true });
+  fs.writeFileSync(path.join(paths.musicDir, 'remote.mp3'), 'legacy unverified audio');
+  fs.writeFileSync(path.join(paths.bundledMusicDir, 'catalog.json'), JSON.stringify({
+    tracks: [{ id: 'remote', ext: 'mp3', downloadUrl: 'https://example.test/remote' }],
+  }));
+  let downloads = 0;
+  const logs: string[] = [];
+
+  await provisionMusicLibrary({
+    ...paths,
+    signal: new AbortController().signal,
+    logLine: (line) => logs.push(line),
+    download: async () => {
+      downloads += 1;
+      return sha256('should not run');
+    },
+  });
+
+  assert.equal(downloads, 0);
+  assert.equal(fs.existsSync(path.join(paths.musicDir, 'remote.mp3')), false);
+  assert.deepEqual(logs, ['[music] skip remote: remote track has no valid sha256\n']);
+});
+
+test('every remote track in the shipped catalog has a lowercase sha256', () => {
+  const sourceFile = fileURLToPath(import.meta.url);
+  const catalogPath = path.join(path.dirname(sourceFile), '..', '..', 'data', 'music', 'catalog.json');
+  const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8')) as { tracks?: unknown[] };
+  const remoteTracks = (catalog.tracks ?? []).filter(
+    (track): track is { id: unknown; downloadUrl: string; sha256?: unknown } =>
+      typeof track === 'object' && track !== null && 'downloadUrl' in track
+      && typeof track.downloadUrl === 'string' && track.downloadUrl !== '',
+  );
+
+  assert.ok(remoteTracks.length > 0);
+  for (const track of remoteTracks) {
+    assert.match(typeof track.sha256 === 'string' ? track.sha256 : '', /^[a-f0-9]{64}$/, String(track.id));
+  }
 });
 
 test('logs an invalid catalog without blocking startup', async (t) => {

@@ -23,10 +23,10 @@ if [ "$missing" -ne 0 ]; then
   cat <<'EOF'
 
 Install optional Go quality tools:
-  go install golang.org/x/tools/cmd/goimports@latest
-  go install honnef.co/go/tools/cmd/staticcheck@latest
-  go install golang.org/x/vuln/cmd/govulncheck@latest
-  go install github.com/securego/gosec/v2/cmd/gosec@latest
+  go install golang.org/x/tools/cmd/goimports@v0.48.0
+  go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+  go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
+  go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
 
 The repository scripts also discover tools from `go env GOBIN` or
 `go env GOPATH` when a Windows Go toolchain is called from Bash/WSL.

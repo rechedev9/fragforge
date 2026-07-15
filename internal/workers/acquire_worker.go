@@ -37,6 +37,7 @@ type AcquireWorkerConfig struct {
 	YtdlpPath   string
 	FFprobePath string
 	Timeout     string
+	MaxBytes    int64
 }
 
 // AcquireWorker handles the "stream:acquire" Asynq task: it downloads a
@@ -58,7 +59,7 @@ func NewAcquireWorker(repo StreamAcquireRepository, store storage.Storage, cfg A
 		repo:    repo,
 		storage: store,
 		cfg:     cfg,
-		fetcher: vodfetch.Fetcher{BinaryPath: cfg.YtdlpPath},
+		fetcher: vodfetch.Fetcher{BinaryPath: cfg.YtdlpPath, MaxBytes: cfg.MaxBytes},
 		prober:  streamclips.FFprobeProber{Path: cfg.FFprobePath},
 	}
 }
@@ -193,8 +194,8 @@ func writeStreamEditPlanArtifact(store storage.Storage, id uuid.UUID, plan strea
 }
 
 // acquireFailureClass classifies an acquire failure by vodfetch's sentinel
-// errors so obs/journal entries and metrics distinguish "source not found"
-// from "auth required" from "unavailable" from a generic error.
+// errors so obs/journal entries and metrics distinguish expected source and
+// size failures from a generic worker error.
 func acquireFailureClass(err error) string {
 	switch {
 	case errors.Is(err, vodfetch.ErrNotFound):
@@ -203,6 +204,8 @@ func acquireFailureClass(err error) string {
 		return "auth_required"
 	case errors.Is(err, vodfetch.ErrUnavailable):
 		return "unavailable"
+	case errors.Is(err, vodfetch.ErrTooLarge):
+		return "too_large"
 	default:
 		return "error"
 	}
@@ -223,6 +226,8 @@ func friendlyAcquireReason(err error) string {
 		return "Ese vídeo necesita inicio de sesión o suscripción; no podemos descargarlo."
 	case errors.Is(err, vodfetch.ErrUnavailable):
 		return "Ese vídeo no está disponible ahora mismo (privado, caducado o restringido por región)."
+	case errors.Is(err, vodfetch.ErrTooLarge):
+		return "Ese vídeo supera el límite máximo de descarga permitido."
 	default:
 		return "No pudimos preparar un vídeo a partir de esa URL. Asegúrate de que es un clip o VOD público de Twitch o YouTube."
 	}

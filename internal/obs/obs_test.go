@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -13,6 +15,13 @@ func TestRecordErrorWritesJournalAndCounters(t *testing.T) {
 	r, err := New(dir)
 	if err != nil {
 		t.Fatalf("New: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if info, statErr := os.Stat(dir); statErr != nil {
+			t.Fatalf("stat obs dir: %v", statErr)
+		} else if got, want := info.Mode().Perm(), os.FileMode(0o700); got != want {
+			t.Errorf("obs dir permissions: got %o want %o", got, want)
+		}
 	}
 
 	if err := r.RecordError(Event{Stage: StageParse, Class: "target_not_found", Message: "no such player", Demo: "a.dem", Target: "76561198000000000"}); err != nil {
@@ -35,6 +44,13 @@ func TestRecordErrorWritesJournalAndCounters(t *testing.T) {
 	if events[0].Time.IsZero() {
 		t.Errorf("first event time not set: %+v", events[0])
 	}
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(r.JournalPath()); err != nil {
+			t.Fatalf("stat journal: %v", err)
+		} else if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+			t.Errorf("journal permissions: got %o want %o", got, want)
+		}
+	}
 
 	want := map[string]int64{
 		`fragforge_errors_total{class="target_not_found",stage="parse"}`: 2,
@@ -46,6 +62,31 @@ func TestRecordErrorWritesJournalAndCounters(t *testing.T) {
 		if got[k] != v {
 			t.Errorf("counter %s: got %d want %d", k, got[k], v)
 		}
+	}
+}
+
+func TestRecordErrorRestrictsExistingJournalPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose POSIX permission bits")
+	}
+	dir := t.TempDir()
+	journalPath := filepath.Join(dir, "journal.jsonl")
+	if err := os.WriteFile(journalPath, nil, 0o644); err != nil {
+		t.Fatalf("seed journal: %v", err)
+	}
+	r, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := r.RecordError(Event{Stage: StageParse, Class: "test", Message: "test"}); err != nil {
+		t.Fatalf("RecordError: %v", err)
+	}
+	info, err := os.Stat(journalPath)
+	if err != nil {
+		t.Fatalf("stat journal: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+		t.Errorf("journal permissions: got %o want %o", got, want)
 	}
 }
 

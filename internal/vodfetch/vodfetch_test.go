@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -54,8 +55,12 @@ func (f *fakeRunner) Run(ctx context.Context, dir, name string, args ...string) 
 
 // outArg extracts the path following "-o" from a yt-dlp argument list.
 func outArg(args []string) string {
+	return argValue(args, "-o")
+}
+
+func argValue(args []string, key string) string {
 	for i, a := range args {
-		if a == "-o" && i+1 < len(args) {
+		if a == key && i+1 < len(args) {
 			return args[i+1]
 		}
 	}
@@ -98,6 +103,90 @@ func TestDownload_Success(t *testing.T) {
 	}
 	if string(content) != "fake mp4 bytes" {
 		t.Errorf("dest content = %q, want %q", content, "fake mp4 bytes")
+	}
+	if runtime.GOOS != "windows" {
+		if info, statErr := os.Stat(dest); statErr != nil {
+			t.Fatalf("stat dest: %v", statErr)
+		} else if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+			t.Errorf("dest permissions = %o, want %o", got, want)
+		}
+		if info, statErr := os.Stat(dir); statErr != nil {
+			t.Fatalf("stat dest dir: %v", statErr)
+		} else if got, want := info.Mode().Perm(), os.FileMode(0o700); got != want {
+			t.Errorf("dest dir permissions = %o, want %o", got, want)
+		}
+	}
+}
+
+func TestDownload_RejectsOversizedResultAndRemovesTemp(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "clip.mp4")
+	runner := &fakeRunner{fileContent: []byte("12345")}
+	f := Fetcher{Runner: runner, MaxBytes: 4}
+
+	_, err := f.Download(context.Background(), "https://cdn.example.com/clip.mp4", dest)
+	if !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("Download() error = %v, want errors.Is(_, ErrTooLarge)", err)
+	}
+	if _, statErr := os.Stat(dest); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("destination exists after oversized download; stat error = %v", statErr)
+	}
+	tmpPath := outArg(runner.gotArgs)
+	if _, statErr := os.Stat(tmpPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("temporary download exists after size rejection; stat error = %v", statErr)
+	}
+	if got := argValue(runner.gotArgs, "--max-filesize"); got != "4" {
+		t.Fatalf("--max-filesize = %q, want 4", got)
+	}
+}
+
+func TestDownload_RedactsSensitiveURLFromErrors(t *testing.T) {
+	rawURL := "https://sentinel-user:sentinel-pass@example.com/clip.mp4?token=sentinel-query#sentinel-fragment"
+	tests := []struct {
+		name    string
+		stderr  string
+		wantErr error
+	}{
+		{
+			name:   "generic reflected url",
+			stderr: "ERROR: failed to download " + rawURL,
+		},
+		{
+			name:    "classified reflected url",
+			stderr:  "ERROR: not found at " + rawURL,
+			wantErr: ErrNotFound,
+		},
+		{
+			name:    "classified error after warning",
+			stderr:  "WARNING: retrying download\nERROR: login required at " + rawURL,
+			wantErr: ErrAuthRequired,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dest := filepath.Join(t.TempDir(), "clip.mp4")
+			runErr := errors.New("exit status 1")
+			f := Fetcher{Runner: &fakeRunner{stderr: tt.stderr, err: runErr}}
+
+			_, err := f.Download(context.Background(), rawURL, dest)
+			if err == nil {
+				t.Fatal("Download() error = nil, want non-nil")
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Download() error = %v, want errors.Is(_, %v)", err, tt.wantErr)
+			}
+			if tt.wantErr == nil && !errors.Is(err, runErr) {
+				t.Fatalf("Download() error = %v, want wrapped command error", err)
+			}
+			for _, secret := range []string{"sentinel-user", "sentinel-pass", "sentinel-query", "sentinel-fragment"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Errorf("Download() error leaked %q: %v", secret, err)
+				}
+			}
+			if !strings.Contains(err.Error(), "https://example.com/clip.mp4") {
+				t.Errorf("Download() error = %v, want redacted source URL", err)
+			}
+		})
 	}
 }
 
@@ -266,6 +355,7 @@ func TestDownload_ArgsShape(t *testing.T) {
 		"--merge-output-format", "mp4",
 		"--no-playlist",
 		"--no-progress",
+		"--max-filesize", "8589934592",
 	}
 	got := runner.gotArgs
 	if len(got) < len(want)+3 { // +3 for "-o", tmpPath, url

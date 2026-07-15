@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readBoundedText } from '@/lib/api/bounded-request-body';
 import { streamJobUrl, mutationHeaders, callOrchestrator, serviceUnavailable } from '../../_lib';
 
 export const runtime = 'nodejs';
@@ -44,11 +45,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   const url = streamJobUrl(jobId, '/killfeed-read');
   if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
 
-  const bodyText = await request.text();
+  const incoming = await readBoundedText(request);
+  if (!incoming.ok) return NextResponse.json({ error: incoming.error }, { status: incoming.status });
   const res = await callOrchestrator(url, {
     method: 'POST',
     headers: { ...mutationHeaders(), 'Content-Type': 'application/json' },
-    body: bodyText,
+    body: incoming.text,
   });
   if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardKillfeedError(res);

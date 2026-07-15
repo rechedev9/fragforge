@@ -1,36 +1,19 @@
 import { execSync } from 'node:child_process';
-import { readFileSync, rmSync, statSync } from 'node:fs';
+import { rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import {
-  assembleUsesTeamXAIKey,
-  environmentWithoutXAIAPIKey,
-  stageTeamXAIKey,
-} from './team-xai-key.mjs';
+import { environmentWithoutXAIAPIKey } from './build-environment.mjs';
+import { releasePaths, verifyReleaseChecksums, writeReleaseChecksums } from './release-integrity.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = join(here, '..');
-const teamDirectory = join(desktop, 'build-resources', 'team');
-const outputDirectory = join(desktop, 'dist-installer');
-const packageMetadata = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8'));
-const installerName = `FragForge Studio Setup ${packageMetadata.version}.exe`;
-const installerPaths = [
-  join(outputDirectory, installerName),
-  join(outputDirectory, `${installerName}.blockmap`),
-];
-const unpackedKeyPath = join(outputDirectory, 'win-unpacked', 'resources', 'team', 'xai-api-key');
+const { artifacts: installerPaths, checksum: checksumPath } = releasePaths(desktop);
 
-// Remove stale release-shaped outputs and staged credentials before validating
-// input. A failed team build can never leave an older same-version installer
-// looking publishable.
-for (const filePath of [...installerPaths, unpackedKeyPath]) rmSync(filePath, { force: true });
-stageTeamXAIKey(teamDirectory, '');
+// Remove stale release-shaped outputs before building the same version again.
+for (const filePath of [...installerPaths, checksumPath]) rmSync(filePath, { force: true });
 
-let teamBuild = false;
-try {
-  teamBuild = assembleUsesTeamXAIKey(process.argv.slice(2));
-} catch {
+if (process.argv.length > 2) {
   console.error('[dist] unsupported build argument');
   process.exit(1);
 }
@@ -39,11 +22,9 @@ const sanitizedEnvironment = environmentWithoutXAIAPIKey();
 let failed = false;
 try {
   execSync('pnpm run build', { cwd: desktop, env: sanitizedEnvironment, stdio: 'inherit' });
-  execSync(teamBuild
-    ? 'node scripts/assemble.mjs --team-xai-key'
-    : 'node scripts/assemble.mjs', {
+  execSync('node scripts/assemble.mjs', {
     cwd: desktop,
-    env: teamBuild ? process.env : sanitizedEnvironment,
+    env: sanitizedEnvironment,
     stdio: 'inherit',
   });
   execSync('electron-builder --win nsis', {
@@ -58,23 +39,16 @@ try {
   });
   await requireNonEmptyFile(installerPaths[0], 'installer');
   await requireNonEmptyFile(installerPaths[1], 'installer blockmap');
-  const packagedKeyBytes = (await waitForFile(unpackedKeyPath, 'packaged xAI key resource')).size;
-  if (teamBuild ? packagedKeyBytes === 0 : packagedKeyBytes !== 0) {
-    throw new Error(teamBuild
-      ? '[dist] internal installer is missing its xAI team fallback'
-      : '[dist] standard installer contains a non-empty xAI team credential');
-  }
+  await writeReleaseChecksums(installerPaths, checksumPath);
+  await verifyReleaseChecksums(installerPaths, checksumPath);
 } catch (err) {
   failed = true;
   console.error(err instanceof Error && err.message.startsWith('[dist]')
     ? err.message
     : '[dist] build or verification failed');
 } finally {
-  // electron-builder has already copied the resource. Keep raw key material
-  // out of build-resources after both successful and failed dist runs.
-  stageTeamXAIKey(teamDirectory, '');
   if (failed) {
-    for (const filePath of [...installerPaths, unpackedKeyPath]) rmSync(filePath, { force: true });
+    for (const filePath of [...installerPaths, checksumPath]) rmSync(filePath, { force: true });
   }
 }
 

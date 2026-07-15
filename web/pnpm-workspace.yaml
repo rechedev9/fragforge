@@ -1,6 +1,9 @@
 allowBuilds:
   sharp: true
 
+overrides:
+  postcss: 8.5.16
+
 # Next's standalone output mirrors the installed node_modules layout. Under
 # pnpm's default (isolated) linker that layout is a graph of symlinks into the
 # .pnpm store, and the desktop installer copies the standalone tree into

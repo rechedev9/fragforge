@@ -25,11 +25,11 @@ jobs:
     timeout-minutes: 5
     outputs:
       installer_changed: ${{ steps.installer-changes.outputs.changed }}
-      go_dependencies_changed: ${{ steps.installer-changes.outputs.go_dependencies_changed }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Detect installer-relevant changes
         id: installer-changes
@@ -40,12 +40,10 @@ jobs:
         run: |
           if [ "$EVENT_NAME" != "push" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "go_dependencies_changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "go_dependencies_changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if git diff --quiet "$BEFORE_SHA" "$HEAD_SHA" -- \
@@ -55,11 +53,6 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-          if git diff --quiet "$BEFORE_SHA" "$HEAD_SHA" -- go.mod go.sum; then
-            echo "go_dependencies_changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "go_dependencies_changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: AGENTS.md must be a symlink to CLAUDE.md
@@ -92,15 +85,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Cache Go quality tools
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/go/bin
           key: ${{ runner.os }}-go-tools-staticcheck2025.1.1-govulncheck1.4.0
@@ -110,7 +105,6 @@ jobs:
         run: command -v staticcheck >/dev/null || go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
 
       - name: Install govulncheck
-        if: needs.repo-integrity.outputs.go_dependencies_changed == 'true'
         shell: bash
         run: command -v govulncheck >/dev/null || go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
 
@@ -122,10 +116,8 @@ jobs:
         shell: bash
         run: scripts/go-gate.sh --build
 
-      - name: govulncheck (informational)
-        if: needs.repo-integrity.outputs.go_dependencies_changed == 'true'
+      - name: govulncheck
         shell: bash
-        continue-on-error: true
         run: govulncheck ./...
 
   go-windows:
@@ -134,9 +126,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           cache: true
@@ -159,19 +153,22 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run test:unit
@@ -186,19 +183,22 @@ jobs:
       run:
         working-directory: desktop
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: desktop/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high
       - run: pnpm run lint
       - run: pnpm run typecheck
       # Real-process and packaged-artifact E2Es are explicitly environment-gated
@@ -215,19 +215,22 @@ jobs:
       run:
         working-directory: landing
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: landing/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high
       - run: pnpm run build
 
   installer-windows:
@@ -237,18 +240,20 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: pnpm
@@ -285,3 +290,7 @@ jobs:
       - name: Build and verify Windows installer
         working-directory: desktop
         run: pnpm run dist
+
+      - name: Verify installer checksums in a fresh process
+        working-directory: desktop
+        run: pnpm run verify:dist-integrity

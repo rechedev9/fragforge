@@ -49,7 +49,7 @@ installer. Optional public trend hints remain available when
 
 ## xAI subtitle credentials
 
-The standard installer remains credential-free. In the installed app, each
+Every installer remains credential-free. In the installed app, each
 Windows user opens `/settings` and enters their own xAI key for stream
 subtitles. The page sends the entered value through the narrow Electron preload
 bridge directly to the main process; it never goes through the bundled Next.js
@@ -68,13 +68,14 @@ The runtime precedence is:
 
 1. `XAI_API_KEY` inherited by the desktop process.
 2. The current Windows user's encrypted key saved from `/settings`.
-3. The packaged key from an internal `dist:team` edition.
-4. No xAI credential (local whisper.cpp can still be used when configured).
+3. No xAI credential (local whisper.cpp can still be used when configured).
 
-`dist:team` is only an internal fallback for machines whose users have not yet
-saved individual keys; it is not the standard distribution path. The selected
-credential is supplied to `zv-orchestrator.exe` for transcription and removed
-from the environments of the bundled Next.js server and media subprocesses.
+There is no shared-key or team build mode. Packaging strips `XAI_API_KEY` from
+the build, web, and electron-builder environments, and the installer manifest
+contains no credential resource. At runtime the selected environment or
+per-user credential is supplied only to `zv-orchestrator.exe` for transcription
+and removed from the environments of the bundled Next.js server and media
+subprocesses.
 
 ## Model Context Protocol (MCP)
 
@@ -255,26 +256,16 @@ packaged app can parse, capture, and render reels. The developer `zv.exe` CLI
 stays available in the repository build but is not shipped in the desktop
 installer.
 
-To produce the optional internal fallback installer, load the shared key
-without placing it in command history and use the separate build target:
+The build has one distribution target, `pnpm run dist`. It rejects unsupported
+arguments, removes `XAI_API_KEY` from every child build environment, and cannot
+stage or declare a credential resource. Users configure credentials after
+installation through `/settings`, where Windows DPAPI protects them per user.
 
-```powershell
-$secureKey = Read-Host "xAI team API key" -AsSecureString
-$env:XAI_API_KEY = (New-Object System.Net.NetworkCredential("", $secureKey)).Password
-pnpm run dist:team
-Remove-Item Env:XAI_API_KEY
-```
-
-`pnpm run dist:team` refuses to run when the key is missing or malformed. It
-stores the credential in `resources/team/xai-api-key` inside the installed app
-only as the lowest-priority configured fallback: an inherited environment key
-or a per-user key saved from `/settings` wins. The ignored `build-resources/`
-and `dist-installer/` directories are its only local staging locations. This is
-convenience, not secret protection: anyone who receives the installer can
-extract and use the shared key, so distribute that edition only to people
-authorized to consume the team's xAI quota. Running the ordinary `pnpm run dist`
-afterward replaces the staged key with an empty resource and produces the
-standard credential-free installer.
+The distribution command also creates dist-installer/SHA256SUMS.txt for the
+installer and its blockmap, then verifies both before returning success. CI
+repeats that verification in a fresh Node process. Publish SHA256SUMS.txt beside
+the versioned installer assets in GitHub Releases so recipients can verify the
+download before running it.
 
 This v2 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
 on first run - choose "More info" -> "Run anyway". Code signing and auto-update

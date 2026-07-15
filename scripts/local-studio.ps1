@@ -18,8 +18,8 @@
 #
 # Prerequisites:
 #   - Build the binaries first:  .\scripts\build.ps1   (produces .\bin\zv.exe)
-#   - Node.js + npm, with web deps installed (the script runs `npm install` if
-#     node_modules is missing).
+#   - Node.js + pnpm 11.9.0. If node_modules is missing, the script installs
+#     exactly the dependency graph in pnpm-lock.yaml.
 #   - CS2 + HLAE installed (HLAE at C:\HLAE-2.190.1\HLAE.exe). Capture needs them;
 #     without them the app still runs the analyze flow and the Capture card tells
 #     you what is missing.
@@ -43,7 +43,7 @@ if (-not (Test-Path $binZv)) {
 if (-not (Test-Path (Join-Path $webDir "node_modules"))) {
     Write-Host "[local-studio] installing web dependencies (first run)..."
     Push-Location $webDir
-    try { & npm install; if ($LASTEXITCODE -ne 0) { throw "npm install failed" } }
+    try { & pnpm install --frozen-lockfile; if ($LASTEXITCODE -ne 0) { throw "pnpm install failed" } }
     finally { Pop-Location }
 }
 
@@ -84,7 +84,7 @@ try {
 
     Write-Host "[local-studio] starting web UI (Ctrl+C to stop everything)..."
     Push-Location $webDir
-    try { & npm run dev }
+    try { & pnpm run dev }
     finally { Pop-Location }
 }
 finally {

@@ -9,6 +9,24 @@ import (
 	"time"
 )
 
+func TestNewOrchestratorHTTPServerSetsDefensiveTimeouts(t *testing.T) {
+	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	server := newOrchestratorHTTPServer("127.0.0.1:8080", handler)
+
+	if got, want := server.Addr, "127.0.0.1:8080"; got != want {
+		t.Fatalf("Addr = %q, want %q", got, want)
+	}
+	if server.Handler == nil {
+		t.Fatal("Handler = nil, want configured handler")
+	}
+	if got, want := server.ReadHeaderTimeout, orchestratorReadHeaderTimeout; got != want {
+		t.Fatalf("ReadHeaderTimeout = %s, want %s", got, want)
+	}
+	if got, want := server.IdleTimeout, orchestratorIdleTimeout; got != want {
+		t.Fatalf("IdleTimeout = %s, want %s", got, want)
+	}
+}
+
 func TestPrepareHTTPServerRejectsOccupiedAddress(t *testing.T) {
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
-import { orchestratorUrl, mutationHeaders, forwardError, callOrchestrator, serviceUnavailable, jobUrl } from './_lib';
+import { localAPIRequestError } from '@/lib/api/local-request-guard';
+import { prepareLocalUploadBody } from '@/lib/api/bounded-request-body';
+import {
+  orchestratorUrl,
+  forwardError,
+  callOrchestrator,
+  callOrchestratorStreamingUpload,
+  serviceUnavailable,
+  jobUrl,
+  UPLOAD_BODY_LIMIT_EXCEEDED,
+} from './_lib';
 
 /**
  * Server-side `/api/demos/*` proxy handlers for the desktop-bundled local
@@ -7,10 +17,9 @@ import { orchestratorUrl, mutationHeaders, forwardError, callOrchestrator, servi
  * capture, render), while its URL and optional token stay out of the browser.
  */
 
-// Matches the orchestrator's 500 MiB MaxBytesReader cap. Enforced here too so a
-// chunked upload with a bogus/absent Content-Length cannot slip a huge body past
-// us before the orchestrator rejects it.
-const MAX_DEMO_BYTES = 500 * 1024 * 1024;
+// Matches the orchestrator's 500 MiB demo cap plus its 1 MiB allowance for
+// multipart boundaries and headers.
+const MAX_DEMO_REQUEST_BYTES = 501 * 1024 * 1024;
 
 /**
  * POST /api/demos/scan (local) - accept a .dem upload and start a roster scan.
@@ -18,27 +27,28 @@ const MAX_DEMO_BYTES = 500 * 1024 * 1024;
  * only the file under field name `demo`.
  */
 export async function localScan(request: Request): Promise<Response> {
-  // Fast-path reject only when a PRESENT, valid Content-Length already exceeds
-  // the cap. A missing/non-numeric header is "unknown", not zero, so we do not
-  // pre-reject on it; the real check is the parsed file size below.
-  const cl = Number(request.headers.get('content-length'));
-  if (Number.isFinite(cl) && cl > MAX_DEMO_BYTES) {
-    return NextResponse.json({ error: 'file too large' }, { status: 413 });
+  const localError = localAPIRequestError(request.headers);
+  if (localError !== undefined) return NextResponse.json({ error: localError }, { status: 403 });
+
+  const contentType = request.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().startsWith('multipart/form-data;')) {
+    return NextResponse.json({ error: 'multipart/form-data required' }, { status: 400 });
   }
 
-  const incoming = await request.formData();
-  const file = incoming.get('file');
-  if (!(file instanceof File)) return NextResponse.json({ error: 'missing file' }, { status: 400 });
-  if (file.size > MAX_DEMO_BYTES) return NextResponse.json({ error: 'file too large' }, { status: 413 });
+  const upload = prepareLocalUploadBody(request, MAX_DEMO_REQUEST_BYTES);
+  if (!upload.ok) return NextResponse.json({ error: upload.error }, { status: upload.status });
 
-  const form = new FormData();
-  form.append('demo', file, file.name);
-
-  const res = await callOrchestrator(`${orchestratorUrl()}/api/jobs`, {
+  const headers: Record<string, string> = { 'Content-Type': contentType };
+  if (upload.contentLength !== undefined) headers['Content-Length'] = upload.contentLength;
+  const res = await callOrchestratorStreamingUpload(`${orchestratorUrl()}/api/jobs`, {
     method: 'POST',
-    headers: mutationHeaders(),
-    body: form,
-  });
+    headers,
+    body: upload.body,
+    duplex: 'half',
+  }, upload.exceeded);
+  if (res === UPLOAD_BODY_LIMIT_EXCEEDED) {
+    return NextResponse.json({ error: 'file too large' }, { status: 413 });
+  }
   if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
 

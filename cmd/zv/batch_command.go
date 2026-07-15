@@ -175,8 +175,12 @@ func runErrors(args []string, stdout, stderr io.Writer) int {
 		return exitUnexpected
 	}
 	if clear {
-		if err := os.WriteFile(rec.JournalPath(), nil, 0o644); err != nil {
+		if err := os.WriteFile(rec.JournalPath(), nil, 0o600); err != nil {
 			fmt.Fprintf(stderr, "error: clear journal: %v\n", err)
+			return exitUnexpected
+		}
+		if err := os.Chmod(rec.JournalPath(), 0o600); err != nil {
+			fmt.Fprintf(stderr, "error: restrict journal permissions: %v\n", err)
 			return exitUnexpected
 		}
 		fmt.Fprintln(stdout, "error journal cleared")

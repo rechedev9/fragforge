@@ -739,6 +739,18 @@ test('rejects unsafe upload paths, unsupported types, directories, and empty fil
   fs.mkdirSync(directoryDemo);
   const client = new OrchestratorClient({ baseUrl: 'http://127.0.0.1:1' });
 
+  await assert.rejects(
+    client.uploadStreamVideo('\\\\attacker.invalid\\share\\clip.mp4', {}),
+    /stream video_path must point to a local drive/,
+  );
+  await assert.rejects(
+    client.uploadStreamVideo('\\\\?\\C:\\private\\clip.mp4', {}),
+    /stream video_path must point to a local drive/,
+  );
+  await assert.rejects(
+    client.uploadStreamVideo('\\??\\C:\\private\\clip.mp4', {}),
+    /stream video_path must point to a local drive/,
+  );
   await assert.rejects(client.uploadDemo('relative.dem', {}), /demo_path must be absolute/);
   await assert.rejects(client.uploadDemo(wrongType, {}), /demo_path must use one of: \.dem/);
   await assert.rejects(client.uploadDemo(emptyDemo, {}), /demo_path must not be empty/);

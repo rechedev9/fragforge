@@ -1,3 +1,5 @@
+import { NextResponse } from 'next/server';
+import { readBoundedText } from '@/lib/api/bounded-request-body';
 import { orchestratorUrl, callOrchestrator, mutationHeaders, forwardError, serviceUnavailable } from '../../_lib';
 
 export const runtime = 'nodejs';
@@ -10,11 +12,12 @@ export const runtime = 'nodejs';
  * contract. Not job-scoped: the notice is drawn purely from the request body.
  */
 export async function POST(request: Request): Promise<Response> {
-  const bodyText = await request.text();
+  const incoming = await readBoundedText(request);
+  if (!incoming.ok) return NextResponse.json({ error: incoming.error }, { status: incoming.status });
   const res = await callOrchestrator(`${orchestratorUrl()}/api/stream-killfeed/notice-preview`, {
     method: 'POST',
     headers: { ...mutationHeaders(), 'Content-Type': 'application/json' },
-    body: bodyText,
+    body: incoming.text,
   });
   if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);

@@ -15,7 +15,7 @@ export type DataPlane = {
   headers: Record<string, string>;
   scanUrl: string;
   /** Multipart field name for the .dem upload. */
-  scanField: 'file';
+  scanField: 'demo';
   /** Reads the job id out of a scan response. */
   scanJobId(body: unknown): string;
   jobStatusUrl(jobId: string): string;
@@ -45,7 +45,7 @@ export function dataPlane(): DataPlane {
   return {
     headers: {},
     scanUrl: '/api/demos/scan',
-    scanField: 'file',
+    scanField: 'demo',
     scanJobId: (body) => str(body, 'jobId'),
     jobStatusUrl: (jobId) => `/api/demos/${jobId}/status`,
     rosterUrl: (jobId) => `/api/demos/${jobId}/roster`,

@@ -10,7 +10,7 @@ export const XAI_SETTINGS_ACTION = {
 } as const;
 
 export type XAISettingsAction = typeof XAI_SETTINGS_ACTION[keyof typeof XAI_SETTINGS_ACTION];
-export type XAISettingsSource = 'environment' | 'stored' | 'team' | 'none';
+export type XAISettingsSource = 'environment' | 'stored' | 'none';
 
 export type XAISettingsRequest =
   | { action: typeof XAI_SETTINGS_ACTION.status }

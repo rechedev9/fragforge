@@ -60,6 +60,7 @@
       "license": "CC0",
       "sourceUrl": "https://archive.org/details/freepd",
       "downloadUrl": "https://archive.org/download/freepd/Page2%2FDrum%20n%20Bass%20B%20Drive.mp3",
+      "sha256": "08e8822289d0d435696bcc279924f8acc744b3acf3376071f6693d465ce69cd4",
       "attributionRequired": false
     },
     {
@@ -72,6 +73,7 @@
       "license": "CC0",
       "sourceUrl": "https://archive.org/details/freepd",
       "downloadUrl": "https://archive.org/download/freepd/Page2%2FElectro%20DnB%20B%20Chaos.mp3",
+      "sha256": "dec5bb871114da338dbaed0a063df666a5ffb46551a086887650bc65a1b9aca8",
       "attributionRequired": false
     },
     {
@@ -84,6 +86,7 @@
       "license": "CC0",
       "sourceUrl": "https://archive.org/details/freepd",
       "downloadUrl": "https://archive.org/download/freepd/Page2%2FElectro%20DnB%20A.mp3",
+      "sha256": "9b05d918f76d12e7b1242a599ffaa2f8350bbdc3d417460be83690e77ef35714",
       "attributionRequired": false
     },
     {
@@ -96,6 +99,7 @@
       "license": "CC0",
       "sourceUrl": "https://archive.org/details/freepd",
       "downloadUrl": "https://archive.org/download/freepd/Page2%2FElectronic%20E%20System%20is%20Down.mp3",
+      "sha256": "805dfcef99108904f1e3e543feb9417491157a0ac0412962277ce18af5c3452d",
       "attributionRequired": false
     },
     {
@@ -108,6 +112,7 @@
       "license": "CC-BY-4.0",
       "sourceUrl": "https://incompetech.com/music/royalty-free/",
       "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Voltaic.mp3",
+      "sha256": "98d6a79a8577c17648ffa533ab213f709005c3a3a51c32e2ad8bd38eb361b5df",
       "attributionRequired": true
     },
     {
@@ -120,6 +125,7 @@
       "license": "CC0",
       "sourceUrl": "https://archive.org/details/freepd",
       "downloadUrl": "https://archive.org/download/freepd/Page2%2FHip%20Hop%20Driver.mp3",
+      "sha256": "db89db2d0446957542db68884fdbe29747b8ce324593c89e38eb8ecca555624c",
       "attributionRequired": false
     },
     {
@@ -132,6 +138,7 @@
       "license": "CC0",
       "sourceUrl": "https://archive.org/details/freepd",
       "downloadUrl": "https://archive.org/download/freepd/epic%2FAdventure.mp3",
+      "sha256": "18432184e1a3acf8095b8b45b688fe08f7afb2447fc6e3adc98cc944c541a733",
       "attributionRequired": false
     },
     {
@@ -144,6 +151,7 @@
       "license": "CC0",
       "sourceUrl": "https://archive.org/details/freepd",
       "downloadUrl": "https://archive.org/download/freepd/Page2%2FVideo%20Games%20Trailer.mp3",
+      "sha256": "9761a9a56538f7bd559441367ff6ed9fdd0ecbf95e596cf4eb1dcd425e04148f",
       "attributionRequired": false
     },
     {
@@ -156,6 +164,7 @@
       "license": "CC-BY-4.0",
       "sourceUrl": "https://incompetech.com/music/royalty-free/",
       "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Hitman.mp3",
+      "sha256": "005d6e28345e3c50a0715f5cf887c4cf02c3fa70910cdacc312bf348a3f2a647",
       "attributionRequired": true
     },
     {
@@ -168,6 +177,7 @@
       "license": "CC-BY-4.0",
       "sourceUrl": "https://incompetech.com/music/royalty-free/",
       "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Severe%20Tire%20Damage.mp3",
+      "sha256": "8bb454c219c4fd668221abaf46e6b85ef1d7dfb48822f8cf4ace26808c99c325",
       "attributionRequired": true
     },
     {
@@ -180,6 +190,7 @@
       "license": "CC-BY-4.0",
       "sourceUrl": "https://incompetech.com/music/royalty-free/",
       "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Cyborg%20Ninja.mp3",
+      "sha256": "b266d2ac6af6b295b8ac278dafc63cb6c336551b7cc3c66e824f9c1bda945f7a",
       "attributionRequired": true
     },
     {
@@ -192,6 +203,7 @@
       "license": "CC0",
       "sourceUrl": "https://archive.org/details/freepd",
       "downloadUrl": "https://archive.org/download/freepd/Page2%2FNeon%20and%20Kickboxing.mp3",
+      "sha256": "9c54bb42ad0c3d2210b826eaa37a54e07279a5f2d5fb46e60760b79203ca7f2f",
       "attributionRequired": false
     },
     {
@@ -204,6 +216,7 @@
       "license": "CC-BY-4.0",
       "sourceUrl": "https://incompetech.com/music/royalty-free/",
       "downloadUrl": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Itty%20Bitty%208%20Bit.mp3",
+      "sha256": "abae7e4d020499466e3840643385c8ec608ba7bb8b62b16e1d9d7bda5e622416",
       "attributionRequired": true
     }
   ]

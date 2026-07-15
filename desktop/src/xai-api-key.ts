@@ -1,16 +1,12 @@
-import * as fs from 'node:fs';
-
 const MAX_XAI_API_KEY_BYTES = 4096;
 const INVALID_KEY_MESSAGE =
   'XAI_API_KEY must contain a single non-empty line no longer than 4096 bytes';
 
-export type XAIAPIKeySource = 'environment' | 'stored' | 'team' | 'none';
+export type XAIAPIKeySource = 'environment' | 'stored' | 'none';
 
 export interface ResolveXAIAPIKeyOptions {
   environmentValue?: string;
   storedValue?: string;
-  bundledPath: string;
-  readFile?: (filePath: string) => string;
 }
 
 export interface ResolvedXAIAPIKey {
@@ -20,8 +16,8 @@ export interface ResolvedXAIAPIKey {
 
 /**
  * Resolves the subtitle credential for the orchestrator. A local environment
- * value intentionally wins for emergency rotation. A key stored securely for
- * the current OS user wins over the optional internal-team bundle.
+ * value intentionally wins for emergency rotation, followed by a key stored
+ * securely for the current OS user. Desktop builds contain no shared fallback.
  */
 export function resolveXAIAPIKeyDetails(options: ResolveXAIAPIKeyOptions): ResolvedXAIAPIKey {
   if (hasValue(options.environmentValue)) {
@@ -36,25 +32,7 @@ export function resolveXAIAPIKeyDetails(options: ResolveXAIAPIKeyOptions): Resol
       source: 'stored',
     };
   }
-
-  let bundledValue: string;
-  try {
-    bundledValue = (options.readFile ?? readUTF8File)(options.bundledPath);
-  } catch (err) {
-    if (isMissingFileError(err)) return { source: 'none' };
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`could not read the packaged team xAI API key: ${detail}`);
-  }
-  if (!hasValue(bundledValue)) return { source: 'none' };
-  return {
-    apiKey: normalizeXAIAPIKey(bundledValue),
-    source: 'team',
-  };
-}
-
-/** Backwards-compatible value-only view used by the desktop boot path. */
-export function resolveXAIAPIKey(options: ResolveXAIAPIKeyOptions): string | undefined {
-  return resolveXAIAPIKeyDetails(options).apiKey;
+  return { source: 'none' };
 }
 
 /**
@@ -91,14 +69,6 @@ export function takeXAIAPIKeyFromEnvironment(
   const captured = selectedName === undefined ? undefined : environment[selectedName];
   for (const name of matchingNames) delete environment[name];
   return captured;
-}
-
-function readUTF8File(filePath: string): string {
-  return fs.readFileSync(filePath, 'utf8');
-}
-
-function isMissingFileError(err: unknown): boolean {
-  return err instanceof Error && 'code' in err && err.code === 'ENOENT';
 }
 
 function hasValue(value: string | undefined): value is string {

@@ -88,7 +88,6 @@ const orchestratorExe = resourcePath(
 const nextServer = resourcePath('web', 'server.js');
 const dataDir = path.join(app.getPath('userData'), 'data');
 const musicDir = path.join(dataDir, 'music');
-const bundledTeamXAIKeyPath = resourcePath('team', 'xai-api-key');
 
 // Capture and remove an inherited key before any provisioner or child process
 // can inherit it. The value remains only in this main process and is passed
@@ -426,7 +425,6 @@ async function pendingXAIConfiguration(): Promise<PendingXAIConfiguration> {
   }
   return {
     resolved: resolveXAIAPIKeyDetails({
-      bundledPath: bundledTeamXAIKeyPath,
       environmentValue: inheritedXAIAPIKey,
       storedValue,
     }),
@@ -499,9 +497,9 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
   allowedOrigins.clear();
   allowedInternalUrls.clear();
 
-  // The normal build stages an empty team file. Explicit environment input
-  // wins, followed by the user's DPAPI-protected key and then the optional
-  // internal-team bundle. Only the selected value reaches the Go orchestrator.
+  // Explicit environment input wins over the user's DPAPI-protected key. No
+  // desktop build contains a shared credential; only the selected per-machine
+  // value reaches the Go orchestrator.
   const xaiConfiguration = await pendingXAIConfiguration();
   const xaiAPIKey = xaiConfiguration.resolved.apiKey;
 
@@ -736,6 +734,7 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   // Local app needs no browser permissions (camera/mic/geolocation/notifications/etc).
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
   registerXAISettingsIPC();
   registerMCPConfigIPC();
   runBoot();

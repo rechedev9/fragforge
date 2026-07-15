@@ -1,6 +1,27 @@
 package main
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
+
+func TestNewViewerHTTPServerSetsTimeouts(t *testing.T) {
+	handler := http.NewServeMux()
+	server := newViewerHTTPServer("127.0.0.1:8090", handler)
+
+	if got, want := server.Addr, "127.0.0.1:8090"; got != want {
+		t.Fatalf("Addr: got %q want %q", got, want)
+	}
+	if got, want := server.Handler, http.Handler(handler); got != want {
+		t.Fatalf("Handler: got %v want %v", got, want)
+	}
+	if got, want := server.ReadHeaderTimeout, viewerReadHeaderTimeout; got != want {
+		t.Fatalf("ReadHeaderTimeout: got %v want %v", got, want)
+	}
+	if got, want := server.IdleTimeout, viewerIdleTimeout; got != want {
+		t.Fatalf("IdleTimeout: got %v want %v", got, want)
+	}
+}
 
 func TestListenGuard(t *testing.T) {
 	tests := []struct {

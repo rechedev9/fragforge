@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readBoundedText } from '@/lib/api/bounded-request-body';
 import { jobUrl, mutationHeaders, forwardError, callOrchestrator, serviceUnavailable } from '../../../_lib';
 
 export const runtime = 'nodejs';
@@ -16,11 +17,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   const url = jobUrl(jobId, `/renders/${variant}`);
   if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
 
-  const bodyText = await request.text();
+  const incoming = await readBoundedText(request);
+  if (!incoming.ok) return NextResponse.json({ error: incoming.error }, { status: incoming.status });
   const init: RequestInit = { method: 'POST', headers: { ...mutationHeaders() } };
-  if (bodyText) {
+  if (incoming.text) {
     init.headers = { ...init.headers, 'Content-Type': 'application/json' };
-    init.body = bodyText;
+    init.body = incoming.text;
   }
   const res = await callOrchestrator(url, init);
   if (res === null) return serviceUnavailable();

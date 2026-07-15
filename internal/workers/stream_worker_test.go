@@ -170,6 +170,30 @@ func TestAcquireWorkerFailureRecordsReasonAndObs(t *testing.T) {
 	}
 }
 
+func TestAcquireWorkerRejectsOversizedDownload(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeStreamRepo(streamclips.Job{ID: id, Status: streamclips.StatusAcquiring, SourceURL: "https://cdn.example.com/clip.mp4"})
+	store := newFakeStorage()
+
+	w := NewAcquireWorker(repo, store, AcquireWorkerConfig{WorkDir: t.TempDir(), MaxBytes: 4})
+	w.fetcher.Runner = &fakeVodfetchRunner{content: "12345"}
+
+	err := w.HandleStreamAcquire(context.Background(), streamAcquireTask(t, id))
+	if !errors.Is(err, vodfetch.ErrTooLarge) {
+		t.Fatalf("HandleStreamAcquire error = %v, want errors.Is(_, ErrTooLarge)", err)
+	}
+	got := repo.jobs[id]
+	if got.Status != streamclips.StatusFailed {
+		t.Fatalf("status = %s, want failed", got.Status)
+	}
+	if !strings.Contains(got.FailureReason, "límite máximo") {
+		t.Fatalf("failure reason = %q, want size-limit guidance", got.FailureReason)
+	}
+	if _, ok := store.files[streamclips.SourceKey(id)]; ok {
+		t.Fatal("oversized source was uploaded to storage")
+	}
+}
+
 func TestAcquireWorkerIsIdempotentWhenSourceAlreadyExists(t *testing.T) {
 	id := uuid.New()
 	repo := newFakeStreamRepo(streamclips.Job{ID: id, Status: streamclips.StatusAcquiring, SourceURL: "https://clips.twitch.tv/SomeSlug"})

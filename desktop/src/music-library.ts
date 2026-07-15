@@ -1,6 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { downloadFile } from './http-download.ts';
+
+const SHA256_RE = /^[a-f0-9]{64}$/i;
 
 export interface MusicLibraryOptions {
   bundledMusicDir: string;
@@ -48,13 +51,12 @@ export async function provisionMusicLibrary({
     if (signal.aborted) return;
     if (!isRecord(track)) continue;
 
-    const { id, ext, downloadUrl } = track;
+    const { id, ext, downloadUrl, sha256 } = track;
     if (typeof id !== 'string' || !id || typeof ext !== 'string' || !ext) continue;
 
     const destination = path.join(musicDir, `${id}.${ext}`);
-    if (fs.existsSync(destination)) continue;
-
     if (typeof downloadUrl !== 'string' || !downloadUrl) {
+      if (fs.existsSync(destination)) continue;
       const bundledAudio = path.join(bundledMusicDir, `${id}.${ext}`);
       if (fs.existsSync(bundledAudio)) {
         fs.copyFileSync(bundledAudio, destination);
@@ -65,12 +67,48 @@ export async function provisionMusicLibrary({
       continue;
     }
 
+    if (typeof sha256 !== 'string' || !SHA256_RE.test(sha256)) {
+      fs.rmSync(destination, { force: true });
+      logLine(`[music] skip ${id}: remote track has no valid sha256\n`);
+      continue;
+    }
+
+    if (fs.existsSync(destination)) {
+      try {
+        const cachedDigest = await fileSHA256(destination, signal);
+        if (sha256Matches(cachedDigest, sha256)) continue;
+        fs.rmSync(destination, { force: true });
+        logLine(`[music] removed ${id}.${ext}: sha256 mismatch\n`);
+      } catch (err) {
+        if (signal.aborted) return;
+        fs.rmSync(destination, { force: true });
+        logLine(`[music] removed ${id}.${ext}: could not verify sha256: ${String(err)}\n`);
+      }
+    }
+
     try {
-      await download(downloadUrl, destination, { signal });
+      const downloadedDigest = await download(downloadUrl, destination, { signal });
+      if (!sha256Matches(downloadedDigest, sha256)) {
+        // downloadFile publishes the destination before returning its digest.
+        // A mismatched asset must not survive that rename boundary.
+        fs.rmSync(destination, { force: true });
+        throw new Error('sha256 mismatch');
+      }
       logLine(`[music] downloaded ${id}.${ext}\n`);
     } catch (err) {
       if (signal.aborted) return;
       logLine(`[music] skip ${id}: ${String(err)}\n`);
     }
   }
+}
+
+async function fileSHA256(filePath: string, signal: AbortSignal): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of fs.createReadStream(filePath, { signal })) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+function sha256Matches(got: string, want: string): boolean {
+  if (!SHA256_RE.test(got) || !SHA256_RE.test(want)) return false;
+  return timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex'));
 }

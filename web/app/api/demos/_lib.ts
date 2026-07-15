@@ -31,6 +31,35 @@ export async function callOrchestrator(url: string, init?: RequestInit): Promise
   }
 }
 
+export const UPLOAD_BODY_LIMIT_EXCEEDED = 'upload_body_limit_exceeded' as const;
+
+export interface StreamingUploadInit {
+  method: 'POST';
+  headers: Record<string, string>;
+  body: ReadableStream<Uint8Array>;
+  duplex: 'half';
+}
+
+/**
+ * Streams an upload to the orchestrator without materializing multipart data.
+ * The caller-owned byte counter distinguishes an intentional size abort from
+ * an unreachable orchestrator without logging the hostile body as an outage.
+ */
+export async function callOrchestratorStreamingUpload(
+  url: string,
+  init: StreamingUploadInit,
+  bodyLimitExceeded: () => boolean,
+): Promise<Response | null | typeof UPLOAD_BODY_LIMIT_EXCEEDED> {
+  const headers = { ...mutationHeaders(), ...init.headers };
+  try {
+    return await fetch(url, { ...init, headers });
+  } catch (err) {
+    if (bodyLimitExceeded()) return UPLOAD_BODY_LIMIT_EXCEEDED;
+    console.error(`orchestrator unreachable: POST ${url}`, err);
+    return null;
+  }
+}
+
 /** 503 for when the local analysis service (orchestrator) is unreachable. */
 export function serviceUnavailable(): Response {
   return NextResponse.json(

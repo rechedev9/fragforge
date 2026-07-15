@@ -10,7 +10,7 @@ test('targets the same-origin /api/demos proxy with no auth header', () => {
   const dp = dataPlane();
   assert.deepEqual(dp.headers, {});
   assert.equal(dp.scanUrl, '/api/demos/scan');
-  assert.equal(dp.scanField, 'file');
+  assert.equal(dp.scanField, 'demo');
   assert.equal(dp.jobStatusUrl(JOB), `/api/demos/${JOB}/status`);
   assert.equal(dp.rosterUrl(JOB), `/api/demos/${JOB}/roster`);
   assert.equal(dp.parseUrl(JOB), `/api/demos/${JOB}/parse`);

@@ -50,7 +50,9 @@ const (
 	xaiAPIKeyEnvironmentVariable       = "XAI_API_KEY"
 	groqAPIKeyEnvironmentVariable      = "GROQ_API_KEY"
 	groqAPIKeyOverrideVariable         = "ZV_GROQ_API_KEY"
+	mutationTokenEnvironmentVariable   = "ZV_MUTATION_TOKEN"
 	discoverySecretEnvironmentVariable = "ZV_DISCOVERY_SECRET"
+	firecrawlAPIKeyEnvironmentVariable = "FIRECRAWL_API_KEY"
 	// defaultGroqCorrectionModel post-corrects Groq transcripts contextually;
 	// see internal/captions.GroqTranscriber.CorrectionModel.
 	defaultGroqCorrectionModel = "llama-3.3-70b-versatile"
@@ -84,7 +86,7 @@ func loadConfig() (config, error) {
 		FFmpegPath:       os.Getenv("ZV_FFMPEG_PATH"),
 		FFprobePath:      os.Getenv("ZV_FFPROBE_PATH"),
 		MusicDir:         os.Getenv("ZV_MUSIC_DIR"),
-		MutationToken:    os.Getenv("ZV_MUTATION_TOKEN"),
+		MutationToken:    os.Getenv(mutationTokenEnvironmentVariable),
 		DiscoverySecret:  os.Getenv(discoverySecretEnvironmentVariable),
 		CodexPath:        os.Getenv("ZV_CODEX_PATH"),
 		CodexModel:       os.Getenv("ZV_CODEX_MODEL"),
@@ -103,7 +105,7 @@ func loadConfig() (config, error) {
 		GroqCorrectionModel: envOr("ZV_GROQ_CORRECTION_MODEL", defaultGroqCorrectionModel),
 		// Firecrawl enriches strategy suggestions with public CS2 trend
 		// references. It is optional and never sent to the web renderer.
-		FirecrawlAPIKey: os.Getenv("FIRECRAWL_API_KEY"),
+		FirecrawlAPIKey: os.Getenv(firecrawlAPIKeyEnvironmentVariable),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
@@ -170,6 +172,16 @@ func clearGroqAPIKeyEnvironment() error {
 // inheriting the desktop-only discovery credential after config has loaded it.
 func clearDiscoverySecretEnvironment() error {
 	return clearEnvironmentVariable(discoverySecretEnvironmentVariable)
+}
+
+// clearSubprocessCredentialEnvironment removes credentials that the
+// orchestrator needs in memory but no media, capture, download, or agent child
+// process should inherit.
+func clearSubprocessCredentialEnvironment() error {
+	if err := clearEnvironmentVariable(mutationTokenEnvironmentVariable); err != nil {
+		return err
+	}
+	return clearEnvironmentVariable(firecrawlAPIKeyEnvironmentVariable)
 }
 
 func clearEnvironmentVariable(variable string) error {

@@ -53,26 +53,39 @@ func TestCrossSiteGuardBlocksBrowserCrossSiteMutations(t *testing.T) {
 	}
 }
 
-func TestRequireReadAuthGatesApiReadsWhenExposed(t *testing.T) {
+func TestRequireReadAuthGatesExposedReads(t *testing.T) {
 	cases := []struct {
-		name       string
-		readAuth   bool
-		path       string
-		token      string
-		wantStatus int
+		name        string
+		readAuth    bool
+		method      string
+		path        string
+		token       string
+		wantStatus  int
+		wantReached bool
 	}{
-		{name: "exposed api read without token", readAuth: true, path: "/api/jobs", token: "", wantStatus: http.StatusUnauthorized},
-		{name: "exposed api read with token", readAuth: true, path: "/api/jobs", token: "secret", wantStatus: http.StatusOK},
-		{name: "exposed workbench shell stays open", readAuth: true, path: "/", token: "", wantStatus: http.StatusOK},
-		{name: "loopback default api read open", readAuth: false, path: "/api/jobs", token: "", wantStatus: http.StatusOK},
+		{name: "exposed api read without token", readAuth: true, path: "/api/jobs", wantStatus: http.StatusUnauthorized},
+		{name: "exposed api read with token", readAuth: true, path: "/api/jobs", token: "secret", wantStatus: http.StatusOK, wantReached: true},
+		{name: "exposed workbench data without token", readAuth: true, path: "/ui/jobs", wantStatus: http.StatusUnauthorized},
+		{name: "exposed workbench data with wrong token", readAuth: true, path: "/ui/jobs", token: "wrong", wantStatus: http.StatusUnauthorized},
+		{name: "exposed workbench data with token", readAuth: true, path: "/ui/jobs", token: "secret", wantStatus: http.StatusOK, wantReached: true},
+		{name: "exposed workbench head without token", readAuth: true, method: http.MethodHead, path: "/ui/jobs", wantStatus: http.StatusUnauthorized},
+		{name: "exposed workbench head with token", readAuth: true, method: http.MethodHead, path: "/ui/jobs", token: "secret", wantStatus: http.StatusOK, wantReached: true},
+		{name: "exposed workbench shell stays open", readAuth: true, path: "/", wantStatus: http.StatusOK, wantReached: true},
+		{name: "loopback default api read open", readAuth: false, path: "/api/jobs", wantStatus: http.StatusOK, wantReached: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &Handlers{mutationToken: "secret", requireReadAuth: tc.readAuth}
+			reached := false
 			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				reached = true
 				w.WriteHeader(http.StatusOK)
 			})
-			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			method := tc.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			req := httptest.NewRequest(method, tc.path, nil)
 			if tc.token != "" {
 				req.Header.Set("X-FragForge-Token", tc.token)
 			}
@@ -81,6 +94,9 @@ func TestRequireReadAuthGatesApiReadsWhenExposed(t *testing.T) {
 
 			if rw.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d; body=%s", rw.Code, tc.wantStatus, rw.Body.String())
+			}
+			if reached != tc.wantReached {
+				t.Fatalf("handler reached = %v, want %v", reached, tc.wantReached)
 			}
 		})
 	}

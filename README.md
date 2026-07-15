@@ -198,7 +198,7 @@ the next backend runs when the previous one fails or produces an empty transcrip
 (observed with sparse speech buried in gameplay audio), and the clip is published
 uncaptioned only when every configured backend finds no words.
 
-Source builds and the standard desktop installer do not contain a credential.
+Source builds and every desktop installer do not contain a credential.
 In the installed desktop app, each Windows user can open `/settings` and save
 their own xAI key. Electron encrypts it for that Windows user with
 `safeStorage` (backed by DPAPI); the stored value is never returned for display,
@@ -208,10 +208,10 @@ stops the local orchestrator and can interrupt active uploads, captures, or
 renders, so finish those tasks first.
 
 xAI credential precedence is: an inherited `XAI_API_KEY`, then the encrypted
-per-user key from `/settings`, then the packaged key in an internal team
-edition, then no xAI credential. `pnpm run dist:team` exists only to produce that
-internal fallback; the packaged key is extractable by anyone who obtains the
-installer. See `desktop/README.md` for the desktop and build details.
+per-user key from `/settings`, then no xAI credential. Every desktop build is
+credential-free: the packaging scripts remove `XAI_API_KEY` from child build
+environments and expose no target or resource capable of embedding a shared
+key. See `desktop/README.md` for the desktop and build details.
 
 Set a newly generated key in the same PowerShell session that starts Local
 Studio without putting the secret in command history:

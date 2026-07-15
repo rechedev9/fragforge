@@ -1,4 +1,4 @@
-import { SERVICE_UNAVAILABLE_CODE } from './types';
+import { SERVICE_UNAVAILABLE_CODE } from './types.ts';
 
 /**
  * Stream Clips: turn a Twitch clip/VOD (or an uploaded MP4) into vertical
@@ -190,8 +190,8 @@ export class RealStreamsApiClient implements StreamsApiClient {
 
   async createFromFile(file: File, title?: string): Promise<StreamJob> {
     const form = new FormData();
-    form.append('file', file);
-    if (title) form.append('title', title);
+    form.append('video', file, file.name);
+    if (title) form.append('config', JSON.stringify({ title }));
     return readJson<StreamJob>(await fetch('/api/streams', { method: 'POST', body: form }));
   }
 

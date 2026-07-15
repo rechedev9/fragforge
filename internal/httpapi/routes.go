@@ -87,13 +87,16 @@ func (h *Handlers) requireMutationToken(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// When the bind is exposed, reads of the API also require the token so an
-		// untrusted network cannot enumerate jobs or stream artifacts. /metrics is
-		// guarded too so it does not leak pipeline activity off-box; a local
-		// Prometheus scrapes the loopback default where requireReadAuth is off.
-		// The workbench shell (GET /), /healthz, and other non-/api paths stay
-		// open so the operator console still loads and can prompt for the token.
-		if h.requireReadAuth && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics") && !h.tokenMatches(r) {
+		// When the bind is exposed, reads of the API and workbench data require
+		// the token so an untrusted network cannot enumerate jobs or artifacts.
+		// /metrics is guarded too so it does not leak pipeline activity off-box;
+		// a local Prometheus scrapes the loopback default where requireReadAuth is
+		// off. The workbench shell (GET /) and /healthz stay open so the operator
+		// console can load and prompt for the token before requesting /ui/* data.
+		protectedRead := strings.HasPrefix(r.URL.Path, "/api/") ||
+			r.URL.Path == "/metrics" ||
+			((r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.HasPrefix(r.URL.Path, "/ui/"))
+		if h.requireReadAuth && protectedRead && !h.tokenMatches(r) {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}

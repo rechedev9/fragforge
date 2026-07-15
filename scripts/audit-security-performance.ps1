@@ -42,14 +42,14 @@ Invoke-Step "fix loop" {
 }
 
 Invoke-Step "gosec" {
-    & go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
+    & go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 ./...
     if ($LASTEXITCODE -ne 0) {
         throw "gosec failed"
     }
 }
 
 Invoke-Step "govulncheck" {
-    & go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+    & go run golang.org/x/vuln/cmd/govulncheck@v1.4.0 ./...
     if ($LASTEXITCODE -ne 0) {
         throw "govulncheck failed"
     }

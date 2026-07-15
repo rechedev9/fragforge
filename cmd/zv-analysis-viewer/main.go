@@ -12,6 +12,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+)
+
+const (
+	viewerReadHeaderTimeout = 10 * time.Second
+	viewerIdleTimeout       = 60 * time.Second
 )
 
 type playerSnapshot struct {
@@ -173,8 +179,17 @@ func main() {
 	})
 
 	log.Printf("zv-analysis-viewer: http://%s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := newViewerHTTPServer(addr, mux).ListenAndServe(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func newViewerHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: viewerReadHeaderTimeout,
+		IdleTimeout:       viewerIdleTimeout,
 	}
 }
 
