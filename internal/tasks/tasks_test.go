@@ -168,7 +168,7 @@ func TestNewComposeFinalTaskRoundtrip(t *testing.T) {
 func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
 	edit := renderplan.EditRequest{Format: renderplan.FormatLandscape16x9, KillEffect: renderplan.KillEffectVelocity, Transition: renderplan.TransitionWhip, Intro: true, HookText: true, KillCounter: true}
-	tk, err := NewRenderVariantTask(id, testRenderVariant, "", edit)
+	tk, err := NewRenderVariantTask(id, testRenderVariant, "concrete-teeth", 0.35, edit)
 	if err != nil {
 		t.Fatalf("NewRenderVariantTask error = %v", err)
 	}
@@ -186,6 +186,9 @@ func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	if payload.Variant != testRenderVariant {
 		t.Errorf("Variant = %q, want %q", payload.Variant, testRenderVariant)
 	}
+	if payload.MusicKey != "concrete-teeth" || payload.MusicVolume != 0.35 {
+		t.Errorf("music = %q/%v, want concrete-teeth/0.35", payload.MusicKey, payload.MusicVolume)
+	}
 	if payload.Edit != edit {
 		t.Errorf("Edit = %#v, want %#v", payload.Edit, edit)
 	}
@@ -197,8 +200,17 @@ func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 func TestNewRenderVariantTaskRejectsUnsafeVariant(t *testing.T) {
 	id := uuid.New()
 	for _, variant := range []string{"", "../x", "x/y", `x\y`, "-bad", "x.mp4"} {
-		if _, err := NewRenderVariantTask(id, variant, "", renderplan.EditRequest{}); err == nil {
+		if _, err := NewRenderVariantTask(id, variant, "", 0, renderplan.EditRequest{}); err == nil {
 			t.Fatalf("NewRenderVariantTask(%q) error = nil, want error", variant)
+		}
+	}
+}
+
+func TestNewRenderVariantTaskRejectsOutOfRangeMusicVolume(t *testing.T) {
+	id := uuid.New()
+	for _, volume := range []float64{-0.1, 1.5} {
+		if _, err := NewRenderVariantTask(id, testRenderVariant, "", volume, renderplan.EditRequest{}); err == nil {
+			t.Fatalf("NewRenderVariantTask(volume=%v) error = nil, want error", volume)
 		}
 	}
 }

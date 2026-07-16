@@ -640,7 +640,7 @@ func TestBuildFFmpegCommandForCompilationShort(t *testing.T) {
 		"[3:v]format=rgba,scale=w=430:h=-1:flags=lanczos,loop=loop=-1:size=1:start=0,setpts=N/24/TB,trim=duration=8.000",
 		"overlay=x=W-w-34:y=1010:format=auto:enable='between(t\\,0.000\\,1.500)'[vimages]",
 		"[vimages]format=yuv420p[v]",
-		"amix=inputs=2:duration=first:dropout_transition=0",
+		"amix=inputs=2:duration=first:dropout_transition=0:normalize=0",
 		"loudnorm=I=-16:TP=-1.5:LRA=11[a]",
 	} {
 		if !strings.Contains(filter, want) {
@@ -651,6 +651,16 @@ func TestBuildFFmpegCommandForCompilationShort(t *testing.T) {
 		if !containsArg(command, want) {
 			t.Fatalf("command missing %q: %#v", want, command)
 		}
+	}
+
+	custom := short
+	custom.MusicVolume = 0.35
+	customFilter := argAfter(BuildFFmpegCommand("ffmpeg", custom), "-filter_complex")
+	if !strings.Contains(customFilter, "[2:a]volume=0.35[music]") {
+		t.Fatalf("compilation filter missing custom music volume 0.35:\n%s", customFilter)
+	}
+	if strings.Contains(customFilter, "[2:a]volume=1.00[music]") {
+		t.Fatalf("compilation filter kept default 1.00 music volume with a custom volume:\n%s", customFilter)
 	}
 }
 

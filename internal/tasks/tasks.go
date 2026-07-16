@@ -79,12 +79,14 @@ type ComposeFinalPayload struct {
 
 // RenderVariantPayload carries the job id and render variant requested by the
 // orchestrator. MusicKey, when set, names a music track the render worker mixes
-// into the reel (resolved from its music directory).
+// into the reel (resolved from its music directory). MusicVolume is the music
+// gain in (0,1]; 0 means the render default.
 type RenderVariantPayload struct {
-	JobID    uuid.UUID              `json:"job_id"`
-	Variant  string                 `json:"variant"`
-	MusicKey string                 `json:"music_key,omitempty"`
-	Edit     renderplan.EditRequest `json:"edit,omitempty"`
+	JobID       uuid.UUID              `json:"job_id"`
+	Variant     string                 `json:"variant"`
+	MusicKey    string                 `json:"music_key,omitempty"`
+	MusicVolume float64                `json:"music_volume,omitempty"`
+	Edit        renderplan.EditRequest `json:"edit,omitempty"`
 }
 
 type CodexAgentPayload struct {
@@ -203,19 +205,23 @@ func NewComposeFinalTask(id uuid.UUID) (*asynq.Task, error) {
 
 // NewRenderVariantTask returns an Asynq task for rendering one named output
 // variant for a job. musicKey is optional; when non-empty the render worker
-// mixes the named track into the reel.
-func NewRenderVariantTask(id uuid.UUID, variant, musicKey string, edit renderplan.EditRequest) (*asynq.Task, error) {
+// mixes the named track into the reel. musicVolume is the music gain in (0,1];
+// 0 means the render default.
+func NewRenderVariantTask(id uuid.UUID, variant, musicKey string, musicVolume float64, edit renderplan.EditRequest) (*asynq.Task, error) {
 	if !renderVariantPattern.MatchString(variant) {
 		return nil, fmt.Errorf("invalid render variant %q", variant)
 	}
 	if musicKey != "" && !renderVariantPattern.MatchString(musicKey) {
 		return nil, fmt.Errorf("invalid music key %q", musicKey)
 	}
+	if musicVolume < 0 || musicVolume > 1 {
+		return nil, fmt.Errorf("music volume must be between 0 and 1")
+	}
 	edit = renderplan.NormalizeEditRequest(edit)
 	if err := edit.Validate(); err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(RenderVariantPayload{JobID: id, Variant: variant, MusicKey: musicKey, Edit: edit})
+	payload, err := json.Marshal(RenderVariantPayload{JobID: id, Variant: variant, MusicKey: musicKey, MusicVolume: musicVolume, Edit: edit})
 	if err != nil {
 		return nil, err
 	}

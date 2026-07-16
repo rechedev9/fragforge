@@ -348,7 +348,7 @@ func (w *RecordWorker) chainRender(id uuid.UUID, intent renderplan.GenerateInten
 		w.failGenerateHandoff(id, intent, errors.New("render queue is not configured"))
 		return
 	}
-	task, err := tasks.NewRenderVariantTask(id, intent.Variant, intent.MusicKey, intent.Edit)
+	task, err := tasks.NewRenderVariantTask(id, intent.Variant, intent.MusicKey, 0, intent.Edit)
 	if err != nil {
 		w.failGenerateHandoff(id, intent, fmt.Errorf("build chained render task: %w", err))
 		return
@@ -1615,14 +1615,14 @@ func (w *RenderWorker) HandleRenderVariant(ctx context.Context, t *asynq.Task) e
 	if variant == "" {
 		variant = editor.DefaultPreset().Name
 	}
-	if err := w.render(ctx, j, variant, payload.MusicKey, payload.Edit); err != nil {
+	if err := w.render(ctx, j, variant, payload.MusicKey, payload.MusicVolume, payload.Edit); err != nil {
 		logWorkerError(j.ID, tasks.TypeRenderVariant, err)
 		return err
 	}
 	return nil
 }
 
-func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey string, edit renderplan.EditRequest) (err error) {
+func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey string, musicVolume float64, edit renderplan.EditRequest) (err error) {
 	edit = renderplan.NormalizeEditRequest(edit)
 	if err := edit.Validate(); err != nil {
 		return err
@@ -1640,7 +1640,7 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 	}
 	cfg := w.cfg.withDefaults()
 	musicPath := resolveMusicFile(cfg.MusicDir, musicKey)
-	inputFingerprint, err := renderInputFingerprint(recordingResult, j.KillPlan, variant, musicKey, musicPath, edit)
+	inputFingerprint, err := renderInputFingerprint(recordingResult, j.KillPlan, variant, musicKey, musicPath, musicVolume, edit)
 	if err != nil {
 		return fmt.Errorf("fingerprint render inputs: %w", err)
 	}
@@ -1763,6 +1763,9 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 	if musicKey != "" {
 		if musicPath != "" {
 			args = append(args, "--music", musicPath)
+			if musicVolume > 0 {
+				args = append(args, "--music-volume", strconv.FormatFloat(musicVolume, 'f', -1, 64))
+			}
 		} else {
 			// Requested music is unavailable; render without it rather than fail.
 			logWorkerError(j.ID, tasks.TypeRenderVariant, fmt.Errorf("music %q not found in %q; rendering without music", musicKey, cfg.MusicDir))
@@ -2346,9 +2349,10 @@ func compositionOutputsReady(store storage.Storage, id uuid.UUID) (bool, []strin
 }
 
 type renderMusicInput struct {
-	Key       string `json:"key,omitempty"`
-	Available bool   `json:"available"`
-	SHA256    string `json:"sha256,omitempty"`
+	Key       string  `json:"key,omitempty"`
+	Available bool    `json:"available"`
+	Volume    float64 `json:"volume,omitempty"`
+	SHA256    string  `json:"sha256,omitempty"`
 }
 
 type renderFingerprintInput struct {
@@ -2360,8 +2364,8 @@ type renderFingerprintInput struct {
 	KillPlan      killplan.Plan             `json:"kill_plan"`
 }
 
-func renderInputFingerprint(result recording.RecordingResult, plan *killplan.Plan, variant, musicKey, musicPath string, edit renderplan.EditRequest) (string, error) {
-	music := renderMusicInput{Key: musicKey, Available: musicPath != ""}
+func renderInputFingerprint(result recording.RecordingResult, plan *killplan.Plan, variant, musicKey, musicPath string, musicVolume float64, edit renderplan.EditRequest) (string, error) {
+	music := renderMusicInput{Key: musicKey, Available: musicPath != "", Volume: musicVolume}
 	if musicPath != "" {
 		f, err := os.Open(musicPath)
 		if err != nil {

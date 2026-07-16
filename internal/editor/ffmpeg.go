@@ -53,11 +53,21 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	return append(command, short.Output)
 }
 
+// musicMixVolume is the gain applied to the looped music track. Zero means
+// unset, which keeps the historical 1.00 balance so existing renders are
+// unchanged; a value in (0,1] overrides it.
+func musicMixVolume(short ShortEdit) float64 {
+	if short.MusicVolume > 0 {
+		return short.MusicVolume
+	}
+	return 1.0
+}
+
 func BuildMusicFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	audioOut := "[game][music]amix=inputs=2:duration=first:dropout_transition=0,aresample=48000"
+	audioOut := "[game][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aresample=48000"
 	if short.AudioNormalize {
 		audioOut += ",loudnorm=I=-16:TP=-1.5:LRA=11"
 	}
@@ -67,8 +77,9 @@ func BuildMusicFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		videoClauses = singleClipVideoClauses(short, killfeeds)
 	}
 	filter := fmt.Sprintf(
-		"%s;[0:a]volume=0.20[game];[1:a]volume=1.00[music];%s",
+		"%s;[0:a]volume=0.20[game];[1:a]volume=%.2f[music];%s",
 		strings.Join(videoClauses, ";"),
+		musicMixVolume(short),
 		audioOut,
 	)
 	command := []string{
@@ -257,7 +268,7 @@ func CompilationFilter(short ShortEdit) string {
 	}
 	if short.MusicPath != "" {
 		musicInput := len(short.Parts)
-		audio := fmt.Sprintf("[%d:a]volume=1.00[music];[gamea]volume=0.20[game];[game][music]amix=inputs=2:duration=first:dropout_transition=0,aresample=48000", musicInput)
+		audio := fmt.Sprintf("[%d:a]volume=%.2f[music];[gamea]volume=0.20[game];[game][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,aresample=48000", musicInput, musicMixVolume(short))
 		if short.AudioNormalize {
 			audio += ",loudnorm=I=-16:TP=-1.5:LRA=11"
 		}

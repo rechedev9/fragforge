@@ -98,6 +98,9 @@ type Config struct {
 	// RenderJobs caps how many shorts render concurrently; 0 selects an
 	// automatic limit based on available CPUs.
 	RenderJobs int
+	// MusicVolume is the gain applied to the mixed music track, in (0,1];
+	// 0 means unset and keeps the default 1.0 balance.
+	MusicVolume float64
 }
 
 type ManifestOptions struct {
@@ -136,7 +139,10 @@ type ManifestOptions struct {
 	FFmpegPath          string
 	CoversEnabled       bool
 	SkipExisting        bool
-	KillPlan            *killplan.Plan
+	// MusicVolume is the gain applied to the mixed music track, in (0,1];
+	// 0 means unset and keeps the default 1.0 balance.
+	MusicVolume float64
+	KillPlan    *killplan.Plan
 	// KillfeedFrameProbe loads a source frame for per-kill killfeed crop
 	// measurement; nil keeps the static crop defaults.
 	KillfeedFrameProbe func(input string, atSeconds float64) (image.Image, error)
@@ -156,6 +162,7 @@ type Manifest struct {
 	EffectsPath       string      `json:"effects_path,omitempty"`
 	EffectsPreset     string      `json:"effects_preset,omitempty"`
 	MusicPath         string      `json:"music_path,omitempty"`
+	MusicVolume       float64     `json:"music_volume,omitempty"`
 	RhythmPath        string      `json:"rhythm_path,omitempty"`
 	OutputFormat      string      `json:"output_format,omitempty"`
 	KillEffect        string      `json:"kill_effect,omitempty"`
@@ -185,61 +192,64 @@ type Manifest struct {
 }
 
 type ShortEdit struct {
-	Index             int                         `json:"index"`
-	SegmentID         string                      `json:"segment_id"`
-	Preset            string                      `json:"preset,omitempty"`
-	Player            string                      `json:"player"`
-	Map               string                      `json:"map,omitempty"`
-	KillCount         int                         `json:"kill_count"`
-	PrimaryWeapon     string                      `json:"primary_weapon,omitempty"`
-	SmokeCount        int                         `json:"smoke_count,omitempty"`
-	PrimarySmoke      string                      `json:"primary_smoke,omitempty"`
-	Input             string                      `json:"input"`
-	Output            string                      `json:"output"`
-	SourceArtifact    recording.RecordingArtifact `json:"source_artifact,omitempty"`
-	OutputArtifact    recording.RecordingArtifact `json:"output_artifact,omitempty"`
-	PublishArtifact   recording.RecordingArtifact `json:"publish_artifact,omitempty"`
-	PromptPath        string                      `json:"prompt_path"`
-	PublishPath       string                      `json:"publish_path"`
-	MusicPath         string                      `json:"music_path,omitempty"`
-	RhythmPath        string                      `json:"rhythm_path,omitempty"`
-	OutputFormat      string                      `json:"output_format,omitempty"`
-	KillEffect        string                      `json:"kill_effect,omitempty"`
-	Transition        string                      `json:"transition,omitempty"`
-	Intro             bool                        `json:"intro,omitempty"`
-	Outro             bool                        `json:"outro,omitempty"`
-	IntroText         string                      `json:"intro_text,omitempty"`
-	OutroText         string                      `json:"outro_text,omitempty"`
-	HookText          bool                        `json:"hook_text,omitempty"`
-	KillCounter       bool                        `json:"kill_counter,omitempty"`
-	KillfeedOverlay   bool                        `json:"killfeed_overlay,omitempty"`
-	TailTrimSeconds   float64                     `json:"tail_trim_seconds,omitempty"`
-	OutputFPS         int                         `json:"output_fps,omitempty"`
-	VideoCRF          int                         `json:"video_crf,omitempty"`
-	VideoPreset       string                      `json:"video_preset,omitempty"`
-	HQFilters         bool                        `json:"hq_filters,omitempty"`
-	AudioNormalize    bool                        `json:"audio_normalize,omitempty"`
-	TemporalSmoothing bool                        `json:"temporal_smoothing,omitempty"`
-	CaptionPath       string                      `json:"caption_path"`
-	CoverPath         string                      `json:"cover_path,omitempty"`
-	CoverSheetPath    string                      `json:"cover_sheet_path,omitempty"`
-	CoverTimeSeconds  float64                     `json:"cover_time_seconds"`
-	DurationSeconds   float64                     `json:"duration_seconds,omitempty"`
-	Label             string                      `json:"label"`
-	Title             string                      `json:"title"`
-	Headline          string                      `json:"headline"`
-	Caption           string                      `json:"caption"`
-	Hashtags          []string                    `json:"hashtags,omitempty"`
-	Kills             []KillCue                   `json:"kills,omitempty"`
-	Smokes            []SmokeCue                  `json:"smokes,omitempty"`
-	Parts             []ShortPart                 `json:"parts,omitempty"`
-	Effects           []Effect                    `json:"effects,omitempty"`
-	FFmpegCommand     []string                    `json:"ffmpeg_command"`
-	CoverCommand      []string                    `json:"cover_command,omitempty"`
-	CoverSheetCommand []string                    `json:"cover_sheet_command,omitempty"`
-	QualityCommand    []string                    `json:"quality_command,omitempty"`
-	RenderLogPath     string                      `json:"render_log_path,omitempty"`
-	QualityLogPath    string                      `json:"quality_log_path,omitempty"`
+	Index           int                         `json:"index"`
+	SegmentID       string                      `json:"segment_id"`
+	Preset          string                      `json:"preset,omitempty"`
+	Player          string                      `json:"player"`
+	Map             string                      `json:"map,omitempty"`
+	KillCount       int                         `json:"kill_count"`
+	PrimaryWeapon   string                      `json:"primary_weapon,omitempty"`
+	SmokeCount      int                         `json:"smoke_count,omitempty"`
+	PrimarySmoke    string                      `json:"primary_smoke,omitempty"`
+	Input           string                      `json:"input"`
+	Output          string                      `json:"output"`
+	SourceArtifact  recording.RecordingArtifact `json:"source_artifact,omitempty"`
+	OutputArtifact  recording.RecordingArtifact `json:"output_artifact,omitempty"`
+	PublishArtifact recording.RecordingArtifact `json:"publish_artifact,omitempty"`
+	PromptPath      string                      `json:"prompt_path"`
+	PublishPath     string                      `json:"publish_path"`
+	MusicPath       string                      `json:"music_path,omitempty"`
+	// MusicVolume is the gain applied to the mixed music track, in (0,1];
+	// 0 means unset and keeps the default 1.0 balance.
+	MusicVolume       float64     `json:"music_volume,omitempty"`
+	RhythmPath        string      `json:"rhythm_path,omitempty"`
+	OutputFormat      string      `json:"output_format,omitempty"`
+	KillEffect        string      `json:"kill_effect,omitempty"`
+	Transition        string      `json:"transition,omitempty"`
+	Intro             bool        `json:"intro,omitempty"`
+	Outro             bool        `json:"outro,omitempty"`
+	IntroText         string      `json:"intro_text,omitempty"`
+	OutroText         string      `json:"outro_text,omitempty"`
+	HookText          bool        `json:"hook_text,omitempty"`
+	KillCounter       bool        `json:"kill_counter,omitempty"`
+	KillfeedOverlay   bool        `json:"killfeed_overlay,omitempty"`
+	TailTrimSeconds   float64     `json:"tail_trim_seconds,omitempty"`
+	OutputFPS         int         `json:"output_fps,omitempty"`
+	VideoCRF          int         `json:"video_crf,omitempty"`
+	VideoPreset       string      `json:"video_preset,omitempty"`
+	HQFilters         bool        `json:"hq_filters,omitempty"`
+	AudioNormalize    bool        `json:"audio_normalize,omitempty"`
+	TemporalSmoothing bool        `json:"temporal_smoothing,omitempty"`
+	CaptionPath       string      `json:"caption_path"`
+	CoverPath         string      `json:"cover_path,omitempty"`
+	CoverSheetPath    string      `json:"cover_sheet_path,omitempty"`
+	CoverTimeSeconds  float64     `json:"cover_time_seconds"`
+	DurationSeconds   float64     `json:"duration_seconds,omitempty"`
+	Label             string      `json:"label"`
+	Title             string      `json:"title"`
+	Headline          string      `json:"headline"`
+	Caption           string      `json:"caption"`
+	Hashtags          []string    `json:"hashtags,omitempty"`
+	Kills             []KillCue   `json:"kills,omitempty"`
+	Smokes            []SmokeCue  `json:"smokes,omitempty"`
+	Parts             []ShortPart `json:"parts,omitempty"`
+	Effects           []Effect    `json:"effects,omitempty"`
+	FFmpegCommand     []string    `json:"ffmpeg_command"`
+	CoverCommand      []string    `json:"cover_command,omitempty"`
+	CoverSheetCommand []string    `json:"cover_sheet_command,omitempty"`
+	QualityCommand    []string    `json:"quality_command,omitempty"`
+	RenderLogPath     string      `json:"render_log_path,omitempty"`
+	QualityLogPath    string      `json:"quality_log_path,omitempty"`
 }
 
 type ShortPart struct {

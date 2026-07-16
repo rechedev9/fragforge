@@ -878,7 +878,7 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	// Build the render task now so an invalid music key fails fast here rather
 	// than silently dropping the chained render later in the record worker.
-	if _, err := tasks.NewRenderVariantTask(j.ID, intent.Variant, intent.MusicKey, intent.Edit); err != nil {
+	if _, err := tasks.NewRenderVariantTask(j.ID, intent.Variant, intent.MusicKey, 0, intent.Edit); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -995,6 +995,35 @@ func (h *Handlers) StartComposition(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// renderMusicRequest is the "music" field of a render request. It accepts
+// either a bare track key ("phonk-01") or an object {"key","volume"} so a
+// client can also set the music mix gain. Volume is in (0,1]; 0 means the
+// render default. Accepting both keeps older string-only clients working.
+type renderMusicRequest struct {
+	Key    string
+	Volume float64
+}
+
+func (m *renderMusicRequest) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil
+	}
+	if trimmed[0] == '"' {
+		return json.Unmarshal(trimmed, &m.Key)
+	}
+	var obj struct {
+		Key    string  `json:"key"`
+		Volume float64 `json:"volume"`
+	}
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return err
+	}
+	m.Key = obj.Key
+	m.Volume = obj.Volume
+	return nil
+}
+
 // StartRenderVariant handles POST /api/jobs/{id}/renders/{variant}.
 func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 	j, ok := h.loadJob(w, r)
@@ -1011,18 +1040,26 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Optional JSON body { "music": "<track-key>" } selects a track to mix in.
+	// Optional JSON body { "music": "<track-key>", "edit": {...} } selects a
+	// track to mix in. "music" also accepts an object {"key","volume"} so the
+	// client can set the music gain; volume is in (0,1], 0 means the default.
 	var musicKey string
+	var musicVolume float64
 	editRequest := renderplan.DefaultEditRequest()
 	if r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 		var req struct {
-			Music string                 `json:"music"`
+			Music renderMusicRequest     `json:"music"`
 			Edit  renderplan.EditRequest `json:"edit"`
 		}
 		switch err := json.NewDecoder(r.Body).Decode(&req); {
 		case err == nil, errors.Is(err, io.EOF):
-			musicKey = req.Music
+			musicKey = req.Music.Key
+			musicVolume = req.Music.Volume
+			if musicVolume < 0 || musicVolume > 1 {
+				writeError(w, http.StatusBadRequest, "music volume must be between 0 and 1")
+				return
+			}
 			editRequest = renderplan.NormalizeEditRequest(req.Edit)
 			if err := editRequest.Validate(); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
@@ -1033,7 +1070,7 @@ func (h *Handlers) StartRenderVariant(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	task, err := tasks.NewRenderVariantTask(j.ID, variant, musicKey, editRequest)
+	task, err := tasks.NewRenderVariantTask(j.ID, variant, musicKey, musicVolume, editRequest)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

@@ -1759,6 +1759,59 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	}
 }
 
+func TestStartRenderVariantRejectsOutOfRangeMusicVolume(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
+	body := `{"music":{"key":"track01","volume":1.5}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("enqueued = %d, want 0 for rejected volume", len(queue.enqueued))
+	}
+}
+
+func TestStartRenderVariantThreadsMusicVolume(t *testing.T) {
+	repo := newFakeRepo()
+	queue := &fakeQueue{}
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecorded, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	h := NewHandlers(repo, newFakeStorage(), queue)
+
+	r := chi.NewRouter()
+	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
+	body := `{"music":{"key":"track01","volume":0.35}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(queue.enqueued))
+	}
+	var payload tasks.RenderVariantPayload
+	if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.MusicKey != "track01" || payload.MusicVolume != 0.35 {
+		t.Fatalf("music = %q/%v, want track01/0.35", payload.MusicKey, payload.MusicVolume)
+	}
+}
+
 func TestStartRenderVariantRejectsWhileGuidedGenerateIsActive(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()

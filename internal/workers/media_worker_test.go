@@ -490,7 +490,7 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	})
 	w.runner = runner
 
-	task, err := tasks.NewRenderVariantTask(id, editor.PresetViral60Clean, "", renderplan.EditRequest{
+	task, err := tasks.NewRenderVariantTask(id, editor.PresetViral60Clean, "", 0, renderplan.EditRequest{
 		Format:      renderplan.FormatLandscape16x9,
 		KillEffect:  renderplan.KillEffectFreezeFlash,
 		Transition:  renderplan.TransitionDip,
@@ -827,7 +827,7 @@ func TestRenderWorkerDefaultsToViral60WhenVariantEmpty(t *testing.T) {
 	recordingResult := recordingResultWithSegment("", "C:/stale/seg-001.mp4")
 	recordingResult.CaptureRevision = "capture-1"
 	putJSON(t, store, recording.ResultArtifactKey(id), recordingResult)
-	fingerprint, err := renderInputFingerprint(recordingResult, &plan, defaultVariant, "", "", renderplan.DefaultEditRequest())
+	fingerprint, err := renderInputFingerprint(recordingResult, &plan, defaultVariant, "", "", 0, renderplan.DefaultEditRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -906,7 +906,7 @@ func TestRenderWorkerSkipsWhenVariantOutputsAlreadyExist(t *testing.T) {
 	recordingResult := recordingResultWithSegment("", "C:/stale/seg-001.mp4")
 	recordingResult.CaptureRevision = "capture-1"
 	putJSON(t, store, recording.ResultArtifactKey(id), recordingResult)
-	fingerprint, err := renderInputFingerprint(recordingResult, &plan, editor.PresetViral60Clean, "", "", renderplan.DefaultEditRequest())
+	fingerprint, err := renderInputFingerprint(recordingResult, &plan, editor.PresetViral60Clean, "", "", 0, renderplan.DefaultEditRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -966,7 +966,7 @@ func TestRenderWorkerRerunsWhenCachedInputsChange(t *testing.T) {
 			repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
 			rec := recordingResultWithSegment("", "C:/stale/seg-001.mp4")
 			rec.CaptureRevision = "capture-1"
-			cachedFingerprint, err := renderInputFingerprint(rec, &plan, editor.PresetViral60Clean, "", "", renderplan.DefaultEditRequest())
+			cachedFingerprint, err := renderInputFingerprint(rec, &plan, editor.PresetViral60Clean, "", "", 0, renderplan.DefaultEditRequest())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1000,7 +1000,7 @@ func TestRenderWorkerRerunsWhenCachedInputsChange(t *testing.T) {
 				MusicDir:   musicDir,
 			})
 			w.runner = runner
-			task, err := tasks.NewRenderVariantTask(id, editor.PresetViral60Clean, tc.musicKey, edit)
+			task, err := tasks.NewRenderVariantTask(id, editor.PresetViral60Clean, tc.musicKey, 0, edit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1010,6 +1010,65 @@ func TestRenderWorkerRerunsWhenCachedInputsChange(t *testing.T) {
 			}
 			if len(runner.calls) != 1 {
 				t.Fatalf("runner calls = %d, want 1 for stale cache", len(runner.calls))
+			}
+		})
+	}
+}
+
+func TestRenderWorkerPassesMusicVolume(t *testing.T) {
+	cases := []struct {
+		name      string
+		volume    float64
+		wantFlag  bool
+		wantValue string
+	}{
+		{"custom volume threads to editor", 0.35, true, "0.35"},
+		{"default volume omits flag", 0, false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			store := newFakeStorage()
+			id := uuid.New()
+			plan := minimalKillPlan()
+			repo.jobs[id] = &job.Job{ID: id, Status: job.StatusRecorded, Rules: rules.Default(), KillPlan: &plan}
+			putJSON(t, store, recording.ResultArtifactKey(id), recordingResultWithSegment("", "C:/stale/seg-001.mp4"))
+			_ = store.Put(mustSegmentClipKey(t, id, "seg-001"), bytes.NewReader([]byte("clip")))
+
+			musicDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(musicDir, "phonk.wav"), []byte("music"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var gotArgs []string
+			wantErr := errors.New("stop after args")
+			runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				gotArgs = append([]string(nil), args...)
+				return nil, wantErr
+			}}
+			w := NewRenderWorker(repo, store, RenderWorkerConfig{
+				WorkDir:    t.TempDir(),
+				EditorPath: "zv-editor",
+				MusicDir:   musicDir,
+			})
+			w.runner = runner
+
+			task, err := tasks.NewRenderVariantTask(id, editor.PresetViral60Clean, "phonk", tc.volume, renderplan.DefaultEditRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := w.HandleRenderVariant(context.Background(), task); !errors.Is(err, wantErr) {
+				t.Fatalf("HandleRenderVariant error = %v, want stop sentinel", err)
+			}
+			if !hasArg(gotArgs, "--music") {
+				t.Fatalf("editor args missing --music: %#v", gotArgs)
+			}
+			if got := hasArg(gotArgs, "--music-volume"); got != tc.wantFlag {
+				t.Fatalf("--music-volume present = %v, want %v: %#v", got, tc.wantFlag, gotArgs)
+			}
+			if tc.wantFlag {
+				if got := argValue(gotArgs, "--music-volume"); got != tc.wantValue {
+					t.Fatalf("--music-volume = %q, want %q", got, tc.wantValue)
+				}
 			}
 		})
 	}
@@ -1122,7 +1181,7 @@ func composeTask(t *testing.T, id uuid.UUID) *asynq.Task {
 
 func renderTask(t *testing.T, id uuid.UUID, variant string) *asynq.Task {
 	t.Helper()
-	task, err := tasks.NewRenderVariantTask(id, variant, "", renderplan.EditRequest{})
+	task, err := tasks.NewRenderVariantTask(id, variant, "", 0, renderplan.EditRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}

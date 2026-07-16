@@ -28,6 +28,7 @@ func run() error {
 		effectsPath         = flag.String("effects", "", "optional Lua effects script; overrides --effects-preset")
 		effectsPreset       = flag.String("effects-preset", "", "effects preset: viral-ultra-clean; defaults by preset")
 		musicPath           = flag.String("music", "", "optional external music file to mix into rendered shorts")
+		musicVolume         = flag.Float64("music-volume", 1.0, "music track gain in (0,1]; higher is louder")
 		rhythmPath          = flag.String("rhythm", "", "optional rhythm JSON with segment_sync entries for compiled shorts")
 		outputFormat        = flag.String("output-format", editor.OutputFormatShort9x16, "output format: short-9x16 or landscape-16x9")
 		killEffect          = flag.String("kill-effect", editor.KillEffectPunchIn, "kill effect: clean, punch-in, velocity, freeze-flash")
@@ -71,6 +72,9 @@ func run() error {
 	if *recordingResultPath == "" || *outDir == "" {
 		return fmt.Errorf("--recording-result and --out are required")
 	}
+	if err := validateMusicVolume(*musicVolume); err != nil {
+		return err
+	}
 	segmentIDs, err := parseSegments(*segments)
 	if err != nil {
 		return err
@@ -84,6 +88,7 @@ func run() error {
 		EffectsPath:         *effectsPath,
 		EffectsPreset:       *effectsPreset,
 		MusicPath:           *musicPath,
+		MusicVolume:         *musicVolume,
 		RhythmPath:          *rhythmPath,
 		OutputFormat:        *outputFormat,
 		KillEffect:          *killEffect,
@@ -120,6 +125,15 @@ func run() error {
 	}
 	if *openGallery {
 		return openPath(result.GalleryPath)
+	}
+	return nil
+}
+
+// validateMusicVolume rejects a music gain outside (0,1]. The flag defaults to
+// 1.0, so a valid render always keeps the historical mix unless overridden.
+func validateMusicVolume(v float64) error {
+	if v <= 0 || v > 1 {
+		return fmt.Errorf("--music-volume must be greater than 0 and at most 1, got %v", v)
 	}
 	return nil
 }

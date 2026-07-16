@@ -119,6 +119,7 @@ func TestBuildMusicFFmpegCommandKillfeedAndTailTrim(t *testing.T) {
 		"split=2[main][kfsrc0]",
 		"[0:a]volume=0.20[game]",
 		"[1:a]volume=1.00[music]",
+		"amix=inputs=2:duration=first:dropout_transition=0:normalize=0",
 		"-t 6.078",
 		"-shortest",
 	} {
@@ -128,6 +129,17 @@ func TestBuildMusicFFmpegCommandKillfeedAndTailTrim(t *testing.T) {
 	}
 	if command[len(command)-1] != "out.mp4" || command[len(command)-2] != "-shortest" {
 		t.Fatalf("command tail = %v, want ... -shortest out.mp4", command[len(command)-3:])
+	}
+
+	custom := singleClipKillfeedShort()
+	custom.MusicPath = "music.mp3"
+	custom.MusicVolume = 0.35
+	customJoined := strings.Join(BuildFFmpegCommand("ffmpeg", custom), " ")
+	if !strings.Contains(customJoined, "[1:a]volume=0.35[music]") {
+		t.Fatalf("command = %q, want custom music volume 0.35", customJoined)
+	}
+	if strings.Contains(customJoined, "[1:a]volume=1.00[music]") {
+		t.Fatalf("command = %q, want no default 1.00 music volume with a custom volume", customJoined)
 	}
 }
 
