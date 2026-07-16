@@ -39,6 +39,7 @@ import (
 type fakeRepo struct {
 	jobs            map[uuid.UUID]job.Job
 	getErr          error
+	deleteErr       error
 	updateHonorsCtx bool
 }
 
@@ -194,6 +195,13 @@ func (f *fakeRepo) UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status,
 	f.jobs[id] = j
 	return nil
 }
+func (f *fakeRepo) Delete(_ context.Context, id uuid.UUID) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	delete(f.jobs, id)
+	return nil
+}
 func (f *fakeRepo) SetParseInputs(_ context.Context, id uuid.UUID, steamID string, r rules.Rules) error {
 	j, ok := f.jobs[id]
 	if !ok {
@@ -236,6 +244,18 @@ func (f *fakeStorage) Exists(key string) (bool, error) {
 }
 func (f *fakeStorage) Delete(key string) error {
 	delete(f.puts, key)
+	return nil
+}
+
+// DeleteTree removes every stored key under the given prefix, mirroring the
+// recursive delete the local filesystem backend provides.
+func (f *fakeStorage) DeleteTree(key string) error {
+	prefix := key + "/"
+	for k := range f.puts {
+		if k == key || strings.HasPrefix(k, prefix) {
+			delete(f.puts, k)
+		}
+	}
 	return nil
 }
 
@@ -2566,6 +2586,108 @@ func TestDeleteRenderVideoRejectsUnknownVariant(t *testing.T) {
 
 	if rw.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+}
+
+func TestDeleteJobRemovesJobArtifactsAndDemo(t *testing.T) {
+	repo := newFakeRepo()
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := job.Job{ID: uuid.New(), Status: job.StatusDone, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+
+	demoKey := "demos/" + j.ID.String() + ".dem"
+	artifactKeys := []string{
+		"jobs/" + j.ID.String() + "/recording/result.json",
+		"jobs/" + j.ID.String() + "/renders/viral-60-clean/video.mp4",
+	}
+	if err := store.Put(demoKey, bytes.NewReader([]byte("PBDEMS2\x00"))); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range artifactKeys {
+		if err := store.Put(key, bytes.NewReader([]byte("artifact-bytes"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewHandlers(repo, store, &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Delete("/api/jobs/{id}", h.DeleteJob)
+	req := httptest.NewRequest(http.MethodDelete, "/api/jobs/"+j.ID.String(), nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rw.Code, rw.Body.String())
+	}
+	if _, ok := repo.jobs[j.ID]; ok {
+		t.Error("job still present in repo after delete")
+	}
+	for _, key := range append(artifactKeys, demoKey) {
+		exists, err := store.Exists(key)
+		if err != nil {
+			t.Fatalf("Exists(%q) error = %v", key, err)
+		}
+		if exists {
+			t.Errorf("artifact %q still present after delete", key)
+		}
+	}
+	// The whole jobs/<id> tree must be gone, not just the seeded files.
+	treeExists, err := store.Exists("jobs/" + j.ID.String())
+	if err != nil {
+		t.Fatalf("Exists(tree) error = %v", err)
+	}
+	if treeExists {
+		t.Error("job artifact tree still present after delete")
+	}
+
+	// A repeat delete after success is a 404: the job is gone.
+	rw = httptest.NewRecorder()
+	r.ServeHTTP(rw, httptest.NewRequest(http.MethodDelete, "/api/jobs/"+j.ID.String(), nil))
+	if rw.Code != http.StatusNotFound {
+		t.Fatalf("repeat delete status = %d, want 404; body=%s", rw.Code, rw.Body.String())
+	}
+}
+
+func TestDeleteJobRejectsInFlightJob(t *testing.T) {
+	repo := newFakeRepo()
+	store := newFakeStorage()
+	j := job.Job{ID: uuid.New(), Status: job.StatusRecording, Rules: rules.Default()}
+	repo.jobs[j.ID] = j
+	demoKey := "demos/" + j.ID.String() + ".dem"
+	_ = store.Put(demoKey, bytes.NewReader([]byte("PBDEMS2\x00")))
+	h := NewHandlers(repo, store, &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Delete("/api/jobs/{id}", h.DeleteJob)
+	req := httptest.NewRequest(http.MethodDelete, "/api/jobs/"+j.ID.String(), nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rw.Code, rw.Body.String())
+	}
+	if _, ok := repo.jobs[j.ID]; !ok {
+		t.Error("job removed from repo despite 409")
+	}
+	if _, ok := store.puts[demoKey]; !ok {
+		t.Error("demo removed from storage despite 409")
+	}
+}
+
+func TestDeleteJobUnknownIDReturns404(t *testing.T) {
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{})
+
+	r := chi.NewRouter()
+	r.Delete("/api/jobs/{id}", h.DeleteJob)
+	req := httptest.NewRequest(http.MethodDelete, "/api/jobs/"+uuid.New().String(), nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rw.Code, rw.Body.String())
 	}
 }
 

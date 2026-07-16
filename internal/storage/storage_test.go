@@ -212,6 +212,70 @@ func TestLocalResolvePathStaysUnderRootAndRejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestLocalDeleteTreeRemovesNestedDirIdempotently(t *testing.T) {
+	store, err := NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal error = %v", err)
+	}
+	keys := []string{
+		"jobs/job-1/recording/result.json",
+		"jobs/job-1/renders/viral/video.mp4",
+	}
+	for _, key := range keys {
+		if err := store.Put(key, bytes.NewReader([]byte("x"))); err != nil {
+			t.Fatalf("Put(%q) error = %v", key, err)
+		}
+	}
+	// A sibling job must survive the delete.
+	if err := store.Put("jobs/job-2/keep.json", bytes.NewReader([]byte("y"))); err != nil {
+		t.Fatalf("Put sibling error = %v", err)
+	}
+
+	if err := store.DeleteTree("jobs/job-1"); err != nil {
+		t.Fatalf("DeleteTree error = %v", err)
+	}
+	for _, key := range keys {
+		exists, err := store.Exists(key)
+		if err != nil {
+			t.Fatalf("Exists(%q) error = %v", key, err)
+		}
+		if exists {
+			t.Errorf("key %q still present after DeleteTree", key)
+		}
+	}
+	if exists, _ := store.Exists("jobs/job-2/keep.json"); !exists {
+		t.Error("sibling job removed by DeleteTree")
+	}
+
+	// Deleting a now-missing tree is a no-op.
+	if err := store.DeleteTree("jobs/job-1"); err != nil {
+		t.Fatalf("second DeleteTree error = %v", err)
+	}
+}
+
+func TestLocalDeleteTreeRejectsEmptyAndTraversalKeys(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewLocal(dir)
+	if err != nil {
+		t.Fatalf("NewLocal error = %v", err)
+	}
+	if err := store.Put("jobs/job-1/keep.json", bytes.NewReader([]byte("x"))); err != nil {
+		t.Fatalf("Put error = %v", err)
+	}
+	for _, key := range []string{"", "..", "../escaped", "jobs/../.."} {
+		if err := store.DeleteTree(key); err == nil {
+			t.Errorf("DeleteTree(%q) = nil, want error", key)
+		}
+	}
+	// The storage root and its contents must be untouched by the rejected keys.
+	if exists, _ := store.Exists("jobs/job-1/keep.json"); !exists {
+		t.Error("a rejected DeleteTree removed stored content")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("storage root missing after rejected DeleteTree: %v", err)
+	}
+}
+
 func TestLocalAllowsDotsInsideFileName(t *testing.T) {
 	store, _ := NewLocal(t.TempDir())
 	if err := store.Put("demos/match..v1.dem", bytes.NewReader([]byte("x"))); err != nil {

@@ -136,6 +136,22 @@ func (l *Local) Delete(key string) error {
 	return nil
 }
 
+// DeleteTree removes the directory at key and everything under it inside the
+// storage root. A missing key is not an error, so tree deletes are idempotent
+// and safe to retry. The key is validated exactly like every other operation,
+// so an empty or root key ("" resolves to ".") and any traversal key are
+// rejected before removal, ensuring the storage root itself is never removed.
+func (l *Local) DeleteTree(key string) error {
+	path, err := l.resolve(key)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Exists reports whether key exists inside the storage root.
 func (l *Local) Exists(key string) (bool, error) {
 	path, err := l.resolve(key)

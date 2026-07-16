@@ -26,6 +26,7 @@ type orchestratorJobRepository interface {
 	UpdateStatus(context.Context, uuid.UUID, job.Status, string) error
 	SetParseInputs(context.Context, uuid.UUID, string, rules.Rules) error
 	SetKillPlan(context.Context, uuid.UUID, killplan.Plan) error
+	Delete(context.Context, uuid.UUID) error
 }
 
 type memoryJobRepository struct {
@@ -209,6 +210,18 @@ func (r *memoryJobRepository) SetParseInputs(ctx context.Context, id uuid.UUID, 
 	j.Status = job.StatusParsing
 	j.UpdatedAt = time.Now().UTC()
 	r.jobs[id] = j
+	return nil
+}
+
+// Delete removes the job from the map. A missing id is not an error, so deletes
+// are idempotent and safe to retry after a failed artifact cleanup.
+func (r *memoryJobRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.jobs, id)
 	return nil
 }
 

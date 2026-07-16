@@ -176,6 +176,36 @@ func TestSQLiteRepoListOrdersByUpdatedThenLimits(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepoDelete(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	series := uuid.NewString()
+
+	j := &job.Job{Status: job.StatusDone, SeriesID: series}
+	if err := repo.Create(ctx, j); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := repo.Delete(ctx, j.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := repo.Get(ctx, j.ID); !errors.Is(err, job.ErrNotFound) {
+		t.Fatalf("Get after Delete: got %v, want ErrNotFound", err)
+	}
+	got, err := repo.ListBySeries(ctx, series)
+	if err != nil {
+		t.Fatalf("ListBySeries: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ListBySeries after Delete returned %d jobs, want 0", len(got))
+	}
+
+	// Deleting a missing id is a no-op.
+	if err := repo.Delete(ctx, uuid.New()); err != nil {
+		t.Fatalf("Delete missing id: %v", err)
+	}
+}
+
 func TestSQLiteRepoListBySeries(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

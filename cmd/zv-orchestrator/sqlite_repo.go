@@ -291,6 +291,15 @@ func (r *sqliteJobRepository) SetParseInputs(ctx context.Context, id uuid.UUID, 
 	})
 }
 
+// Delete removes the job row. A missing row is not an error, so deletes are
+// idempotent and safe to retry after a failed artifact cleanup.
+func (r *sqliteJobRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id.String()); err != nil {
+		return fmt.Errorf("delete job: %w", err)
+	}
+	return nil
+}
+
 func (r *sqliteJobRepository) SetKillPlan(ctx context.Context, id uuid.UUID, plan killplan.Plan) error {
 	return r.mutate(ctx, id, func(j *job.Job) error {
 		planCopy := plan

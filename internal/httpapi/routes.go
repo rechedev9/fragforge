@@ -37,6 +37,7 @@ func Routes(h *Handlers) chi.Router {
 	r.Post("/api/jobs", h.CreateJob)
 	r.Get("/api/jobs", h.ListJobs)
 	r.Get("/api/jobs/{id}", h.GetJob)
+	r.Delete("/api/jobs/{id}", h.DeleteJob)
 	r.Get("/api/jobs/{id}/plan", h.GetPlan)
 	r.Get("/api/jobs/{id}/roster", h.GetRoster)
 	r.Post("/api/jobs/{id}/parse", h.StartParse)

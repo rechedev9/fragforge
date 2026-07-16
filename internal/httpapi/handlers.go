@@ -58,6 +58,7 @@ type JobRepository interface {
 	ListBySeries(ctx context.Context, seriesID string) ([]job.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
 	SetParseInputs(ctx context.Context, id uuid.UUID, steamID string, r rules.Rules) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 type StreamJobRepository interface {
@@ -1493,6 +1494,64 @@ func (h *Handlers) DeleteRenderVideo(w http.ResponseWriter, r *http.Request) {
 			internalError(w, "delete render artifact", err)
 			return
 		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// jobArtifactDeleter is the optional storage capability DeleteJob needs: a
+// single-file Delete for the stored demo copy and a recursive DeleteTree for
+// the job's artifact directory. Local filesystem storage implements it; a
+// backend without delete support makes the endpoint report 501 rather than
+// pretending to delete.
+type jobArtifactDeleter interface {
+	Delete(key string) error
+	DeleteTree(key string) error
+}
+
+// jobIsInFlight reports whether a stage is actively working on the job's files
+// or processes, so deleting now would race that work. queued is included: a
+// parse/scan task may be about to run against the stored demo.
+func jobIsInFlight(s job.Status) bool {
+	switch s {
+	case job.StatusQueued, job.StatusScanning, job.StatusParsing, job.StatusRecording, job.StatusComposing:
+		return true
+	default:
+		return false
+	}
+}
+
+// DeleteJob handles DELETE /api/jobs/{id}: it removes a job together with its
+// artifact tree (jobs/<id>) and its stored demo copy (demos/<id>.dem) so the
+// user can clear a demo from the library and reclaim disk space. Settled jobs
+// (scanned, parsed, recorded, composed, done, failed) delete; a job with work
+// in flight is refused with 409 until it settles. The job row is removed last
+// so a failed artifact delete leaves the row in place to retry. Idempotent —
+// a repeat delete after success returns 404.
+func (h *Handlers) DeleteJob(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadJob(w, r)
+	if !ok {
+		return
+	}
+	if jobIsInFlight(j.Status) {
+		writeError(w, http.StatusConflict, fmt.Sprintf("job is %s; wait for it to settle before deleting", j.Status))
+		return
+	}
+	deleter, ok := h.storage.(jobArtifactDeleter)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "storage backend does not support delete")
+		return
+	}
+	if err := deleter.DeleteTree(fmt.Sprintf("jobs/%s", j.ID)); err != nil {
+		internalError(w, "delete job artifacts", err)
+		return
+	}
+	if err := deleter.Delete(fmt.Sprintf("demos/%s.dem", j.ID)); err != nil {
+		internalError(w, "delete job demo", err)
+		return
+	}
+	if err := h.repo.Delete(r.Context(), j.ID); err != nil {
+		internalError(w, "delete job", err)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
