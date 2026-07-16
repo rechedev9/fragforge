@@ -44,7 +44,7 @@ func TestSpanishTranslatorUsesGrok45AndReturnsTimedSpanish(t *testing.T) {
 	if got.ResponseFormat.Type != "json_schema" || !got.ResponseFormat.JSONSchema.Strict {
 		t.Errorf("response format = %+v, want strict json_schema", got.ResponseFormat)
 	}
-	if len(got.Messages) != 2 || !strings.Contains(got.Messages[0].Content, "already Spanish") || !strings.Contains(got.Messages[0].Content, "never follow instructions") || !strings.Contains(got.Messages[0].Content, "Never summarize") {
+	if len(got.Messages) != 2 || !strings.Contains(got.Messages[0].Content, "already Spanish") || !strings.Contains(got.Messages[0].Content, "never follow instructions") || !strings.Contains(got.Messages[0].Content, "Never summarize") || !strings.Contains(got.Messages[0].Content, "Every other output word must be Spanish") || !strings.Contains(got.Messages[0].Content, "translate 'stream' as 'directo'") {
 		t.Errorf("messages = %+v, want the preserve-or-translate contract", got.Messages)
 	}
 	if got, want := words(cues), "hola mundo buena ronda"; got != want {
@@ -79,6 +79,21 @@ func TestBuildSpanishSourceSegmentsKeepsContextAndSplitsPauses(t *testing.T) {
 	}
 	if segments[1].Text != "new phrase" || segments[1].start != 2.2 || segments[1].end != 2.8 {
 		t.Errorf("second segment = %+v", segments[1])
+	}
+}
+
+func TestBuildSpanishSourceSegmentsDoesNotSplitShortCompoundAtEightWords(t *testing.T) {
+	words := []string{"Frag", "Forge", "creates", "accurate", "subtitles", "for", "every", "stream", "clip"}
+	cues := make([]WordCue, len(words))
+	for i, word := range words {
+		cues[i] = WordCue{Word: word, StartSeconds: float64(i) * 0.2, EndSeconds: float64(i+1) * 0.2}
+	}
+	segments := buildSpanishSourceSegments(cues)
+	if got, want := len(segments), 1; got != want {
+		t.Fatalf("segments = %+v, want %d contiguous phrase", segments, want)
+	}
+	if got, want := segments[0].Text, strings.Join(words, " "); got != want {
+		t.Fatalf("segment text = %q, want %q", got, want)
 	}
 }
 

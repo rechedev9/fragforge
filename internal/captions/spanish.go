@@ -20,7 +20,11 @@ const DefaultSpanishModel = "grok-4.5"
 const (
 	defaultSpanishHTTPTimeout = 2 * time.Minute
 	maxSpanishResponseBytes   = 4 << 20
-	spanishWordsPerSegment    = 8
+	// Keep a full short-form utterance together whenever possible. The previous
+	// eight-word cap split compounds such as "stream clip" across segments and
+	// caused Grok to leave the first half untranslated. Long speech still
+	// splits at natural pauses or this defensive cap.
+	spanishMaxWordsPerSegment = 64
 )
 
 // SpanishTranslator turns timed source-language cues into Spanish cues through
@@ -106,10 +110,10 @@ func (t SpanishTranslator) Translate(ctx context.Context, source []WordCue) ([]W
 }
 
 func buildSpanishSourceSegments(cues []WordCue) []spanishSourceSegment {
-	segments := make([]spanishSourceSegment, 0, (len(cues)+spanishWordsPerSegment-1)/spanishWordsPerSegment)
+	segments := make([]spanishSourceSegment, 0, (len(cues)+spanishMaxWordsPerSegment-1)/spanishMaxWordsPerSegment)
 	for start := 0; start < len(cues); {
 		end := start + 1
-		for end < len(cues) && end-start < spanishWordsPerSegment && cues[end].StartSeconds-cues[end-1].EndSeconds <= maxWordGapSeconds {
+		for end < len(cues) && end-start < spanishMaxWordsPerSegment && cues[end].StartSeconds-cues[end-1].EndSeconds <= maxWordGapSeconds {
 			end++
 		}
 		words := make([]string, 0, end-start)
@@ -146,7 +150,10 @@ func (t SpanishTranslator) translate(ctx context.Context, segments []spanishSour
 					"If the text is already Spanish, copy its spoken words without paraphrasing. " +
 					"Otherwise translate every spoken word to natural concise Spanish. " +
 					"Never summarize, omit, censor, explain, add context, or invent speech. " +
-					"Preserve names, gamer tags, game terms, interjections, repetitions, and profanity.",
+					"Preserve names, gamer tags, product names, canonical identifiers such as CS2, AWP, and AK-47, interjections, repetitions, and profanity. " +
+					"Every other output word must be Spanish: do not retain ordinary foreign words or English streaming loanwords even when creators commonly use them. " +
+					"Translate ordinary gaming and streaming vocabulary; for example, translate 'stream' as 'directo' or 'transmision', 'streaming' as 'retransmision', and 'stream clip' as 'clip del directo'. " +
+					"Normalize the product name 'Frag Forge' to 'FragForge'.",
 			},
 			{Role: "user", Content: string(input)},
 		},
