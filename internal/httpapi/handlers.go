@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -54,6 +55,7 @@ type JobRepository interface {
 	// GetStatus returns segmentCount only while the job is recording.
 	GetStatus(ctx context.Context, id uuid.UUID) (status job.Status, failureReason string, segmentCount int, err error)
 	List(ctx context.Context, limit int) ([]job.Job, error)
+	ListBySeries(ctx context.Context, seriesID string) ([]job.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, failureReason string) error
 	SetParseInputs(ctx context.Context, id uuid.UUID, steamID string, r rules.Rules) error
 }
@@ -210,6 +212,35 @@ type createJobConfig struct {
 	Rules         *rules.Rules `json:"rules,omitempty"`
 }
 
+// maxDemoFileNameRunes caps the stored original demo file name so a hostile or
+// accidental upload cannot bloat the persisted job document.
+const maxDemoFileNameRunes = 128
+
+// sanitizeDemoFileName reduces an uploaded multipart file name to a safe display
+// name: it strips any directory prefix using either separator (a client may send
+// a Windows path or a URL-style one, so filepath.Base alone is not enough), drops
+// control characters and invisible format characters (Cf: RTL overrides,
+// zero-width runes, BOM) that could spoof the displayed name, and caps the
+// result at maxDemoFileNameRunes runes. It returns "" when nothing usable
+// remains, so the caller leaves the field empty.
+func sanitizeDemoFileName(name string) string {
+	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
+		name = name[i+1:]
+	}
+	var b strings.Builder
+	for _, r := range name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	cleaned := strings.TrimSpace(b.String())
+	if runes := []rune(cleaned); len(runes) > maxDemoFileNameRunes {
+		cleaned = strings.TrimSpace(string(runes[:maxDemoFileNameRunes]))
+	}
+	return cleaned
+}
+
 // isDemoHeader reports whether the leading bytes look like a CS2 (Source 2) or
 // legacy GOTV (Source 1) demo.
 func isDemoHeader(header []byte) bool {
@@ -230,12 +261,16 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 			_ = r.MultipartForm.RemoveAll()
 		}
 	}()
-	file, _, err := r.FormFile("demo")
+	file, fileHeader, err := r.FormFile("demo")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing demo file: "+err.Error())
 		return
 	}
 	defer file.Close()
+	var demoFileName string
+	if fileHeader != nil {
+		demoFileName = sanitizeDemoFileName(fileHeader.Filename)
+	}
 
 	// Peek the demo magic bytes before persisting so non-demo uploads are
 	// rejected at the door. io.ReadFull tolerates a short read via ErrUnexpectedEOF.
@@ -278,9 +313,24 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// series_id is an optional client-minted UUID that groups the demos of one
+	// bo3/bo5 series. When present it must be a valid UUID; it is stored in the
+	// canonical lowercase form so ListBySeries matches regardless of casing.
+	var seriesID string
+	if raw := strings.TrimSpace(r.FormValue("series_id")); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "series_id must be a valid UUID")
+			return
+		}
+		seriesID = parsed.String()
+	}
+
 	j := &job.Job{
 		ID:            uuid.New(),
 		Status:        job.StatusQueued,
+		SeriesID:      seriesID,
+		DemoFileName:  demoFileName,
 		TargetSteamID: cfg.TargetSteamID,
 		Rules:         effectiveRules,
 	}
@@ -327,8 +377,24 @@ func (h *Handlers) CreateJob(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ListJobs handles GET /api/jobs.
+// ListJobs handles GET /api/jobs. With ?series_id=<uuid> it returns only that
+// series' jobs ordered by creation time ascending (id as a deterministic
+// tie-break); otherwise it returns the recent jobs (?limit).
 func (h *Handlers) ListJobs(w http.ResponseWriter, r *http.Request) {
+	if raw := r.URL.Query().Get("series_id"); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "series_id must be a valid UUID")
+			return
+		}
+		jobs, err := h.repo.ListBySeries(r.Context(), parsed.String())
+		if err != nil {
+			internalError(w, "list jobs by series", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+		return
+	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)

@@ -92,9 +92,16 @@ func ParseStatus(name string) (Status, error) {
 
 // Job is the canonical domain model used by the API, the worker, and the DB.
 type Job struct {
-	ID            uuid.UUID      `json:"id"`
-	Status        Status         `json:"status"`
-	FailureReason string         `json:"failure_reason,omitempty"`
+	ID            uuid.UUID `json:"id"`
+	Status        Status    `json:"status"`
+	FailureReason string    `json:"failure_reason,omitempty"`
+	// SeriesID groups the jobs of one uploaded bo3/bo5 series. It is a
+	// client-minted UUID shared by every demo in the series; empty for a
+	// standalone single-demo upload.
+	SeriesID string `json:"series_id,omitempty"`
+	// DemoFileName is the sanitized original file name of the uploaded demo,
+	// kept only for display; empty when the upload carried no usable name.
+	DemoFileName  string         `json:"demo_file_name,omitempty"`
 	DemoPath      string         `json:"demo_path"`
 	DemoSHA256    string         `json:"demo_sha256"`
 	TargetSteamID string         `json:"target_steamid"`

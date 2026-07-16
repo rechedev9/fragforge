@@ -21,6 +21,7 @@ type orchestratorJobRepository interface {
 	GetMeta(context.Context, uuid.UUID) (job.Job, error)
 	GetStatus(context.Context, uuid.UUID) (job.Status, string, int, error)
 	List(context.Context, int) ([]job.Job, error)
+	ListBySeries(context.Context, string) ([]job.Job, error)
 	ListByStatus(context.Context, job.Status) ([]job.Job, error)
 	UpdateStatus(context.Context, uuid.UUID, job.Status, string) error
 	SetParseInputs(context.Context, uuid.UUID, string, rules.Rules) error
@@ -123,6 +124,37 @@ func (r *memoryJobRepository) List(ctx context.Context, limit int) ([]job.Job, e
 	})
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	return out, nil
+}
+
+// ListBySeries returns the metadata-only jobs of one upload series ordered by
+// creation time ascending, with the id as a deterministic tie-break when two
+// jobs share a CreatedAt (the same ordering the SQLite repo uses). The kill
+// plan is stripped and the result is capped at 100 jobs, matching List: a
+// series is a handful of demos, so the cap only guards against a pathological
+// job set.
+func (r *memoryJobRepository) ListBySeries(ctx context.Context, seriesID string) ([]job.Job, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []job.Job{}
+	for _, j := range r.jobs {
+		if j.SeriesID == seriesID {
+			j.KillPlan = nil
+			out = append(out, j)
+		}
+	}
+	sort.Slice(out, func(i, k int) bool {
+		if out[i].CreatedAt.Equal(out[k].CreatedAt) {
+			return out[i].ID.String() < out[k].ID.String()
+		}
+		return out[i].CreatedAt.Before(out[k].CreatedAt)
+	})
+	if len(out) > 100 {
+		out = out[:100]
 	}
 	return out, nil
 }

@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -162,6 +163,22 @@ func (f *fakeRepo) List(_ context.Context, limit int) ([]job.Job, error) {
 	}
 	return jobs, nil
 }
+func (f *fakeRepo) ListBySeries(_ context.Context, seriesID string) ([]job.Job, error) {
+	jobs := make([]job.Job, 0, len(f.jobs))
+	for _, j := range f.jobs {
+		if j.SeriesID == seriesID {
+			j.KillPlan = nil
+			jobs = append(jobs, j)
+		}
+	}
+	sort.Slice(jobs, func(i, k int) bool {
+		if jobs[i].CreatedAt.Equal(jobs[k].CreatedAt) {
+			return jobs[i].ID.String() < jobs[k].ID.String()
+		}
+		return jobs[i].CreatedAt.Before(jobs[k].CreatedAt)
+	})
+	return jobs, nil
+}
 func (f *fakeRepo) UpdateStatus(ctx context.Context, id uuid.UUID, s job.Status, reason string) error {
 	if f.updateHonorsCtx {
 		if err := ctx.Err(); err != nil {
@@ -286,6 +303,23 @@ func multipartBodyRaw(t *testing.T, demoBytes []byte, configJSON string) (*bytes
 	return body, mw.FormDataContentType()
 }
 
+// multipartBodyFields builds a CreateJob upload with a valid demo header, the
+// given demo file name, and arbitrary extra form fields (e.g. config,
+// series_id). It is used by the series/file-name tests.
+func multipartBodyFields(t *testing.T, filename string, demoBytes []byte, fields map[string]string) (*bytes.Buffer, string) {
+	t.Helper()
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	demoPart, _ := mw.CreateFormFile("demo", filename)
+	demoPart.Write(demoMagic)
+	demoPart.Write(demoBytes)
+	for k, v := range fields {
+		mw.WriteField(k, v)
+	}
+	mw.Close()
+	return body, mw.FormDataContentType()
+}
+
 func TestPostJobsCreatesJobAndEnqueues(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()
@@ -363,6 +397,213 @@ func TestListJobsReturnsRecentJobsWithoutKillPlan(t *testing.T) {
 	if strings.Contains(rw.Body.String(), "kill_plan") {
 		t.Fatalf("list response should not include kill_plan: %s", rw.Body.String())
 	}
+}
+
+func TestSanitizeDemoFileName(t *testing.T) {
+	longName := strings.Repeat("a", 200) + ".dem"
+	// U+FEFF BOM, U+200B zero-width space, U+202E RTL override: Cf format
+	// characters that must be dropped, not just Cc controls. Built from rune
+	// values so no invisible characters hide in the source.
+	formatCharsName := string(rune(0xFEFF)) + "med" + string(rune(0x200B)) + "io" + string(rune(0x202E)) + "med.dem"
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "match.dem", "match.dem"},
+		{"windows_path", `C:\replays\game one.dem`, "game one.dem"},
+		{"url_path", "uploads/2026/final.dem", "final.dem"},
+		{"mixed_separators", `dir/sub\match.dem`, "match.dem"},
+		{"control_chars", "clip\t\n\x00.dem", "clip.dem"},
+		{"format_chars", formatCharsName, "mediomed.dem"},
+		{"over_long", longName, strings.Repeat("a", 128)},
+		{"empty", "", ""},
+		{"only_separators", `a/b\`, ""},
+		{"only_control", "\x00\x01\x02", ""},
+		{"whitespace_only", "   ", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sanitizeDemoFileName(tc.in)
+			if got != tc.want {
+				t.Fatalf("sanitizeDemoFileName(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if len([]rune(got)) > maxDemoFileNameRunes {
+				t.Fatalf("sanitizeDemoFileName(%q) = %q, exceeds %d runes", tc.in, got, maxDemoFileNameRunes)
+			}
+		})
+	}
+}
+
+func TestCreateJobStoresSeriesIDAndFileName(t *testing.T) {
+	repo := newFakeRepo()
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	// Upper-case series id and a Windows path exercise canonicalization and
+	// base-name sanitization in one happy-path request.
+	series := strings.ToUpper(uuid.NewString())
+	fields := map[string]string{
+		"config":    `{"target_steamid":"76561198000000000"}`,
+		"series_id": series,
+	}
+	body, ct := multipartBodyFields(t, `C:\replays\game one.dem`, []byte("dem-bytes"), fields)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+	req.Header.Set("Content-Type", ct)
+	rw := httptest.NewRecorder()
+
+	h.CreateJob(rw, req)
+
+	if rw.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rw.Code, rw.Body.String())
+	}
+	var resp struct {
+		ID uuid.UUID `json:"id"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	stored, ok := repo.jobs[resp.ID]
+	if !ok {
+		t.Fatalf("job %s not stored", resp.ID)
+	}
+	if got, want := stored.SeriesID, strings.ToLower(series); got != want {
+		t.Fatalf("SeriesID = %q, want canonical %q", got, want)
+	}
+	if got, want := stored.DemoFileName, "game one.dem"; got != want {
+		t.Fatalf("DemoFileName = %q, want %q", got, want)
+	}
+}
+
+func TestCreateJobRejectsInvalidSeriesID(t *testing.T) {
+	repo := newFakeRepo()
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	fields := map[string]string{
+		"config":    `{"target_steamid":"76561198000000000"}`,
+		"series_id": "not-a-uuid",
+	}
+	body, ct := multipartBodyFields(t, "match.dem", []byte("dem-bytes"), fields)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+	req.Header.Set("Content-Type", ct)
+	rw := httptest.NewRecorder()
+
+	h.CreateJob(rw, req)
+
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	}
+	if len(repo.jobs) != 0 {
+		t.Fatalf("repo stored %d jobs, want 0 on invalid series_id", len(repo.jobs))
+	}
+}
+
+func TestCreateJobWithoutSeriesIDLeavesFieldEmpty(t *testing.T) {
+	repo := newFakeRepo()
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+
+	body, ct := multipartBody(t, []byte("dem-bytes"), `{"target_steamid":"76561198000000000"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", body)
+	req.Header.Set("Content-Type", ct)
+	rw := httptest.NewRecorder()
+
+	h.CreateJob(rw, req)
+
+	if rw.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rw.Code, rw.Body.String())
+	}
+	for _, j := range repo.jobs {
+		if j.SeriesID != "" {
+			t.Fatalf("SeriesID = %q, want empty when series_id absent", j.SeriesID)
+		}
+		// multipartBody uploads as "test.dem", so the name is captured.
+		if j.DemoFileName != "test.dem" {
+			t.Fatalf("DemoFileName = %q, want test.dem", j.DemoFileName)
+		}
+	}
+}
+
+func TestListJobsBySeries(t *testing.T) {
+	repo := newFakeRepo()
+	series := uuid.New()
+	other := uuid.New()
+	base := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+
+	// Three jobs in the target series, inserted out of creation order so the
+	// handler must sort them; one job in another series; one with no series.
+	for _, offset := range []int{2, 0, 1} {
+		id := uuid.New()
+		repo.jobs[id] = job.Job{
+			ID:        id,
+			Status:    job.StatusQueued,
+			SeriesID:  series.String(),
+			CreatedAt: base.Add(time.Duration(offset) * time.Minute),
+		}
+	}
+	otherID := uuid.New()
+	repo.jobs[otherID] = job.Job{ID: otherID, Status: job.StatusQueued, SeriesID: other.String(), CreatedAt: base}
+	loneID := uuid.New()
+	repo.jobs[loneID] = job.Job{ID: loneID, Status: job.StatusQueued, CreatedAt: base}
+
+	// Expected upload order is by CreatedAt ascending.
+	var want []uuid.UUID
+	for _, j := range sortedByCreatedAt(repo.jobs, series.String()) {
+		want = append(want, j.ID)
+	}
+
+	h := NewHandlers(repo, newFakeStorage(), &fakeQueue{})
+	r := chi.NewRouter()
+	r.Get("/api/jobs", h.ListJobs)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs?series_id="+series.String(), nil)
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	var resp struct {
+		Jobs []job.Job `json:"jobs"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Jobs) != len(want) {
+		t.Fatalf("got %d jobs, want %d: %+v", len(resp.Jobs), len(want), resp.Jobs)
+	}
+	for i, j := range resp.Jobs {
+		if j.ID != want[i] {
+			t.Fatalf("jobs[%d].ID = %s, want %s (order)", i, j.ID, want[i])
+		}
+		if j.SeriesID != series.String() {
+			t.Fatalf("jobs[%d].SeriesID = %q, want %q", i, j.SeriesID, series.String())
+		}
+	}
+
+	// Invalid series_id is a 400.
+	bad := httptest.NewRequest(http.MethodGet, "/api/jobs?series_id=not-a-uuid", nil)
+	badRW := httptest.NewRecorder()
+	r.ServeHTTP(badRW, bad)
+	if badRW.Code != http.StatusBadRequest {
+		t.Fatalf("invalid series_id status = %d, want 400; body=%s", badRW.Code, badRW.Body.String())
+	}
+}
+
+// sortedByCreatedAt returns the target series' jobs ordered by CreatedAt, the
+// same order ListBySeries must produce.
+func sortedByCreatedAt(jobs map[uuid.UUID]job.Job, seriesID string) []job.Job {
+	out := []job.Job{}
+	for _, j := range jobs {
+		if j.SeriesID == seriesID {
+			out = append(out, j)
+		}
+	}
+	sort.Slice(out, func(i, k int) bool {
+		if out[i].CreatedAt.Equal(out[k].CreatedAt) {
+			return out[i].ID.String() < out[k].ID.String()
+		}
+		return out[i].CreatedAt.Before(out[k].CreatedAt)
+	})
+	return out
 }
 
 func TestListLoadoutsReturnsCatalog(t *testing.T) {

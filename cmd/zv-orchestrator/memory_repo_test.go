@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"sort"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/killplan"
@@ -65,5 +69,99 @@ func TestMemoryJobRepositoryStoresJobLifecycle(t *testing.T) {
 	}
 	if len(jobs) != 1 || jobs[0].ID != j.ID || jobs[0].KillPlan != nil {
 		t.Fatalf("List = %#v, want one metadata-only job", jobs)
+	}
+}
+
+func TestMemoryJobRepositoryListBySeries(t *testing.T) {
+	repo := newMemoryJobRepository()
+	ctx := context.Background()
+	series := uuid.NewString()
+
+	// An unknown series returns an empty, non-nil slice.
+	got, err := repo.ListBySeries(ctx, series)
+	if err != nil {
+		t.Fatalf("ListBySeries empty error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ListBySeries empty = %#v, want no jobs", got)
+	}
+
+	// Three jobs in the series, created in order with distinct timestamps.
+	var ids []uuid.UUID
+	for range 3 {
+		j := &job.Job{Status: job.StatusQueued, SeriesID: series}
+		if err := repo.Create(ctx, j); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		ids = append(ids, j.ID)
+		time.Sleep(2 * time.Millisecond)
+	}
+	// A different series and a standalone job must be excluded.
+	if err := repo.Create(ctx, &job.Job{Status: job.StatusQueued, SeriesID: uuid.NewString()}); err != nil {
+		t.Fatalf("Create other series: %v", err)
+	}
+	if err := repo.Create(ctx, &job.Job{Status: job.StatusQueued}); err != nil {
+		t.Fatalf("Create standalone: %v", err)
+	}
+	// Give one series job a kill plan to confirm ListBySeries strips it.
+	if err := repo.SetKillPlan(ctx, ids[0], killplan.NewPlan()); err != nil {
+		t.Fatalf("SetKillPlan: %v", err)
+	}
+
+	got, err = repo.ListBySeries(ctx, series)
+	if err != nil {
+		t.Fatalf("ListBySeries error = %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("ListBySeries returned %d jobs, want 3", len(got))
+	}
+	for i, id := range ids {
+		if got[i].ID != id {
+			t.Fatalf("ListBySeries[%d].ID = %s, want %s (upload order)", i, got[i].ID, id)
+		}
+		if got[i].SeriesID != series {
+			t.Fatalf("ListBySeries[%d].SeriesID = %q, want %q", i, got[i].SeriesID, series)
+		}
+		if got[i].KillPlan != nil {
+			t.Fatalf("ListBySeries[%d] carried a kill plan, want stripped", i)
+		}
+	}
+}
+
+func TestMemoryJobRepositoryListBySeriesBreaksCreatedAtTiesByID(t *testing.T) {
+	repo := newMemoryJobRepository()
+	ctx := context.Background()
+	series := uuid.NewString()
+
+	var ids []string
+	for range 2 {
+		j := &job.Job{Status: job.StatusQueued, SeriesID: series}
+		if err := repo.Create(ctx, j); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		ids = append(ids, j.ID.String())
+	}
+	// Force an identical CreatedAt on both jobs (white-box: the repo is in this
+	// package) so only the id tie-break decides the order.
+	tie := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	for _, raw := range ids {
+		id := uuid.MustParse(raw)
+		j := repo.jobs[id]
+		j.CreatedAt = tie
+		repo.jobs[id] = j
+	}
+	sort.Strings(ids)
+
+	got, err := repo.ListBySeries(ctx, series)
+	if err != nil {
+		t.Fatalf("ListBySeries: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListBySeries returned %d jobs, want 2", len(got))
+	}
+	for i, want := range ids {
+		if got[i].ID.String() != want {
+			t.Fatalf("ListBySeries[%d].ID = %s, want %s (id tie-break ascending)", i, got[i].ID, want)
+		}
 	}
 }

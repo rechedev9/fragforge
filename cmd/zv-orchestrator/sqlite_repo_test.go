@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -172,6 +173,97 @@ func TestSQLiteRepoListOrdersByUpdatedThenLimits(t *testing.T) {
 	}
 	if len(limited) != 2 {
 		t.Fatalf("List limit: got %d, want 2", len(limited))
+	}
+}
+
+func TestSQLiteRepoListBySeries(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	series := uuid.NewString()
+
+	// An unknown series returns an empty, non-nil slice.
+	got, err := repo.ListBySeries(ctx, series)
+	if err != nil {
+		t.Fatalf("ListBySeries empty: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ListBySeries empty: got %d jobs, want 0", len(got))
+	}
+
+	// Three jobs in the series, created in order with distinct created_at.
+	var ids []uuid.UUID
+	for range 3 {
+		j := &job.Job{Status: job.StatusQueued, SeriesID: series}
+		if err := repo.Create(ctx, j); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		ids = append(ids, j.ID)
+		time.Sleep(2 * time.Millisecond)
+	}
+	// A different series and a standalone job must be excluded.
+	if err := repo.Create(ctx, &job.Job{Status: job.StatusQueued, SeriesID: uuid.NewString()}); err != nil {
+		t.Fatalf("Create other series: %v", err)
+	}
+	if err := repo.Create(ctx, &job.Job{Status: job.StatusQueued}); err != nil {
+		t.Fatalf("Create standalone: %v", err)
+	}
+	// A kill plan on a series job confirms ListBySeries strips it.
+	if err := repo.SetKillPlan(ctx, ids[0], killplan.NewPlan()); err != nil {
+		t.Fatalf("SetKillPlan: %v", err)
+	}
+
+	got, err = repo.ListBySeries(ctx, series)
+	if err != nil {
+		t.Fatalf("ListBySeries: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("ListBySeries: got %d jobs, want 3", len(got))
+	}
+	for i, id := range ids {
+		if got[i].ID != id {
+			t.Fatalf("ListBySeries[%d].ID = %s, want %s (upload order)", i, got[i].ID, id)
+		}
+		if got[i].SeriesID != series {
+			t.Fatalf("ListBySeries[%d].SeriesID = %q, want %q", i, got[i].SeriesID, series)
+		}
+		if got[i].KillPlan != nil {
+			t.Fatalf("ListBySeries[%d] carried a kill plan, want stripped", i)
+		}
+	}
+}
+
+func TestSQLiteRepoListBySeriesBreaksCreatedAtTiesByID(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	series := uuid.NewString()
+
+	var ids []string
+	for range 2 {
+		j := &job.Job{Status: job.StatusQueued, SeriesID: series}
+		if err := repo.Create(ctx, j); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		ids = append(ids, j.ID.String())
+	}
+	// Force an identical created_at mirror column on both rows so only the id
+	// tie-break decides the order.
+	tie := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC).UnixNano()
+	if _, err := repo.db.ExecContext(ctx, `UPDATE jobs SET created_at = ? WHERE id IN (?, ?)`, tie, ids[0], ids[1]); err != nil {
+		t.Fatalf("force equal created_at: %v", err)
+	}
+	sort.Strings(ids)
+
+	got, err := repo.ListBySeries(ctx, series)
+	if err != nil {
+		t.Fatalf("ListBySeries: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListBySeries returned %d jobs, want 2", len(got))
+	}
+	for i, want := range ids {
+		if got[i].ID.String() != want {
+			t.Fatalf("ListBySeries[%d].ID = %s, want %s (id tie-break ascending)", i, got[i].ID, want)
+		}
 	}
 }
 

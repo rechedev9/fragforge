@@ -171,6 +171,40 @@ func (r *sqliteJobRepository) List(ctx context.Context, limit int) ([]job.Job, e
 	return out, nil
 }
 
+// ListBySeries returns the metadata-only jobs of one upload series ordered by
+// creation time ascending, with the id as a deterministic tie-break when two
+// jobs share a created_at (the same ordering the memory repo uses). created_at
+// is the UnixNano mirror column. The kill plan is stripped and the result is
+// capped at 100 jobs, matching List: a series is a handful of demos, so the cap
+// only guards against a pathological document set.
+func (r *sqliteJobRepository) ListBySeries(ctx context.Context, seriesID string) ([]job.Job, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT json_remove(data, '$.kill_plan') FROM jobs WHERE json_extract(data, '$.series_id') = ? ORDER BY created_at ASC, id ASC LIMIT 100`,
+		seriesID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query jobs by series: %w", err)
+	}
+	defer rows.Close()
+
+	out := []job.Job{}
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("scan job: %w", err)
+		}
+		var j job.Job
+		if err := json.Unmarshal(data, &j); err != nil {
+			return nil, fmt.Errorf("unmarshal job: %w", err)
+		}
+		out = append(out, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate jobs: %w", err)
+	}
+	return out, nil
+}
+
 func (r *sqliteJobRepository) ListByStatus(ctx context.Context, status job.Status) ([]job.Job, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT json_remove(data, '$.kill_plan') FROM jobs WHERE status = ? ORDER BY updated_at DESC, created_at DESC`,
