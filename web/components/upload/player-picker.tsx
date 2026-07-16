@@ -6,13 +6,26 @@ import { cn } from '@/lib/utils';
 import { ratingBarClass, ratingBarPct, ratingClass } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 
+/**
+ * A picker row is a scan's DemoPlayer, optionally carrying `mapsPresent` in
+ * series mode (how many of the series' maps the player appeared in). It stays
+ * optional so single-match callers pass a plain DemoPlayer unchanged.
+ */
+export type PickerPlayer = DemoPlayer & { mapsPresent?: number };
+
 export type PlayerPickerProps = {
-  /** Roster from the scan, already sorted by kills desc. */
-  players: DemoPlayer[];
+  /** Roster from the scan (single match) or aggregated across a series, sorted by kills desc. */
+  players: PickerPlayer[];
   /** Fires when the user confirms a target by clicking a row. */
   onPick: (steamId: string) => void;
   /** Match-level context (map, score, rounds) shown above the tables, when the scan has it. */
   match?: RosterMatch;
+  /**
+   * Total maps scanned in a bulk series. When 2+, the picker shows a series
+   * summary strip instead of the single-match header and flags players missing
+   * from some maps. Absent/1 keeps the plain single-match rendering.
+   */
+  seriesMapCount?: number;
 };
 
 /** Tooltip copy for the abbreviated stat column headers. */
@@ -122,6 +135,25 @@ function MatchHeader({ match }: { match: RosterMatch }) {
 }
 
 /**
+ * Compact series header shown above the roster in series mode: it replaces the
+ * single-match score line (a series has no single map/score) with the map count
+ * and roster size, so the user knows the scoreboard is aggregated across maps.
+ */
+function SeriesSummary({ mapCount, playerCount }: { mapCount: number; playerCount: number }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border border-primary/15 bg-muted/20 px-3.5 py-2.5">
+      <span className="flex items-center gap-2 font-[family-name:var(--font-display)] text-sm font-bold uppercase tracking-wide text-foreground">
+        <span className="size-1.5 bg-primary shadow-[0_0_8px_currentColor]" />
+        Serie · {mapCount} mapas
+      </span>
+      <span className="shrink-0 font-[family-name:var(--font-mono)] text-[0.7rem] uppercase tracking-wider text-muted-foreground">
+        estadísticas combinadas · {playerCount} jugadores
+      </span>
+    </div>
+  );
+}
+
+/**
  * PlayerPicker — pick whose POV to clip after a roster scan, shown as a CS-style
  * scoreboard split by team (Terroristas / Antiterroristas), with a match header
  * (map, score, rounds) above it when the scan reports one. Each team is its own
@@ -132,9 +164,10 @@ function MatchHeader({ match }: { match: RosterMatch }) {
  * "Recomendado", but the user must click a row to confirm the target, which is
  * the whole point of this screen.
  */
-export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
+export function PlayerPicker({ players, onPick, match, seriesMapCount }: PlayerPickerProps) {
   const recommended = pickRecommended(players);
   const [highlighted, setHighlighted] = useState<string | null>(recommended?.steamId ?? players[0]?.steamId ?? null);
+  const isSeries = (seriesMapCount ?? 0) >= 2;
 
   const showMvp = players.some((p) => p.mvps > 0);
   const columns: Column[] = [
@@ -167,9 +200,15 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
     .map((roster, i) => ({ side: sides[i], roster }))
     .filter((g) => g.roster.length > 0);
 
+  // Series mode shows the combined-stats strip; a single match shows its
+  // score header when the scan reported one; otherwise neither.
+  let header: ReactNode = null;
+  if (isSeries) header = <SeriesSummary mapCount={seriesMapCount ?? 0} playerCount={players.length} />;
+  else if (match) header = <MatchHeader match={match} />;
+
   return (
     <div className="flex flex-col gap-5">
-      {match ? <MatchHeader match={match} /> : null}
+      {header}
       {groups.map(({ side, roster }) => {
         const meta = TEAM_META[side];
         const avg = roster.reduce((s, p) => s + p.rating, 0) / roster.length;
@@ -204,6 +243,16 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                 const active = p.steamId === highlighted;
                 const isRecommended = p.steamId === recommended?.steamId;
                 const chips = highlightChips(p);
+                // Series mode: flag players who did not appear in every map. A
+                // player present everywhere (the common case) stays visually
+                // quiet — no chip at all.
+                const showMapsChip =
+                  isSeries && typeof p.mapsPresent === 'number' && p.mapsPresent < (seriesMapCount ?? 0);
+                const mapsChip = showMapsChip ? (
+                  <span className="inline-flex items-center rounded-full border border-border bg-muted/60 px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.6rem] font-semibold tabular-nums text-muted-foreground">
+                    {p.mapsPresent}/{seriesMapCount} mapas
+                  </span>
+                ) : null;
                 let chipRow: ReactNode;
                 if (chips.length > 0) {
                   chipRow = chips.map((c) => (
@@ -217,7 +266,7 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                       {c.label}
                     </span>
                   ));
-                } else if (!isRecommended) {
+                } else if (!isRecommended && !showMapsChip) {
                   chipRow = <span className="text-[0.65rem] text-muted-foreground/60">-</span>;
                 } else {
                   chipRow = null;
@@ -266,6 +315,7 @@ export function PlayerPicker({ players, onPick, match }: PlayerPickerProps) {
                         {isRecommended ? (
                           <Badge className="shrink-0 px-1.5 py-0 text-[0.6rem] leading-4">Recomendado</Badge>
                         ) : null}
+                        {mapsChip}
                         {chipRow}
                       </span>
                     </span>

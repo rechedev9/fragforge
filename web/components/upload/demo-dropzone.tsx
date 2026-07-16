@@ -5,37 +5,47 @@ import { UploadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type DemoDropzoneProps = {
-  /** Called with the chosen .dem file. The parent owns parsing + navigation. */
-  onFile: (file: File) => void;
+  /** Called with the chosen .dem file(s). The parent owns parsing + navigation. */
+  onFiles: (files: File[]) => void;
 };
 
 const DEM_EXT = '.dem';
 
+/** Most demos we ever record for one series is a bo5 (5 maps); 10 leaves slack. */
+const MAX_FILES = 10;
+
 /**
- * A drop zone + file picker for a single CS2 .dem file, styled as the mockup's
- * HUD dropzone: dashed cyan border, four corner brackets, glowing circle icon.
- * The clickable area is a <label> bound to the file input, so the OS file
- * dialog opens natively on click (no JS .click() that can be flaky with hidden
- * inputs). Drag-and-drop and keyboard both work; the extension is validated
- * before handing the File up.
+ * A drop zone + file picker for CS2 .dem files, styled as the mockup's HUD
+ * dropzone: dashed cyan border, four corner brackets, glowing circle icon. It
+ * accepts a single demo or several at once — a whole bo3/bo5 series — up to
+ * {@link MAX_FILES}. The clickable area is a <label> bound to the file input, so
+ * the OS file dialog opens natively on click (no JS .click() that can be flaky
+ * with hidden inputs). Drag-and-drop and keyboard both work; every file's
+ * extension is validated before handing the list up.
  */
-export function DemoDropzone({ onFile }: DemoDropzoneProps) {
+export function DemoDropzone({ onFiles }: DemoDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const accept = useCallback(
-    (file: File | undefined) => {
-      if (!file) return;
-      if (!file.name.toLowerCase().endsWith(DEM_EXT)) {
-        setError('Ese archivo no es una demo .dem.');
+    (fileList: FileList | null | undefined) => {
+      const files = fileList ? Array.from(fileList) : [];
+      if (files.length === 0) return;
+      if (files.length > MAX_FILES) {
+        setError(`Máximo ${MAX_FILES} demos por serie. Has soltado ${files.length}.`);
+        return;
+      }
+      const bad = files.find((f) => !f.name.toLowerCase().endsWith(DEM_EXT));
+      if (bad) {
+        setError(`"${bad.name}" no es una demo .dem.`);
         return;
       }
       setError(null);
-      onFile(file);
+      onFiles(files);
     },
-    [onFile],
+    [onFiles],
   );
 
   return (
@@ -50,7 +60,7 @@ export function DemoDropzone({ onFile }: DemoDropzoneProps) {
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          accept(e.dataTransfer.files?.[0]);
+          accept(e.dataTransfer.files);
         }}
         className={cn(
           'studio-panel studio-panel-raised group relative isolate flex min-h-[268px] cursor-pointer flex-col items-center justify-center overflow-hidden px-6 py-10 text-center transition-[border-color,box-shadow,transform] duration-200 sm:min-h-[300px] sm:px-10 sm:py-12',
@@ -83,19 +93,20 @@ export function DemoDropzone({ onFile }: DemoDropzoneProps) {
           SUELTA UN .DEM AQUÍ
         </span>
         <span className="relative z-10 mt-2 max-w-lg text-[15px] leading-6 text-muted-foreground">
-          Arrastra una demo tuya o de cualquier jugador
+          Arrastra una demo — o varias, una serie bo3/bo5 completa
         </span>
         <span className="relative z-10 mt-4 inline-flex min-h-10 items-center justify-center border border-primary/40 bg-primary/[0.08] px-5 font-[family-name:var(--font-display)] text-sm font-semibold uppercase tracking-[0.05em] text-primary transition-colors group-hover:border-primary/70 group-hover:bg-primary/[0.12]">
           explora tus archivos
         </span>
         <span className="relative z-10 mt-4 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.16em] text-muted-foreground/80">
-          SIN LOGIN · EL .DEM NUNCA SALE DE TU PC
+          HASTA {MAX_FILES} DEMOS · EL .DEM NUNCA SALE DE TU PC
         </span>
 
         <input
           id={inputId}
           ref={inputRef}
           type="file"
+          multiple
           // No `accept` filter: on Windows the ".dem" filter hid every file in
           // folders without a .dem, so the dialog looked empty/broken. Show all
           // files; the extension check below rejects non-.dem with a message.
@@ -104,7 +115,7 @@ export function DemoDropzone({ onFile }: DemoDropzoneProps) {
           onClick={(e) => {
             (e.target as HTMLInputElement).value = '';
           }}
-          onChange={(e) => accept(e.target.files?.[0])}
+          onChange={(e) => accept(e.target.files)}
         />
       </label>
 
