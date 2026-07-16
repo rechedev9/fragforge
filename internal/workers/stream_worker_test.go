@@ -386,11 +386,23 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	})
 	w.runner = runner
 	var transcriptionPath string
-	w.transcribe = func(_ context.Context, mediaPath, _, _ string) ([]captions.WordCue, error) {
+	w.transcribe = func(_ context.Context, mediaPath, _, language string) ([]captions.WordCue, error) {
 		transcriptionPath = mediaPath
+		if language != captionSourceLanguage {
+			t.Fatalf("source transcription language = %q, want %q", language, captionSourceLanguage)
+		}
 		return []captions.WordCue{
-			{Word: "gg", StartSeconds: 0.75, EndSeconds: 1},
 			{Word: "nice", StartSeconds: 0, EndSeconds: 0.5},
+			{Word: "gg", StartSeconds: 0.75, EndSeconds: 1},
+		}, nil
+	}
+	w.translateToSpanish = func(_ context.Context, source []captions.WordCue) ([]captions.WordCue, error) {
+		if got, want := wordsOf(source), "nice gg"; got != want {
+			t.Fatalf("translation source = %q, want %q", got, want)
+		}
+		return []captions.WordCue{
+			{Word: "bien", StartSeconds: 0, EndSeconds: 0.5},
+			{Word: "jugado", StartSeconds: 0.75, EndSeconds: 1},
 		}, nil
 	}
 
@@ -452,8 +464,8 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	}
 	// The leading override block carries the entrance pop and \pos; this test
 	// only cares that cues are ordered chronologically with their \k timings.
-	if !strings.Contains(string(ass), `\k50}nice {\k25}gg`) {
-		t.Fatalf("caption artifact does not order cues chronologically: %s", ass)
+	if !strings.Contains(string(ass), `\k50}bien {\k25}jugado`) {
+		t.Fatalf("caption artifact does not contain translated spanish cues in chronological order: %s", ass)
 	}
 	if !strings.Contains(string(ass), "Style: Karaoke,"+mediafont.FamilyName+",") {
 		t.Fatalf("caption artifact does not use %s: %s", mediafont.FamilyName, ass)
@@ -609,7 +621,7 @@ func TestTranscribeCaptionCuesUsesSpeechRegionRecovery(t *testing.T) {
 		return nil, fmt.Errorf("captions: xai transcript contains no words: %w", captions.ErrUnusableTranscript)
 	}
 	recoveryCalls := 0
-	cues, err := w.transcribeCaptionCues(context.Background(), "ordinary.wav", t.TempDir(), "auto", func() ([]captions.WordCue, error) {
+	cues, err := w.transcribeCaptionCues(context.Background(), "ordinary.wav", t.TempDir(), "auto", 15, func() ([]captions.WordCue, error) {
 		recoveryCalls++
 		return []captions.WordCue{{Word: "hola", StartSeconds: 1, EndSeconds: 1.4}}, nil
 	})
@@ -624,6 +636,79 @@ func TestTranscribeCaptionCuesUsesSpeechRegionRecovery(t *testing.T) {
 	}
 }
 
+func TestTranscribeCaptionCuesRecoversTemporallySparseValidTranscript(t *testing.T) {
+	w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		return []captions.WordCue{{Word: "hello", StartSeconds: 11, EndSeconds: 11.4}}, nil
+	}
+	recoveryCalled := false
+	recovered := []captions.WordCue{
+		{Word: "hola", StartSeconds: 0.5, EndSeconds: 0.9},
+		{Word: "mundo", StartSeconds: 11, EndSeconds: 11.4},
+	}
+	cues, err := w.transcribeCaptionCues(context.Background(), "ordinary.wav", t.TempDir(), "auto", 15, func() ([]captions.WordCue, error) {
+		recoveryCalled = true
+		return recovered, nil
+	})
+	if err != nil {
+		t.Fatalf("transcribeCaptionCues error = %v", err)
+	}
+	if !recoveryCalled {
+		t.Fatal("recovery was not called for a valid but temporally sparse transcript")
+	}
+	if got, want := wordsOf(cues), "hola mundo"; got != want {
+		t.Fatalf("cues = %q, want broader recovered transcript %q", got, want)
+	}
+}
+
+func TestTranscribeCaptionCuesKeepsValidSparseTranscriptWhenRecoveryFails(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "unusable", err: fmt.Errorf("no recovery speech: %w", captions.ErrUnusableTranscript)},
+		{name: "transport", err: errors.New("temporary xai failure")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+			w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+				return []captions.WordCue{{Word: "hola", StartSeconds: 11, EndSeconds: 11.4}}, nil
+			}
+			cues, err := w.transcribeCaptionCues(context.Background(), "ordinary.wav", t.TempDir(), "auto", 15, func() ([]captions.WordCue, error) {
+				return nil, tt.err
+			})
+			if err != nil {
+				t.Fatalf("transcribeCaptionCues error = %v, want the valid first pass", err)
+			}
+			if got, want := wordsOf(cues), "hola"; got != want {
+				t.Fatalf("cues = %q, want first pass %q", got, want)
+			}
+		})
+	}
+}
+
+func TestTranscribeCaptionCuesSkipsRecoveryForBroadTranscript(t *testing.T) {
+	w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		return []captions.WordCue{
+			{Word: "hola", StartSeconds: 1, EndSeconds: 1.4},
+			{Word: "mundo", StartSeconds: 10, EndSeconds: 10.4},
+		}, nil
+	}
+	recoveryCalled := false
+	_, err := w.transcribeCaptionCues(context.Background(), "ordinary.wav", t.TempDir(), "auto", 15, func() ([]captions.WordCue, error) {
+		recoveryCalled = true
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("transcribeCaptionCues error = %v", err)
+	}
+	if recoveryCalled {
+		t.Fatal("recovery called for a transcript spanning more than half the clip")
+	}
+}
+
 func TestTranscribeCaptionCuesKeepsCancellationHard(t *testing.T) {
 	t.Run("after ordinary transcript", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -633,7 +718,7 @@ func TestTranscribeCaptionCuesKeepsCancellationHard(t *testing.T) {
 			return nil, fmt.Errorf("captions: no words: %w", captions.ErrUnusableTranscript)
 		}
 		retryCalled := false
-		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", func() ([]captions.WordCue, error) {
+		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", 15, func() ([]captions.WordCue, error) {
 			retryCalled = true
 			return nil, nil
 		})
@@ -651,7 +736,7 @@ func TestTranscribeCaptionCuesKeepsCancellationHard(t *testing.T) {
 		w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
 			return nil, fmt.Errorf("captions: no words: %w", captions.ErrUnusableTranscript)
 		}
-		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", func() ([]captions.WordCue, error) {
+		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", 15, func() ([]captions.WordCue, error) {
 			cancel()
 			return nil, errors.New("ffmpeg canceled")
 		})
@@ -666,7 +751,7 @@ func TestTranscribeCaptionCuesKeepsCancellationHard(t *testing.T) {
 		w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
 			return nil, fmt.Errorf("captions: no words: %w", captions.ErrUnusableTranscript)
 		}
-		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", func() ([]captions.WordCue, error) {
+		_, err := w.transcribeCaptionCues(ctx, "ordinary.wav", t.TempDir(), "auto", 15, func() ([]captions.WordCue, error) {
 			cancel()
 			return nil, fmt.Errorf("captions: no words: %w", captions.ErrUnusableTranscript)
 		})
@@ -1009,6 +1094,9 @@ func TestStreamRenderWorkerScalesCloudCaptionCuesBySpeed(t *testing.T) {
 			{Word: "nice", StartSeconds: 0, EndSeconds: 0.5},
 			{Word: "gg", StartSeconds: 0.5, EndSeconds: 1},
 		}, nil
+	}
+	w.translateToSpanish = func(_ context.Context, cues []captions.WordCue) ([]captions.WordCue, error) {
+		return cues, nil
 	}
 
 	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)

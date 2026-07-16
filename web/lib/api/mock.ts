@@ -484,6 +484,30 @@ export class MockApiClient implements ApiClient {
     if (index !== -1) videos.splice(index, 1);
   }
 
+  // The mock has no orchestrator, so a delete only clears its own in-memory
+  // uploaded state (fixture matches are read-only seeds and stay put).
+  async deleteMatch(jobId: string): Promise<void> {
+    await delay();
+    const index = uploadedMatches.findIndex((m) => m.id === jobId);
+    if (index !== -1) uploadedMatches.splice(index, 1);
+    uploadedPlays.delete(jobId);
+    pendingScans.delete(jobId);
+    saveUploads();
+  }
+
+  async deleteSeries(seriesId: string): Promise<void> {
+    await delay();
+    const list = seriesScans.get(seriesId) ?? [];
+    for (const scan of list) {
+      const index = uploadedMatches.findIndex((m) => m.id === scan.jobId);
+      if (index !== -1) uploadedMatches.splice(index, 1);
+      uploadedPlays.delete(scan.jobId);
+      pendingScans.delete(scan.jobId);
+    }
+    seriesScans.delete(seriesId);
+    saveUploads();
+  }
+
   async listFeed(): Promise<FeedItem[]> {
     await delay();
     return fixtureFeed.map((f) => ({ ...f }));

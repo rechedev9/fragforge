@@ -793,6 +793,10 @@ type StreamRenderWorker struct {
 	runner  commandRunner
 	// transcribe runs the xAI captions pass, with a seam for unit tests.
 	transcribe func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error)
+	// translateToSpanish is the sole subtitle-output pass. xAI STT has no
+	// translation target, so Grok preserves Spanish phrases and translates all
+	// other recognized speech before ASS generation.
+	translateToSpanish func(ctx context.Context, cues []captions.WordCue) ([]captions.WordCue, error)
 }
 
 func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, cfg StreamRenderWorkerConfig) *StreamRenderWorker {
@@ -809,6 +813,7 @@ func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, c
 		x := captions.XAITranscriber{APIKey: w.cfg.XAIAPIKey, Language: language}
 		return transcribeCaptionsWithXAI(ctx, mediaPath, workDir, x.Transcribe)
 	}
+	w.translateToSpanish = captions.SpanishTranslator{APIKey: w.cfg.XAIAPIKey}.Translate
 	return w
 }
 
@@ -989,12 +994,12 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 					}
 					recoverTranscription = func() ([]captions.WordCue, error) {
 						return w.recoverCaptionTranscript(
-							runCtx, cfg, workDir, sourcePath, transcriptionPath, clip, plan.Captions.Language,
+							runCtx, cfg, workDir, sourcePath, transcriptionPath, clip, captionSourceLanguage,
 						)
 					}
 					cueSpeed = clip.EffectiveSpeed()
 				}
-				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, recoverTranscription, cueSpeed, j.ID, variant, clip.ID, plan.Captions.Language)
+				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, recoverTranscription, clip.EndSeconds-clip.StartSeconds, cueSpeed, j.ID, variant, clip.ID)
 				if err != nil {
 					return err
 				}
@@ -1429,13 +1434,56 @@ func normalizeRecoveredCaptionCues(cues []captions.WordCue) []captions.WordCue {
 	return normalized
 }
 
+const (
+	// xAI's batch STT language field only enables number/currency formatting;
+	// it does not select the spoken language or translate the result. Leave the
+	// source language automatic and make Spanish the explicit second pass.
+	captionSourceLanguage = "auto"
+
+	// A valid transcript concentrated in less than half of the selected clip is
+	// suspicious enough to run the existing speech-region recovery. This
+	// restores coverage for partial bilingual results without replacing a valid
+	// first pass when recovery is worse or unavailable.
+	captionPartialSpanThreshold = 0.5
+)
+
+func captionTranscriptLooksPartial(cues []captions.WordCue, duration float64) bool {
+	if len(cues) == 0 || duration <= 0 {
+		return false
+	}
+	span := cues[len(cues)-1].EndSeconds - cues[0].StartSeconds
+	return span/duration < captionPartialSpanThreshold
+}
+
+func betterCaptionTranscript(primary, recovered []captions.WordCue, duration float64) []captions.WordCue {
+	if len(primary) == 0 {
+		return recovered
+	}
+	if len(recovered) == 0 {
+		return primary
+	}
+	primarySpan := primary[len(primary)-1].EndSeconds - primary[0].StartSeconds
+	recoveredSpan := recovered[len(recovered)-1].EndSeconds - recovered[0].StartSeconds
+	if duration > 0 {
+		primarySpan /= duration
+		recoveredSpan /= duration
+	}
+	if recoveredSpan > primarySpan || recoveredSpan == primarySpan && len(recovered) > len(primary) {
+		return recovered
+	}
+	return primary
+}
+
 func (w *StreamRenderWorker) transcribeCaptionCues(
 	ctx context.Context,
 	transcriptionPath, workDir, language string,
+	duration float64,
 	recoverTranscription func() ([]captions.WordCue, error),
 ) ([]captions.WordCue, error) {
 	cues, err := w.transcribe(ctx, transcriptionPath, workDir, language)
-	if err == nil || !errors.Is(err, captions.ErrUnusableTranscript) || recoverTranscription == nil {
+	initialUsable := err == nil
+	shouldRecover := errors.Is(err, captions.ErrUnusableTranscript) || initialUsable && captionTranscriptLooksPartial(cues, duration)
+	if !shouldRecover || recoverTranscription == nil {
 		return cues, err
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -1447,10 +1495,19 @@ func (w *StreamRenderWorker) transcribeCaptionCues(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
+		// Recovery is an opportunistic completeness pass. Once the ordinary
+		// transcript has passed validation, a later locator/window failure must
+		// not turn that valid result into a hard render failure.
+		if initialUsable {
+			return cues, nil
+		}
 		if errors.Is(recoveryErr, captions.ErrUnusableTranscript) {
 			return nil, fmt.Errorf("%v; speech-region recovery: %w", err, recoveryErr)
 		}
 		return nil, fmt.Errorf("speech-region recovery: %w", recoveryErr)
+	}
+	if initialUsable {
+		return betterCaptionTranscript(cues, recovered, duration), nil
 	}
 	return recovered, nil
 }
@@ -1462,8 +1519,8 @@ func (w *StreamRenderWorker) transcribeCaptionCues(
 // publishes the uncaptioned clip instead of failing the render; any other
 // transcription or burn failure is returned as an error since captions were
 // explicitly requested and a transcription backend is configured.
-func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, recoverTranscription func() ([]captions.WordCue, error), cueSpeed float64, id uuid.UUID, variant, clipID, language string) (captionedPath, warning string, err error) {
-	cues, err := w.transcribeCaptionCues(ctx, transcriptionPath, workDir, language, recoverTranscription)
+func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, recoverTranscription func() ([]captions.WordCue, error), sourceDuration, cueSpeed float64, id uuid.UUID, variant, clipID string) (captionedPath, warning string, err error) {
+	cues, err := w.transcribeCaptionCues(ctx, transcriptionPath, workDir, captionSourceLanguage, sourceDuration, recoverTranscription)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
@@ -1472,6 +1529,10 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 			return "", fmt.Sprintf("clip %s: no usable transcript (%s), publishing without captions", clipID, singleLine(err)), nil
 		}
 		return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
+	}
+	cues, err = w.translateToSpanish(ctx, cues)
+	if err != nil {
+		return "", "", fmt.Errorf("translate clip %s subtitles to spanish: %w", clipID, err)
 	}
 	if cueSpeed != 1 {
 		for i := range cues {

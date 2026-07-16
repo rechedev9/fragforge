@@ -34,5 +34,13 @@ export interface ApiClient {
   retryVideo(id: string): Promise<Video>;
   /** Remove a reel from the library, deleting its rendered artifacts where possible. */
   deleteVideo(id: string): Promise<void>;
+  /**
+   * Delete a demo job (match) and its server-side artifacts, pruning any local
+   * reels forged from it. A 404 counts as success (already gone); a 409 (job
+   * still processing) or a 503 (offline) throws with the body's error/code.
+   */
+  deleteMatch(jobId: string): Promise<void>;
+  /** Delete every demo of a bulk series (bo3/bo5); a 404 on one part is fine. */
+  deleteSeries(seriesId: string): Promise<void>;
   listFeed(): Promise<FeedItem[]>;
 }

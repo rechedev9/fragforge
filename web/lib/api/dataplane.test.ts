@@ -14,6 +14,7 @@ test('targets the same-origin /api/demos proxy with no auth header', () => {
   assert.equal(dp.scanField, 'demo');
   assert.equal(dp.scanSeriesField, 'series_id');
   assert.equal(dp.jobStatusUrl(JOB), `/api/demos/${JOB}/status`);
+  assert.equal(dp.jobDeleteUrl(JOB), `/api/demos/${JOB}`);
   assert.equal(dp.rosterUrl(JOB), `/api/demos/${JOB}/roster`);
   assert.equal(dp.jobsUrl, '/api/demos/jobs');
   assert.equal(dp.seriesUrl(SERIES), `/api/demos/series/${SERIES}`);

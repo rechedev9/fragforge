@@ -5,10 +5,14 @@ import { MatchRow } from './match-row';
 
 export type MatchListProps = {
   matches: Match[];
+  /** Deletes a match by job id; when set, each row shows a trash button. */
+  onDelete?: (jobId: string) => Promise<void>;
+  /** Called after a successful delete so the page can re-fetch its lists. */
+  onDeleted?: () => void;
 };
 
 /** The scoreboard: one MatchRow per match (the first one featured), or an empty state when filtered out. */
-export function MatchList({ matches }: MatchListProps) {
+export function MatchList({ matches, onDelete, onDeleted }: MatchListProps) {
   if (matches.length === 0) {
     return (
       <StudioEmptyState
@@ -24,7 +28,7 @@ export function MatchList({ matches }: MatchListProps) {
   return (
     <section className="flex flex-col gap-3" aria-label="Partidas disponibles">
       {matches.map((match, index) => (
-        <MatchRow key={match.id} match={match} featured={index === 0} />
+        <MatchRow key={match.id} match={match} featured={index === 0} onDelete={onDelete} onDeleted={onDeleted} />
       ))}
     </section>
   );

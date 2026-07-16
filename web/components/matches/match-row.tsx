@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ScoreBar } from '@/components/brand/score-bar';
 import { StatMono } from '@/components/brand/stat-mono';
+import { DeleteMatchButton } from '@/components/matches/delete-match-button';
 import { formatKd, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Match } from '@/lib/api/types';
@@ -14,6 +15,10 @@ export type MatchRowProps = {
    * quiet "VER ▸" mono link instead.
    */
   featured?: boolean;
+  /** Deletes this match (and its artifacts); when set, the row shows a trash button. */
+  onDelete?: (jobId: string) => Promise<void>;
+  /** Called after a successful delete so the page can re-fetch its lists. */
+  onDeleted?: () => void;
 };
 
 /**
@@ -21,11 +26,14 @@ export type MatchRowProps = {
  * display caps over a dim mono meta line, the round score in mono (own score
  * cyan on a win), the K/D/A/MVP stat strip, and the per-row CTA.
  */
-export function MatchRow({ match, featured = false }: MatchRowProps) {
+export function MatchRow({ match, featured = false, onDelete, onDeleted }: MatchRowProps) {
   const win = isWin(match.score);
   const { stats } = match;
   const { ours, theirs } = parseScore(match.score);
+  // Lead the meta line with the clipped player when known ("<PLAYER> · HACE X"),
+  // dropping it cleanly (no stray separator) when it is absent.
   const meta = [
+    match.player,
     timeAgo(match.playedAt),
     match.decentPlays > 0 ? `${match.decentPlays} ${match.decentPlays === 1 ? 'jugada' : 'jugadas'}` : null,
   ]
@@ -73,22 +81,29 @@ export function MatchRow({ match, featured = false }: MatchRowProps) {
           <StatMono label="K/D" value={formatKd(stats.kd)} accent />
         </div>
 
-        <div className="col-span-2 flex min-w-0 justify-end xl:col-span-1">
+        <div className="col-span-2 flex min-w-0 items-start justify-end gap-2 xl:col-span-1">
           {featured ? (
             <Link
               href={`/matches/${match.id}`}
-              className="neon-glow rounded-md inline-flex h-11 w-full items-center justify-center bg-primary px-5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-auto"
+              className="neon-glow rounded-md inline-flex h-11 flex-1 items-center justify-center bg-primary px-5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:flex-initial"
             >
               FORJAR REEL
             </Link>
           ) : (
             <Link
               href={`/matches/${match.id}`}
-              className="inline-flex h-11 w-full items-center justify-center border border-border-strong bg-background/45 px-4 font-[family-name:var(--font-mono)] text-xs tracking-[0.14em] text-muted-foreground transition-colors hover:border-primary/55 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-auto"
+              className="inline-flex h-11 flex-1 items-center justify-center border border-border-strong bg-background/45 px-4 font-[family-name:var(--font-mono)] text-xs tracking-[0.14em] text-muted-foreground transition-colors hover:border-primary/55 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:flex-initial"
             >
               VER PARTIDA ▸
             </Link>
           )}
+          {onDelete ? (
+            <DeleteMatchButton
+              label={match.map}
+              onConfirm={() => onDelete(match.id)}
+              onDeleted={() => onDeleted?.()}
+            />
+          ) : null}
         </div>
       </div>
     </article>

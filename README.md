@@ -185,23 +185,30 @@ address requires `ZV_MUTATION_TOKEN`. Optional environment variables:
 | `ZV_WORKER_CONCURRENCY` | Asynq worker concurrency (default 2). |
 | `ZV_MEDIA_WORK_DIR` | Keep media workdirs for debugging (deleted after each task when unset). |
 | `ZV_CODEX_PATH`, `ZV_CODEX_MODEL`, `ZV_AGENT_TIMEOUT` | Optional local editorial assistant (`codex exec`, read-only sandbox) for caption/title suggestions. |
-| `XAI_API_KEY` | Optional xAI speech-to-text for stream captions. |
+| `XAI_API_KEY` | Optional xAI speech-to-text plus Grok Spanish translation for stream captions. |
 | `FIRECRAWL_API_KEY` | Optional public CS2 Shorts trend hints for the publication assistant; never sent to the browser. |
 
 xAI captions use the REST `/v1/stt` endpoint, which returns word-level timestamps
 and accepts the speech-oriented WAV extracted from the selected source range.
-The endpoint does not take a model name;
+The endpoint does not take a model name, and its `language` field only formats
+numbers, currencies, and units; it does not select or translate the spoken
+language. FragForge therefore transcribes with automatic source-language
+recognition, then uses `grok-4.5` structured output to preserve Spanish speech
+or translate every other recognized phrase into Spanish before burning captions.
 xAI prices batch speech-to-text separately from streaming; check the
 [current Voice API pricing](https://x.ai/api/voice).
 Stream captions use xAI only. A normal captioned clip makes one transcription
-request. If the whole-range result is unusable, FragForge makes one
+request and one Spanish preservation/translation request. If the whole-range
+result is unusable or is valid but temporally sparse, FragForge makes one
 speech-enhanced locator request and then re-transcribes at most four short,
 padded regions from the original audio that collectively cover the selected
 range; locator timings choose useful boundaries, but locator text is never
-published. If complete bounded coverage is not possible or those independent
-region reads still produce no usable words or implausible
-timings, the clip is published uncaptioned with a warning rather than burning a
-hallucinated transcript or substituting another engine.
+published. A failed recovery does not discard an otherwise valid first pass. If
+no pass produces usable words or timings, the clip is published uncaptioned with
+a warning rather than burning a hallucinated transcript or substituting another
+engine. A transport, authentication, or Spanish-translation failure remains a
+hard render error because publishing non-Spanish text would violate the selected
+subtitle contract.
 
 Source builds and every desktop installer do not contain a credential.
 In the installed desktop app, each Windows user can open `/settings` and save
@@ -231,6 +238,13 @@ Validate a real clip against xAI without printing the key or transcript:
 
 ```powershell
 .\scripts\smoke-xai-stt.ps1 -MediaPath .\data\clip.mp4 -Language es -ASSPath .\data\clip.ass -ExpectedText "texto conocido de la fixture"
+```
+
+Validate the complete automatic-STT plus Grok 4.5 Spanish output path:
+
+```powershell
+.\scripts\smoke-xai-spanish.ps1 -MediaPath .\data\smoke\xai-stt\voice-es.wav -ASSPath .\data\smoke\xai-stt\voice-es-preserved.ass -ExpectedSpanish "FragForge crea subtítulos precisos para cada clip del directo"
+.\scripts\smoke-xai-spanish.ps1 -MediaPath .\data\smoke\xai-stt\voice-en.wav -ASSPath .\data\smoke\xai-stt\voice-en-spanish.ass
 ```
 
 ### Smoke tests

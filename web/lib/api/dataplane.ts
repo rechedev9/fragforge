@@ -21,6 +21,8 @@ export type DataPlane = {
   /** Reads the job id out of a scan response. */
   scanJobId(body: unknown): string;
   jobStatusUrl(jobId: string): string;
+  /** DELETE target for removing a demo job (match) and its server-side artifacts. */
+  jobDeleteUrl(jobId: string): string;
   rosterUrl(jobId: string): string;
   /** The recent-jobs listing that Partidas rediscovers uploads/series from. */
   jobsUrl: string;
@@ -54,6 +56,7 @@ export function dataPlane(): DataPlane {
     scanSeriesField: 'series_id',
     scanJobId: (body) => str(body, 'jobId'),
     jobStatusUrl: (jobId) => `/api/demos/${jobId}/status`,
+    jobDeleteUrl: (jobId) => `/api/demos/${jobId}`,
     rosterUrl: (jobId) => `/api/demos/${jobId}/roster`,
     jobsUrl: '/api/demos/jobs',
     seriesUrl: (seriesId) => `/api/demos/series/${seriesId}`,

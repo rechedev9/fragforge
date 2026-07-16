@@ -186,9 +186,10 @@ type StreamerBannerPlan struct {
 }
 
 // CaptionsPlan opts a stream render into a burned-in karaoke caption pass.
-// Language is an xAI speech-to-text language code ("es", "en", ...); empty
-// means automatic detection.
-// Nothing is required when Enabled is false.
+// Subtitle output is always Spanish: Spanish speech is preserved and other
+// recognized speech is translated. Language remains in the wire shape for
+// saved-plan compatibility; new plans write "es" and rendering ignores older
+// source-language values. Nothing is required when Enabled is false.
 type CaptionsPlan struct {
 	Enabled  bool   `json:"enabled"`
 	Language string `json:"language,omitempty"`

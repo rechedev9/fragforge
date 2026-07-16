@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { ChevronRight, Clapperboard, Layers, Swords, UploadCloud } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -10,6 +10,7 @@ import type { SeriesSummary } from '@/lib/api/jobs-index';
 import { MatchFilters, type MatchFilter } from '@/components/matches/match-filters';
 import { MatchList } from '@/components/matches/match-list';
 import { MatchListSkeleton } from '@/components/matches/match-list-skeleton';
+import { DeleteMatchButton } from '@/components/matches/delete-match-button';
 import { isWin } from '@/components/matches/match-score';
 import { StudioEmptyState } from '@/components/studio/empty-state';
 import { StudioPageHeader } from '@/components/studio/page-header';
@@ -70,33 +71,49 @@ function NoMatchesYet({ offline }: { offline: boolean }) {
  * list individually below (that is the Partidas model); this row is the way to
  * reach the series as a whole after a restart.
  */
-function SeriesSection({ series }: { series: SeriesSummary[] }) {
+function SeriesSection({
+  series,
+  onDelete,
+  onDeleted,
+}: {
+  series: SeriesSummary[];
+  onDelete: (seriesId: string) => Promise<void>;
+  onDeleted: () => void;
+}) {
   return (
     <section className="flex flex-col gap-3" aria-label="Series">
       <h2 className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.2em] text-muted-foreground">
         SERIES
       </h2>
       {series.map((s) => (
-        <Link
-          key={s.seriesId}
-          href={`/series/${s.seriesId}`}
-          className="studio-panel studio-panel-interactive flex items-center justify-between gap-4 rounded-xl px-4 py-4 transition-colors sm:px-5"
-        >
-          <div className="flex min-w-0 items-center gap-4">
-            <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
-              <Layers className="size-5" aria-hidden />
-            </span>
-            <div className="flex min-w-0 flex-col gap-1">
-              <span className="truncate font-[family-name:var(--font-display)] text-lg font-bold uppercase leading-tight tracking-tight text-foreground">
-                {seriesTitle(s.mapCount)}
+        // The trash button can't live inside the row's <Link>, so the row is a
+        // flex container with the link and the delete control as siblings.
+        <div key={s.seriesId} className="flex items-center gap-3">
+          <Link
+            href={`/series/${s.seriesId}`}
+            className="studio-panel studio-panel-interactive flex flex-1 items-center justify-between gap-4 rounded-xl px-4 py-4 transition-colors sm:px-5"
+          >
+            <div className="flex min-w-0 items-center gap-4">
+              <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
+                <Layers className="size-5" aria-hidden />
               </span>
-              <span className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.1em] text-muted-foreground">
-                {timeAgo(s.createdAt)}
-              </span>
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="truncate font-[family-name:var(--font-display)] text-lg font-bold uppercase leading-tight tracking-tight text-foreground">
+                  {seriesTitle(s.mapCount)}
+                </span>
+                <span className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.1em] text-muted-foreground">
+                  {timeAgo(s.createdAt)}
+                </span>
+              </div>
             </div>
-          </div>
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        </Link>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          </Link>
+          <DeleteMatchButton
+            label={seriesTitle(s.mapCount)}
+            onConfirm={() => onDelete(s.seriesId)}
+            onDeleted={onDeleted}
+          />
+        </div>
       ))}
     </section>
   );
@@ -109,27 +126,33 @@ export default function MatchesPage() {
   const [filter, setFilter] = useState<MatchFilter>('all');
   const [query, setQuery] = useState('');
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const [nextMatches, nextSeries] = await Promise.all([api.listMatches(), api.listSeriesSummaries()]);
-        if (!active) return;
-        setMatches(nextMatches);
-        setSeries(nextSeries);
-      } catch (err) {
-        if (!active) return;
-        // Offline (or any load failure) must not crash the page: fall to the
-        // empty state, flagging offline so its copy explains the empty list.
-        setMatches([]);
-        setSeries([]);
-        setOffline(isServiceUnavailable(err));
-      }
-    })();
-    return () => {
-      active = false;
-    };
+  const load = useCallback(async () => {
+    try {
+      const [nextMatches, nextSeries] = await Promise.all([api.listMatches(), api.listSeriesSummaries()]);
+      setMatches(nextMatches);
+      setSeries(nextSeries);
+      setOffline(false);
+    } catch (err) {
+      // Offline (or any load failure) must not crash the page: fall to the
+      // empty state, flagging offline so its copy explains the empty list.
+      setMatches([]);
+      setSeries([]);
+      setOffline(isServiceUnavailable(err));
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // A match delete throws (409 busy / 503 offline) so the row surfaces it; a
+  // success re-fetches both lists so the deleted entry drops (and a deleted
+  // series' member matches vanish, since the server is the source of truth).
+  const deleteMatch = useCallback((jobId: string) => api.deleteMatch(jobId), []);
+  const deleteSeries = useCallback((seriesId: string) => api.deleteSeries(seriesId), []);
+  const refresh = useCallback(() => {
+    void load();
+  }, [load]);
 
   const visible = useMemo(() => {
     if (!matches) return [];
@@ -159,8 +182,12 @@ export default function MatchesPage() {
   } else {
     content = (
       <div className="flex flex-col gap-8 sm:gap-10">
-        {series.length > 0 ? <SeriesSection series={series} /> : null}
-        {matches.length > 0 ? <MatchList matches={visible} /> : null}
+        {series.length > 0 ? (
+          <SeriesSection series={series} onDelete={deleteSeries} onDeleted={refresh} />
+        ) : null}
+        {matches.length > 0 ? (
+          <MatchList matches={visible} onDelete={deleteMatch} onDeleted={refresh} />
+        ) : null}
       </div>
     );
   }

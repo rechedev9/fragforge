@@ -83,6 +83,23 @@ export async function localStatus(jobId: string): Promise<Response> {
 }
 
 /**
+ * DELETE /api/demos/{jobId} (local) - delete a demo job (match) and its
+ * server-side artifacts (rendered videos, covers, and the demo copy). Returns
+ * 204 on success. The orchestrator answers 409 while the job is still
+ * queued/scanning/parsing/recording/composing (its {error} body explains the
+ * wait) and 404 for an unknown id; forwardError normalizes both.
+ */
+export async function localDeleteJob(jobId: string): Promise<Response> {
+  const url = jobUrl(jobId);
+  if (!url) return NextResponse.json({ error: 'invalid job id' }, { status: 400 });
+
+  const res = await callOrchestrator(url, { method: 'DELETE' });
+  if (res === null) return serviceUnavailable();
+  if (!res.ok) return forwardError(res);
+  return new Response(null, { status: 204 });
+}
+
+/**
  * GET /api/demos/{jobId}/roster (local) - proxy the roster scan result. The
  * orchestrator already wraps it as { players: [...] } with steamid64 keys; the
  * client maps steamid64 → steamId, so this is a pass-through.

@@ -136,7 +136,7 @@ function jobHeadline(job: IndexedJob): string {
 export function jobToMatch(job: IndexedJob, enrichment?: { map?: string; player?: DemoPlayer }): Match {
   const rawMap = enrichment?.map;
   const player = enrichment?.player;
-  return {
+  const match: Match = {
     id: job.jobId,
     map: rawMap ? prettifyMap(rawMap) : jobHeadline(job),
     score: '',
@@ -145,4 +145,8 @@ export function jobToMatch(job: IndexedJob, enrichment?: { map?: string; player?
     decentPlays: 0,
     source: 'upload',
   };
+  // Name the row after the clipped/target player when the roster resolved them;
+  // leave it off (no stray separator) for an unenriched or nameless entry.
+  if (player?.name) match.player = player.name;
+  return match;
 }

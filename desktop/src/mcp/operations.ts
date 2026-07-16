@@ -145,7 +145,7 @@ const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
       description: 'Burned-in subtitles generated through the configured xAI speech-to-text capability.',
       properties: {
         enabled: { type: 'boolean' },
-        language: { description: 'xAI speech-to-text language code such as es or en; omit for automatic detection.', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$', type: 'string' },
+        language: { description: 'Subtitle output language. FragForge currently supports Spanish only.', enum: ['es'], type: 'string' },
       },
       required: ['enabled'],
       type: 'object',
@@ -494,6 +494,18 @@ const operations: readonly OperationDefinition[] = [
     title: 'Generate a reel',
   }),
   mutationOperation({ category: 'jobs', description: 'Concatenate recorded segments into the legacy final artifact.', inputSchema: JOB_ID_SCHEMA, keywords: ['concat', 'final'], name: 'jobs.compose', path: (input) => jobPath(input, '/compose'), risk: 'costly', title: 'Compose final video' }),
+  mutationOperation({
+    category: 'jobs',
+    description:
+      'Permanently remove one analyzed demo job: its recordings, renders, and stored demo copy. Refused (409) while the job is still scanning, parsing, recording, or composing.',
+    inputSchema: JOB_ID_SCHEMA,
+    keywords: ['delete', 'remove', 'borrar', 'partida'],
+    method: 'DELETE',
+    name: 'jobs.delete',
+    path: (input) => jobPath(input),
+    risk: 'destructive',
+    title: 'Delete demo job',
+  }),
   readOperation({ category: 'renders', description: 'Get a render variant state and its real video/cover artifact names.', inputSchema: JOB_VARIANT_SCHEMA, keywords: ['video', 'ready', 'cover', 'progress'], name: 'renders.get', path: (input) => renderPath(input), title: 'Get render state' }),
   mutationOperation({
     body: (input) => without(input, 'job_id', 'variant'),
@@ -698,16 +710,16 @@ const operations: readonly OperationDefinition[] = [
   }),
   {
     category: 'streams',
-    description: 'Enable, disable, or change burned-in subtitles while preserving the rest of the current stream edit plan.',
+    description: 'Enable or disable Spanish burned-in subtitles while preserving the rest of the current stream edit plan.',
     inputSchema: objectSchema({
       enabled: { type: 'boolean' },
-      language: { description: 'xAI speech-to-text language code such as es or en; omit for automatic detection.', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$', type: 'string' },
+      language: { description: 'Subtitle output language. Spanish is the only supported value.', enum: ['es'], type: 'string' },
       stream_job_id: UUID_PROPERTY,
     }, ['stream_job_id', 'enabled']),
     keywords: ['captions', 'caption', 'subtitles', 'subtitle', 'subtitulos', 'subtitulo', 'transcription', 'speech to text', 'stt', 'xai', 'grok'],
     name: 'streams.configure_captions',
     preview: (input) => ({
-      captions: { enabled: input.enabled, language: input.language ?? '' },
+      captions: { enabled: input.enabled, language: 'es' },
       steps: [
         { method: 'GET', path: streamPath(input, '/edit-plan'), purpose: 'preserve the current edit plan' },
         { method: 'PUT', path: streamPath(input, '/edit-plan'), purpose: 'replace only caption settings inside that plan' },
@@ -1217,9 +1229,7 @@ async function editStreamClip(client: OrchestratorClient, input: JsonObject, sig
 }
 
 async function configureStreamCaptions(client: OrchestratorClient, input: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
-  const captions: JsonObject = { enabled: input.enabled === true };
-  const language = optionalStringInput(input, 'language');
-  if (language !== undefined) captions.language = language;
+  const captions: JsonObject = { enabled: input.enabled === true, language: 'es' };
   return updateStreamEditPlan(client, input, (current) => ({ ...current, captions }), signal);
 }
 

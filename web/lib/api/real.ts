@@ -492,6 +492,55 @@ export class RealApiClient implements ApiClient {
   }
 
   /**
+   * Deletes a demo job (match) and every server-side artifact behind it (the
+   * orchestrator wipes rendered videos, covers, and the demo copy). A 404 means
+   * it was already gone, which is still success; a 409 (the job is still
+   * queued/scanning/parsing/recording/composing) or a 503 (orchestrator offline)
+   * throws with the body's error/code so the UI can message it. On success the
+   * local reels forged from this job are pruned so the Library never keeps a
+   * reel whose demo no longer exists.
+   */
+  async deleteMatch(jobId: string): Promise<void> {
+    const res = await this.send((dp) => ({ url: dp.jobDeleteUrl(jobId), init: { method: 'DELETE' } }));
+    // 404 = already gone (success). Any other non-2xx (409 busy, 503 offline,
+    // 500) throws here, carrying the backend's error message and stable code.
+    if (res.status !== 404 && !res.ok) await readJson<unknown>(res);
+    this.pruneJob(jobId);
+  }
+
+  /**
+   * Deletes every demo of a bulk series, one at a time via the same per-job
+   * delete. The series' jobIds come from the existing series listing; a member
+   * that is already gone (404) is tolerated by deleteMatch, while a still-busy
+   * member (409) surfaces so the UI can explain the wait. Local reels for each
+   * deleted member are pruned as part of deleteMatch.
+   */
+  async deleteSeries(seriesId: string): Promise<void> {
+    const demos = await this.getSeries(seriesId);
+    for (const demo of demos) {
+      await this.deleteMatch(demo.jobId);
+    }
+  }
+
+  /**
+   * Drops every locally tracked reel forged from a deleted job: its intents,
+   * derived live views, cached artifact names, and cached series match, then
+   * persists the surviving intents. Deleting from a Map while iterating its
+   * entries is safe (each key is visited once), and reels/artifactNames are
+   * keyed by the same videoIds the intents carry.
+   */
+  private pruneJob(jobId: string): void {
+    for (const [videoId, intent] of this.intents) {
+      if (intent.jobId !== jobId) continue;
+      this.intents.delete(videoId);
+      this.reels.delete(videoId);
+      this.artifactNames.delete(videoId);
+    }
+    this.seriesMatches.delete(jobId);
+    saveReelIntents(Array.from(this.intents.values()));
+  }
+
+  /**
    * Reconciles every non-terminal tracked reel against the orchestrator and drives
    * its next step. Idempotent and resumable: it reads server truth each tick, so a
    * reload simply reattaches. One reel's failure never breaks the batch.

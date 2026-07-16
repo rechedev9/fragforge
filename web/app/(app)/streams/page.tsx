@@ -129,7 +129,7 @@ function blankPlan(
     face_crop: DEFAULT_FACE_CROP,
     gameplay_crop: FULL_FRAME,
     clips: [{ id: nextClipId(), start_seconds: 0, end_seconds: clipEnd, title: '' }],
-    captions: { enabled: false, language: 'auto' },
+    captions: { enabled: false, language: 'es' },
   };
 }
 
@@ -179,7 +179,7 @@ function planFingerprint(plan: StreamEditPlan): string {
     streamerNick: plan.streamer_banner?.nick?.trim() ?? '',
     streamerPosition: plan.streamer_banner?.position_y ?? null,
     streamerSlide: plan.streamer_banner?.slide_enabled ?? false,
-    captions: [plan.captions?.enabled ?? false, plan.captions?.language ?? 'auto'],
+    captions: [plan.captions?.enabled ?? false, 'es'],
     music: [plan.music?.key ?? '', plan.music?.volume ?? 0],
     grade: plan.effects?.grade ?? false,
   });
@@ -776,9 +776,7 @@ function StreamEditor({
   const setStreamerSlide = (slideEnabled: boolean) =>
     onPlanChange({ ...plan, streamer_banner: { ...plan.streamer_banner, slide_enabled: slideEnabled } });
   const setCaptionsEnabled = (enabled: boolean) =>
-    onPlanChange({ ...plan, captions: { enabled, language: plan.captions?.language ?? 'auto' } });
-  const setLanguage = (language: string) =>
-    onPlanChange({ ...plan, captions: { enabled: plan.captions?.enabled ?? false, language } });
+    onPlanChange({ ...plan, captions: { enabled, language: 'es' } });
   const setMusicKey = (key: string) =>
     onPlanChange({ ...plan, music: key ? { key, volume: plan.music?.volume } : {} });
   const setMusicVolume = (volume: number) =>
@@ -1119,26 +1117,12 @@ function StreamEditor({
                 <Captions className="size-4" />
                 {plan.captions?.enabled ? 'Subtítulos incrustados: activados' : 'Subtítulos incrustados: desactivados'}
               </Button>
-              {plan.captions?.enabled ? (
-                <Select
-                  value={plan.captions?.language ?? 'auto'}
-                  disabled={busy}
-                  onValueChange={setLanguage}
-                >
-                  <SelectTrigger aria-label="Idioma de subtítulos" className="w-52">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Sin formato adicional</SelectItem>
-                    <SelectItem value="es">Formato español</SelectItem>
-                    <SelectItem value="en">Formato inglés</SelectItem>
-                  </SelectContent>
-                </Select>
-              ) : null}
+              {plan.captions?.enabled ? <span className="studio-chip">Salida: español</span> : null}
             </div>
             {plan.captions?.enabled ? (
               <p className="text-xs leading-relaxed text-muted-foreground">
-                xAI transcribe voz multilingüe automáticamente. Esta opción solo formatea números, monedas y unidades; no fuerza el idioma hablado.
+                xAI transcribe la voz y Grok 4.5 conserva el español o traduce cualquier otro idioma al español. No
+                resume ni omite contenido intencionadamente.
               </p>
             ) : null}
           </div>

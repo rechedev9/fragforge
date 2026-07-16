@@ -40,6 +40,7 @@ const COVERAGE: readonly CoverageCase[] = [
   { input: { demo_path: 'C:\\demos\\match.dem' }, method: 'POST', operation: 'jobs.create', route: '/api/jobs' },
   { input: {}, method: 'GET', operation: 'jobs.list', route: '/api/jobs' },
   { input: JOB_INPUT, method: 'GET', operation: 'jobs.get', route: '/api/jobs/{id}' },
+  { input: JOB_INPUT, method: 'DELETE', operation: 'jobs.delete', route: '/api/jobs/{id}' },
   { input: JOB_INPUT, method: 'GET', operation: 'jobs.plan', route: '/api/jobs/{id}/plan' },
   { input: JOB_INPUT, method: 'GET', operation: 'jobs.roster', route: '/api/jobs/{id}/roster' },
   { input: { ...JOB_INPUT, target_steamid: '76561198000000000' }, method: 'POST', operation: 'jobs.parse', route: '/api/jobs/{id}/parse' },

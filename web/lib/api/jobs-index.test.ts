@@ -131,6 +131,19 @@ test('jobToMatch enriches map (prettified) and the target player stats', () => {
   assert.equal(match.stats.kd, 2);
 });
 
+test('jobToMatch names the row after the resolved target player', () => {
+  const match = jobToMatch(
+    job({ jobId: 'job-1', targetSteamId: '765', createdAt: '2026-07-16T10:00:00Z' }),
+    { map: 'de_nuke', player: player({ steamId: '765', name: 's1mple', kills: 20, deaths: 10 }) },
+  );
+  assert.equal(match.player, 's1mple');
+});
+
+test('jobToMatch leaves player undefined when the target is not in the roster', () => {
+  assert.equal(jobToMatch(job({ jobId: 'job-4', createdAt: '2026-07-16T10:00:00Z' }), { map: 'de_nuke' }).player, undefined);
+  assert.equal(jobToMatch(job({ jobId: 'job-5' })).player, undefined);
+});
+
 test('jobToMatch falls back to a filename-titled, zeroed entry without enrichment', () => {
   const match = jobToMatch(job({ jobId: 'job-2', fileName: 'match730.dem', createdAt: '2026-07-16T10:00:00Z' }));
   assert.equal(match.map, 'match730.dem');

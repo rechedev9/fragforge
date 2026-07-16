@@ -126,7 +126,7 @@ export function planToPlays(jobId: string, plan: KillPlan): Play[] {
 export function planToMatch(jobId: string, plan: KillPlan, player: DemoPlayer): Match {
   const segments = plan.segments ?? [];
   const { kills, deaths, assists } = player;
-  return {
+  const match: Match = {
     id: jobId,
     map: prettifyMap(plan.demo?.map ?? ''),
     score: '',
@@ -146,4 +146,9 @@ export function planToMatch(jobId: string, plan: KillPlan, player: DemoPlayer): 
     thumbnailUrl: thumb(jobId),
     source: 'upload',
   };
+  // The chosen player's name (roster row, or the plan's target name it was
+  // built from) titles the match; omit it when unknown so no blank label shows.
+  const name = player.name || plan.target?.name_in_demo;
+  if (name) match.player = name;
+  return match;
 }
