@@ -1349,3 +1349,137 @@ func TestInlineQueueWorkerEnqueueCannotDeadlockBehindQueuedTasks(t *testing.T) {
 		}
 	}
 }
+
+func TestInlineQueueSerializesCaptureTasks(t *testing.T) {
+	const captures = 4
+	var (
+		mu         sync.Mutex
+		running    int
+		maxRunning int
+	)
+	done := make(chan struct{}, captures)
+	queue := startTestInlineQueue(t, map[string]taskHandler{
+		tasktypes.TypeRecordDemo: func(context.Context, *asynq.Task) error {
+			mu.Lock()
+			running++
+			if running > maxRunning {
+				maxRunning = running
+			}
+			mu.Unlock()
+			time.Sleep(20 * time.Millisecond)
+			mu.Lock()
+			running--
+			mu.Unlock()
+			done <- struct{}{}
+			return nil
+		},
+	}, 4)
+
+	for i := 0; i < captures; i++ {
+		if _, err := queue.Enqueue(asynq.NewTask(tasktypes.TypeRecordDemo, []byte{byte(i)})); err != nil {
+			t.Fatalf("capture %d Enqueue() error = %v", i, err)
+		}
+	}
+	deadline := time.After(5 * time.Second)
+	for i := 0; i < captures; i++ {
+		select {
+		case <-done:
+		case <-deadline:
+			t.Fatalf("capture task %d did not finish", i)
+		}
+	}
+	mu.Lock()
+	got := maxRunning
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("concurrent capture tasks = %d, want 1", got)
+	}
+}
+
+func TestInlineQueueRunsOtherTasksWhileCaptureIsActive(t *testing.T) {
+	captureStarted := make(chan struct{})
+	releaseCapture := make(chan struct{})
+	defer close(releaseCapture)
+	parsed := make(chan struct{}, 1)
+	queue := startTestInlineQueue(t, map[string]taskHandler{
+		tasktypes.TypeRecordDemo: func(context.Context, *asynq.Task) error {
+			close(captureStarted)
+			<-releaseCapture
+			return nil
+		},
+		tasktypes.TypeParseDemo: func(context.Context, *asynq.Task) error {
+			parsed <- struct{}{}
+			return nil
+		},
+	}, 1)
+
+	if _, err := queue.Enqueue(asynq.NewTask(tasktypes.TypeRecordDemo, nil)); err != nil {
+		t.Fatalf("capture Enqueue() error = %v", err)
+	}
+	select {
+	case <-captureStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("capture task did not start")
+	}
+	if _, err := queue.Enqueue(asynq.NewTask(tasktypes.TypeParseDemo, nil), asynq.MaxRetry(1)); err != nil {
+		t.Fatalf("parse Enqueue() error = %v", err)
+	}
+	select {
+	case <-parsed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parse task did not run while a capture held the serial lane")
+	}
+}
+
+func TestInlineQueueDiscardsPendingCaptureTasksOnShutdown(t *testing.T) {
+	captureStarted := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	queue := newInlineQueue(map[string]taskHandler{
+		tasktypes.TypeRecordDemo: func(context.Context, *asynq.Task) error {
+			close(captureStarted)
+			<-release
+			return nil
+		},
+	}, 1)
+	queue.Start(ctx)
+
+	if _, err := queue.Enqueue(asynq.NewTask(tasktypes.TypeRecordDemo, []byte("hold"))); err != nil {
+		t.Fatalf("blocking capture Enqueue() error = %v", err)
+	}
+	select {
+	case <-captureStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocking capture task did not start")
+	}
+
+	var (
+		decisionMu sync.Mutex
+		decisions  []error
+	)
+	_, err := queue.EnqueueWithTransition(asynq.NewTask(tasktypes.TypeRecordDemo, []byte("pending")), func(decision error) error {
+		decisionMu.Lock()
+		decisions = append(decisions, decision)
+		decisionMu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("pending capture EnqueueWithTransition() error = %v", err)
+	}
+
+	cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer shutdownCancel()
+	// The blocking capture keeps its worker busy past the deadline; Shutdown
+	// still compensates every pending task before it returns.
+	queue.Shutdown(shutdownCtx)
+
+	decisionMu.Lock()
+	got := append([]error(nil), decisions...)
+	decisionMu.Unlock()
+	if len(got) != 2 || got[0] != nil || !errors.Is(got[1], errInlineQueueDiscarded) {
+		t.Fatalf("pending capture transition decisions = %v, want [nil errInlineQueueDiscarded]", got)
+	}
+}

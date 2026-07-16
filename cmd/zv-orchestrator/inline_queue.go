@@ -71,6 +71,16 @@ type inlineUniqueLock struct {
 	expiresAt time.Time
 }
 
+// isCaptureTaskType reports whether a task records with CS2/HLAE. Capture
+// tasks run on a dedicated serial lane: the recorder launches a single
+// cs2.exe, so two concurrent captures — even for different jobs — collide
+// with "cs2.exe is already running". Every other task type keeps the
+// concurrent worker pool, so parses and renders still progress while a
+// capture is running.
+func isCaptureTaskType(taskType string) bool {
+	return taskType == tasks.TypeRecordDemo
+}
+
 type inlineTaskQueue struct {
 	mu     sync.Mutex
 	ready  *sync.Cond
@@ -140,11 +150,12 @@ type inlineQueue struct {
 	handlers    map[string]taskHandler
 	concurrency int
 
-	ctx       context.Context
-	tasks     *inlineTaskQueue
-	wg        sync.WaitGroup
-	stopClose func() bool
-	nextID    atomic.Uint64
+	ctx          context.Context
+	tasks        *inlineTaskQueue
+	captureTasks *inlineTaskQueue
+	wg           sync.WaitGroup
+	stopClose    func() bool
+	nextID       atomic.Uint64
 
 	closeMu      sync.Mutex
 	closeStarted bool
@@ -165,12 +176,13 @@ func newInlineQueue(handlers map[string]taskHandler, concurrency int) *inlineQue
 		maxPending = workerBuffer
 	}
 	return &inlineQueue{
-		handlers:    handlers,
-		concurrency: concurrency,
-		tasks:       newInlineTaskQueue(maxPending),
-		closeDone:   make(chan struct{}),
-		uniqueLocks: make(map[inlineUniqueKey]inlineUniqueLock),
-		now:         time.Now,
+		handlers:     handlers,
+		concurrency:  concurrency,
+		tasks:        newInlineTaskQueue(maxPending),
+		captureTasks: newInlineTaskQueue(maxPending),
+		closeDone:    make(chan struct{}),
+		uniqueLocks:  make(map[inlineUniqueKey]inlineUniqueLock),
+		now:          time.Now,
 	}
 }
 
@@ -179,8 +191,11 @@ func (q *inlineQueue) Start(ctx context.Context) {
 	q.stopClose = context.AfterFunc(ctx, q.closePending)
 	for i := 0; i < q.concurrency; i++ {
 		q.wg.Add(1)
-		go q.run(ctx)
+		go q.run(ctx, q.tasks)
 	}
+	// The capture lane always has exactly one worker; see isCaptureTaskType.
+	q.wg.Add(1)
+	go q.run(ctx, q.captureTasks)
 }
 
 func (q *inlineQueue) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
@@ -306,6 +321,7 @@ func (q *inlineQueue) finishClosePending(ctx context.Context) error {
 	// finishes, so a re-drive cannot overtake the state transition.
 	q.uniqueMu.Lock()
 	discarded := q.tasks.close()
+	discarded = append(discarded, q.captureTasks.close()...)
 	q.uniqueMu.Unlock()
 
 	var errs []error
@@ -342,10 +358,10 @@ func (q *inlineQueue) finishClosePending(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (q *inlineQueue) run(ctx context.Context) {
+func (q *inlineQueue) run(ctx context.Context, lane *inlineTaskQueue) {
 	defer q.wg.Done()
 	for {
-		queued, ok := q.tasks.pop()
+		queued, ok := lane.pop()
 		if !ok {
 			return
 		}
@@ -497,8 +513,12 @@ func parseInlineEnqueueOptions(opts []asynq.Option) (inlineEnqueueOptions, error
 }
 
 func (q *inlineQueue) push(task inlineTask, uniqueTTL time.Duration, transition func(error) error) error {
+	lane := q.tasks
+	if isCaptureTaskType(task.task.Type()) {
+		lane = q.captureTasks
+	}
 	if !task.unique {
-		return q.tasks.push(q.ctx, task, transition)
+		return lane.push(q.ctx, task, transition)
 	}
 	q.uniqueMu.Lock()
 	defer q.uniqueMu.Unlock()
@@ -507,7 +527,7 @@ func (q *inlineQueue) push(task inlineTask, uniqueTTL time.Duration, transition 
 	if lock, ok := q.uniqueLocks[task.uniqueKey]; ok && now.Before(lock.expiresAt) {
 		return applyInlineEnqueueTransition(transition, asynq.ErrDuplicateTask)
 	}
-	if err := q.tasks.push(q.ctx, task, transition); err != nil {
+	if err := lane.push(q.ctx, task, transition); err != nil {
 		return err
 	}
 	q.uniqueLocks[task.uniqueKey] = inlineUniqueLock{
