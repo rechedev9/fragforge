@@ -54,6 +54,10 @@ func TestValidateTranscript(t *testing.T) {
 	}
 }
 
+// entranceTag is the once-per-line stretch-pop override that every displayed
+// caption line must carry exactly once (on its first word).
+const entranceTag = `\fscx160\fscy30\blur6\t(0,60,\fscx96\fscy106\blur0)\t(60,110,\fscx100\fscy100)`
+
 func TestDefaultStyle(t *testing.T) {
 	style := DefaultStyle()
 
@@ -66,8 +70,71 @@ func TestDefaultStyle(t *testing.T) {
 	if !style.Bold {
 		t.Fatalf("got Bold false, want true")
 	}
+	if !style.Italic {
+		t.Fatalf("got Italic false, want true")
+	}
+	if style.PrimaryColour != captionYellow || style.HighlightColour != captionYellow {
+		t.Fatalf("got fills primary=%q highlight=%q, want both %q", style.PrimaryColour, style.HighlightColour, captionYellow)
+	}
+	if style.Alignment != 2 {
+		t.Fatalf("got Alignment %d, want 2 (bottom-center fallback)", style.Alignment)
+	}
 	if style.MarginV != 460 {
 		t.Fatalf("got MarginV %d, want 460", style.MarginV)
+	}
+	if style.PosX != 0 || style.PosY != 0 {
+		t.Fatalf("got Pos (%d,%d), want (0,0): the layout-free default must not pin a position", style.PosX, style.PosY)
+	}
+}
+
+func TestLayoutStyle(t *testing.T) {
+	tests := []struct {
+		name        string
+		faceHeight  int
+		outHeight   int
+		wantPosX    int
+		wantPosY    int
+		wantResY    int
+		wantDefault bool
+	}{
+		{
+			// 40/60 default: facecam 768 over gameplay 1152 -> center 34-35%
+			// into the gameplay band = 768 + round(0.35*1152) = 1171.
+			name: "facecam 40/60", faceHeight: 768, outHeight: 1920,
+			wantPosX: 540, wantPosY: 1171, wantResY: 1920,
+		},
+		{
+			// Full frame: no facecam, so the band is the whole 1920px frame.
+			name: "full frame", faceHeight: 0, outHeight: 1920,
+			wantPosX: 540, wantPosY: 672, wantResY: 1920,
+		},
+		{
+			name: "invalid output height falls back to default", faceHeight: 100, outHeight: 0,
+			wantDefault: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := LayoutStyle(tt.faceHeight, tt.outHeight)
+			if tt.wantDefault {
+				if got != DefaultStyle() {
+					t.Fatalf("got %+v, want DefaultStyle() fallback", got)
+				}
+				return
+			}
+			if got.Alignment != 5 {
+				t.Fatalf("got Alignment %d, want 5 (mid-center + \\pos)", got.Alignment)
+			}
+			if got.PosX != tt.wantPosX || got.PosY != tt.wantPosY {
+				t.Fatalf("got Pos (%d,%d), want (%d,%d)", got.PosX, got.PosY, tt.wantPosX, tt.wantPosY)
+			}
+			if got.PlayResY != tt.wantResY {
+				t.Fatalf("got PlayResY %d, want %d", got.PlayResY, tt.wantResY)
+			}
+			if !got.Italic || got.PrimaryColour != captionYellow {
+				t.Fatalf("got Italic=%v primary=%q, want italic yellow like DefaultStyle", got.Italic, got.PrimaryColour)
+			}
+		})
 	}
 }
 
@@ -86,9 +153,55 @@ func TestBuildASS_ScriptInfoAndStyle(t *testing.T) {
 		t.Fatalf("got ASS body %q, want it to contain script info %q", got, wantScriptInfo)
 	}
 
-	wantStyle := "Style: Karaoke,Montserrat ExtraBold,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,460,1"
+	// All-yellow fill (primary + secondary), Bold -1, Italic -1, Outline 4,
+	// Shadow 2, Alignment 2, MarginV 460.
+	wantStyle := "Style: Karaoke,Montserrat ExtraBold,72,&H002FF4F9,&H002FF4F9,&H00000000,&H00000000,-1,-1,0,0,100,100,0,0,1,4,2,2,40,40,460,1"
 	if !strings.Contains(got, wantStyle) {
 		t.Fatalf("got ASS body %q, want it to contain style line %q", got, wantStyle)
+	}
+}
+
+func TestBuildASS_LayoutStyleUsesPosAndMidCenter(t *testing.T) {
+	cues := []WordCue{
+		{Word: "hola", StartSeconds: 0, EndSeconds: 0.3},
+	}
+
+	got, err := BuildASS(cues, LayoutStyle(768, 1920))
+	if err != nil {
+		t.Fatalf("BuildASS returned error: %v", err)
+	}
+
+	// Mid-center alignment (5) and MarginV 0, since \pos drives placement.
+	wantStyle := "Style: Karaoke,Montserrat ExtraBold,72,&H002FF4F9,&H002FF4F9,&H00000000,&H00000000,-1,-1,0,0,100,100,0,0,1,4,2,5,40,40,0,1"
+	if !strings.Contains(got, wantStyle) {
+		t.Fatalf("got ASS body %q, want it to contain style line %q", got, wantStyle)
+	}
+
+	wantDialogue := `Dialogue: 0,0:00:00.00,0:00:00.30,Karaoke,,0,0,0,,{\pos(540,1171)` + entranceTag + `\k30}hola`
+	if !strings.Contains(got, wantDialogue) {
+		t.Fatalf("got ASS body %q, want it to contain dialogue %q", got, wantDialogue)
+	}
+}
+
+func TestBuildASS_EntranceTagOncePerLine(t *testing.T) {
+	style := DefaultStyle()
+	style.WordsPerLine = 2
+
+	cues := []WordCue{
+		{Word: "una", StartSeconds: 0, EndSeconds: 0.5},
+		{Word: "kill", StartSeconds: 0.5, EndSeconds: 1.0},
+		{Word: "limpia", StartSeconds: 1.0, EndSeconds: 1.5},
+		{Word: "ya", StartSeconds: 1.5, EndSeconds: 2.0},
+	}
+
+	got, err := BuildASS(cues, style)
+	if err != nil {
+		t.Fatalf("BuildASS returned error: %v", err)
+	}
+
+	// Two windows -> the entrance pop must appear exactly twice, once per line.
+	if gotCount := strings.Count(got, entranceTag); gotCount != 2 {
+		t.Fatalf("got %d entrance tags, want 2 (one per displayed line)", gotCount)
 	}
 }
 
@@ -108,12 +221,14 @@ func TestBuildASS_TwoWindows(t *testing.T) {
 		t.Fatalf("BuildASS returned error: %v", err)
 	}
 
-	wantFirst := `Dialogue: 0,0:00:00.00,0:00:01.00,Karaoke,,0,0,0,,{\k50}una {\k50}kill`
+	// The entrance pop rides on the window's first word; karaoke \k timings are
+	// preserved for every word.
+	wantFirst := `Dialogue: 0,0:00:00.00,0:00:01.00,Karaoke,,0,0,0,,{` + entranceTag + `\k50}una {\k50}kill`
 	if !strings.Contains(got, wantFirst) {
 		t.Fatalf("got ASS body %q, want it to contain first window %q", got, wantFirst)
 	}
 
-	wantSecond := `Dialogue: 0,0:00:01.00,0:00:02.00,Karaoke,,0,0,0,,{\k50}limpia {\k50}ya`
+	wantSecond := `Dialogue: 0,0:00:01.00,0:00:02.00,Karaoke,,0,0,0,,{` + entranceTag + `\k50}limpia {\k50}ya`
 	if !strings.Contains(got, wantSecond) {
 		t.Fatalf("got ASS body %q, want it to contain second window %q", got, wantSecond)
 	}
@@ -136,12 +251,12 @@ func TestBuildASS_GapSplitsWindow(t *testing.T) {
 		t.Fatalf("BuildASS returned error: %v", err)
 	}
 
-	wantFirst := `Dialogue: 0,0:00:00.00,0:00:00.80,Karaoke,,0,0,0,,{\k40}espera {\k40}ahi`
+	wantFirst := `Dialogue: 0,0:00:00.00,0:00:00.80,Karaoke,,0,0,0,,{` + entranceTag + `\k40}espera {\k40}ahi`
 	if !strings.Contains(got, wantFirst) {
 		t.Fatalf("got ASS body %q, want it to contain %q", got, wantFirst)
 	}
 
-	wantSecond := `Dialogue: 0,0:00:02.80,0:00:03.20,Karaoke,,0,0,0,,{\k40}va`
+	wantSecond := `Dialogue: 0,0:00:02.80,0:00:03.20,Karaoke,,0,0,0,,{` + entranceTag + `\k40}va`
 	if !strings.Contains(got, wantSecond) {
 		t.Fatalf("got ASS body %q, want it to contain %q", got, wantSecond)
 	}
@@ -157,9 +272,18 @@ func TestBuildASS_EscapesSpecialCharacters(t *testing.T) {
 		t.Fatalf("BuildASS returned error: %v", err)
 	}
 
-	want := `{\k30}wei\{rd\}\\word`
+	want := `\k30}wei\{rd\}\\word`
 	if !strings.Contains(got, want) {
 		t.Fatalf("got ASS body %q, want it to contain escaped word %q", got, want)
+	}
+
+	// The once-per-line entrance override block must open the line and precede
+	// the first \k tag, so the stretch-pop rides the whole line rather than a
+	// single word; escaping the word must not reorder it after the \k.
+	entranceStart := strings.Index(got, `{\fscx`)
+	firstK := strings.Index(got, `\k`)
+	if entranceStart < 0 || firstK < 0 || entranceStart > firstK {
+		t.Fatalf("entrance override block must precede the first \\k tag on the escaped-word line: %s", got)
 	}
 }
 

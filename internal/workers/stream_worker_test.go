@@ -458,6 +458,19 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	if !strings.Contains(string(ass), "Style: Karaoke,"+mediafont.FamilyName+",") {
 		t.Fatalf("caption artifact does not use %s: %s", mediafont.FamilyName, ass)
 	}
+	// The worker must thread LayoutStyle (not DefaultStyle) for the streamer
+	// 40/60 variant: mid-center alignment (5) with the caption pinned at 35% of
+	// the gameplay band via \pos(540,1171). Assert both the LayoutStyle style
+	// line (Alignment=5 + zero MarginV) and the per-line \pos literally, so a
+	// regression back to DefaultStyle (Alignment=2, MarginV=460, no \pos) fails.
+	wantStyleLine := "Style: Karaoke,Montserrat ExtraBold,72,&H002FF4F9,&H002FF4F9,&H00000000,&H00000000,-1,-1,0,0,100,100,0,0,1,4,2,5,40,40,0,1"
+	if !strings.Contains(string(ass), wantStyleLine) {
+		t.Fatalf("caption artifact does not carry the LayoutStyle style line %q: %s", wantStyleLine, ass)
+	}
+	if !strings.Contains(string(ass), `\pos(540,1171)`) {
+		t.Fatalf("caption artifact does not pin the caption at the 40/60 gameplay band via \\pos(540,1171): %s", ass)
+	}
+
 	resultKey, err := streamclips.RenderResultKey(id, streamclips.VariantStreamer4060)
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ package captions
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -72,13 +73,28 @@ type Style struct {
 	HighlightColour string
 	OutlineColour   string
 
-	Bold    bool
+	Bold   bool
+	Italic bool
+
 	Outline int
 	Shadow  int
 
+	// Alignment is the ASS numpad alignment for the style. 2 (bottom-center)
+	// places the block MarginV pixels above the frame bottom; 5 (mid-center),
+	// paired with a per-line \pos, pins the block center at an absolute point.
+	// Zero defaults to 2.
+	Alignment int
+
 	// MarginV is the vertical margin from the bottom of the frame, in
-	// PlayRes pixels.
+	// PlayRes pixels. It is ignored when PosX/PosY pin the block via \pos.
 	MarginV int
+
+	// PosX and PosY, when both positive, pin the caption block center at that
+	// PlayRes point via a \pos tag on every Dialogue line, overriding
+	// MarginV-based placement. LayoutStyle sets them so the caption tracks the
+	// facecam split; DefaultStyle leaves them zero for bottom-margin placement.
+	PosX int
+	PosY int
 
 	// WordsPerLine is the maximum number of words shown together in one
 	// caption window.
@@ -88,25 +104,67 @@ type Style struct {
 	PlayResY int
 }
 
-// DefaultStyle returns the product default caption style: a bold,
-// high-contrast look sized for a 1080x1920 vertical Short, with the caption
-// block sitting in the lower-middle "gameplay band" of a 40/60 stacked
-// layout, clear of platform UI (share/like buttons, captions safe area).
+// captionYellow is the reference viral-Short caption fill, #F9F42F in CSS,
+// written in ASS &HAABBGGRR channel order.
+const captionYellow = "&H002FF4F9"
+
+// captionGameplayBandFraction is how far into the gameplay band the caption
+// block center sits, measured from the reference Short (~34-35% below the
+// facecam split).
+const captionGameplayBandFraction = 0.35
+
+// DefaultStyle returns the layout-free product default caption style: the
+// reference viral-Short look — extra-bold italic, all-yellow fill with a black
+// outline — sized for a 1080x1920 vertical Short with a bottom-margin fallback
+// placement. Use LayoutStyle to place the caption relative to a specific
+// facecam/gameplay split; DefaultStyle is the fallback when the layout is
+// unknown.
 func DefaultStyle() Style {
 	return Style{
 		FontName:        mediafont.FamilyName,
 		FontSize:        72,
-		PrimaryColour:   "&H00FFFFFF", // opaque white
-		HighlightColour: "&H0000FFFF", // opaque yellow (BGR: 00 FF FF)
+		PrimaryColour:   captionYellow, // all words yellow; no white->yellow karaoke flip
+		HighlightColour: captionYellow,
 		OutlineColour:   "&H00000000", // opaque black
 		Bold:            true,
+		Italic:          true,
 		Outline:         4,
 		Shadow:          2,
+		Alignment:       2,
 		MarginV:         460,
 		WordsPerLine:    4,
 		PlayResX:        1080,
 		PlayResY:        1920,
 	}
+}
+
+// LayoutStyle returns the caption style placed for a stacked layout: the same
+// look as DefaultStyle, but with the caption block pinned a fixed fraction into
+// the gameplay band instead of a hardcoded bottom margin, so it tracks the
+// facecam split. It uses mid-center alignment plus a per-line \pos, which also
+// anchors the entrance scale-pop at the block center. faceHeight is the facecam
+// band height in output pixels (0 for a full-frame layout) and outputHeight is
+// the full output height. Invalid dimensions fall back to DefaultStyle.
+func LayoutStyle(faceHeight, outputHeight int) Style {
+	style := DefaultStyle()
+	if outputHeight <= 0 {
+		return style
+	}
+	if faceHeight < 0 {
+		faceHeight = 0
+	}
+	if faceHeight > outputHeight {
+		faceHeight = outputHeight
+	}
+	gameplayHeight := outputHeight - faceHeight
+	captionCenterY := faceHeight + int(math.Round(captionGameplayBandFraction*float64(gameplayHeight)))
+
+	style.PlayResY = outputHeight
+	style.Alignment = 5
+	style.MarginV = 0
+	style.PosX = style.PlayResX / 2
+	style.PosY = captionCenterY
+	return style
 }
 
 // maxWordGapSeconds is the pause between two consecutive words above which a
@@ -142,7 +200,7 @@ func BuildASS(cues []WordCue, style Style) (string, error) {
 	b.WriteString("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
 
 	for _, window := range windowCues(cues, style.WordsPerLine) {
-		line, err := dialogueLine(window)
+		line, err := dialogueLine(window, style)
 		if err != nil {
 			return "", err
 		}
@@ -194,20 +252,28 @@ func windowCues(cues []WordCue, wordsPerLine int) [][]WordCue {
 }
 
 // dialogueLine renders one ASS Dialogue line for a caption window, with a
-// \k karaoke tag per word timed in centiseconds.
-func dialogueLine(window []WordCue) (string, error) {
+// \k karaoke tag per word timed in centiseconds. The window's first word also
+// carries the once-per-line entrance override (and \pos when the style pins a
+// position), so the stretch-pop fires once as the line appears rather than
+// re-triggering per word.
+func dialogueLine(window []WordCue, style Style) (string, error) {
 	if len(window) == 0 {
 		return "", fmt.Errorf("captions: empty caption window")
 	}
 	start := window[0].StartSeconds
 	end := window[len(window)-1].EndSeconds
 
+	lead := entranceOverride(style)
 	var text strings.Builder
 	for i, cue := range window {
 		if i > 0 {
 			text.WriteString(" ")
 		}
 		centiseconds := karaokeCentiseconds(cue)
+		if i == 0 {
+			fmt.Fprintf(&text, `{%s\k%d}%s`, lead, centiseconds, escapeASSText(cue.Word))
+			continue
+		}
 		fmt.Fprintf(&text, `{\k%d}%s`, centiseconds, escapeASSText(cue.Word))
 	}
 
@@ -217,6 +283,21 @@ func dialogueLine(window []WordCue) (string, error) {
 		formatASSTimestamp(end),
 		text.String(),
 	), nil
+}
+
+// entranceOverride is the once-per-line "alive" pop measured from the reference
+// Short at 60fps: the phrase enters wide and vertically squashed with blur
+// (\fscx160\fscy30\blur6), snaps up past 100% with a small overshoot
+// (\fscx96\fscy106 by 60ms), then settles to 100% by ~110ms. When the style
+// pins a position it prepends \pos so the block sits at the caption center and
+// the scale animates around that anchor.
+func entranceOverride(style Style) string {
+	var b strings.Builder
+	if style.PosX > 0 && style.PosY > 0 {
+		fmt.Fprintf(&b, `\pos(%d,%d)`, style.PosX, style.PosY)
+	}
+	b.WriteString(`\fscx160\fscy30\blur6\t(0,60,\fscx96\fscy106\blur0)\t(60,110,\fscx100\fscy100)`)
+	return b.String()
 }
 
 // karaokeCentiseconds converts a cue's duration to ASS karaoke centiseconds,
@@ -233,24 +314,40 @@ func writeScriptInfo(b *strings.Builder, style Style) {
 }
 
 func writeStyles(b *strings.Builder, style Style) {
-	boldFlag := 0
-	if style.Bold {
-		boldFlag = -1 // ASS boolean convention: -1 = true, 0 = false
-	}
 	b.WriteString("\n[V4+ Styles]\n")
 	b.WriteString("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
 	fmt.Fprintf(b,
-		"Style: Karaoke,%s,%d,%s,%s,%s,&H00000000,%d,0,0,0,100,100,0,0,1,%d,%d,2,40,40,%d,1\n",
+		"Style: Karaoke,%s,%d,%s,%s,%s,&H00000000,%d,%d,0,0,100,100,0,0,1,%d,%d,%d,40,40,%d,1\n",
 		style.FontName,
 		style.FontSize,
 		style.PrimaryColour,
-		style.PrimaryColour, // SecondaryColour: the karaoke fill sweeps to HighlightColour per-word below
+		style.HighlightColour, // SecondaryColour: \k sweeps from this to PrimaryColour; both yellow, so no visible flip
 		style.OutlineColour,
-		boldFlag,
+		assBool(style.Bold),
+		assBool(style.Italic),
 		style.Outline,
 		style.Shadow,
+		alignmentOrDefault(style.Alignment),
 		style.MarginV,
 	)
+}
+
+// assBool renders a Go bool in the ASS style convention: -1 for true, 0 for
+// false.
+func assBool(v bool) int {
+	if v {
+		return -1
+	}
+	return 0
+}
+
+// alignmentOrDefault falls back to 2 (bottom-center) for a zero alignment so a
+// Style that never set Alignment keeps the historical placement.
+func alignmentOrDefault(a int) int {
+	if a == 0 {
+		return 2
+	}
+	return a
 }
 
 // formatASSTimestamp renders seconds as an ASS timestamp, h:mm:ss.cc

@@ -10,32 +10,69 @@ import (
 	"testing"
 )
 
-func TestEmbeddedFontChecksum(t *testing.T) {
-	got := fmt.Sprintf("%x", sha256.Sum256(montserratExtraBold))
-	if got != EmbeddedSHA256 {
-		t.Fatalf("embedded font SHA256 = %q, want %q", got, EmbeddedSHA256)
+func TestEmbeddedFontChecksums(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"upright", montserratExtraBold, EmbeddedSHA256},
+		{"italic", montserratExtraBoldItalic, ItalicEmbeddedSHA256},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fmt.Sprintf("%x", sha256.Sum256(tt.data))
+			if got != tt.want {
+				t.Fatalf("embedded font SHA256 = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestMaterializeAtIsStableAndRepairsCorruptCache(t *testing.T) {
+func TestMaterializeAtWritesBothFacesAndRepairsCorruptCache(t *testing.T) {
 	dir := t.TempDir()
 	path, err := materializeAt(dir)
 	if err != nil {
 		t.Fatalf("materializeAt error = %v", err)
 	}
 	if path != filepath.Join(dir, FileName) {
-		t.Fatalf("font path = %q, want stable cache path", path)
+		t.Fatalf("font path = %q, want stable upright cache path", path)
 	}
-	if err := os.WriteFile(path, []byte("corrupt"), 0o600); err != nil {
-		t.Fatal(err)
+
+	// Both faces land in the same directory so filepath.Dir(path) is the fontsdir.
+	uprightMatch, err := fileMatchesSHA(filepath.Join(dir, FileName), EmbeddedSHA256)
+	if err != nil || !uprightMatch {
+		t.Fatalf("upright face match = %v, error = %v", uprightMatch, err)
 	}
-	got, err := materializeAt(dir)
-	if err != nil {
-		t.Fatalf("materializeAt repair error = %v", err)
+	italicMatch, err := fileMatchesSHA(filepath.Join(dir, ItalicFileName), ItalicEmbeddedSHA256)
+	if err != nil || !italicMatch {
+		t.Fatalf("italic face match = %v, error = %v", italicMatch, err)
 	}
-	match, err := fileMatchesEmbedded(got)
-	if err != nil || !match {
-		t.Fatalf("repaired font match = %v, error = %v", match, err)
+
+	// Corrupt each face in turn and confirm materializeAt repairs it back to the
+	// embedded bytes, so both the upright and italic faces stay covered.
+	faces := []struct {
+		name     string
+		fileName string
+		wantSHA  string
+	}{
+		{"upright", FileName, EmbeddedSHA256},
+		{"italic", ItalicFileName, ItalicEmbeddedSHA256},
+	}
+	for _, face := range faces {
+		t.Run("repairs "+face.name, func(t *testing.T) {
+			target := filepath.Join(dir, face.fileName)
+			if err := os.WriteFile(target, []byte("corrupt"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := materializeAt(dir); err != nil {
+				t.Fatalf("materializeAt repair error = %v", err)
+			}
+			repaired, err := fileMatchesSHA(target, face.wantSHA)
+			if err != nil || !repaired {
+				t.Fatalf("repaired %s match = %v, error = %v", face.name, repaired, err)
+			}
+		})
 	}
 }
 

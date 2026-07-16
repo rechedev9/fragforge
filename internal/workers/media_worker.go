@@ -1487,7 +1487,14 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 		return "", "", fmt.Errorf("materialize caption font for clip %s: %w", clipID, err)
 	}
 
-	assContent, err := captions.BuildASS(cues, captions.DefaultStyle())
+	// Place the caption relative to the variant's facecam/gameplay split so it
+	// sits in the gameplay band; fall back to the layout-free default when the
+	// variant is unknown.
+	style := captions.DefaultStyle()
+	if lv, ok := streamclips.VariantByName(variant); ok {
+		style = captions.LayoutStyle(lv.FaceOutputHeight, lv.FaceOutputHeight+lv.GameOutputHeight)
+	}
+	assContent, err := captions.BuildASS(cues, style)
 	if err != nil {
 		return "", "", fmt.Errorf("build captions for clip %s: %w", clipID, err)
 	}
