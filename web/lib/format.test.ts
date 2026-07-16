@@ -2,7 +2,7 @@
 // (Spanish NEON HUD skin). Run: node --test "lib/**/*.test.ts"
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { timeAgo, playsSelectionLabel, formatKd, ratingBarClass, ratingBarPct } from './format.ts';
+import { timeAgo, playsSelectionLabel, formatKd, ratingBarClass, ratingBarPct, prettyMapName } from './format.ts';
 import type { Play } from './api/types.ts';
 
 function play(overrides: Partial<Play>): Play {
@@ -73,6 +73,16 @@ test('ratingBarPct clamps an above-ceiling rating to 100', () => {
 
 test('ratingBarPct clamps a negative rating to 0', () => {
   assert.equal(ratingBarPct(-1), 0);
+});
+
+test('prettyMapName strips the de_/cs_ prefix and capitalizes', () => {
+  assert.equal(prettyMapName('de_dust2'), 'Dust2');
+  assert.equal(prettyMapName('cs_office'), 'Office');
+});
+
+test('prettyMapName passes through an unprefixed name, capitalizing it', () => {
+  assert.equal(prettyMapName('ancient'), 'Ancient');
+  assert.equal(prettyMapName(''), '');
 });
 
 test('ratingBarClass matches ratingClass band boundaries', () => {

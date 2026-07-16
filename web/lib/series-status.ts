@@ -3,6 +3,8 @@
 // polling/linking decisions the series view needs. Pure and unit-tested so the
 // UI never sprinkles status string literals across components.
 
+import { PLAN_READY_STATUSES } from './api/types.ts';
+
 /**
  * Raw orchestrator job statuses grouped into the Spanish label shown on each
  * demo's status pill. `scanned` is a settled state in a series, not progress:
@@ -11,7 +13,7 @@
  * will never happen. Unknown/older statuses fall back to "analizando" via
  * {@link seriesStatusLabel}.
  */
-export const SERIES_STATUS_LABELS = {
+const SERIES_STATUS_LABELS = {
   queued: 'analizando',
   scanning: 'analizando',
   scanned: 'sin jugador elegido',
@@ -34,7 +36,7 @@ export type SeriesStatusTone = 'pending' | 'ready' | 'progress' | 'done' | 'fail
  * `scanned` (a demo whose player was skipped stays there and never advances on
  * its own) and the transient `recorded`/`composed` handoffs.
  */
-export const SERIES_PENDING_STATUSES: ReadonlySet<string> = new Set([
+const SERIES_PENDING_STATUSES: ReadonlySet<string> = new Set([
   'queued',
   'scanning',
   'parsing',
@@ -43,22 +45,19 @@ export const SERIES_PENDING_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Statuses at or past which the kill plan exists, so `/matches/{jobId}` resolves
- * and the demo can link into the highlight picker. Mirrors the client's
- * PLAN_READY set.
+ * Widened view of the label map for a no-cast lookup: reading an arbitrary
+ * status key yields `string | undefined` rather than requiring a key assertion.
  */
-export const SERIES_FORGEABLE_STATUSES: ReadonlySet<string> = new Set([
-  'parsed',
-  'recording',
-  'recorded',
-  'composing',
-  'composed',
-  'done',
-]);
+const LABEL_OF: Record<string, string | undefined> = SERIES_STATUS_LABELS;
 
 /** The Spanish pill label for a raw status; unknown statuses read as "analizando". */
 export function seriesStatusLabel(status: string): string {
-  return SERIES_STATUS_LABELS[status as keyof typeof SERIES_STATUS_LABELS] ?? 'analizando';
+  return LABEL_OF[status] ?? 'analizando';
+}
+
+/** The series header title: "SERIE DE 1 MAPA" / "SERIE DE N MAPAS". */
+export function seriesTitle(mapCount: number): string {
+  return mapCount === 1 ? 'SERIE DE 1 MAPA' : `SERIE DE ${mapCount} MAPAS`;
 }
 
 /** The pill tone for a raw status; drives the pill colour in the series view. */
@@ -79,7 +78,7 @@ export function seriesStatusIsPending(status: string): boolean {
 
 /** True once a demo has a kill plan, so it links into `/matches/{jobId}`. */
 export function seriesStatusIsForgeable(status: string): boolean {
-  return SERIES_FORGEABLE_STATUSES.has(status);
+  return PLAN_READY_STATUSES.has(status);
 }
 
 /**

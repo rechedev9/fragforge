@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
-import { ratingBarClass, ratingBarPct, ratingClass } from '@/lib/format';
+import { ratingBarClass, ratingBarPct, ratingClass, prettyMapName } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 
 /**
@@ -35,12 +35,6 @@ const STAT_TOOLTIPS: Record<string, string> = {
   kast: '% de rondas con kill/asistencia/sobrevivir/trade',
   hs: '% de kills por headshot',
 };
-
-/** "de_dust2" -> "Dust2", "cs_office" -> "Office"; passes through anything unprefixed. */
-function prettyMapName(map: string): string {
-  const stripped = map.replace(/^(de|cs)_/, '');
-  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
-}
 
 /** First one or two glyphs of a name, uppercased, for the row's monogram avatar. */
 function initials(name: string): string {

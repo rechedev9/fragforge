@@ -1,6 +1,6 @@
 import type { ApiClient } from './client';
 import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch, CaptureProgress, SeriesDemo } from './types';
-import { SERVICE_UNAVAILABLE_CODE } from './types';
+import { SERVICE_UNAVAILABLE_CODE, PLAN_READY_STATUSES } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
 import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
@@ -69,13 +69,6 @@ const VARIANT_LABELS: Record<string, string> = {
 function variantLabel(variant: string): string {
   return VARIANT_LABELS[variant] ?? variant;
 }
-
-/**
- * Job statuses at or past which the kill plan exists and stays available. Once a
- * job is parsed it keeps its plan through recording/render, so the match detail
- * must not 404 just because the user moved the job forward by creating a reel.
- */
-const PLAN_READY = new Set(['parsed', 'recording', 'recorded', 'composing', 'composed', 'done']);
 
 /**
  * Job statuses at or past which the roster scan result exists, so getSeries can
@@ -180,6 +173,12 @@ export class RealApiClient implements ApiClient {
   private readonly driving = new Set<string>();
   /** Server-reported artifact names for each reel (the file names the editor wrote). */
   private readonly artifactNames = new Map<string, { video: string; cover?: string }>();
+  /**
+   * Cached per-job series match (map/score), keyed by jobId. A match is
+   * immutable once a job has one, and this client is a module singleton, so
+   * getSeries reads a cached hit instead of refetching the roster every poll.
+   */
+  private readonly seriesMatches = new Map<string, RosterMatch>();
 
   constructor() {
     // Rehydrate the reels the user asked for so the Library survives a hard reload
@@ -231,18 +230,24 @@ export class RealApiClient implements ApiClient {
    * that demo's match undefined and never rejects the whole call.
    */
   async getSeries(seriesId: string): Promise<SeriesDemo[]> {
-    type ProxyDemo = { jobId: string; status: string; failureReason?: string; fileName?: string; createdAt: string };
+    type ProxyDemo = { jobId: string; status: string; failureReason?: string; fileName?: string };
     const body = await readJson<{ demos: ProxyDemo[] }>(await this.send((dp) => ({ url: dp.seriesUrl(seriesId) })));
     return Promise.all(
       body.demos.map(async (raw): Promise<SeriesDemo> => {
         const demo: SeriesDemo = { jobId: raw.jobId, status: raw.status };
         if (raw.fileName) demo.fileName = raw.fileName;
         if (raw.failureReason) demo.failureReason = raw.failureReason;
-        if (ROSTER_READY.has(raw.status)) {
+        const cached = this.seriesMatches.get(raw.jobId);
+        if (cached) {
+          demo.match = cached;
+        } else if (ROSTER_READY.has(raw.status)) {
           try {
             const roster = await readJson<RosterResponse>(await this.send((dp) => ({ url: dp.rosterUrl(raw.jobId) })));
             const match = toRosterMatch(roster.match);
-            if (match) demo.match = match;
+            if (match) {
+              this.seriesMatches.set(raw.jobId, match);
+              demo.match = match;
+            }
           } catch {
             // Roster not ready (409) or a transient failure: leave match unset.
           }
@@ -282,7 +287,7 @@ export class RealApiClient implements ApiClient {
     const status = await this.fetchStatus(id);
     if (status === null) return null;
     // The plan exists once parsing finishes and stays through record/render.
-    if (!PLAN_READY.has(status)) return null;
+    if (!PLAN_READY_STATUSES.has(status)) return null;
 
     const plan = await readJson<KillPlan>(await this.send((dp) => ({ url: dp.planUrl(id) })));
     return planToMatch(id, plan, await this.summaryPlayer(id, plan));
@@ -324,7 +329,7 @@ export class RealApiClient implements ApiClient {
 
     const status = await this.fetchStatus(matchId);
     // No plan until parsing finishes; it persists through record/render.
-    if (status === null || !PLAN_READY.has(status)) return [];
+    if (status === null || !PLAN_READY_STATUSES.has(status)) return [];
 
     const plan = await readJson<KillPlan>(await this.send((dp) => ({ url: dp.planUrl(matchId) })));
     return planToPlays(matchId, plan);

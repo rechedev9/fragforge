@@ -8,6 +8,7 @@ import {
   seriesStatusIsPending,
   seriesStatusIsForgeable,
   summarizeSeriesStatuses,
+  seriesTitle,
 } from './series-status.ts';
 
 test('maps every known status to its Spanish label', () => {
@@ -91,4 +92,10 @@ test('summarize never calls a settled map pending', () => {
 
 test('summarize keeps an unknown status consistent with its "analizando" pill', () => {
   assert.deepEqual(summarizeSeriesStatuses(['something-new']), { ready: 0, pending: 1, failed: 0, skipped: 0 });
+});
+
+test('seriesTitle reads singular for one map and plural otherwise', () => {
+  assert.equal(seriesTitle(1), 'SERIE DE 1 MAPA');
+  assert.equal(seriesTitle(2), 'SERIE DE 2 MAPAS');
+  assert.equal(seriesTitle(5), 'SERIE DE 5 MAPAS');
 });

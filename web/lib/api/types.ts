@@ -117,6 +117,21 @@ export type AggregatedSeriesPlayer = DemoPlayer & { mapsPresent: number };
 export const SERVICE_UNAVAILABLE_CODE = 'service_unavailable';
 
 /**
+ * Job statuses at or past which the kill plan exists and stays available. Once a
+ * job is parsed it keeps its plan through recording and render, so every caller
+ * that reads the plan (match detail, series forge links) must treat all of these
+ * as ready. The one canonical set, shared instead of re-declared per module.
+ */
+export const PLAN_READY_STATUSES: ReadonlySet<string> = new Set([
+  'parsed',
+  'recording',
+  'recorded',
+  'composing',
+  'composed',
+  'done',
+]);
+
+/**
  * One external capture tool (recorder/HLAE/CS2) and its readiness on this PC.
  * `source` is how the path was resolved: 'detected' (auto-found on the machine),
  * 'env' (set explicitly), or 'none' (not found - the user must install/set it).

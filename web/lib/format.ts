@@ -4,6 +4,12 @@ export function formatKd(n: number): string {
   return n.toFixed(2);
 }
 
+/** "de_dust2" -> "Dust2", "cs_office" -> "Office"; passes through anything unprefixed. */
+export function prettyMapName(map: string): string {
+  const stripped = map.replace(/^(de|cs)_/, '');
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
 /** Tailwind text-colour class for an HLTV-1.0 rating, by performance band. */
 export function ratingClass(rating: number): string {
   if (rating >= 1.15) return 'text-emerald-400';

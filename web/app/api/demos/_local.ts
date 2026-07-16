@@ -122,14 +122,12 @@ export async function localSeries(seriesId: string): Promise<Response> {
     status: string;
     failure_reason?: string;
     demo_file_name?: string;
-    created_at: string;
   };
   const body = (await res.json()) as { jobs: UpstreamJob[] };
   const demos = body.jobs.map((job) => {
-    const demo: { jobId: string; status: string; failureReason?: string; fileName?: string; createdAt: string } = {
+    const demo: { jobId: string; status: string; failureReason?: string; fileName?: string } = {
       jobId: job.id,
       status: job.status,
-      createdAt: job.created_at,
     };
     if (job.failure_reason) demo.failureReason = job.failure_reason;
     if (job.demo_file_name) demo.fileName = job.demo_file_name;

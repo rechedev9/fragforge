@@ -8,6 +8,8 @@ import { api } from '@/lib/api';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { aggregateSeriesRoster } from '@/lib/api/series-roster';
+import { prettyMapName } from '@/lib/format';
+import { seriesTitle } from '@/lib/series-status';
 import { Wordmark } from '@/components/brand/wordmark';
 import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
@@ -22,24 +24,30 @@ import { PlayerPicker } from '@/components/upload/player-picker';
  */
 type Stage = 'idle' | 'scanning' | 'picking' | 'parsing';
 
-/** One dropped demo's roster-scan state; scanned rows carry the job + roster. */
+/**
+ * One dropped demo's roster-scan state; scanned rows carry the job + roster. An
+ * error row may carry a `reason`: a specific hint (e.g. a demo that scanned but
+ * yielded zero players) shown in place of the generic "Error" so the user can
+ * tell a bad demo apart from a transient failure.
+ */
 type ScanRow =
   | { fileName: string; status: 'scanning' }
   | { fileName: string; status: 'scanned'; jobId: string; players: DemoPlayer[]; match?: RosterMatch }
-  | { fileName: string; status: 'error' };
+  | { fileName: string; status: 'error'; reason?: string };
 
 /** One scanned demo's parse state after the player is picked (series mode). */
 type ParseRow = { jobId: string; label: string; status: 'parsing' | 'done' | 'skipped' | 'error' };
 
+/**
+ * Hint for a demo that scanned without errors yet yielded an empty roster (e.g.
+ * a Source-1 demo that passes the header checks but parses to zero players), so
+ * its error row reads as "wrong demo" rather than a transient failure.
+ */
+const ZERO_PLAYERS_HINT = 'Sin jugadores — ¿seguro que es una demo de CS2?';
+
 /** True when an API error means the local analysis service is unreachable. */
 function isServiceUnavailable(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === SERVICE_UNAVAILABLE_CODE;
-}
-
-/** "de_dust2" -> "Dust2", "cs_office" -> "Office"; passes through anything unprefixed. */
-function prettyMapName(map: string): string {
-  const stripped = map.replace(/^(de|cs)_/, '');
-  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
 
 /** A scanned demo's short label: prettified map name, else its file name. */
@@ -83,7 +91,6 @@ export default function UploadPage() {
   const router = useRouter();
   const homeHref = '/matches';
   const [stage, setStage] = useState<Stage>('idle');
-  const [seriesMode, setSeriesMode] = useState(false);
   const [seriesId, setSeriesId] = useState<string | null>(null);
 
   // Single-demo state (seriesMode === false).
@@ -96,6 +103,11 @@ export default function UploadPage() {
   const [scanRows, setScanRows] = useState<ScanRow[]>([]);
   const [parseRows, setParseRows] = useState<ParseRow[]>([]);
 
+  // Series mode is fully derived from the scan rows: a series scan seeds them
+  // (2+ demos), the single-demo path never does, and reset clears them. There is
+  // no independent flag to drift out of sync with the rows.
+  const seriesMode = scanRows.length > 0;
+
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
 
@@ -103,7 +115,6 @@ export default function UploadPage() {
     setError(message);
     setWarning(null);
     setStage('idle');
-    setSeriesMode(false);
     setSeriesId(null);
     setFileName(null);
     setJobId(null);
@@ -119,7 +130,6 @@ export default function UploadPage() {
     async (file: File) => {
       setError(null);
       setWarning(null);
-      setSeriesMode(false);
       setFileName(file.name);
       setStage('scanning');
       try {
@@ -175,7 +185,6 @@ export default function UploadPage() {
       const sid = crypto.randomUUID();
       setError(null);
       setWarning(null);
-      setSeriesMode(true);
       setSeriesId(sid);
       setScanRows(files.map((f) => ({ fileName: f.name, status: 'scanning' })));
       setStage('scanning');
@@ -185,7 +194,7 @@ export default function UploadPage() {
         api
           .scanDemo(file, { seriesId: sid })
           .then((scan): ScanRow => {
-            if (scan.players.length === 0) return { fileName: file.name, status: 'error' };
+            if (scan.players.length === 0) return { fileName: file.name, status: 'error', reason: ZERO_PLAYERS_HINT };
             const row: ScanRow = { fileName: file.name, status: 'scanned', jobId: scan.jobId, players: scan.players };
             if (scan.match) row.match = scan.match;
             return row;
@@ -282,9 +291,8 @@ export default function UploadPage() {
 
   // --- Header copy ---
 
-  const mapCount = scannedRows.length;
   // Reachable singular: 2+ demos dropped but only one scan survived.
-  const seriesTitle = mapCount === 1 ? 'SERIE DE 1 MAPA' : `SERIE DE ${mapCount} MAPAS`;
+  const mapCount = scannedRows.length;
   let headerLabel = 'SUBIR DEMO';
   let headerTitle = 'ANALIZA CUALQUIER DEMO';
   let headerDescription: ReactNode = (
@@ -296,12 +304,12 @@ export default function UploadPage() {
       headerTitle = 'ANALIZANDO LA SERIE';
       headerDescription = <>Escaneando {scanRows.length} demos de la serie…</>;
     } else if (stage === 'picking') {
-      headerTitle = seriesTitle;
+      headerTitle = seriesTitle(mapCount);
       headerDescription = (
         <>Elige un jugador y forjaremos sus mejores jugadas en {scannedRows.map(rowLabel).join(', ')}.</>
       );
     } else if (stage === 'parsing') {
-      headerTitle = seriesTitle;
+      headerTitle = seriesTitle(mapCount);
       headerDescription =
         mapCount === 1 ? (
           <>Forjando los highlights del jugador en el mapa de la serie…</>
@@ -476,9 +484,12 @@ function ScanRowList({ rows }: { rows: ScanRow[] }) {
               </span>
             ) : null}
             {row.status === 'error' ? (
-              <span className="inline-flex items-center gap-1.5 text-destructive">
-                <AlertTriangle className="size-4" />
-                Error
+              <span
+                className="inline-flex max-w-[13rem] items-center gap-1.5 text-destructive sm:max-w-xs"
+                title={row.reason}
+              >
+                <AlertTriangle className="size-4 shrink-0" />
+                <span className="truncate">{row.reason ?? 'Error'}</span>
               </span>
             ) : null}
           </span>

@@ -99,7 +99,7 @@ export function DemoDropzone({ onFiles }: DemoDropzoneProps) {
           explora tus archivos
         </span>
         <span className="relative z-10 mt-4 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.16em] text-muted-foreground/80">
-          HASTA {MAX_FILES} DEMOS · EL .DEM NUNCA SALE DE TU PC
+          SIN LOGIN · HASTA {MAX_FILES} DEMOS · EL .DEM NUNCA SALE DE TU PC
         </span>
 
         <input

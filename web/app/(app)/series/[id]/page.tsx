@@ -12,8 +12,10 @@ import {
   seriesStatusIsPending,
   seriesStatusIsForgeable,
   summarizeSeriesStatuses,
+  seriesTitle,
   type SeriesStatusTone,
 } from '@/lib/series-status';
+import { prettyMapName } from '@/lib/format';
 import { startPollLoop } from '@/lib/poll-loop';
 import { StudioEmptyState } from '@/components/studio/empty-state';
 import { StudioPageHeader } from '@/components/studio/page-header';
@@ -33,12 +35,6 @@ function isServiceUnavailable(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === SERVICE_UNAVAILABLE_CODE;
 }
 
-/** "de_dust2" -> "Dust2", "cs_office" -> "Office"; passes through anything unprefixed. */
-function prettyMapName(map: string): string {
-  const stripped = map.replace(/^(de|cs)_/, '');
-  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
-}
-
 /** Each demo's headline: prettified map name, else file name, else its position. */
 function demoTitle(demo: SeriesDemo, index: number): string {
   if (demo.match) return prettyMapName(demo.match.map);
@@ -48,14 +44,16 @@ function demoTitle(demo: SeriesDemo, index: number): string {
 
 /**
  * Header description built from the real status buckets, omitting empty ones:
- * "2 mapas listos para forjar · 1 analizando · 1 fallido · 1 sin jugador".
+ * "2 mapas con jugadas listas · 1 analizando · 1 fallido · 1 sin jugador".
+ * The ready bucket spans every forgeable status (parsing done through done), so
+ * its copy stays true whether a map is grabando, renderizando or completada.
  * Only genuinely pending maps are ever described as being analyzed; settled
  * ones (failed, or scanned without the chosen player) get their own bucket.
  */
 function seriesDescription(statuses: readonly string[]): string {
   const { ready, pending, failed, skipped } = summarizeSeriesStatuses(statuses);
   const parts: string[] = [];
-  if (ready > 0) parts.push(ready === 1 ? '1 mapa listo para forjar' : `${ready} mapas listos para forjar`);
+  if (ready > 0) parts.push(ready === 1 ? '1 mapa con jugadas listas' : `${ready} mapas con jugadas listas`);
   if (pending > 0) parts.push(`${pending} analizando`);
   if (failed > 0) parts.push(failed === 1 ? '1 fallido' : `${failed} fallidos`);
   if (skipped > 0) parts.push(`${skipped} sin jugador`);
@@ -92,7 +90,17 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
 
   useEffect(() => {
     if (!valid) return;
+    // The App Router reuses this page instance across dynamic-param changes, so
+    // the effect must reset every piece of series state before polling the new
+    // id; otherwise the previous series' demos linger and the loading state
+    // never re-renders when switching series.
+    setDemos(null);
+    setLoaded(false);
+    setLoadError(null);
+    demosRef.current = null;
+
     let active = true;
+    let stopLoop: (() => void) | undefined;
     const stop = startPollLoop({
       tick: async () => {
         try {
@@ -102,7 +110,13 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
           setDemos(list);
           setLoadError(null);
           setLoaded(true);
-          return list.some((d) => seriesStatusIsPending(d.status)) ? 'fast' : 'idle';
+          const pending = list.some((d) => seriesStatusIsPending(d.status));
+          // A settled series (no map still working) does one fetch, renders, and
+          // stops: keep polling only while some map is pending. stopLoop is
+          // assigned before this async tick can reach here (the tick suspends on
+          // the getSeries await), so the call is safe.
+          if (!pending) stopLoop?.();
+          return pending ? 'fast' : 'idle';
         } catch (err) {
           if (!active) return 'idle';
           setLoaded(true);
@@ -117,6 +131,7 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
       fastMs: FAST_MS,
       idleMs: IDLE_MS,
     });
+    stopLoop = stop;
     return () => {
       active = false;
       stop();
@@ -183,7 +198,7 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
       <StudioPageHeader
         number={2}
         label="SERIE"
-        title={list.length === 1 ? 'SERIE DE 1 MAPA' : `SERIE DE ${list.length} MAPAS`}
+        title={seriesTitle(list.length)}
         description={seriesDescription(list.map((d) => d.status))}
       />
 

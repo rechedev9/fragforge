@@ -22,7 +22,7 @@ function Frame({ children }: { children: React.ReactNode }) {
 export function Idle() {
   return (
     <Frame>
-      <DemoDropzone onFile={() => {}} />
+      <DemoDropzone onFiles={() => {}} />
     </Frame>
   );
 }
