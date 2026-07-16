@@ -20,6 +20,7 @@ import {
   type SeriesStatusTone,
 } from '@/lib/series-status';
 import { prettyMapName } from '@/lib/format';
+import { groupSeriesDemos, representativeSeriesStatus, type SeriesGroup } from '@/lib/series-grouping';
 import { startPollLoop } from '@/lib/poll-loop';
 import { StudioEmptyState } from '@/components/studio/empty-state';
 import { StudioPageHeader } from '@/components/studio/page-header';
@@ -218,19 +219,33 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
     );
   }
 
+  // HLTV-style downloads split one map into several .dem parts; fold them back
+  // into one logical map card so a bo3 reads "SERIE DE 3 MAPAS", not 4.
+  const groups = groupSeriesDemos(list);
+
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
       <StudioPageHeader
         number={2}
         label="SERIE"
-        title={seriesTitle(list.length)}
-        description={seriesDescription(list.map((d) => d.status))}
+        title={seriesTitle(groups.length)}
+        description={seriesDescription(groups.map((g) => representativeSeriesStatus(g.demos.map((d) => d.status))))}
       />
 
       <div className="flex flex-col gap-3">
-        {list.map((demo, i) => (
-          <SeriesDemoCard key={demo.jobId} demo={demo} index={i} seriesId={id} reel={reelByJob.get(demo.jobId)} />
-        ))}
+        {groups.map((group, i) =>
+          group.demos.length === 1 ? (
+            <SeriesDemoCard
+              key={group.demos[0].jobId}
+              demo={group.demos[0]}
+              index={i}
+              seriesId={id}
+              reel={reelByJob.get(group.demos[0].jobId)}
+            />
+          ) : (
+            <SeriesMultiPartCard key={group.key} group={group} index={i} seriesId={id} reelByJob={reelByJob} />
+          ),
+        )}
       </div>
     </div>
   );
@@ -279,6 +294,120 @@ function SeriesDemoCard({
             ) : null}
           </div>
         </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-3">
+        <span
+          className={cn(
+            'inline-flex items-center rounded-full border px-2.5 py-0.5 font-[family-name:var(--font-mono)] text-[0.65rem] font-semibold uppercase tracking-wider',
+            TONE_CLASSES[tone],
+          )}
+        >
+          {label}
+        </span>
+        {forgeable ? (
+          <Button
+            asChild
+            size="sm"
+            variant={reel ? 'secondary' : 'default'}
+            className="font-[family-name:var(--font-display)] tracking-[0.05em]"
+          >
+            <Link href={`/matches/${demo.jobId}?series=${seriesId}`}>
+              {reel ? 'OTRO REEL' : 'ELEGIR JUGADAS'}
+              <ChevronRight className="size-4" />
+            </Link>
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One logical map split across several .dem parts: a single card titled by the
+ * map (from the first part that carries a match), with one compact row per part.
+ * The parts share the map header but each keeps its own status/reel pill and its
+ * own picker link, so a half that failed to parse or already has a reel reads
+ * independently while the map still counts as one entry in the series.
+ */
+function SeriesMultiPartCard({
+  group,
+  index,
+  seriesId,
+  reelByJob,
+}: {
+  group: SeriesGroup<SeriesDemo>;
+  index: number;
+  seriesId: string;
+  reelByJob: ReadonlyMap<string, Video>;
+}) {
+  // Title from the first part that has a roster match; fall back to the first
+  // part's own title so a still-scanning map still names itself.
+  const headDemo = group.demos.find((d) => d.match) ?? group.demos[0];
+
+  return (
+    <div className="studio-panel studio-panel-raised flex flex-col gap-4 rounded-xl p-5">
+      <div className="flex min-w-0 items-center gap-4">
+        <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 font-[family-name:var(--font-mono)] text-sm text-primary">
+          {index + 1}
+        </span>
+        <h2 className="truncate font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight text-foreground">
+          {demoTitle(headDemo, index)}
+        </h2>
+      </div>
+
+      <div className="flex flex-col divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60 bg-muted/20">
+        {group.demos.map((demo, partIndex) => (
+          <SeriesPartRow
+            key={demo.jobId}
+            demo={demo}
+            partIndex={partIndex}
+            seriesId={seriesId}
+            reel={reelByJob.get(demo.jobId)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One part of a multi-part map: "PARTE N" plus that part's score/status and its
+ * own picker CTA. Mirrors {@link SeriesDemoCard}'s pill/CTA logic so a part reads
+ * exactly like a single-map card, just scoped to one half of the split demo.
+ */
+function SeriesPartRow({
+  demo,
+  partIndex,
+  seriesId,
+  reel,
+}: {
+  demo: SeriesDemo;
+  partIndex: number;
+  seriesId: string;
+  reel?: Video;
+}) {
+  const tone = reel ? seriesReelTone(reel.status) : seriesStatusTone(demo.status);
+  const label = reel ? seriesReelLabel(reel.status) : seriesStatusLabel(demo.status);
+  const forgeable = seriesStatusIsForgeable(demo.status);
+  const failed = demo.status === 'failed';
+
+  return (
+    <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[0.7rem] uppercase tracking-wider text-muted-foreground">
+          <span className="font-semibold text-foreground/70">PARTE {partIndex + 1}</span>
+          {demo.match ? (
+            <span className="tabular-nums">
+              {demo.match.scoreT}-{demo.match.scoreCt} · {demo.match.rounds} rondas
+            </span>
+          ) : null}
+        </div>
+        {failed && demo.failureReason ? (
+          <span className="font-[family-name:var(--font-mono)] text-[0.7rem] normal-case tracking-normal text-destructive">
+            {demo.failureReason}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
