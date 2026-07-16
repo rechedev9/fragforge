@@ -3,7 +3,7 @@
 // reconcile state machine is testable with zero new dependencies (Node 24 node:test).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveReelView } from './reel-reconcile.ts';
+import { canHaveRenderState, deriveReelView } from './reel-reconcile.ts';
 import type { ReconcileInput } from './reel-reconcile.ts';
 
 /** deriveReelView with sane defaults so each case states only what it varies. */
@@ -94,4 +94,22 @@ test('unknown job status → queued, no action (never guess an action)', () => {
 
 test('failed without a reason still reports failed (no spurious empty reason key)', () => {
   assert.deepEqual(view({ jobStatus: 'failed' }), { status: 'failed', action: 'none' });
+});
+
+test('canHaveRenderState: true only once a render POST can have been driven', () => {
+  for (const s of ['recorded', 'composing', 'composed', 'done']) {
+    assert.equal(canHaveRenderState(s), true, `${s} should allow a render GET`);
+  }
+});
+
+test('canHaveRenderState: includes failed (a render can be ready before the job fails)', () => {
+  // deriveReelView surfaces a finished render as ready even when the job later
+  // flags failed, so the render GET must still fire for a failed job.
+  assert.equal(canHaveRenderState('failed'), true);
+});
+
+test('canHaveRenderState: false for every pre-recorded status (skip the guaranteed 404)', () => {
+  for (const s of ['queued', 'scanning', 'scanned', 'parsing', 'parsed', 'recording', 'wat']) {
+    assert.equal(canHaveRenderState(s), false, `${s} must not issue a render GET`);
+  }
 });

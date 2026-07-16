@@ -22,6 +22,11 @@ export type ReelIntent = {
   variant?: string;
   editConfig: EditConfig;
   songId?: string;
+  /**
+   * Music track volume in (0,1]; only meaningful with a songId. Absent means the
+   * default full volume (1.0), which renders byte-identically to a legacy reel.
+   */
+  musicVolume?: number;
   title: string;
   map: string;
   score: string;
@@ -92,6 +97,7 @@ export function coerceIntents(parsed: unknown): ReelIntent[] {
       variant: typeof r.variant === 'string' ? r.variant : DEFAULT_VARIANT,
       editConfig: coerceEditConfig(r.editConfig),
       songId: typeof r.songId === 'string' ? r.songId : undefined,
+      musicVolume: coerceMusicVolume(r.musicVolume),
       title: typeof r.title === 'string' ? r.title : 'Highlight',
       map: typeof r.map === 'string' ? r.map : 'Unknown',
       score: typeof r.score === 'string' ? r.score : '',
@@ -129,6 +135,15 @@ export function coerceEditConfig(value: unknown): EditConfig {
     introText: coerceBookendText(raw.introText),
     outroText: coerceBookendText(raw.outroText),
   };
+}
+
+/**
+ * Music volume must be a real number in (0,1]; anything else (out of range, NaN,
+ * a stringified number) collapses to undefined so the reel renders at the default
+ * full volume rather than smuggling a bad value into the render request.
+ */
+function coerceMusicVolume(value: unknown): number | undefined {
+  return typeof value === 'number' && value > 0 && value <= 1 ? value : undefined;
 }
 
 function coerceBookendText(value: unknown): string {

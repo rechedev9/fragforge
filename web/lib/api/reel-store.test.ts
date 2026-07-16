@@ -13,6 +13,7 @@ const valid: ReelIntent = {
   variant: 'clean-pov-60',
   editConfig: { format: 'landscape-16x9', killEffect: 'velocity', transition: 'whip', intro: true, outro: false, hookText: true, killCounter: false, introText: 'GG WP', outroText: '' },
   songId: 's1',
+  musicVolume: 0.35,
   title: 'Ace',
   map: 'de_dust2',
   score: '13-7',
@@ -39,14 +40,25 @@ test('drops entries with no segment ids at all', () => {
 
 test('defaults soft fields, normalizes mode, migrates missing variant', () => {
   assert.deepEqual(coerceIntents([{ videoId: 'v', jobId: 'j', segmentIds: ['s'], mode: 'weird' }]), [
-    { videoId: 'v', jobId: 'j', segmentIds: ['s'], mode: 'clean', variant: 'viral-60-clean', editConfig: DEFAULT_EDIT_CONFIG, songId: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0 },
+    { videoId: 'v', jobId: 'j', segmentIds: ['s'], mode: 'clean', variant: 'viral-60-clean', editConfig: DEFAULT_EDIT_CONFIG, songId: undefined, musicVolume: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0 },
   ]);
 });
 
 test('migrates a legacy singular segmentId into a one-element segmentIds array', () => {
   assert.deepEqual(coerceIntents([{ videoId: 'v', jobId: 'j', segmentId: 'seg-001', mode: 'clean' }]), [
-    { videoId: 'v', jobId: 'j', segmentIds: ['seg-001'], mode: 'clean', variant: 'viral-60-clean', editConfig: DEFAULT_EDIT_CONFIG, songId: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0 },
+    { videoId: 'v', jobId: 'j', segmentIds: ['seg-001'], mode: 'clean', variant: 'viral-60-clean', editConfig: DEFAULT_EDIT_CONFIG, songId: undefined, musicVolume: undefined, title: 'Highlight', map: 'Unknown', score: '', createdAt: 0 },
   ]);
+});
+
+test('keeps a valid music volume and drops out-of-range or mistyped ones', () => {
+  const base = { videoId: 'v', jobId: 'j', segmentIds: ['s'], mode: 'music' as const, songId: 's1' };
+  assert.equal(coerceIntents([{ ...base, musicVolume: 0.35 }])[0]?.musicVolume, 0.35);
+  assert.equal(coerceIntents([{ ...base, musicVolume: 1 }])[0]?.musicVolume, 1);
+  assert.equal(coerceIntents([{ ...base, musicVolume: 0 }])[0]?.musicVolume, undefined);
+  assert.equal(coerceIntents([{ ...base, musicVolume: 1.5 }])[0]?.musicVolume, undefined);
+  assert.equal(coerceIntents([{ ...base, musicVolume: '0.5' }])[0]?.musicVolume, undefined);
+  assert.equal(coerceIntents([{ ...base, musicVolume: Number.NaN }])[0]?.musicVolume, undefined);
+  assert.equal(coerceIntents([base])[0]?.musicVolume, undefined);
 });
 
 test('ignores the legacy fake published flag instead of treating it as a real upload', () => {

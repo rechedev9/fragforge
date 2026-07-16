@@ -1,10 +1,13 @@
 import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch, SeriesDemo } from './types';
+import type { SeriesSummary } from './jobs-index';
 import type { PublishAssistant } from './publish-assistant';
 
 export interface ApiClient {
   /** Whether gameplay capture (HLAE + CS2) is configured on the local machine. */
   getCaptureReadiness(): Promise<CaptureReadiness>;
   listMatches(): Promise<Match[]>;
+  /** One summary per uploaded series, so Partidas can surface series after a restart. */
+  listSeriesSummaries(): Promise<SeriesSummary[]>;
   getMatch(id: string): Promise<Match | null>;
   /** @deprecated Superseded by scanDemo + parseDemo (roster scan → target pick). */
   uploadDemo(input: { fileName: string }): Promise<Match>;
@@ -22,7 +25,7 @@ export interface ApiClient {
   /** The user-selectable reel presets (preset name == render variant). */
   listPresets(): Promise<Preset[]>;
   /** playIds is 2+ ids for a concatenated reel; pass them in plan order, not click order. */
-  createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video>;
+  createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; musicVolume?: number; variant?: string; editConfig?: EditConfig }): Promise<Video>;
   listVideos(): Promise<Video[]>;
   getVideo(id: string): Promise<Video | null>;
   /** Build editable metadata and a Madrid schedule for manual publishing. */

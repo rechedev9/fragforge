@@ -20,6 +20,13 @@ import { CreateReelBar } from '@/components/clips/create-reel-bar';
 import { EditOptions } from '@/components/clips/edit-options';
 import { SongPickerDialog } from '@/components/clips/song-picker-dialog';
 
+// Music volume slider, in UI percent. Default 100 renders at full volume (the
+// legacy byte-identical form); only < 100 sends a reduced volume to the render.
+const VOLUME_MIN = 5;
+const VOLUME_MAX = 100;
+const VOLUME_STEP = 5;
+const VOLUME_DEFAULT = 100;
+
 /** Parse "13-2" into [13, 2]; returns null if it isn't a clean rounds score. */
 function parseScore(score: string): [number, number] | null {
   const m = /^(\d+)\s*-\s*(\d+)$/.exec(score.trim());
@@ -56,6 +63,7 @@ export default function FindHighlightsPage({
   const [variant, setVariant] = useState<string | null>(null);
   const [songId, setSongId] = useState<string | null>(null);
   const [songTitle, setSongTitle] = useState<string | null>(null);
+  const [musicVolume, setMusicVolume] = useState<number>(VOLUME_DEFAULT);
   const [editConfig, setEditConfig] = useState<EditConfig>(DEFAULT_EDIT_CONFIG);
   const [songOpen, setSongOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -137,6 +145,8 @@ export default function FindHighlightsPage({
         playIds: selectedPlays.map((p) => p.id),
         mode: songId ? 'music' : 'clean',
         songId: songId ?? undefined,
+        // Only a reduced volume travels; full volume stays the legacy default.
+        musicVolume: songId && musicVolume < VOLUME_MAX ? musicVolume / 100 : undefined,
         variant,
         editConfig,
       });
@@ -328,29 +338,51 @@ export default function FindHighlightsPage({
         <section className="flex flex-col gap-4">
           <SectionEyebrow label="MÚSICA (OPCIONAL)" />
           {songTitle ? (
-            <div className="flex items-center justify-between gap-3 border border-stream/30 bg-card px-5 py-4">
-              <div className="flex min-w-0 items-center gap-3">
-                <Music className="size-5 shrink-0 text-stream" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{songTitle}</p>
-                  <p className="text-xs text-muted-foreground">Música añadida</p>
+            <div className="flex flex-col gap-px border border-stream/30 bg-card">
+              <div className="flex items-center justify-between gap-3 px-5 py-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <Music className="size-5 shrink-0 text-stream" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{songTitle}</p>
+                    <p className="text-xs text-muted-foreground">Música añadida</p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button variant="secondary" size="sm" disabled={busy} onClick={() => setSongOpen(true)}>
+                    Cambiar
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setSongId(null);
+                      setSongTitle(null);
+                      setMusicVolume(VOLUME_DEFAULT);
+                    }}
+                  >
+                    Quitar
+                  </Button>
                 </div>
               </div>
-              <div className="flex shrink-0 gap-2">
-                <Button variant="secondary" size="sm" disabled={busy} onClick={() => setSongOpen(true)}>
-                  Cambiar
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => {
-                    setSongId(null);
-                    setSongTitle(null);
-                  }}
+              <div className="flex items-center gap-4 border-t border-border/60 px-5 py-3.5">
+                <label
+                  htmlFor="music-volume"
+                  className="shrink-0 font-[family-name:var(--font-mono)] text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground/80"
                 >
-                  Quitar
-                </Button>
+                  VOLUMEN <span className="text-stream">· {musicVolume}%</span>
+                </label>
+                <input
+                  id="music-volume"
+                  type="range"
+                  min={VOLUME_MIN}
+                  max={VOLUME_MAX}
+                  step={VOLUME_STEP}
+                  value={musicVolume}
+                  disabled={busy}
+                  onChange={(e) => setMusicVolume(Number(e.target.value))}
+                  className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-border accent-stream disabled:cursor-not-allowed disabled:opacity-50"
+                />
               </div>
             </div>
           ) : (

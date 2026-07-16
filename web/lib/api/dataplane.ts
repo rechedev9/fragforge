@@ -22,6 +22,8 @@ export type DataPlane = {
   scanJobId(body: unknown): string;
   jobStatusUrl(jobId: string): string;
   rosterUrl(jobId: string): string;
+  /** The recent-jobs listing that Partidas rediscovers uploads/series from. */
+  jobsUrl: string;
   seriesUrl(seriesId: string): string;
   parseUrl(jobId: string): string;
   /** Parse request body. */
@@ -53,6 +55,7 @@ export function dataPlane(): DataPlane {
     scanJobId: (body) => str(body, 'jobId'),
     jobStatusUrl: (jobId) => `/api/demos/${jobId}/status`,
     rosterUrl: (jobId) => `/api/demos/${jobId}/roster`,
+    jobsUrl: '/api/demos/jobs',
     seriesUrl: (seriesId) => `/api/demos/series/${seriesId}`,
     parseUrl: (jobId) => `/api/demos/${jobId}/parse`,
     parseBody: (steamId) => ({ steamId }),

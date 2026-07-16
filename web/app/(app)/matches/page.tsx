@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { Clapperboard, Swords, UploadCloud } from 'lucide-react';
+import { ChevronRight, Clapperboard, Layers, Swords, UploadCloud } from 'lucide-react';
 import { api } from '@/lib/api';
+import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { Match } from '@/lib/api/types';
+import type { SeriesSummary } from '@/lib/api/jobs-index';
 import { MatchFilters, type MatchFilter } from '@/components/matches/match-filters';
 import { MatchList } from '@/components/matches/match-list';
 import { MatchListSkeleton } from '@/components/matches/match-list-skeleton';
@@ -12,18 +14,31 @@ import { isWin } from '@/components/matches/match-score';
 import { StudioEmptyState } from '@/components/studio/empty-state';
 import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
+import { seriesTitle } from '@/lib/series-status';
+import { timeAgo } from '@/lib/format';
+
+/** True when an API error means the local analysis service is unreachable. */
+function isServiceUnavailable(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === SERVICE_UNAVAILABLE_CODE;
+}
 
 /**
- * Landing state when there are no matches at all (not merely filtered out):
- * the dashboard is the first screen, so it must route into both content flows
- * instead of showing the filter-oriented empty state.
+ * Landing state when there are no matches and no series at all (not merely
+ * filtered out): the dashboard is the first screen, so it must route into both
+ * content flows instead of showing the filter-oriented empty state. When the
+ * local analysis service is offline it says so, since that (not "nothing
+ * uploaded") is why the list came back empty.
  */
-function NoMatchesYet() {
+function NoMatchesYet({ offline }: { offline: boolean }) {
   return (
     <StudioEmptyState
       icon={Swords}
       title="Aún no hay partidas"
-      description="Analiza una demo de CS2 o corta clips de un stream para empezar."
+      description={
+        offline
+          ? 'No se pudo contactar con el servicio de análisis local. Arráncalo y recarga, o analiza una demo para empezar.'
+          : 'Analiza una demo de CS2 o corta clips de un stream para empezar.'
+      }
       compact
       actions={
         <>
@@ -49,16 +64,67 @@ function NoMatchesYet() {
   );
 }
 
+/**
+ * The SERIES section above the matches list: one compact row per uploaded
+ * bo3/bo5 series, linking into its /series/{id} view. The maps of a series still
+ * list individually below (that is the Partidas model); this row is the way to
+ * reach the series as a whole after a restart.
+ */
+function SeriesSection({ series }: { series: SeriesSummary[] }) {
+  return (
+    <section className="flex flex-col gap-3" aria-label="Series">
+      <h2 className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.2em] text-muted-foreground">
+        SERIES
+      </h2>
+      {series.map((s) => (
+        <Link
+          key={s.seriesId}
+          href={`/series/${s.seriesId}`}
+          className="studio-panel studio-panel-interactive flex items-center justify-between gap-4 rounded-xl px-4 py-4 transition-colors sm:px-5"
+        >
+          <div className="flex min-w-0 items-center gap-4">
+            <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
+              <Layers className="size-5" aria-hidden />
+            </span>
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="truncate font-[family-name:var(--font-display)] text-lg font-bold uppercase leading-tight tracking-tight text-foreground">
+                {seriesTitle(s.mapCount)}
+              </span>
+              <span className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.1em] text-muted-foreground">
+                {timeAgo(s.createdAt)}
+              </span>
+            </div>
+          </div>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </Link>
+      ))}
+    </section>
+  );
+}
+
 export default function MatchesPage() {
   const [matches, setMatches] = useState<Match[] | null>(null);
+  const [series, setSeries] = useState<SeriesSummary[]>([]);
+  const [offline, setOffline] = useState(false);
   const [filter, setFilter] = useState<MatchFilter>('all');
   const [query, setQuery] = useState('');
 
   useEffect(() => {
     let active = true;
     (async () => {
-      const next = await api.listMatches();
-      if (active) setMatches(next);
+      try {
+        const [nextMatches, nextSeries] = await Promise.all([api.listMatches(), api.listSeriesSummaries()]);
+        if (!active) return;
+        setMatches(nextMatches);
+        setSeries(nextSeries);
+      } catch (err) {
+        if (!active) return;
+        // Offline (or any load failure) must not crash the page: fall to the
+        // empty state, flagging offline so its copy explains the empty list.
+        setMatches([]);
+        setSeries([]);
+        setOffline(isServiceUnavailable(err));
+      }
     })();
     return () => {
       active = false;
@@ -83,14 +149,24 @@ export default function MatchesPage() {
     return rows;
   }, [matches, filter, query]);
 
+  const hasContent = (matches !== null && matches.length > 0) || series.length > 0;
+
   let content: ReactNode;
-  if (matches !== null && matches.length === 0) {
-    content = <NoMatchesYet />;
-  } else if (matches === null) {
+  if (matches === null) {
     content = <MatchListSkeleton />;
+  } else if (!hasContent) {
+    content = <NoMatchesYet offline={offline} />;
   } else {
-    content = <MatchList matches={visible} />;
+    content = (
+      <div className="flex flex-col gap-8 sm:gap-10">
+        {series.length > 0 ? <SeriesSection series={series} /> : null}
+        {matches.length > 0 ? <MatchList matches={visible} /> : null}
+      </div>
+    );
   }
+
+  // The filters act on the matches list, so show them only when matches exist.
+  const showFilters = matches !== null && matches.length > 0;
 
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
@@ -100,14 +176,14 @@ export default function MatchesPage() {
         title="TUS PARTIDAS"
         description="Tus últimas partidas de CS2. Elige una y forja sus highlights en un reel."
         actions={
-          matches !== null && matches.length === 0 ? null : (
+          showFilters ? (
             <MatchFilters
               filter={filter}
               onFilterChange={setFilter}
               query={query}
               onQueryChange={setQuery}
             />
-          )
+          ) : null
         }
       />
 

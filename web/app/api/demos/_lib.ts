@@ -90,6 +90,14 @@ export function seriesJobsUrl(seriesId: string): string | null {
   return UUID_RE.test(seriesId) ? `${orchestratorUrl()}/api/jobs?${SERIES_ID_PARAM}=${seriesId}` : null;
 }
 
+/** How many recent jobs the Partidas index requests; the orchestrator caps it at 100. */
+export const JOBS_LIST_LIMIT = 100;
+
+/** Builds the upstream recent-jobs listing URL (most recent first, capped). */
+export function jobsListUrl(): string {
+  return `${orchestratorUrl()}/api/jobs?limit=${JOBS_LIST_LIMIT}`;
+}
+
 /** Mutation headers: the optional orchestrator token, server-side only. */
 export function mutationHeaders(): Record<string, string> {
   const token = process.env.ORCHESTRATOR_TOKEN;

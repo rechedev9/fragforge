@@ -8,6 +8,7 @@ import {
   callOrchestratorStreamingUpload,
   serviceUnavailable,
   jobUrl,
+  jobsListUrl,
   seriesJobsUrl,
   UPLOAD_BODY_LIMIT_EXCEEDED,
 } from './_lib';
@@ -134,4 +135,46 @@ export async function localSeries(seriesId: string): Promise<Response> {
     return demo;
   });
   return NextResponse.json({ demos });
+}
+
+/**
+ * GET /api/demos/jobs (local) - list the most recent demo jobs so Partidas can
+ * rediscover uploads and series after the app restarts. Forwards only a
+ * whitelisted per-job shape (snake_case → camelCase), never the raw upstream job
+ * objects: failure_reason, demo_file_name, series_id and target_steamid survive
+ * only when the orchestrator sends them, and the kill plan never leaves here.
+ */
+export async function localJobs(): Promise<Response> {
+  const res = await callOrchestrator(jobsListUrl());
+  if (res === null) return serviceUnavailable();
+  if (!res.ok) return forwardError(res);
+
+  type UpstreamJob = {
+    id: string;
+    status: string;
+    failure_reason?: string;
+    demo_file_name?: string;
+    series_id?: string;
+    target_steamid?: string;
+    created_at?: string;
+  };
+  const body = (await res.json()) as { jobs: UpstreamJob[] };
+  const jobs = body.jobs.map((job) => {
+    const out: {
+      jobId: string;
+      status: string;
+      failureReason?: string;
+      fileName?: string;
+      seriesId?: string;
+      targetSteamId?: string;
+      createdAt?: string;
+    } = { jobId: job.id, status: job.status };
+    if (job.failure_reason) out.failureReason = job.failure_reason;
+    if (job.demo_file_name) out.fileName = job.demo_file_name;
+    if (job.series_id) out.seriesId = job.series_id;
+    if (job.target_steamid) out.targetSteamId = job.target_steamid;
+    if (job.created_at) out.createdAt = job.created_at;
+    return out;
+  });
+  return NextResponse.json({ jobs });
 }

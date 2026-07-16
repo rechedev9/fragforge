@@ -3,10 +3,18 @@ import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset
 import { SERVICE_UNAVAILABLE_CODE, PLAN_READY_STATUSES } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
-import { deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
+import { canHaveRenderState, deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
 import { dataPlane, type DataPlane } from './dataplane';
 import { parsePublishAssistant, type PublishAssistant } from './publish-assistant';
+import {
+  ROSTER_READY,
+  listableJobs,
+  summarizeSeries,
+  jobToMatch,
+  type IndexedJob,
+  type SeriesSummary,
+} from './jobs-index';
 import { playsSelectionLabel } from '@/lib/format';
 
 /** Segment ids joined into the stable local id for a reel (not an artifact path). */
@@ -70,13 +78,6 @@ function variantLabel(variant: string): string {
   return VARIANT_LABELS[variant] ?? variant;
 }
 
-/**
- * Job statuses at or past which the roster scan result exists, so getSeries can
- * best-effort enrich a series demo with its map/score. Excludes queued/scanning
- * (no roster yet) and failed (nothing to read).
- */
-const ROSTER_READY = new Set(['scanned', 'parsing', 'parsed', 'recording', 'recorded', 'composing', 'composed', 'done']);
-
 function isJobId(id: string): boolean {
   return UUID_RE.test(id);
 }
@@ -133,6 +134,20 @@ function buildEditRequest(edit: EditConfig): EditRequestBody {
   const outroText = edit.outroText?.trim();
   if (edit.outro && outroText) body.outro_text = outroText;
   return body;
+}
+
+/**
+ * The render request's `music` field. A reel with no music sends nothing; a reel
+ * at default full volume sends the bare song key (byte-identical to legacy reels
+ * that predate volume); only a reduced volume upgrades to the `{ key, volume }`
+ * object the orchestrator accepts (volume in (0,1]).
+ */
+function buildMusicRequest(intent: ReelIntent): string | { key: string; volume: number } | undefined {
+  if (intent.mode !== 'music' || !intent.songId) return undefined;
+  if (intent.musicVolume !== undefined && intent.musicVolume < 1) {
+    return { key: intent.songId, volume: intent.musicVolume };
+  }
+  return intent.songId;
 }
 
 /** A queued placeholder Video for an intent; its live status is filled by reconcile. */
@@ -206,6 +221,11 @@ export class RealApiClient implements ApiClient {
     return fetch(url, { ...init, headers });
   }
 
+  /** Reads a job's roster scan (players + optional match context) from the proxy. */
+  private async fetchRoster(jobId: string): Promise<RosterResponse> {
+    return readJson<RosterResponse>(await this.send((dp) => ({ url: dp.rosterUrl(jobId) })));
+  }
+
   async scanDemo(file: File, opts?: { seriesId?: string }): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
     const dp = this.dp();
     const form = new FormData();
@@ -243,7 +263,7 @@ export class RealApiClient implements ApiClient {
           demo.match = cached;
         } else if (ROSTER_READY.has(raw.status)) {
           try {
-            const roster = await readJson<RosterResponse>(await this.send((dp) => ({ url: dp.rosterUrl(raw.jobId) })));
+            const roster = await this.fetchRoster(raw.jobId);
             const match = toRosterMatch(roster.match);
             if (match) {
               this.seriesMatches.set(raw.jobId, match);
@@ -355,7 +375,7 @@ export class RealApiClient implements ApiClient {
    * across reloads because every step is derived from the orchestrator's state.
    * Mock matches delegate to the fallback.
    */
-  async createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video> {
+  async createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; musicVolume?: number; variant?: string; editConfig?: EditConfig }): Promise<Video> {
     if (!isJobId(input.matchId)) return this.fallback.createVideo(input);
 
     const videoId = `${input.matchId}__${reelName(input.playIds)}`;
@@ -375,6 +395,8 @@ export class RealApiClient implements ApiClient {
       variant,
       editConfig: input.editConfig ?? DEFAULT_EDIT_CONFIG,
       songId: input.songId,
+      // Volume only rides along with a chosen song; without one it is meaningless.
+      musicVolume: input.songId ? input.musicVolume : undefined,
       title: `${playsSelectionLabel(pickedPlays) ?? 'Highlight'} - ${suffix}`,
       map: match?.map ?? 'Unknown',
       score: match?.score ?? '',
@@ -483,18 +505,7 @@ export class RealApiClient implements ApiClient {
   }
 
   private async reconcileOne(intent: ReelIntent): Promise<void> {
-    // Job and render status have no happy-path data dependency; fetch in parallel.
-    const [job, render] = await Promise.all([
-      this.fetchStatusFull(intent.jobId),
-      this.fetchRenderStatus(intent.jobId, variantOf(intent)),
-    ]);
-    // Capture the server's real artifact names so applyView addresses the reel
-    // by the editor's file names instead of guessing from segment ids.
-    if (render.videoName) {
-      const names: { video: string; cover?: string } = { video: render.videoName };
-      if (render.coverName) names.cover = render.coverName;
-      this.artifactNames.set(intent.videoId, names);
-    }
+    const job = await this.fetchStatusFull(intent.jobId);
     if (job === null) {
       // Memory-mode orchestrator restart drops jobs; surface it instead of spinning.
       this.applyView(intent, {
@@ -503,6 +514,21 @@ export class RealApiClient implements ApiClient {
         failureReason: 'job no longer available (the local orchestrator may have restarted)',
       });
       return;
+    }
+    // The render variant only exists once a render POST has been driven (at/after
+    // 'recorded'); before that the GET is a guaranteed 404 that floods the browser
+    // network console the whole recording phase, so gate the call on the job status
+    // and use 'none' — the same value the GET would map a 404 to — otherwise.
+    const render: { status: RenderStatus; failureReason?: string; videoName?: string; coverName?: string } =
+      canHaveRenderState(job.status)
+        ? await this.fetchRenderStatus(intent.jobId, variantOf(intent))
+        : { status: 'none' };
+    // Capture the server's real artifact names so applyView addresses the reel
+    // by the editor's file names instead of guessing from segment ids.
+    if (render.videoName) {
+      const names: { video: string; cover?: string } = { video: render.videoName };
+      if (render.coverName) names.cover = render.coverName;
+      this.artifactNames.set(intent.videoId, names);
     }
     const view = deriveReelView({
       jobStatus: job.status,
@@ -566,7 +592,7 @@ export class RealApiClient implements ApiClient {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  music: intent.mode === 'music' ? intent.songId : undefined,
+                  music: buildMusicRequest(intent),
                   edit: buildEditRequest(intent.editConfig),
                 }),
               },
@@ -692,10 +718,53 @@ export class RealApiClient implements ApiClient {
       return { recordEnabled: false, status: 'offline', tools: [] };
     }
   }
-  listMatches(): Promise<Match[]> {
-    // The desktop app has no match library: a match is opened by job id from
-    // the upload flow, not listed.
-    return Promise.resolve([]);
+  /**
+   * Rediscovers the demos uploaded on this PC by listing the orchestrator's
+   * persisted jobs, so Partidas is populated after an app restart instead of
+   * only being reachable by a kept URL. Only jobs past a roster scan list; each
+   * lists as one Match per demo (a series still yields one entry per map, the
+   * Partidas model), best-effort enriched from its roster in parallel with
+   * per-job failures tolerated, newest first.
+   */
+  async listMatches(): Promise<Match[]> {
+    const jobs = await this.fetchJobs();
+    return Promise.all(listableJobs(jobs).map((job) => this.jobToMatchEnriched(job)));
+  }
+
+  /**
+   * One summary per uploaded series, derived from the same jobs listing, so
+   * Partidas can offer a way into each series even when its maps list
+   * individually below. Series with maps still scanning are included so a fresh
+   * bulk upload is discoverable immediately.
+   */
+  async listSeriesSummaries(): Promise<SeriesSummary[]> {
+    return summarizeSeries(await this.fetchJobs());
+  }
+
+  /** The recent demo jobs the orchestrator persists (the Partidas index feed). */
+  private async fetchJobs(): Promise<IndexedJob[]> {
+    const body = await readJson<{ jobs: IndexedJob[] }>(await this.send((dp) => ({ url: dp.jobsUrl })));
+    return body.jobs;
+  }
+
+  /**
+   * One job → its Match, best-effort enriched from the roster: the demo's map
+   * and, when the job's target is in the roster, that player's scoreboard. A
+   * roster that is not ready (still scanning) or a transient failure leaves a
+   * filename-titled, zeroed entry rather than rejecting the whole list.
+   */
+  private async jobToMatchEnriched(job: IndexedJob): Promise<Match> {
+    try {
+      const roster = await this.fetchRoster(job.jobId);
+      const enrichment: { map?: string; player?: DemoPlayer } = {};
+      if (roster.match) enrichment.map = roster.match.map;
+      const row = job.targetSteamId ? roster.players.find((p) => p.steamid64 === job.targetSteamId) : undefined;
+      if (row) enrichment.player = toDemoPlayer(row);
+      return jobToMatch(job, enrichment);
+    } catch {
+      // Roster not ready (409) or a transient failure: still list the demo.
+      return jobToMatch(job);
+    }
   }
   /** @deprecated Superseded by scanDemo + parseDemo. */
   uploadDemo(input: { fileName: string }): Promise<Match> {

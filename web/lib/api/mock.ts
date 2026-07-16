@@ -1,5 +1,6 @@
 import type { ApiClient } from './client';
 import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch, SeriesDemo } from './types';
+import type { SeriesSummary } from './jobs-index';
 import { DEFAULT_EDIT_CONFIG } from './reel-store';
 import {
   PUBLISH_ASSISTANT_SCHEMA_VERSION,
@@ -318,6 +319,12 @@ export class MockApiClient implements ApiClient {
     return fixtureMatches.map((m) => ({ ...m, stats: { ...m.stats } }));
   }
 
+  // The offline/dev mock has no persisted orchestrator jobs to rediscover, so it
+  // surfaces no series; the /matches series section stays empty here.
+  listSeriesSummaries(): Promise<SeriesSummary[]> {
+    return Promise.resolve([]);
+  }
+
   async getMatch(id: string): Promise<Match | null> {
     await delay();
     const match = uploadedMatches.find((m) => m.id === id) ?? fixtureMatches.find((m) => m.id === id);
@@ -409,7 +416,7 @@ export class MockApiClient implements ApiClient {
     ];
   }
 
-  async createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; variant?: string; editConfig?: EditConfig }): Promise<Video> {
+  async createVideo(input: { matchId: string; playIds: string[]; mode: RenderMode; songId?: string; musicVolume?: number; variant?: string; editConfig?: EditConfig }): Promise<Video> {
     await delay();
     const match = uploadedMatches.find((m) => m.id === input.matchId) ?? fixtureMatches.find((m) => m.id === input.matchId);
     const plays = uploadedPlays.get(input.matchId) ?? playsForMatch(input.matchId);
