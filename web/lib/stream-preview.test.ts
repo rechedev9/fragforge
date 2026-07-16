@@ -7,6 +7,7 @@ import {
   calculateCropCoverGeometry,
   clampStreamerBannerPosition,
   defaultStreamerBannerPosition,
+  killfeedBaseTopPixels,
   killfeedKillsForCue,
   killfeedNoticePlacement,
   killfeedSampleFrameSeconds,
@@ -92,20 +93,20 @@ test('legacy 520/1400 bands cover without changing the source aspect ratio', () 
   }
 });
 
-test('killfeed overlay uses a proportional nearest-even height for its 620px output', () => {
+test('killfeed overlay uses a proportional nearest-even height for its 930px output', () => {
   assert.equal(
     proportionalEvenKillfeedHeight(
       { x: 0.68, y: 0.04, width: 0.31, height: 0.14 },
       SOURCE,
     ),
-    158,
+    236,
   );
   assert.equal(
     proportionalEvenKillfeedHeight(
       { x: 0, y: 0, width: 1, height: 1 },
       SOURCE,
     ),
-    348,
+    524,
   );
   assert.equal(
     proportionalEvenKillfeedHeight(
@@ -242,24 +243,33 @@ test('killfeed sampling waits for the notice without moving its display cue', ()
   assert.equal(killfeedSampleFrameSeconds(clips, 3), 3);
 });
 
-test('synthetic notice placement stacks 48px notices with an 8px gap from the base top', () => {
-  const first = killfeedNoticePlacement(0, 64);
-  assert.equal(first.heightPercent, (48 * 100) / 1920);
-  assert.equal(first.rightPercent, (24 * 100) / 1080);
-  assert.equal(first.topPercent, (64 * 100) / 1920);
-
-  const second = killfeedNoticePlacement(1, 64);
-  assert.equal(second.topPercent, ((64 + 48 + 8) * 100) / 1920);
-  assert.equal(second.heightPercent, first.heightPercent);
-  assert.equal(second.rightPercent, first.rightPercent);
-
-  const third = killfeedNoticePlacement(2, 64);
-  assert.equal(third.topPercent, ((64 + 2 * (48 + 8)) * 100) / 1920);
+test('killfeed base top follows the 24% gameplay band for each variant', () => {
+  // 40/60 stack: facecam 768 over 1152 gameplay -> 768 + round(0.24*1152).
+  assert.equal(killfeedBaseTopPixels(768, 1152), 1044);
+  // full-frame: no facecam, full 1920 gameplay -> round(0.24*1920).
+  assert.equal(killfeedBaseTopPixels(0, 1920), 461);
+  // legacy stack: facecam 520 over 1400 gameplay -> 520 + round(0.24*1400).
+  assert.equal(killfeedBaseTopPixels(520, 1400), 856);
 });
 
-test('synthetic notice placement honors a stacked base top offset', () => {
-  const stacked = killfeedNoticePlacement(0, 768 + 72);
-  assert.equal(stacked.topPercent, ((768 + 72) * 100) / 1920);
+test('synthetic notice placement stacks 72px notices upward with an 8px gap from the base top', () => {
+  const base = killfeedBaseTopPixels(768, 1152); // 1044
+  const first = killfeedNoticePlacement(0, base);
+  assert.equal(first.heightPercent, (72 * 100) / 1920);
+  assert.equal(first.topPercent, (1044 * 100) / 1920);
+
+  // Upward: each later concurrent notice sits one 80px step above the base.
+  const second = killfeedNoticePlacement(1, base);
+  assert.equal(second.topPercent, ((1044 - (72 + 8)) * 100) / 1920);
+  assert.equal(second.heightPercent, first.heightPercent);
+
+  const third = killfeedNoticePlacement(2, base);
+  assert.equal(third.topPercent, ((1044 - 2 * (72 + 8)) * 100) / 1920);
+});
+
+test('synthetic notice placement anchors at the full-frame base top', () => {
+  const base = killfeedBaseTopPixels(0, 1920); // 461
+  assert.equal(killfeedNoticePlacement(0, base).topPercent, (461 * 100) / 1920);
 });
 
 test('killfeedKillsForCue returns the kills index-aligned with the matching cue', () => {

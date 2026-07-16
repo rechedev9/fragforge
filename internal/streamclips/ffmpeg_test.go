@@ -2,6 +2,7 @@ package streamclips
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"path/filepath"
 	"slices"
@@ -384,10 +385,13 @@ func TestBuildFFmpegArgsBuildsNoticeOverlayGraph(t *testing.T) {
 		t.Fatalf("BuildFFmpegArgs error = %v", err)
 	}
 
+	slide := killfeedSlideX(1)
 	wantFilter := strings.Join(append(
 		append([]string{`[0:v]split=2[facein][gamein]`}, stackedLayoutBranches...),
-		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
-		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[1:v]format=rgba,setpts=PTS-STARTPTS,fade=t=out:st=3.450000:d=0.350000:alpha=1,split=2[nsharp0_0][nblurpre0_0]`,
+		`[nblurpre0_0]gblur=sigma=24:sigmaV=0[nblur0_0]`,
+		fmt.Sprintf(`[layout][nblur0_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover0]`, slide),
+		fmt.Sprintf(`[kfover0][nsharp0_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[content]`, slide),
 		`[content]fps=60,format=yuv420p[v]`,
 	), ";")
 	if got := filterComplexArg(t, args); got != wantFilter {
@@ -423,7 +427,7 @@ func TestBuildFFmpegArgsNoticeInputIndexShiftsAfterMusic(t *testing.T) {
 	}
 	filter := filterComplexArg(t, args)
 	// Source is input 0 and music is input 1, so the notice PNG is input 2.
-	if !strings.Contains(filter, `[2:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`) {
+	if !strings.Contains(filter, `[2:v]format=rgba,setpts=PTS-STARTPTS,fade=t=out:st=3.450000:d=0.350000:alpha=1,split=2[nsharp0_0][nblurpre0_0]`) {
 		t.Fatalf("notice input index did not shift past music: %s", filter)
 	}
 	if strings.Contains(filter, `[1:v]format=rgba`) {
@@ -455,14 +459,22 @@ func TestBuildFFmpegArgsMixesNoticesAndFrozenCropFallback(t *testing.T) {
 		t.Fatalf("BuildFFmpegArgs error = %v", err)
 	}
 
+	slide1 := killfeedSlideX(1)
+	slide2 := killfeedSlideX(2)
 	wantFilter := strings.Join(append(
 		append([]string{`[0:v]split=3[facein][gamein][killfeedin1]`}, stackedLayoutBranches...),
-		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
-		`[2:v]format=rgba,setpts=PTS-STARTPTS[notice0_1]`,
-		`[killfeedin1]trim=start=2.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed1]`,
-		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[kfover0]`,
-		`[kfover0][notice0_1]overlay=x=W-w-24:y=840+56*(between(t\,1.000000\,3.800000)):enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[kfover1]`,
-		`[kfover1][killfeed1]overlay=x=W-w-24:y=840:enable='between(t\,2.000000\,4.800000)':eof_action=pass:shortest=0[content]`,
+		`[1:v]format=rgba,setpts=PTS-STARTPTS,fade=t=out:st=3.450000:d=0.350000:alpha=1,split=2[nsharp0_0][nblurpre0_0]`,
+		`[nblurpre0_0]gblur=sigma=24:sigmaV=0[nblur0_0]`,
+		`[2:v]format=rgba,setpts=PTS-STARTPTS,fade=t=out:st=3.450000:d=0.350000:alpha=1,split=2[nsharp0_1][nblurpre0_1]`,
+		`[nblurpre0_1]gblur=sigma=24:sigmaV=0[nblur0_1]`,
+		`[killfeedin1]trim=start=2.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=930:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000,fade=t=out:st=4.450000:d=0.350000:alpha=1,split=2[kfsharp1][kfblurpre1]`,
+		`[kfblurpre1]gblur=sigma=24:sigmaV=0[kfblur1]`,
+		fmt.Sprintf(`[layout][nblur0_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover0]`, slide1),
+		fmt.Sprintf(`[kfover0][nsharp0_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[kfover1]`, slide1),
+		fmt.Sprintf(`[kfover1][nblur0_1]overlay=x='%s':y=1044-80*(between(t\,1.000000\,3.800000)):eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover2]`, slide1),
+		fmt.Sprintf(`[kfover2][nsharp0_1]overlay=x='%s':y=1044-80*(between(t\,1.000000\,3.800000)):eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[kfover3]`, slide1),
+		fmt.Sprintf(`[kfover3][kfblur1]overlay=x='%s':y=1044:eval=frame:enable='between(t\,2.000000\,2.080000)':eof_action=pass:shortest=0[kfover4]`, slide2),
+		fmt.Sprintf(`[kfover4][kfsharp1]overlay=x='%s':y=1044:eval=frame:enable='between(t\,2.080000\,4.800000)':eof_action=pass:shortest=0[content]`, slide2),
 		`[content]fps=60,format=yuv420p[v]`,
 	), ";")
 	if got := filterComplexArg(t, args); got != wantFilter {
@@ -495,15 +507,85 @@ func TestBuildFFmpegArgsReflowsOverlappingNoticeEvents(t *testing.T) {
 	}
 
 	filter := filterComplexArg(t, args)
+	// The first notice sits at baseY; the second, overlapping it, reflows one slot
+	// UP (80 = KillfeedNoticeHeight+gap) so the caption band below baseY stays
+	// clear; the third, after both clear, is back at baseY. Each notice
+	// contributes a blurred slide op then a sharp settle op.
 	wants := []string{
-		`[layout][notice0_0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)'`,
-		`[kfover0][notice1_0]overlay=x=W-w-24:y=840+56*(between(t\,1.000000\,3.800000)):enable='between(t\,1.125000\,3.925000)'`,
-		`[kfover1][notice2_0]overlay=x=W-w-24:y=840:enable='between(t\,4.000000\,5.000000)'`,
+		fmt.Sprintf(`[layout][nblur0_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.000000\,1.080000)'`, killfeedSlideX(1)),
+		fmt.Sprintf(`[kfover0][nsharp0_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.080000\,3.800000)'`, killfeedSlideX(1)),
+		fmt.Sprintf(`[kfover1][nblur1_0]overlay=x='%s':y=1044-80*(between(t\,1.000000\,3.800000)):eval=frame:enable='between(t\,1.125000\,1.205000)'`, killfeedSlideX(1.125)),
+		fmt.Sprintf(`[kfover2][nsharp1_0]overlay=x='%s':y=1044-80*(between(t\,1.000000\,3.800000)):eval=frame:enable='between(t\,1.205000\,3.925000)'`, killfeedSlideX(1.125)),
+		fmt.Sprintf(`[kfover3][nblur2_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,4.000000\,4.080000)'`, killfeedSlideX(4)),
 	}
 	for _, want := range wants {
 		if !strings.Contains(filter, want) {
 			t.Errorf("filter_complex missing %q: %s", want, filter)
 		}
+	}
+}
+
+func TestBuildFFmpegArgsSuppressesDegenerateNoticeEntrance(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	// The cue lands at duration-0.05, so its window (0.05s) is shorter than the
+	// slide+settle (0.12s). Sliding there would render only blurred mid-slide
+	// frames before the clip cuts, so the entrance is skipped: one sharp op holds
+	// the notice at center for the whole window.
+	clip := ClipRange{
+		ID:              "clip-001",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{14.95},
+	}
+	plan := EditPlan{
+		Variant:      VariantStreamerFullframeNoCam,
+		GameplayCrop: CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+		KillfeedCrop: &killfeedCrop,
+	}
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:          "source.mp4",
+		OutputPath:          "out.mp4",
+		KillfeedNoticePaths: [][]string{{"n0.png"}},
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+
+	wantFilter := strings.Join([]string{
+		`[0:v]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[layout]`,
+		`[1:v]format=rgba,setpts=PTS-STARTPTS,fade=t=out:st=4.950000:d=0.050000:alpha=1[nsharp0_0]`,
+		`[layout][nsharp0_0]overlay=x='(W-w)/2':y=461:eval=frame:enable='between(t\,4.950000\,5.000000)':eof_action=pass:shortest=0[content]`,
+		`[content]fps=60,format=yuv420p[v]`,
+	}, ";")
+	got := filterComplexArg(t, args)
+	if got != wantFilter {
+		t.Fatalf("filter_complex mismatch\n got: %s\nwant: %s", got, wantFilter)
+	}
+	// A suppressed entrance emits no blur variant and no per-notice split.
+	for _, forbidden := range []string{"nblur", "gblur", "split=2["} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("suppressed entrance must not emit %q: %s", forbidden, got)
+		}
+	}
+	// The x is the static center, never the slide expression.
+	if strings.Contains(got, "if(lt(t") {
+		t.Fatalf("suppressed entrance must hold a static centered x, not slide: %s", got)
+	}
+}
+
+func TestKillfeedStackYStacksUpwardAboveBaseY(t *testing.T) {
+	const baseY = 1044
+	// No live predecessor: the notice holds baseY.
+	if got := killfeedStackY(baseY, 1, 3.8, nil); got != "1044" {
+		t.Fatalf("killfeedStackY with no predecessor = %q, want %q", got, "1044")
+	}
+	// One live predecessor: slot 1 sits one step ABOVE baseY (baseY-80), keeping
+	// the caption band below baseY clear.
+	prior := []noticeLifetime{{start: 1, end: 3.8}}
+	want := "1044-80*(between(t\\,1.000000\\,3.800000))"
+	if got := killfeedStackY(baseY, 1.1, 3.9, prior); got != want {
+		t.Fatalf("killfeedStackY slot 1 = %q, want %q (baseY-80)", got, want)
 	}
 }
 
@@ -524,10 +606,13 @@ func TestBuildFFmpegArgsFrozenCropFallbackGeometry(t *testing.T) {
 		t.Fatalf("BuildFFmpegArgs error = %v", err)
 	}
 
+	slide := killfeedSlideX(1)
 	wantFilter := strings.Join(append(
 		append([]string{`[0:v]split=3[facein][gamein][killfeedin0]`}, stackedLayoutBranches...),
-		`[killfeedin0]trim=start=1.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=620:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000[killfeed0]`,
-		`[layout][killfeed0]overlay=x=W-w-24:y=840:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[killfeedin0]trim=start=1.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=930:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000,fade=t=out:st=3.450000:d=0.350000:alpha=1,split=2[kfsharp0][kfblurpre0]`,
+		`[kfblurpre0]gblur=sigma=24:sigmaV=0[kfblur0]`,
+		fmt.Sprintf(`[layout][kfblur0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover0]`, slide),
+		fmt.Sprintf(`[kfover0][kfsharp0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[content]`, slide),
 		`[content]fps=60,format=yuv420p[v]`,
 	), ";")
 	if got := filterComplexArg(t, args); got != wantFilter {
@@ -649,18 +734,75 @@ func TestBuildFFmpegArgsFullframeNoticeGraphOmitsDegenerateSplit(t *testing.T) {
 		t.Fatalf("BuildFFmpegArgs error = %v", err)
 	}
 
+	slide := killfeedSlideX(1)
 	wantFilter := strings.Join([]string{
 		`[0:v]crop=w=iw*1.000000:h=ih*1.000000:x=iw*0.000000:y=ih*0.000000,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[layout]`,
-		`[1:v]format=rgba,setpts=PTS-STARTPTS[notice0_0]`,
-		`[layout][notice0_0]overlay=x=W-w-24:y=64:enable='between(t\,1.000000\,3.800000)':eof_action=pass:shortest=0[content]`,
+		`[1:v]format=rgba,setpts=PTS-STARTPTS,fade=t=out:st=3.450000:d=0.350000:alpha=1,split=2[nsharp0_0][nblurpre0_0]`,
+		`[nblurpre0_0]gblur=sigma=24:sigmaV=0[nblur0_0]`,
+		fmt.Sprintf(`[layout][nblur0_0]overlay=x='%s':y=461:eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover0]`, slide),
+		fmt.Sprintf(`[kfover0][nsharp0_0]overlay=x='%s':y=461:eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[content]`, slide),
 		`[content]fps=60,format=yuv420p[v]`,
 	}, ";")
 	got := filterComplexArg(t, args)
 	if got != wantFilter {
 		t.Fatalf("filter_complex mismatch\n got: %s\nwant: %s", got, wantFilter)
 	}
-	if strings.Contains(got, "split") {
-		t.Fatalf("fullframe notice graph must not emit a degenerate split: %s", got)
+	// The fullframe layout must not split the source: the only split is the
+	// per-notice sharp/blur split, never a degenerate [0:v] layout split.
+	if strings.Contains(got, "[0:v]split") {
+		t.Fatalf("fullframe notice graph must not emit a degenerate layout split: %s", got)
+	}
+}
+
+func TestKillfeedBaseYSitsAtGameplayBandFraction(t *testing.T) {
+	tests := []struct {
+		name    string
+		variant string
+		want    int
+	}{
+		// 24% down the gameplay band. Facecam bands offset by the facecam height.
+		{name: "facecam 40/60", variant: VariantStreamer4060, want: 768 + 276},         // round(0.24*1152)
+		{name: "legacy stack", variant: VariantStreamerVerticalStack, want: 520 + 336}, // round(0.24*1400)
+		{name: "fullframe", variant: VariantStreamerFullframeNoCam, want: 461},         // round(0.24*1920)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			layout, ok := VariantByName(tt.variant)
+			if !ok {
+				t.Fatalf("variant %q not registered", tt.variant)
+			}
+			if got := killfeedBaseY(layout); got != tt.want {
+				t.Fatalf("killfeedBaseY(%s) = %d, want %d", tt.variant, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKillfeedSlideXEasesFromRightEdgeToCenterWithOvershoot(t *testing.T) {
+	got := killfeedSlideX(1)
+	// Pin the whole expression as a literal so a change to the ease curve (the
+	// quadratic ease-out factor) or the settle term is caught here rather than
+	// silently tracking killfeedSlideX itself. Independent of notice width: it
+	// centers via overlay's W and w, eases out from the right edge to 12px past
+	// center over 0.08s, then settles linearly back over 0.04s and holds.
+	// Commas are escaped for the filtergraph.
+	want := `if(lt(t\,1.080000)\,W+(((W-w)/2-12)-W)*(1-(1-(t-1.000000)/0.080000)*(1-(t-1.000000)/0.080000))\,if(lt(t\,1.120000)\,(W-w)/2-12*(1-(t-1.080000)/0.040000)\,(W-w)/2))`
+	if got != want {
+		t.Fatalf("killfeedSlideX(1) mismatch\n got: %s\nwant: %s", got, want)
+	}
+	if strings.Contains(got, ",") && !strings.Contains(got, `\,`) {
+		t.Fatalf("killfeedSlideX must escape commas for the filtergraph: %s", got)
+	}
+}
+
+func TestKillfeedFadeFilterShortensForShortWindows(t *testing.T) {
+	// A full-length window fades over the fixed tail.
+	if got := killfeedFadeFilter(1, 3.8); got != "fade=t=out:st=3.450000:d=0.350000:alpha=1" {
+		t.Fatalf("full-window fade = %q", got)
+	}
+	// A window shorter than the fade shrinks the fade so it always fits.
+	if got := killfeedFadeFilter(1, 1.2); got != "fade=t=out:st=1.000000:d=0.200000:alpha=1" {
+		t.Fatalf("short-window fade = %q", got)
 	}
 }
 

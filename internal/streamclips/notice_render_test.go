@@ -101,9 +101,9 @@ func TestRenderNoticeBorderPixel(t *testing.T) {
 		t.Fatalf("RenderNotice: %v", err)
 	}
 	r, g, b, a := img.At(0, 0).RGBA()
-	// #B50000 opaque, compared in 8-bit space.
-	if r>>8 != 0xB5 || g>>8 != 0x00 || b>>8 != 0x00 || a>>8 != 0xFF {
-		t.Fatalf("border pixel at (0,0): got rgba(%d,%d,%d,%d), want #B50000 opaque", r>>8, g>>8, b>>8, a>>8)
+	// #F40708 opaque, compared in 8-bit space.
+	if r>>8 != 0xF4 || g>>8 != 0x07 || b>>8 != 0x08 || a>>8 != 0xFF {
+		t.Fatalf("border pixel at (0,0): got rgba(%d,%d,%d,%d), want #F40708 opaque", r>>8, g>>8, b>>8, a>>8)
 	}
 }
 
@@ -112,8 +112,8 @@ func TestRenderNoticeInteriorPlatePixel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderNotice: %v", err)
 	}
-	// A near-corner interior pixel is inside the 2px border but clear of the
-	// vertically centered, 10px-padded content: it should be the plate fill.
+	// A near-corner interior pixel is inside the 3px border but clear of the
+	// vertically centered, 15px-padded content: it should be the plate fill.
 	r, g, b, a := img.At(4, 4).RGBA()
 	if r>>8 != 0 || g>>8 != 0 || b>>8 != 0 {
 		t.Fatalf("plate pixel (4,4): got rgb(%d,%d,%d), want black", r>>8, g>>8, b>>8)

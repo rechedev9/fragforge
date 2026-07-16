@@ -66,7 +66,7 @@ export function calculateCropCoverGeometry(
   };
 }
 
-const KILLFEED_WIDTH = 620;
+const KILLFEED_WIDTH = 930;
 const KILLFEED_SAMPLE_DELAY_SECONDS = 0.35;
 const KILLFEED_SAMPLE_END_GUARD_SECONDS = 0.05;
 const KILLFEED_TAIL_SECONDS = 2.8;
@@ -130,32 +130,42 @@ export function killfeedSampleFrameSeconds(clips: StreamClipRange[], cue: number
 }
 
 // Synthetic notice stack geometry, in output pixels on the 1080x1920 canvas,
-// mirroring the render: 48px-tall notices right-aligned 24px from the edge,
-// stacked from a base top with an 8px gap between them.
-const KILLFEED_OUTPUT_WIDTH = 1080;
+// mirroring the render: 72px-tall notices horizontally centered, stacked upward
+// from a base top with an 8px gap between them (later concurrent notices sit
+// above earlier ones). The base top is a fixed fraction down the gameplay band.
 const KILLFEED_OUTPUT_HEIGHT = 1920;
-const KILLFEED_NOTICE_HEIGHT = 48;
+const KILLFEED_NOTICE_HEIGHT = 72;
 const KILLFEED_NOTICE_GAP = 8;
-const KILLFEED_NOTICE_RIGHT_MARGIN = 24;
+const KILLFEED_GAMEPLAY_TOP_FRACTION = 0.24;
 
 export type KillfeedNoticePlacement = {
   topPercent: number;
   heightPercent: number;
-  rightPercent: number;
 };
 
 /**
- * Placement of the notice at stack position `index` (0 = topmost), as
- * percentages of the preview box so it scales with the box. `baseTopPixels` is
- * the same base top the frozen-crop overlay uses (64 full-frame, or
- * faceHeight + 72 stacked) in 1080x1920 output pixels.
+ * Top of the killfeed in 1080x1920 output pixels, mirroring killfeedBaseY in
+ * internal/streamclips/ffmpeg.go: a fixed fraction down the gameplay band.
+ * `gameplayTopPixels` is the facecam band height (0 for full-frame variants),
+ * and `gameplayHeightPixels` is the gameplay band height.
+ */
+export function killfeedBaseTopPixels(gameplayTopPixels: number, gameplayHeightPixels: number): number {
+  return gameplayTopPixels + Math.round(KILLFEED_GAMEPLAY_TOP_FRACTION * gameplayHeightPixels);
+}
+
+/**
+ * Placement of the notice at stack position `index` (0 = base), as percentages
+ * of the preview box so it scales with the box. `baseTopPixels` is the same base
+ * top the frozen-crop overlay uses. Notices stack upward, so slot `index` sits
+ * `index` steps above the base. Horizontal centering is a fixed CSS concern the
+ * component handles; the render also adds slide-in/fade entrance and exit
+ * animation the static preview intentionally omits.
  */
 export function killfeedNoticePlacement(index: number, baseTopPixels: number): KillfeedNoticePlacement {
-  const topPixels = baseTopPixels + index * (KILLFEED_NOTICE_HEIGHT + KILLFEED_NOTICE_GAP);
+  const topPixels = baseTopPixels - index * (KILLFEED_NOTICE_HEIGHT + KILLFEED_NOTICE_GAP);
   return {
     topPercent: (topPixels * 100) / KILLFEED_OUTPUT_HEIGHT,
     heightPercent: (KILLFEED_NOTICE_HEIGHT * 100) / KILLFEED_OUTPUT_HEIGHT,
-    rightPercent: (KILLFEED_NOTICE_RIGHT_MARGIN * 100) / KILLFEED_OUTPUT_WIDTH,
   };
 }
 

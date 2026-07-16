@@ -8,6 +8,7 @@ import {
   activeTextOverlays,
   calculateCropCoverGeometry,
   clampStreamerBannerPosition,
+  killfeedBaseTopPixels,
   killfeedKillsForCue,
   killfeedNoticePlacement,
   killfeedSampleFrameSeconds,
@@ -23,10 +24,7 @@ const FULL_FRAME: NormalizedRect = { x: 0, y: 0, width: 1, height: 1 };
 const EMPTY_CLIPS: StreamClipRange[] = [];
 const PREVIEW_WIDTH = 1080;
 const PREVIEW_HEIGHT = 1920;
-const KILLFEED_WIDTH = 620;
-const KILLFEED_RIGHT_MARGIN = 24;
-const KILLFEED_FULL_FRAME_TOP = 64;
-const KILLFEED_STACK_GAP = 72;
+const KILLFEED_WIDTH = 930;
 const LAST_FRAME_MARGIN_SECONDS = 0.001;
 const SEEK_TOLERANCE_SECONDS = 0.005;
 const HAVE_METADATA = 1;
@@ -129,7 +127,7 @@ function CroppedFrame({
 /**
  * Shows the exact selected source crop. Unlike the gameplay and facecam bands,
  * this does not use cover geometry: the whole normalized notice rectangle is
- * scaled to the backend's fixed 620-pixel width and proportional even height.
+ * scaled to the backend's fixed 930-pixel width and proportional even height.
  */
 function KillfeedOverlayFrame({
   videoSrc,
@@ -158,7 +156,7 @@ function KillfeedOverlayFrame({
       style={{
         width: `${(KILLFEED_WIDTH * 100) / PREVIEW_WIDTH}%`,
         height: outputHeight === null ? '0' : `${(outputHeight * 100) / PREVIEW_HEIGHT}%`,
-        right: `${(KILLFEED_RIGHT_MARGIN * 100) / PREVIEW_WIDTH}%`,
+        left: `${(((PREVIEW_WIDTH - KILLFEED_WIDTH) / 2) * 100) / PREVIEW_WIDTH}%`,
         top: `${(topPixels * 100) / PREVIEW_HEIGHT}%`,
       }}
     >
@@ -245,9 +243,11 @@ function useKillfeedNoticeUrls(kills: KillfeedKill[]): (string | null)[] {
 }
 
 /**
- * Right-aligned stack of synthetic kill notices for a cue that has confirmed
- * kills. Geometry mirrors the render (48px notices, 24px right margin, 8px gap)
- * scaled to the preview box; a notice is shown only once its image is ready.
+ * Horizontally centered, upward-growing stack of synthetic kill notices for a
+ * cue that has confirmed kills. Geometry mirrors the render (72px notices, 8px
+ * gap) scaled to the preview box; a notice is shown only once its image is
+ * ready. This is static placement parity only: the render also adds a slide-in
+ * and fade entrance/exit the preview intentionally omits.
  */
 function SyntheticKillfeedNotices({
   kills,
@@ -274,7 +274,8 @@ function SyntheticKillfeedNotices({
             className="absolute"
             style={{
               top: `${placement.topPercent}%`,
-              right: `${placement.rightPercent}%`,
+              left: '50%',
+              transform: 'translateX(-50%)',
               height: `${placement.heightPercent}%`,
               width: 'auto',
               maxWidth: 'none',
@@ -327,9 +328,7 @@ export function StreamPreview({
     ? (faceLayout.height * 100) / (faceLayout.height + layout.gameplay.height)
     : 0;
   const bannerPosition = resolveStreamerBannerPosition(variant, streamerPositionY);
-  const killfeedTop = faceLayout
-    ? faceLayout.height + KILLFEED_STACK_GAP
-    : KILLFEED_FULL_FRAME_TOP;
+  const killfeedTop = killfeedBaseTopPixels(faceLayout ? faceLayout.height : 0, layout.gameplay.height);
   const activeKillfeedCue = killfeedCrop
     ? resolveActiveKillfeedCue(clips, frameSeconds)
     : null;

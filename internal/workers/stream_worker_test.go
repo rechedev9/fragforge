@@ -284,10 +284,12 @@ func TestStreamRenderWorkerRendersSyntheticKillfeedNotices(t *testing.T) {
 		t.Fatalf("render args missing notice PNG input: %v", renderArgs)
 	}
 	renderFilter := argValue(renderArgs, "-filter_complex")
-	if !strings.Contains(renderFilter, "notice0_0") || !strings.Contains(renderFilter, "overlay") {
-		t.Fatalf("render filter missing synthetic notice overlay: %s", renderFilter)
+	for _, want := range []string{"nsharp0_0", "nblur0_0", "overlay"} {
+		if !strings.Contains(renderFilter, want) {
+			t.Fatalf("render filter missing synthetic notice overlay (%q): %s", want, renderFilter)
+		}
 	}
-	for _, forbidden := range []string{"killfeedin", "scale=620:-2"} {
+	for _, forbidden := range []string{"killfeedin", "scale=930:-2"} {
 		if strings.Contains(renderFilter, forbidden) {
 			t.Fatalf("synthetic-notice render fell back to a frozen crop (%q): %s", forbidden, renderFilter)
 		}
@@ -341,7 +343,7 @@ func TestStreamRenderWorkerFreezesKillfeedCropWithoutKills(t *testing.T) {
 		t.Fatalf("runner calls = %d, want %d (render only)", got, want)
 	}
 	renderFilter := argValue(runner.calls[0].args, "-filter_complex")
-	if !strings.Contains(renderFilter, "killfeedin0") || !strings.Contains(renderFilter, "scale=620:-2") {
+	if !strings.Contains(renderFilter, "killfeedin0") || !strings.Contains(renderFilter, "scale=930:-2") {
 		t.Fatalf("frozen-crop fallback filter missing: %s", renderFilter)
 	}
 	for _, a := range runner.calls[0].args {
@@ -448,13 +450,14 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	if !ok {
 		t.Fatal("storage missing .ass caption artifact")
 	}
-	if !strings.Contains(string(ass), `Dialogue: 0,0:00:00.00,0:00:01.00,Karaoke,,0,0,0,,{\k50}nice {\k25}gg`) {
+	// The leading override block carries the entrance pop and \pos; this test
+	// only cares that cues are ordered chronologically with their \k timings.
+	if !strings.Contains(string(ass), `\k50}nice {\k25}gg`) {
 		t.Fatalf("caption artifact does not order cues chronologically: %s", ass)
 	}
 	if !strings.Contains(string(ass), "Style: Karaoke,"+mediafont.FamilyName+",") {
 		t.Fatalf("caption artifact does not use %s: %s", mediafont.FamilyName, ass)
 	}
-
 	resultKey, err := streamclips.RenderResultKey(id, streamclips.VariantStreamer4060)
 	if err != nil {
 		t.Fatal(err)
@@ -1013,7 +1016,7 @@ func TestStreamRenderWorkerScalesCloudCaptionCuesBySpeed(t *testing.T) {
 	}
 	// At 2x the 1s of source speech plays back in 0.5s: cue times must be
 	// divided by the clip speed so captions stay on the output timeline.
-	if !strings.Contains(string(ass), `Dialogue: 0,0:00:00.00,0:00:00.50,Karaoke,,0,0,0,,{\k25}nice {\k25}gg`) {
+	if !strings.Contains(string(ass), `0:00:00.00,0:00:00.50,Karaoke`) || !strings.Contains(string(ass), `\k25}nice {\k25}gg`) {
 		t.Fatalf("caption artifact does not scale cues to the sped-up output: %s", ass)
 	}
 }

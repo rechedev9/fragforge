@@ -153,18 +153,20 @@ func TestStreamRenderE2E(t *testing.T) {
 
 		// A cue without confirmed kills freezes the FULL killfeed crop rect
 		// as one WYSIWYG strip: crop (947,29)-(1267,137) of the 1280x720
-		// source (320x108), scaled to 620px wide (x1.9375) and overlaid at
-		// x=1080-620-24=436, y=64. Notice A's lime interior (1024,36)-(1248,72)
-		// lands roughly at (585,78)-(1019,148) and notice B's yellow interior
-		// (984,82)-(1248,114) at (507,167)-(1019,229). Region means over the
-		// interiors keep the assertions robust against one-pixel geometry
-		// drift and chroma subsampling.
+		// source (320x108), scaled to 930px wide (x2.90625) and overlaid
+		// centered at x=(1080-930)/2=75, y=461 (24% into the gameplay band).
+		// Notice A's lime interior (1024,36)-(1248,72) lands roughly at
+		// (299,481)-(950,586) and notice B's yellow interior (984,82)-(1248,114)
+		// at (183,615)-(950,708). The strip slides in from the right for 0.12s
+		// after the cue, so the "at cue" frame samples after the settle. Region
+		// means over the interiors keep the assertions robust against one-pixel
+		// geometry drift and chroma subsampling.
 		const (
-			noticeAX, noticeAY = 780, 108
-			noticeBX, noticeBY = 780, 196
+			noticeAX, noticeAY = 600, 525
+			noticeBX, noticeBY = 600, 660
 		)
 		beforeFrame := extractFramePNG(t, ffmpegPath, outPath, 1.0)
-		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.5)
+		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.8)
 		beforeA := readRegionMean(t, beforeFrame, noticeAX, noticeAY, 40, 6)
 		beforeB := readRegionMean(t, beforeFrame, noticeBX, noticeBY, 40, 6)
 		atCueA := readRegionMean(t, atCueFrame, noticeAX, noticeAY, 40, 6)
@@ -209,19 +211,23 @@ func TestStreamRenderE2E(t *testing.T) {
 		clipID := startAndAwaitStreamRender(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam)
 		outPath := downloadStreamVideo(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam, clipID)
 
-		// The synthetic notice overlays right-aligned at x=W-w-24 (right edge
-		// 1056), y=64, height 48, whatever width the names produce. Its right
-		// padding zone (text-free) sits at x ~1045..1051 and shows the
-		// half-black plate over the blue gameplay, and the top 2px #B50000
-		// border covers rows y=64..65 across the notice width.
+		// The synthetic notice overlays horizontally centered with its top at
+		// y≈460-461 (killfeedBaseY = round(0.24*1920) = 461; the RGB conversion
+		// bleeds the top red row so it reads at y≈460), height 72 with a 3px
+		// #F40708 border, and slides in from the right for 0.12s after the cue,
+		// so the "at cue" frame samples after the settle. The icon/text content
+		// band is vertically centered (tallest content 39px -> rows ~477..515),
+		// which leaves rows ~464..476 as plate-only across the full notice
+		// width; x=540 is always inside the centered notice. The sample at
+		// y=461 lands on the top border either way.
 		const (
-			plateX, plateY   = 1048, 88
-			borderX, borderY = 1040, 65
+			plateX, plateY   = 540, 468
+			borderX, borderY = 540, 461
 		)
 		beforeFrame := extractFramePNG(t, ffmpegPath, outPath, 1.0)
-		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.5)
-		beforePlate := readRegionMean(t, beforeFrame, plateX, plateY, 3, 14)
-		atCuePlate := readRegionMean(t, atCueFrame, plateX, plateY, 3, 14)
+		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.8)
+		beforePlate := readRegionMean(t, beforeFrame, plateX, plateY, 3, 6)
+		atCuePlate := readRegionMean(t, atCueFrame, plateX, plateY, 3, 6)
 		atCueBorder := readRegionMean(t, atCueFrame, borderX, borderY, 8, 0)
 		t.Logf("synthetic notice plate before=%+v at cue=%+v, top border at cue=%+v", beforePlate, atCuePlate, atCueBorder)
 		if !isPredominantlyBlue(beforePlate) {

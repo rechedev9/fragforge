@@ -21,25 +21,30 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-// KillfeedNoticeHeight is the pixel height of every rendered kill notice.
-const KillfeedNoticeHeight = 48
+// KillfeedNoticeHeight is the pixel height of every rendered kill notice. It is
+// scaled ~1.5x above the original 48px so the centered killfeed reads at the
+// same size as the reference viral Short; every padding, icon, and font size
+// below scales with it so nothing clips.
+const KillfeedNoticeHeight = 72
 
 // Layout constants for the synthetic CS2 highlighted kill notice. They mirror
 // the community killfeed generators: a translucent black plate with a solid red
-// border, white weapon and flag icons, and team-colored player names.
+// border, white weapon and flag icons, and team-colored player names. All sizes
+// are scaled ~1.5x from the original notice so the plate grows proportionally.
 const (
-	noticeHPadding = 10 // horizontal padding inside the border, each side
-	noticeGap      = 6  // gap between adjacent content elements
-	noticeBorder   = 2  // border thickness in px
-	weaponIconH    = 26 // weapon icon target height
-	flagIconH      = 22 // flag icon target height
-	nameFontSize   = 24 // Rajdhani-Bold size in points at 72 DPI
+	noticeHPadding = 15 // horizontal padding inside the border, each side
+	noticeGap      = 9  // gap between adjacent content elements
+	noticeBorder   = 3  // border thickness in px
+	weaponIconH    = 39 // weapon icon target height
+	flagIconH      = 33 // flag icon target height
+	nameFontSize   = 36 // Rajdhani-Bold size in points at 72 DPI
 	nameFontDPI    = 72
 )
 
 var (
-	plateFill   = color.RGBA{R: 0, G: 0, B: 0, A: 127}
-	borderColor = color.RGBA{R: 0xB5, G: 0x00, B: 0x00, A: 0xFF}
+	plateFill = color.RGBA{R: 0, G: 0, B: 0, A: 127}
+	// borderColor is sampled from the reference viral Short's killfeed highlight.
+	borderColor = color.RGBA{R: 0xF4, G: 0x07, B: 0x08, A: 0xFF}
 	colorT      = color.RGBA{R: 0xEC, G: 0xCE, B: 0x51, A: 0xFF}
 	colorCT     = color.RGBA{R: 0x71, G: 0xA6, B: 0xFF, A: 0xFF}
 	colorWhite  = color.RGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
