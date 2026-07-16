@@ -162,7 +162,7 @@ func workflowDelegatedCommand(args []string) string {
 		}
 	case "serve":
 		return "zv-orchestrator"
-	case "gallery", "skills", "workflows", "check":
+	case "capabilities", "gallery", "skills", "workflows", "check":
 		return "zv"
 	}
 	return ""

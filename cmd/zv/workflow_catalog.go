@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/parser"
+	"github.com/rechedev9/fragforge/internal/recording"
 )
 
 func findWorkflow(name string) (workflowInfo, bool) {
@@ -40,6 +44,12 @@ func buildWorkflowCatalog() []workflowInfo {
 			Description: "Create one upload-ready Short through parse, capture, render, and publish stages.",
 			Command:     "zv short <demo.dem> --prompt <prompt>",
 			RunArgs:     []string{"short"},
+		},
+		{
+			Name:        "capabilities",
+			Description: "Inspect local capture and render tool readiness without starting work.",
+			Command:     "zv capabilities",
+			RunArgs:     []string{"capabilities"},
 		},
 		{
 			Name:        "demo-parse",
@@ -146,7 +156,7 @@ func workflowArgumentMetadata(workflow workflowInfo) workflowArguments {
 	required := workflowRequiredFlags(workflow)
 	commandName := fmt.Sprintf("%q", strings.Join(workflow.RunArgs, " "))
 	valueFlags := commandValueFlags(commandName, required)
-	if workflow.Name == "skills-check" || workflow.Name == "workflows-check" || workflow.Name == "project-check" {
+	if workflow.Name == "capabilities" || workflow.Name == "skills-check" || workflow.Name == "workflows-check" || workflow.Name == "project-check" {
 		valueFlags = append(valueFlags, "--format")
 	}
 
@@ -179,7 +189,54 @@ func workflowArgumentMetadata(workflow workflowInfo) workflowArguments {
 		RequiredFlags:           copyStrings(required),
 		OptionalValueFlags:      flagsExcept(valueFlags, required),
 		BooleanFlags:            copyStrings(commandBoolFlags(commandName)),
+		ValueConstraints:        workflowValueConstraints(workflow),
 		ConditionalRequirements: conditional,
+	}
+}
+
+func workflowValueConstraints(workflow workflowInfo) []workflowValueConstraint {
+	constraint := func(flag, defaultValue, discoveryCommand string, allowed ...string) workflowValueConstraint {
+		return workflowValueConstraint{
+			Flag:             flag,
+			AllowedValues:    copyStrings(allowed),
+			Default:          defaultValue,
+			DiscoveryCommand: discoveryCommand,
+		}
+	}
+
+	switch workflow.Name {
+	case "short":
+		return []workflowValueConstraint{
+			constraint("--preset", editor.DefaultPreset().Name, "zv presets --format json", editor.PresetNames()...),
+		}
+	case "demo-parse":
+		return []workflowValueConstraint{
+			constraint("--segment-mode", string(parser.SegmentModeKills), "",
+				string(parser.SegmentModeKills), string(parser.SegmentModeSmokes), string(parser.SegmentModeUtility)),
+		}
+	case "utility-audit":
+		return []workflowValueConstraint{
+			constraint("--format", "csv", "", "csv", "json"),
+		}
+	case "record":
+		return []workflowValueConstraint{
+			constraint("--hud", string(recording.HUDModeGameplay), "",
+				string(recording.HUDModeGameplay), string(recording.HUDModeClean), string(recording.HUDModeDeathnotices)),
+		}
+	case "shorts-render":
+		defaultPreset := editor.DefaultPreset()
+		return []workflowValueConstraint{
+			constraint("--preset", defaultPreset.Name, "zv presets --format json", editor.PresetNames()...),
+			constraint("--effects-preset", defaultPreset.EffectsPreset, "", editor.EffectsPresetViralUltraClean),
+			constraint("--video-preset", defaultPreset.VideoPreset, "",
+				"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"),
+		}
+	case "capabilities", "skills-check", "workflows-check", "project-check":
+		return []workflowValueConstraint{
+			constraint("--format", "text", "", "text", "json"),
+		}
+	default:
+		return []workflowValueConstraint{}
 	}
 }
 
@@ -193,7 +250,7 @@ func workflowRequiredFlags(workflow workflowInfo) []string {
 func workflowSafetyMetadata(workflow workflowInfo, arguments workflowArguments) workflowSafety {
 	readOnly := false
 	switch workflow.Name {
-	case "demo-players", "analysis-viewer", "gallery-open", "skills-check", "workflows-check", "project-check":
+	case "capabilities", "demo-players", "analysis-viewer", "gallery-open", "skills-check", "workflows-check", "project-check":
 		readOnly = true
 	}
 

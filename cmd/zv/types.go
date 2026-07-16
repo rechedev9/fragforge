@@ -55,6 +55,7 @@ type workflowArguments struct {
 	RequiredFlags           []string                         `json:"required_flags"`
 	OptionalValueFlags      []string                         `json:"optional_value_flags"`
 	BooleanFlags            []string                         `json:"boolean_flags"`
+	ValueConstraints        []workflowValueConstraint        `json:"value_constraints"`
 	ConditionalRequirements []workflowConditionalRequirement `json:"conditional_requirements"`
 }
 
@@ -69,6 +70,13 @@ type workflowConditionalRequirement struct {
 	UnlessAnyFlags      []string `json:"unless_any_flags"`
 	RequiredFlags       []string `json:"required_flags"`
 	RequiredPositionals []string `json:"required_positionals"`
+}
+
+type workflowValueConstraint struct {
+	Flag             string   `json:"flag"`
+	AllowedValues    []string `json:"allowed_values"`
+	Default          string   `json:"default,omitempty"`
+	DiscoveryCommand string   `json:"discovery_command,omitempty"`
 }
 
 type workflowSafety struct {

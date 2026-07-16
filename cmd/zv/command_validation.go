@@ -22,6 +22,10 @@ func validateSkillCommand(command []string) string {
 		if issue := validateFormattedCommand("presets", command[1:]); issue != "" {
 			return issue
 		}
+	case "capabilities":
+		if issue := validateFormattedCommand("capabilities", command[1:]); issue != "" {
+			return issue
+		}
 	case "check":
 		if issue := validateFormattedCommand("check", command[1:]); issue != "" {
 			return issue
@@ -250,7 +254,7 @@ func validateWorkflowRunCommand(args []string) string {
 }
 
 func validateWorkflowValidateCommand(args []string) string {
-	control, forwarded, _ := splitWorkflowValidateArgs(args)
+	control, forwarded := splitWorkflowValidateArgs(args)
 	_, rest, err := parseFormatArgs(control)
 	if err != nil {
 		return err.Error()
@@ -267,7 +271,10 @@ func validateWorkflowValidateCommand(args []string) string {
 	}
 	command := append([]string(nil), workflow.RunArgs...)
 	command = append(command, forwarded...)
-	return validateSkillCommand(command)
+	if issue := validateSkillCommand(command); issue != "" {
+		return issue
+	}
+	return validateWorkflowValueConstraints(workflow, forwarded)
 }
 
 func validateWorkflowRunForwardedArgs(workflow workflowInfo, rest []string) string {
@@ -283,7 +290,34 @@ func validateWorkflowRunForwardedArgs(workflow workflowInfo, rest []string) stri
 	}
 	command := append([]string(nil), workflow.RunArgs...)
 	command = append(command, forwarded...)
-	return validateSkillCommand(command)
+	if issue := validateSkillCommand(command); issue != "" {
+		return issue
+	}
+	return validateWorkflowValueConstraints(workflow, forwarded)
+}
+
+func validateWorkflowValueConstraints(workflow workflowInfo, args []string) string {
+	for _, constraint := range workflow.Arguments.ValueConstraints {
+		value, ok := flagValue(args, constraint.Flag)
+		if !ok || containsString(constraint.AllowedValues, value) {
+			continue
+		}
+		return fmt.Sprintf("invalid value %q for flag %s in workflow %q; allowed values: %s",
+			value, constraint.Flag, workflow.Name, strings.Join(constraint.AllowedValues, ", "))
+	}
+	return ""
+}
+
+func flagValue(args []string, name string) (string, bool) {
+	for i, arg := range args {
+		if value, ok := strings.CutPrefix(arg, name+"="); ok {
+			return value, true
+		}
+		if arg == name && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }
 
 func validateRequiredFlags(commandName string, args []string, required ...string) string {

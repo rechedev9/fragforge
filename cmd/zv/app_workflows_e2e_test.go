@@ -145,7 +145,7 @@ func TestZVBinaryEveryWorkflowRunCommandEndToEnd(t *testing.T) {
 			switch {
 			case workflow.RunArgs[0] == "gallery":
 				wantOpenPathCalls++
-			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
+			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "capabilities" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
 			default:
 				wantSubcommandCalls++
 			}
@@ -160,6 +160,43 @@ func TestZVBinaryEveryWorkflowRunCommandEndToEnd(t *testing.T) {
 	if got, want := len(readLines(t, openPathLogPath)), wantOpenPathCalls; got != want {
 		t.Fatalf("open path calls = %d, want %d", got, want)
 	}
+}
+
+func TestZVBinaryEveryWorkflowValidateCommandIsSideEffectFreeEndToEnd(t *testing.T) {
+	tempDir := t.TempDir()
+	exe := buildZVBinary(t, tempDir)
+	installFakeDelegatedSubcommands(t, filepath.Dir(exe))
+
+	galleryPath := filepath.Join(tempDir, "gallery", "index.html")
+	subcommandLogPath := filepath.Join(tempDir, "validate-subcommands.jsonl")
+	openPathLogPath := filepath.Join(tempDir, "validate-open-paths.txt")
+	env := []string{
+		"ZV_FAKE_SUBCOMMAND=1",
+		"ZV_FAKE_SUBCOMMAND_LOG=" + subcommandLogPath,
+		"ZV_FAKE_OPEN_PATH_LOG=" + openPathLogPath,
+	}
+
+	for _, workflow := range workflowCatalog() {
+		t.Run(workflow.Name, func(t *testing.T) {
+			args := workflowValidateCommandArgs(t, workflow)
+			args = append(args, "--format", "json")
+			args = append(args, workflowRunSampleForwardedArgs(t, workflow, galleryPath)...)
+			stdout, stderr := runZVBinarySplitWithEnv(t, exe, tempDir, env, args...)
+			if stderr != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+			var result workflowValidationResult
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatalf("unmarshal validation result: %v\n%s", err, stdout)
+			}
+			if !result.OK || result.Executed || result.Workflow != workflow.Name || result.Scope != "arguments" {
+				t.Fatalf("validation result = %#v, want valid unexecuted %s preflight", result, workflow.Name)
+			}
+		})
+	}
+
+	assertPathDoesNotExist(t, subcommandLogPath)
+	assertPathDoesNotExist(t, openPathLogPath)
 }
 
 func TestZVBinaryEveryWorkflowRunAcceptsEqualsRequiredFlagsEndToEnd(t *testing.T) {
@@ -204,7 +241,7 @@ func TestZVBinaryEveryWorkflowRunAcceptsEqualsRequiredFlagsEndToEnd(t *testing.T
 			switch {
 			case workflow.RunArgs[0] == "gallery":
 				wantOpenPathCalls++
-			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
+			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "capabilities" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
 			default:
 				wantSubcommandCalls++
 			}
@@ -1406,7 +1443,7 @@ func TestZVBinaryEveryDirectWorkflowAcceptsEqualsRequiredFlagsEndToEnd(t *testin
 			switch {
 			case workflow.RunArgs[0] == "gallery":
 				wantOpenPathCalls++
-			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
+			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "capabilities" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
 			default:
 				wantSubcommandCalls++
 			}
@@ -1714,7 +1751,7 @@ func TestZVBinaryWorkflowListJSONRunCommandsEndToEnd(t *testing.T) {
 		switch {
 		case catalogWorkflow.RunArgs[0] == "gallery":
 			wantOpenPathCalls++
-		case catalogWorkflow.RunArgs[0] == "short" || catalogWorkflow.RunArgs[0] == "skills" || catalogWorkflow.RunArgs[0] == "workflows" || catalogWorkflow.RunArgs[0] == "check":
+		case catalogWorkflow.RunArgs[0] == "short" || catalogWorkflow.RunArgs[0] == "capabilities" || catalogWorkflow.RunArgs[0] == "skills" || catalogWorkflow.RunArgs[0] == "workflows" || catalogWorkflow.RunArgs[0] == "check":
 		default:
 			wantSubcommandCalls++
 		}
@@ -1901,7 +1938,7 @@ func TestZVBinaryWorkflowShowJSONRunCommandsEndToEnd(t *testing.T) {
 		switch {
 		case catalogWorkflow.RunArgs[0] == "gallery":
 			wantOpenPathCalls++
-		case catalogWorkflow.RunArgs[0] == "short" || catalogWorkflow.RunArgs[0] == "skills" || catalogWorkflow.RunArgs[0] == "workflows" || catalogWorkflow.RunArgs[0] == "check":
+		case catalogWorkflow.RunArgs[0] == "short" || catalogWorkflow.RunArgs[0] == "capabilities" || catalogWorkflow.RunArgs[0] == "skills" || catalogWorkflow.RunArgs[0] == "workflows" || catalogWorkflow.RunArgs[0] == "check":
 		default:
 			wantSubcommandCalls++
 		}

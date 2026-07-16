@@ -23,6 +23,7 @@ func TestZVBinaryCanonicalGroupHelpEndToEnd(t *testing.T) {
 		{name: "shorts", args: []string{"shorts", "--help"}, want: shortsUsage},
 		{name: "analysis", args: []string{"analysis", "--help"}, want: analysisUsage},
 		{name: "gallery", args: []string{"gallery", "--help"}, want: galleryUsage},
+		{name: "capabilities", args: []string{"capabilities", "--help"}, want: capabilitiesUsage},
 		{name: "check", args: []string{"check", "--help"}, want: checkUsage},
 		{name: "skills", args: []string{"skills", "--help"}, want: skillsUsage},
 		{name: "workflows", args: []string{"workflows", "--help"}, want: workflowsUsage},
@@ -51,10 +52,14 @@ func TestZVBinaryCanonicalHelpAliasesEndToEnd(t *testing.T) {
 		{name: "root word", args: []string{"help"}, want: usage},
 		{name: "demo short", args: []string{"demo", "-h"}, want: demoUsage},
 		{name: "demo word", args: []string{"demo", "help"}, want: demoUsage},
+		{name: "capabilities short", args: []string{"capabilities", "-h"}, want: capabilitiesUsage},
+		{name: "capabilities word", args: []string{"capabilities", "help"}, want: capabilitiesUsage},
 		{name: "skills list short", args: []string{"skills", "list", "-h"}, want: skillsListUsage},
 		{name: "skills list word", args: []string{"skills", "list", "help"}, want: skillsListUsage},
 		{name: "workflows show short", args: []string{"workflows", "show", "-h"}, want: workflowsShowUsage},
 		{name: "workflows show word", args: []string{"workflows", "show", "help"}, want: workflowsShowUsage},
+		{name: "workflows validate short", args: []string{"workflows", "validate", "-h"}, want: workflowsValidateUsage},
+		{name: "workflows validate word", args: []string{"workflows", "validate", "help"}, want: workflowsValidateUsage},
 		{name: "gallery open short", args: []string{"gallery", "open", "-h"}, want: galleryUsage},
 		{name: "gallery open word", args: []string{"gallery", "open", "help"}, want: galleryUsage},
 		{name: "workflows run project short", args: []string{"workflows", "run", "project-check", "--", "-h"}, want: checkUsage},
@@ -126,6 +131,7 @@ func TestZVBinaryCanonicalSubcommandHelpEndToEnd(t *testing.T) {
 		{name: "gallery open", args: []string{"gallery", "open", "--help"}, want: galleryUsage},
 		{name: "workflows list", args: []string{"workflows", "list", "--help"}, want: workflowsListUsage},
 		{name: "workflows show", args: []string{"workflows", "show", "--help"}, want: workflowsShowUsage},
+		{name: "workflows validate", args: []string{"workflows", "validate", "--help"}, want: workflowsValidateUsage},
 		{name: "workflows check", args: []string{"workflows", "check", "--help"}, want: workflowsCheckUsage},
 		{name: "run skills check", args: []string{"workflows", "run", "skills-check", "--", "--help"}, want: skillsCheckUsage},
 		{name: "run workflows check", args: []string{"workflows", "run", "workflows-check", "--", "--help"}, want: workflowsCheckUsage},
@@ -155,6 +161,7 @@ func TestZVBinaryCanonicalSubcommandHelpUsesStdoutOnlyEndToEnd(t *testing.T) {
 		{name: "gallery open", args: []string{"gallery", "open", "--help"}, want: galleryUsage},
 		{name: "workflows list", args: []string{"workflows", "list", "--help"}, want: workflowsListUsage},
 		{name: "workflows show", args: []string{"workflows", "show", "--help"}, want: workflowsShowUsage},
+		{name: "workflows validate", args: []string{"workflows", "validate", "--help"}, want: workflowsValidateUsage},
 		{name: "workflows check", args: []string{"workflows", "check", "--help"}, want: workflowsCheckUsage},
 		{name: "run skills check", args: []string{"workflows", "run", "skills-check", "--", "--help"}, want: skillsCheckUsage},
 		{name: "run workflows check", args: []string{"workflows", "run", "workflows-check", "--", "--help"}, want: workflowsCheckUsage},
@@ -282,6 +289,7 @@ func TestZVBinaryCanonicalSubcommandUsageErrorsEndToEnd(t *testing.T) {
 		{name: "workflows list", args: []string{"workflows", "list", "extra"}, want: "error: unexpected extra args for \"workflows list\"\n" + workflowsListUsage},
 		{name: "workflows show", args: []string{"workflows", "show"}, want: "error: missing workflow name for \"workflows show\"\n" + workflowsShowUsage},
 		{name: "workflows run", args: []string{"workflows", "run"}, want: workflowsRunUsage},
+		{name: "workflows validate", args: []string{"workflows", "validate"}, want: "error: missing workflow name for \"workflows validate\"\n" + workflowsValidateUsage},
 		{name: "workflows check", args: []string{"workflows", "check", "extra"}, want: "error: unexpected extra args for \"workflows check\"\n" + workflowsCheckUsage},
 		{name: "serve", args: []string{"serve", "extra"}, want: "error: unexpected extra args for \"serve\"\n" + serveUsage},
 	}
@@ -316,6 +324,7 @@ func TestZVBinaryIncompleteCommandsUseStderrOnlyEndToEnd(t *testing.T) {
 		{name: "skills", args: []string{"skills"}, want: skillsUsage},
 		{name: "workflows", args: []string{"workflows"}, want: workflowsUsage},
 		{name: "workflows run", args: []string{"workflows", "run"}, want: workflowsRunUsage},
+		{name: "workflows validate", args: []string{"workflows", "validate"}, want: "error: missing workflow name for \"workflows validate\"\n" + workflowsValidateUsage},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -758,6 +767,8 @@ func TestZVBinaryFormattedCommandsRejectInvalidFormatEndToEnd(t *testing.T) {
 		{name: "skills check", args: []string{"skills", "check"}},
 		{name: "workflows list", args: []string{"workflows", "list"}},
 		{name: "workflows show", args: []string{"workflows", "show", "demo-parse"}},
+		{name: "workflows validate", args: []string{"workflows", "validate", "demo-parse"}, wantUsage: workflowsValidateUsage},
+		{name: "capabilities", args: []string{"capabilities"}, wantUsage: capabilitiesUsage},
 		{name: "workflows check", args: []string{"workflows", "check"}},
 		{name: "project check", args: []string{"check"}},
 		{name: "workflow run skills check", args: []string{"workflows", "run", "skills-check", "--"}, wantUsage: workflowsRunUsage},
@@ -1289,6 +1300,12 @@ func TestZVBinaryCurrentRepoPublicJSONSchemasEndToEnd(t *testing.T) {
 	}
 	for i, row := range workflowListRows {
 		assertJSONKeys(t, fmt.Sprintf("workflows list json row %d", i), row, "name", "description", "command", "run_command", "validate_command", "arguments", "safety")
+		var arguments map[string]json.RawMessage
+		if err := json.Unmarshal(row["arguments"], &arguments); err != nil {
+			t.Fatalf("unmarshal workflows list row %d arguments: %v", i, err)
+		}
+		assertJSONKeys(t, fmt.Sprintf("workflows list json row %d arguments", i), arguments,
+			"positionals", "required_flags", "optional_value_flags", "boolean_flags", "value_constraints", "conditional_requirements")
 	}
 
 	for _, workflow := range workflowCatalog() {

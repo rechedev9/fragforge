@@ -1085,7 +1085,7 @@ func TestZVBinaryCurrentWorkflowDocExamplesEndToEnd(t *testing.T) {
 		switch {
 		case len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open":
 			wantOpenPathCalls++
-		case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
+		case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "capabilities" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
 		default:
 			wantSubcommandCalls++
 		}

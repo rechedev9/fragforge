@@ -8,6 +8,7 @@ Usage:
   zv metrics [--reset]
   zv errors [--tail <n>] [--json] [--clear]
   zv presets [--format text|json]
+  zv capabilities [--format text|json]
   zv demo parse [zv-parser parse flags]
   zv demo players [zv-demo-players flags]
   zv utility audit [zv-parser utility-audit flags]
@@ -68,6 +69,9 @@ Prompt rules (deterministic keywords, no model calls):
 `
 
 const presetsUsage = `usage: zv presets [--format text|json]
+`
+
+const capabilitiesUsage = `usage: zv capabilities [--format text|json]
 `
 
 const batchUsage = `usage: zv batch <dir> [flags]

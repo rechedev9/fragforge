@@ -1222,6 +1222,9 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 		if workflow.Arguments.BooleanFlags == nil {
 			t.Fatalf("workflow %q boolean flags are nil, want an empty array when absent", workflow.Name)
 		}
+		if workflow.Arguments.ValueConstraints == nil {
+			t.Fatalf("workflow %q value constraints are nil, want an empty array when absent", workflow.Name)
+		}
 		if workflow.Arguments.ConditionalRequirements == nil {
 			t.Fatalf("workflow %q conditional requirements are nil, want an empty array when absent", workflow.Name)
 		}
@@ -1229,6 +1232,9 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 			if containsString(workflow.Arguments.OptionalValueFlags, flag) {
 				t.Fatalf("workflow %q exposes required flag %q as optional", workflow.Name, flag)
 			}
+		}
+		if issues := validateWorkflowValueConstraintMetadata(workflow); len(issues) != 0 {
+			t.Fatalf("workflow %q value constraint issues = %#v, want none", workflow.Name, issues)
 		}
 	}
 
@@ -1258,6 +1264,13 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 	if !short.Safety.SupportsDryRun || !short.Safety.LongRunning || short.Safety.ReadOnly {
 		t.Fatalf("short safety = %#v, want mutating long-running workflow with dry-run", short.Safety)
 	}
+	shortPreset := workflowValueConstraintForFlag(t, short, "--preset")
+	if got, want := strings.Join(shortPreset.AllowedValues, " "), "viral-60-clean clean-pov-60 full-hud-60"; got != want {
+		t.Fatalf("short preset values = %q, want %q", got, want)
+	}
+	if shortPreset.Default != "viral-60-clean" || shortPreset.DiscoveryCommand != "zv presets --format json" {
+		t.Fatalf("short preset metadata = %#v, want default and discovery command", shortPreset)
+	}
 
 	parse, ok := findWorkflow("demo-parse")
 	if !ok {
@@ -1271,6 +1284,10 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 	}
 	if got, want := strings.Join(parse.Arguments.BooleanFlags, " "), "--verbose"; got != want {
 		t.Fatalf("demo-parse boolean flags = %q, want %q", got, want)
+	}
+	segmentMode := workflowValueConstraintForFlag(t, parse, "--segment-mode")
+	if got, want := strings.Join(segmentMode.AllowedValues, " "), "kills smokes utility"; got != want || segmentMode.Default != "kills" {
+		t.Fatalf("demo-parse segment mode metadata = %#v, want kills/smokes/utility with kills default", segmentMode)
 	}
 
 	record, ok := findWorkflow("record")
@@ -1298,6 +1315,10 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 	if !record.Safety.SupportsDryRun || !record.Safety.LongRunning || record.Safety.ReadOnly {
 		t.Fatalf("record safety = %#v, want mutating long-running workflow with dry-run", record.Safety)
 	}
+	hud := workflowValueConstraintForFlag(t, record, "--hud")
+	if got, want := strings.Join(hud.AllowedValues, " "), "gameplay clean deathnotices"; got != want || hud.Default != "gameplay" {
+		t.Fatalf("record HUD metadata = %#v, want gameplay/clean/deathnotices with gameplay default", hud)
+	}
 
 	projectCheck, ok := findWorkflow("project-check")
 	if !ok {
@@ -1310,6 +1331,17 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 		t.Fatalf("project-check safety = %#v, want short read-only workflow", projectCheck.Safety)
 	}
 
+	capabilities, ok := findWorkflow("capabilities")
+	if !ok {
+		t.Fatal("capabilities workflow not found")
+	}
+	if got, want := strings.Join(capabilities.Arguments.OptionalValueFlags, " "), "--format"; got != want {
+		t.Fatalf("capabilities optional value flags = %q, want %q", got, want)
+	}
+	if !capabilities.Safety.ReadOnly || capabilities.Safety.LongRunning || capabilities.Safety.SupportsDryRun {
+		t.Fatalf("capabilities safety = %#v, want short read-only workflow", capabilities.Safety)
+	}
+
 	serve, ok := findWorkflow("serve")
 	if !ok {
 		t.Fatal("serve workflow not found")
@@ -1317,6 +1349,17 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 	if !serve.Safety.LongRunning || serve.Safety.ReadOnly || serve.Safety.SupportsDryRun {
 		t.Fatalf("serve safety = %#v, want long-running service without dry-run", serve.Safety)
 	}
+}
+
+func workflowValueConstraintForFlag(t *testing.T, workflow workflowInfo, flag string) workflowValueConstraint {
+	t.Helper()
+	for _, constraint := range workflow.Arguments.ValueConstraints {
+		if constraint.Flag == flag {
+			return constraint
+		}
+	}
+	t.Fatalf("workflow %q has no value constraint for %s", workflow.Name, flag)
+	return workflowValueConstraint{}
 }
 
 func TestRunWorkflowsValidateJSONDoesNotExecute(t *testing.T) {
@@ -1392,6 +1435,38 @@ func TestRunWorkflowsValidateJSONReturnsStructuredFailureWithoutExecuting(t *tes
 	}
 	if got, want := strings.Join(result.Argv, " "), "zv record --killplan plan.json"; got != want {
 		t.Fatalf("argv = %q, want %q", got, want)
+	}
+}
+
+func TestRunWorkflowsValidateRejectsUnknownConstrainedValueWithoutExecuting(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+	code := Run([]string{
+		"zv", "workflows", "validate", "demo-parse", "--format=json", "--",
+		"--demo", "inferno.dem",
+		"--steamid", "76561198000000000",
+		"--out", "plan.json",
+		"--segment-mode=banana",
+	}, &stdout, &stderr, nil, runner)
+
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty for JSON failure", got)
+	}
+	if got := runner.name; got != "" {
+		t.Fatalf("runner.name = %q, want no delegated command", got)
+	}
+	var result workflowValidationResult
+	if err := json.Unmarshal([]byte(stdout.String()), &result); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if result.OK || result.Executed {
+		t.Fatalf("result = %#v, want invalid unexecuted preflight", result)
+	}
+	if got, want := result.Error, `invalid value "banana" for flag --segment-mode in workflow "demo-parse"; allowed values: kills, smokes, utility`; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
 	}
 }
 
@@ -1630,6 +1705,82 @@ func TestRunWorkflowsRunRejectsMissingRequiredForwardedArgs(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `missing required flags --demo, --steamid, --out for "demo parse"`) {
 		t.Fatalf("stderr = %q, want missing required flags error", stderr.String())
+	}
+}
+
+func TestRunWorkflowsRunRejectsUnknownConstrainedValueWithoutExecuting(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+	code := Run([]string{
+		"zv", "workflows", "run", "record", "--",
+		"--killplan", "plan.json",
+		"--demo", "inferno.dem",
+		"--out", "recording",
+		"--dry-run",
+		"--hud", "banana",
+	}, &stdout, &stderr, nil, runner)
+
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d", got, want)
+	}
+	if got := runner.name; got != "" {
+		t.Fatalf("runner.name = %q, want no delegated command", got)
+	}
+	if got, want := stderr.String(), "error: invalid value \"banana\" for flag --hud in workflow \"record\"; allowed values: gameplay, clean, deathnotices\n"+workflowsRunUsage; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestRunWorkflowsRunRejectsDuplicateConstrainedFlagWithoutExecuting(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+	code := Run([]string{
+		"zv", "workflows", "run", "record", "--",
+		"--killplan", "plan.json",
+		"--demo", "inferno.dem",
+		"--out", "recording",
+		"--dry-run",
+		"--hud", "gameplay",
+		"--hud", "banana",
+	}, &stdout, &stderr, nil, runner)
+
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d", got, want)
+	}
+	if got := runner.name; got != "" {
+		t.Fatalf("runner.name = %q, want no delegated command", got)
+	}
+	if !strings.Contains(stderr.String(), "error: duplicate flag --hud for \"record\"") {
+		t.Fatalf("stderr = %q, want duplicate flag error", stderr.String())
+	}
+}
+
+func TestValidateWorkflowValueConstraintMetadataRejectsDrift(t *testing.T) {
+	workflow := workflowInfo{
+		Name: "bad-values",
+		Arguments: workflowArguments{
+			OptionalValueFlags: []string{"--mode"},
+			ValueConstraints: []workflowValueConstraint{
+				{Flag: "--mode", AllowedValues: []string{"", "fast", "fast"}, Default: "slow"},
+				{Flag: "--other", AllowedValues: []string{}},
+				{Flag: "--mode", AllowedValues: []string{"fast"}, DiscoveryCommand: "other values"},
+			},
+		},
+	}
+
+	issues := validateWorkflowValueConstraintMetadata(workflow)
+	for _, want := range []string{
+		"value constraint for flag --mode has an empty allowed value",
+		`value constraint for flag --mode has duplicate allowed value "fast"`,
+		`default "slow" for flag --mode is not an allowed value`,
+		"value constraint flag --other is not a declared value flag",
+		"value constraint for flag --other has no allowed values",
+		"duplicate value constraint for flag --mode",
+		"discovery command for flag --mode must start with zv: other values",
+	} {
+		if !containsString(issues, want) {
+			t.Fatalf("issues = %#v, want %q", issues, want)
+		}
 	}
 }
 

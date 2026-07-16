@@ -124,6 +124,71 @@ func validateWorkflowCatalog(workflows []workflowInfo) []skillIssue {
 		if issue := validateWorkflowRunArgs(workflow); issue != "" {
 			issues = append(issues, skillIssue{Path: path, Message: issue})
 		}
+		for _, issue := range validateWorkflowValueConstraintMetadata(workflow) {
+			issues = append(issues, skillIssue{Path: path, Message: issue})
+		}
+	}
+	return issues
+}
+
+func validateWorkflowValueConstraintMetadata(workflow workflowInfo) []string {
+	valueFlags := make(map[string]struct{}, len(workflow.Arguments.RequiredFlags)+len(workflow.Arguments.OptionalValueFlags))
+	for _, flag := range workflow.Arguments.RequiredFlags {
+		valueFlags[flag] = struct{}{}
+	}
+	for _, flag := range workflow.Arguments.OptionalValueFlags {
+		valueFlags[flag] = struct{}{}
+	}
+
+	seenFlags := make(map[string]struct{}, len(workflow.Arguments.ValueConstraints))
+	var issues []string
+	for _, constraint := range workflow.Arguments.ValueConstraints {
+		if strings.TrimSpace(constraint.Flag) == "" {
+			issues = append(issues, "value constraint is missing a flag")
+			continue
+		}
+		if _, ok := seenFlags[constraint.Flag]; ok {
+			issues = append(issues, fmt.Sprintf("duplicate value constraint for flag %s", constraint.Flag))
+		} else {
+			seenFlags[constraint.Flag] = struct{}{}
+		}
+		if _, ok := valueFlags[constraint.Flag]; !ok {
+			issues = append(issues, fmt.Sprintf("value constraint flag %s is not a declared value flag", constraint.Flag))
+		}
+		if len(constraint.AllowedValues) == 0 {
+			issues = append(issues, fmt.Sprintf("value constraint for flag %s has no allowed values", constraint.Flag))
+			continue
+		}
+		seenValues := make(map[string]struct{}, len(constraint.AllowedValues))
+		for _, value := range constraint.AllowedValues {
+			if strings.TrimSpace(value) == "" {
+				issues = append(issues, fmt.Sprintf("value constraint for flag %s has an empty allowed value", constraint.Flag))
+				continue
+			}
+			if _, ok := seenValues[value]; ok {
+				issues = append(issues, fmt.Sprintf("value constraint for flag %s has duplicate allowed value %q", constraint.Flag, value))
+			} else {
+				seenValues[value] = struct{}{}
+			}
+		}
+		if constraint.Default != "" && !containsString(constraint.AllowedValues, constraint.Default) {
+			issues = append(issues, fmt.Sprintf("default %q for flag %s is not an allowed value", constraint.Default, constraint.Flag))
+		}
+		if constraint.DiscoveryCommand == "" {
+			continue
+		}
+		fields, ok := splitCommandFields(constraint.DiscoveryCommand)
+		if !ok || len(fields) == 0 {
+			issues = append(issues, fmt.Sprintf("could not parse discovery command for flag %s: %s", constraint.Flag, constraint.DiscoveryCommand))
+			continue
+		}
+		if fields[0] != "zv" {
+			issues = append(issues, fmt.Sprintf("discovery command for flag %s must start with zv: %s", constraint.Flag, constraint.DiscoveryCommand))
+			continue
+		}
+		if issue := validateSkillCommand(fields[1:]); issue != "" {
+			issues = append(issues, fmt.Sprintf("discovery command for flag %s is not canonical: %s", constraint.Flag, issue))
+		}
 	}
 	return issues
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -616,6 +617,18 @@ func workflowRunCommandArgs(t *testing.T, workflow workflowInfo) []string {
 	return append([]string(nil), fields[1:]...)
 }
 
+func workflowValidateCommandArgs(t *testing.T, workflow workflowInfo) []string {
+	t.Helper()
+	fields, ok := splitCommandFields(workflow.ValidateCommand)
+	if !ok {
+		t.Fatalf("parse workflow validate command %q", workflow.ValidateCommand)
+	}
+	if len(fields) != 4 || fields[0] != "zv" || fields[1] != "workflows" || fields[2] != "validate" || fields[3] != workflow.Name {
+		t.Fatalf("workflow validate command = %#v, want zv workflows validate %s", fields, workflow.Name)
+	}
+	return append([]string(nil), fields[1:]...)
+}
+
 func workflowRunSampleForwardedArgs(t *testing.T, workflow workflowInfo, galleryPath string) []string {
 	t.Helper()
 	switch workflow.Name {
@@ -641,7 +654,7 @@ func workflowRunSampleForwardedArgs(t *testing.T, workflow workflowInfo, gallery
 		return []string{"--", "--json", "run/analysis.json"}
 	case "gallery-open":
 		return []string{"--", "--path", galleryPath}
-	case "skills-check", "workflows-check", "project-check", "serve":
+	case "capabilities", "skills-check", "workflows-check", "project-check", "serve":
 		return nil
 	default:
 		t.Fatalf("missing sample forwarded args for workflow %q", workflow.Name)
@@ -672,7 +685,7 @@ func workflowRunSampleArgsWithoutSeparator(t *testing.T, workflow workflowInfo, 
 		return append([]string(nil), forwarded[1:]...)
 	}
 	switch workflow.Name {
-	case "skills-check", "workflows-check", "project-check":
+	case "capabilities", "skills-check", "workflows-check", "project-check":
 		return []string{"--format", "json"}
 	case "serve":
 		return []string{"--help"}
@@ -698,6 +711,12 @@ func assertWorkflowDiscoveryMatches(t *testing.T, source string, got workflowInf
 	}
 	if got.ValidateCommand != want.ValidateCommand {
 		t.Fatalf("%s validate_command for %s = %q, want %q", source, want.Name, got.ValidateCommand, want.ValidateCommand)
+	}
+	if !reflect.DeepEqual(got.Arguments, want.Arguments) {
+		t.Fatalf("%s arguments for %s = %#v, want %#v", source, want.Name, got.Arguments, want.Arguments)
+	}
+	if !reflect.DeepEqual(got.Safety, want.Safety) {
+		t.Fatalf("%s safety for %s = %#v, want %#v", source, want.Name, got.Safety, want.Safety)
 	}
 	if got.RunArgs != nil {
 		t.Fatalf("%s run args for %s = %#v, want omitted from json", source, want.Name, got.RunArgs)
@@ -991,7 +1010,7 @@ func workflowDelegatesExternally(workflow workflowInfo) bool {
 		return false
 	}
 	switch workflow.RunArgs[0] {
-	case "check", "gallery", "short", "skills", "workflows":
+	case "capabilities", "check", "gallery", "short", "skills", "workflows":
 		return false
 	default:
 		return true

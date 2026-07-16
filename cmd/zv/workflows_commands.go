@@ -123,7 +123,7 @@ func runWorkflowValidate(args []string, stdout, stderr io.Writer) int {
 		return exitSuccess
 	}
 
-	control, forwarded, hasSeparator := splitWorkflowValidateArgs(args)
+	control, forwarded := splitWorkflowValidateArgs(args)
 	format, rest, err := parseFormatArgs(control)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -141,15 +141,15 @@ func runWorkflowValidate(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return writeWorkflowValidationFailure(format, rest[0], nil, "workflow not found: "+rest[0], stdout, stderr)
 	}
-	if !hasSeparator && len(forwarded) > 0 {
-		return writeWorkflowValidationFailure(format, workflow.Name, &workflow, `missing "--" separator before workflow flags`, stdout, stderr)
-	}
-
 	argv := append([]string{"zv"}, workflow.RunArgs...)
 	argv = append(argv, forwarded...)
 	command := append([]string(nil), workflow.RunArgs...)
 	command = append(command, forwarded...)
-	if issue := validateSkillCommand(command); issue != "" {
+	issue := validateSkillCommand(command)
+	if issue == "" {
+		issue = validateWorkflowValueConstraints(workflow, forwarded)
+	}
+	if issue != "" {
 		return writeWorkflowValidationResult(format, workflowValidationResult{
 			OK:       false,
 			Scope:    "arguments",
@@ -171,14 +171,14 @@ func runWorkflowValidate(args []string, stdout, stderr io.Writer) int {
 	}, stdout, stderr)
 }
 
-func splitWorkflowValidateArgs(args []string) (control, forwarded []string, hasSeparator bool) {
+func splitWorkflowValidateArgs(args []string) (control, forwarded []string) {
 	for i, arg := range args {
 		if arg != "--" {
 			continue
 		}
-		return args[:i], args[i+1:], true
+		return args[:i], args[i+1:]
 	}
-	return args, nil, false
+	return args, nil
 }
 
 func writeWorkflowValidationFailure(format, workflow string, known *workflowInfo, issue string, stdout, stderr io.Writer) int {

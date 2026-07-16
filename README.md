@@ -78,10 +78,17 @@ current allowed values are returned on demand. Mutations are previews unless
 the caller explicitly uses `mode=apply` and `confirmed=true`.
 
 For shell-first agents, `zv workflows list --format json` and
-`zv workflows show <name> --format json` expose the canonical execution command,
-accepted required/value/boolean flags, and safety hints for read-only, dry-run,
-and long-running behavior. `zv workflows run <name> -- ...` validates that same
-contract before delegating to the stage binary.
+`zv workflows show <name> --format json` expose the primary `short` flow and
+every granular workflow with canonical run/preflight commands, positionals,
+required and optional flags, conditional requirements, enum-like allowed
+values/defaults, and safety hints for read-only, dry-run, and long-running
+behavior. `zv workflows validate <name> --format json -- ...` checks that
+argument contract without executing anything; `zv workflows run <name> -- ...`
+checks the same contract before delegating to the command. Before a costly
+capture, `zv capabilities --format json` reports the resolved local tool paths,
+their source (`env`, `detected`, or `none`), accessibility, and aggregate
+record/compose/render/`local_studio_ready` state without starting a worker or media
+process.
 
 Project-local Codex and Claude Code configuration is already checked in under
 `.codex/config.toml` and `.mcp.json`. Start Studio first, then open a new agent
@@ -303,6 +310,7 @@ scripted use:
 ./bin/zv compose final --recording-result run/recording/recording-result.json --out run/final.mp4
 ./bin/zv music analyze --input track.mp3 --killplan plan.json --out run/rhythm.json
 ./bin/zv presets
+./bin/zv capabilities --format json
 ./bin/zv check
 ./bin/zv serve
 ```
