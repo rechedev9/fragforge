@@ -16,10 +16,13 @@ export type DataPlane = {
   scanUrl: string;
   /** Multipart field name for the .dem upload. */
   scanField: 'demo';
+  /** Multipart field name for the optional bulk-series id carried on a scan. */
+  scanSeriesField: 'series_id';
   /** Reads the job id out of a scan response. */
   scanJobId(body: unknown): string;
   jobStatusUrl(jobId: string): string;
   rosterUrl(jobId: string): string;
+  seriesUrl(seriesId: string): string;
   parseUrl(jobId: string): string;
   /** Parse request body. */
   parseBody(steamId: string): Record<string, string>;
@@ -46,9 +49,11 @@ export function dataPlane(): DataPlane {
     headers: {},
     scanUrl: '/api/demos/scan',
     scanField: 'demo',
+    scanSeriesField: 'series_id',
     scanJobId: (body) => str(body, 'jobId'),
     jobStatusUrl: (jobId) => `/api/demos/${jobId}/status`,
     rosterUrl: (jobId) => `/api/demos/${jobId}/roster`,
+    seriesUrl: (seriesId) => `/api/demos/series/${seriesId}`,
     parseUrl: (jobId) => `/api/demos/${jobId}/parse`,
     parseBody: (steamId) => ({ steamId }),
     planUrl: (jobId) => `/api/demos/${jobId}/plan`,

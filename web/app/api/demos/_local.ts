@@ -8,6 +8,7 @@ import {
   callOrchestratorStreamingUpload,
   serviceUnavailable,
   jobUrl,
+  seriesJobsUrl,
   UPLOAD_BODY_LIMIT_EXCEEDED,
 } from './_lib';
 
@@ -93,6 +94,46 @@ export async function localRoster(jobId: string): Promise<Response> {
   if (res === null) return serviceUnavailable();
   if (!res.ok) return forwardError(res);
 
-  const body = (await res.json()) as { players: unknown[] };
-  return NextResponse.json({ players: body.players });
+  // Forward only the known top-level keys, never the raw upstream object. The
+  // real client's toRosterMatch reads match.{map,score_ct,score_t,rounds}, so
+  // match must survive the proxy; it is omitted when the scan produced none.
+  const body = (await res.json()) as { players: unknown[]; match?: unknown };
+  const out: { players: unknown[]; match?: unknown } = { players: body.players };
+  if (body.match !== undefined) out.match = body.match;
+  return NextResponse.json(out);
+}
+
+/**
+ * GET /api/demos/series/{seriesId} (local) - list the demos uploaded under one
+ * bulk series (bo3/bo5), in upload order. Forwards only a whitelisted per-demo
+ * shape, never the raw upstream job objects: failure_reason and demo_file_name
+ * are present only when the orchestrator sends them.
+ */
+export async function localSeries(seriesId: string): Promise<Response> {
+  const url = seriesJobsUrl(seriesId);
+  if (!url) return NextResponse.json({ error: 'invalid series id' }, { status: 400 });
+
+  const res = await callOrchestrator(url);
+  if (res === null) return serviceUnavailable();
+  if (!res.ok) return forwardError(res);
+
+  type UpstreamJob = {
+    id: string;
+    status: string;
+    failure_reason?: string;
+    demo_file_name?: string;
+    created_at: string;
+  };
+  const body = (await res.json()) as { jobs: UpstreamJob[] };
+  const demos = body.jobs.map((job) => {
+    const demo: { jobId: string; status: string; failureReason?: string; fileName?: string; createdAt: string } = {
+      jobId: job.id,
+      status: job.status,
+      createdAt: job.created_at,
+    };
+    if (job.failure_reason) demo.failureReason = job.failure_reason;
+    if (job.demo_file_name) demo.fileName = job.demo_file_name;
+    return demo;
+  });
+  return NextResponse.json({ demos });
 }

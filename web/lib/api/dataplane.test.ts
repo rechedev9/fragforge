@@ -5,14 +5,17 @@ import assert from 'node:assert/strict';
 import { dataPlane } from './dataplane.ts';
 
 const JOB = '11111111-1111-4111-8111-111111111111';
+const SERIES = '22222222-2222-4222-8222-222222222222';
 
 test('targets the same-origin /api/demos proxy with no auth header', () => {
   const dp = dataPlane();
   assert.deepEqual(dp.headers, {});
   assert.equal(dp.scanUrl, '/api/demos/scan');
   assert.equal(dp.scanField, 'demo');
+  assert.equal(dp.scanSeriesField, 'series_id');
   assert.equal(dp.jobStatusUrl(JOB), `/api/demos/${JOB}/status`);
   assert.equal(dp.rosterUrl(JOB), `/api/demos/${JOB}/roster`);
+  assert.equal(dp.seriesUrl(SERIES), `/api/demos/series/${SERIES}`);
   assert.equal(dp.parseUrl(JOB), `/api/demos/${JOB}/parse`);
   assert.equal(dp.planUrl(JOB), `/api/demos/${JOB}/plan`);
   assert.equal(dp.recordUrl(JOB), `/api/demos/${JOB}/record`);

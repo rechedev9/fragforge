@@ -1,4 +1,4 @@
-import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch } from './types';
+import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch, SeriesDemo } from './types';
 import type { PublishAssistant } from './publish-assistant';
 
 export interface ApiClient {
@@ -8,8 +8,13 @@ export interface ApiClient {
   getMatch(id: string): Promise<Match | null>;
   /** @deprecated Superseded by scanDemo + parseDemo (roster scan → target pick). */
   uploadDemo(input: { fileName: string }): Promise<Match>;
-  /** Roster scan: returns the demo's players (K/D/A) so the user can pick a target. */
-  scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }>;
+  /**
+   * Roster scan: returns the demo's players (K/D/A) so the user can pick a target.
+   * Pass `opts.seriesId` to tag the upload as one demo of a bulk bo3/bo5 series.
+   */
+  scanDemo(file: File, opts?: { seriesId?: string }): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }>;
+  /** Lists the demos uploaded under one bulk series (bo3/bo5), in upload order. */
+  getSeries(seriesId: string): Promise<SeriesDemo[]>;
   /** Parse the scanned demo for the chosen player and return its Match. */
   parseDemo(input: { jobId: string; steamId: string }): Promise<Match>;
   findClips(matchId: string): Promise<Play[]>;

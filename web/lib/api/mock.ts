@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch } from './types';
+import type { Session, Match, Play, Song, Video, FeedItem, RenderMode, VideoStatus, DemoPlayer, Preset, EditConfig, CaptureReadiness, RosterMatch, SeriesDemo } from './types';
 import { DEFAULT_EDIT_CONFIG } from './reel-store';
 import {
   PUBLISH_ASSISTANT_SCHEMA_VERSION,
@@ -153,6 +153,14 @@ let uploadSeq = 0;
  */
 type PendingScan = { fileName: string; seq: number; players: DemoPlayer[]; match: RosterMatch };
 const pendingScans = new Map<string, PendingScan>();
+
+/**
+ * Demos recorded per bulk series id by scanDemo, in upload order, so getSeries
+ * can synthesize a plausible series without a real orchestrator. In-memory only,
+ * like pendingScans: a series that is never listed costs nothing.
+ */
+type SeriesScan = { jobId: string; fileName: string; match: RosterMatch };
+const seriesScans = new Map<string, SeriesScan[]>();
 
 /**
  * Uploaded demos persist to sessionStorage so the bookmarkable /matches/[id]
@@ -327,14 +335,27 @@ export class MockApiClient implements ApiClient {
     return { ...match, stats: { ...match.stats } };
   }
 
-  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match: RosterMatch }> {
+  async scanDemo(file: File, opts?: { seriesId?: string }): Promise<{ jobId: string; players: DemoPlayer[]; match: RosterMatch }> {
     await delay();
     uploadSeq += 1;
     const jobId = `m-upload-${uploadSeq}`;
     const players = synthRoster(file.name);
     const match = synthRosterMatch(file.name);
     pendingScans.set(jobId, { fileName: file.name, seq: uploadSeq, players, match });
+    if (opts?.seriesId) {
+      const list = seriesScans.get(opts.seriesId) ?? [];
+      list.push({ jobId, fileName: file.name, match });
+      seriesScans.set(opts.seriesId, list);
+    }
     return { jobId, players: players.map((p) => ({ ...p })), match: { ...match } };
+  }
+
+  async getSeries(seriesId: string): Promise<SeriesDemo[]> {
+    await delay();
+    const list = seriesScans.get(seriesId) ?? [];
+    // A scanned demo has a roster, so the synthetic series reports it as scanned
+    // and carries the match; failed/unscanned demos never enter the mock series.
+    return list.map((s) => ({ jobId: s.jobId, fileName: s.fileName, status: 'scanned', match: { ...s.match } }));
   }
 
   async parseDemo(input: { jobId: string; steamId: string }): Promise<Match> {

@@ -89,6 +89,26 @@ export type RosterMatch = {
 };
 
 /**
+ * One demo of a bulk-uploaded series (bo3/bo5), as surfaced by the series proxy
+ * route. `match` is filled best-effort from the demo's roster scan once it has
+ * one, so a still-scanning or failed demo simply carries no match.
+ */
+export type SeriesDemo = {
+  jobId: string;
+  fileName?: string;
+  status: string;
+  failureReason?: string;
+  match?: RosterMatch;
+};
+
+/**
+ * A player's scoreboard aggregated across every map of a series. It is a
+ * DemoPlayer whose counting stats are summed and whose rate stats are
+ * round-weighted, plus `mapsPresent`: how many maps the player appeared in.
+ */
+export type AggregatedSeriesPlayer = DemoPlayer & { mapsPresent: number };
+
+/**
  * Stable error code returned by the /api/demos/* proxy routes when the local
  * analysis service (the orchestrator) is unreachable, and the code the client
  * branches on to tell "backend offline" apart from "bad demo". Shared so server

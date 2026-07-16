@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch, CaptureProgress } from './types';
+import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset, EditConfig, CaptureReadiness, CaptureTool, CaptureStatus, RosterMatch, CaptureProgress, SeriesDemo } from './types';
 import { SERVICE_UNAVAILABLE_CODE } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
@@ -76,6 +76,13 @@ function variantLabel(variant: string): string {
  * must not 404 just because the user moved the job forward by creating a reel.
  */
 const PLAN_READY = new Set(['parsed', 'recording', 'recorded', 'composing', 'composed', 'done']);
+
+/**
+ * Job statuses at or past which the roster scan result exists, so getSeries can
+ * best-effort enrich a series demo with its map/score. Excludes queued/scanning
+ * (no roster yet) and failed (nothing to read).
+ */
+const ROSTER_READY = new Set(['scanned', 'parsing', 'parsed', 'recording', 'recorded', 'composing', 'composed', 'done']);
 
 function isJobId(id: string): boolean {
   return UUID_RE.test(id);
@@ -199,10 +206,13 @@ export class RealApiClient implements ApiClient {
     return fetch(url, { ...init, headers });
   }
 
-  async scanDemo(file: File): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
+  async scanDemo(file: File, opts?: { seriesId?: string }): Promise<{ jobId: string; players: DemoPlayer[]; match?: RosterMatch }> {
     const dp = this.dp();
     const form = new FormData();
     form.append(dp.scanField, file);
+    // Tag the upload as one demo of a bulk series; the scan proxy streams the
+    // multipart body straight through, so the orchestrator reads series_id.
+    if (opts?.seriesId) form.append(dp.scanSeriesField, opts.seriesId);
     const scanned = await readJson<unknown>(
       await this.send((d) => ({ url: d.scanUrl, init: { method: 'POST', body: form } })),
     );
@@ -212,6 +222,34 @@ export class RealApiClient implements ApiClient {
 
     const roster = await readJson<RosterResponse>(await this.send((d) => ({ url: d.rosterUrl(jobId) })));
     return { jobId, players: roster.players.map(toDemoPlayer), match: toRosterMatch(roster.match) };
+  }
+
+  /**
+   * Lists the demos uploaded under one bulk series, in upload order, then
+   * best-effort enriches each demo that has a roster with its map/score. A
+   * single demo's roster failure (still scanning → 409, or transient) leaves
+   * that demo's match undefined and never rejects the whole call.
+   */
+  async getSeries(seriesId: string): Promise<SeriesDemo[]> {
+    type ProxyDemo = { jobId: string; status: string; failureReason?: string; fileName?: string; createdAt: string };
+    const body = await readJson<{ demos: ProxyDemo[] }>(await this.send((dp) => ({ url: dp.seriesUrl(seriesId) })));
+    return Promise.all(
+      body.demos.map(async (raw): Promise<SeriesDemo> => {
+        const demo: SeriesDemo = { jobId: raw.jobId, status: raw.status };
+        if (raw.fileName) demo.fileName = raw.fileName;
+        if (raw.failureReason) demo.failureReason = raw.failureReason;
+        if (ROSTER_READY.has(raw.status)) {
+          try {
+            const roster = await readJson<RosterResponse>(await this.send((dp) => ({ url: dp.rosterUrl(raw.jobId) })));
+            const match = toRosterMatch(roster.match);
+            if (match) demo.match = match;
+          } catch {
+            // Roster not ready (409) or a transient failure: leave match unset.
+          }
+        }
+        return demo;
+      }),
+    );
   }
 
   async parseDemo(input: { jobId: string; steamId: string }): Promise<Match> {

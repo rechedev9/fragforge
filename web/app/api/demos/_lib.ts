@@ -70,12 +70,24 @@ export function serviceUnavailable(): Response {
 
 const UUID_RE = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
+/** Query param the orchestrator filters jobs by for a bulk series listing. */
+export const SERIES_ID_PARAM = 'series_id';
+
 /**
  * Builds the upstream job URL for a validated UUID jobId, returning null when
  * the id is not a UUID. Defence in depth against path injection into upstream.
  */
 export function jobUrl(jobId: string, suffix = ''): string | null {
   return UUID_RE.test(jobId) ? `${orchestratorUrl()}/api/jobs/${jobId}${suffix}` : null;
+}
+
+/**
+ * Builds the upstream jobs-list URL filtered by a validated series UUID,
+ * returning null when the id is not a UUID. Reuses jobUrl's UUID guard so the
+ * proxy never forwards an unvalidated series id into the upstream query.
+ */
+export function seriesJobsUrl(seriesId: string): string | null {
+  return UUID_RE.test(seriesId) ? `${orchestratorUrl()}/api/jobs?${SERIES_ID_PARAM}=${seriesId}` : null;
 }
 
 /** Mutation headers: the optional orchestrator token, server-side only. */
