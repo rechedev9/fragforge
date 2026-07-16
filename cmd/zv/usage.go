@@ -136,7 +136,7 @@ const skillsShowUsage = `usage: zv skills show <name> [--format text|json]
 const skillsCheckUsage = `usage: zv skills check [--format text|json]
 `
 
-const workflowsUsage = `usage: zv workflows list [--format text|json] | zv workflows show <name> [--format text|json] | zv workflows run <name> -- [workflow flags] | zv workflows check [--format text|json]
+const workflowsUsage = `usage: zv workflows list [--format text|json] | zv workflows show <name> [--format text|json] | zv workflows validate <name> [--format text|json] -- [workflow flags] | zv workflows run <name> -- [workflow flags] | zv workflows check [--format text|json]
 `
 
 const workflowsListUsage = `usage: zv workflows list [--format text|json]
@@ -146,6 +146,9 @@ const workflowsShowUsage = `usage: zv workflows show <name> [--format text|json]
 `
 
 const workflowsRunUsage = `usage: zv workflows run <name> -- [workflow flags]
+`
+
+const workflowsValidateUsage = `usage: zv workflows validate <name> [--format text|json] -- [workflow flags]
 `
 
 const workflowsCheckUsage = `usage: zv workflows check [--format text|json]

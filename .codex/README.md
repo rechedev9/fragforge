@@ -142,6 +142,8 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv skills check --format json
 ./bin/zv workflows list
 ./bin/zv workflows list --format json
+./bin/zv workflows show short
+./bin/zv workflows show short --format json
 ./bin/zv workflows show demo-parse
 ./bin/zv workflows show demo-parse --format json
 ./bin/zv workflows show demo-players
@@ -170,6 +172,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows show workflows-check --format json
 ./bin/zv workflows show project-check
 ./bin/zv workflows show project-check --format json
+./bin/zv short testdata/foo.dem --prompt "all kills 76561198000000000" --dry-run
 ./bin/zv demo parse --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json
 ./bin/zv demo players --demo testdata/foo.dem
 ./bin/zv utility audit --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
@@ -181,6 +184,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json
 ./bin/zv gallery open --path data/runs/run-004/shorts/publish/index.html
 ./bin/zv serve
+./bin/zv workflows run short -- testdata/foo.dem --prompt "all kills 76561198000000000" --dry-run
 ./bin/zv workflows run demo-parse -- --demo testdata/foo.dem --steamid 76561198000000000 --out plan.json
 ./bin/zv workflows run demo-players -- --demo testdata/foo.dem
 ./bin/zv workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
@@ -205,8 +209,12 @@ The unified CLI can discover the same repo-local skills:
 `zv check` is the full project contract. It validates repo-local skills, the
 workflow catalog, and the active docs/scripts that document the CLI.
 `workflows list --format json` and `workflows show <name> --format json`
-include `command` for the direct canonical command and `run_command` for the
-standard workflow entrypoint automation should execute.
+include `command` for the direct canonical command, `run_command` for the
+standard workflow entrypoint automation should execute, an `arguments` object
+with every accepted required/value/boolean flag, and `safety` hints describing
+read-only, dry-run, and long-running behavior. The argument fields are derived
+from the same command contract enforced at execution time, so an agent does not
+need to guess flags from prose or probe the CLI with invalid calls.
 
 ## Verify AGENTS.md loading
 

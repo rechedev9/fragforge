@@ -14,6 +14,9 @@ func documentedWorkflowCommand(command string) string {
 	if len(fields) == 0 || fields[0] != "zv" {
 		return ""
 	}
+	if len(fields) >= 2 && fields[1] == "short" {
+		return "./bin/zv short"
+	}
 	out := []string{"./bin/zv"}
 	for _, field := range fields[1:] {
 		if strings.HasPrefix(field, "--") || strings.HasPrefix(field, "<") {

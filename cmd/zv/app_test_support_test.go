@@ -619,6 +619,8 @@ func workflowRunCommandArgs(t *testing.T, workflow workflowInfo) []string {
 func workflowRunSampleForwardedArgs(t *testing.T, workflow workflowInfo, galleryPath string) []string {
 	t.Helper()
 	switch workflow.Name {
+	case "short":
+		return []string{"--", "inferno.dem", "--prompt", "all kills 76561198000000000", "--out", "run/short", "--dry-run"}
 	case "demo-parse":
 		return []string{"--", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", "run/plan.json"}
 	case "demo-players":
@@ -693,6 +695,9 @@ func assertWorkflowDiscoveryMatches(t *testing.T, source string, got workflowInf
 	}
 	if got.RunCommand != want.RunCommand {
 		t.Fatalf("%s run_command for %s = %q, want %q", source, want.Name, got.RunCommand, want.RunCommand)
+	}
+	if got.ValidateCommand != want.ValidateCommand {
+		t.Fatalf("%s validate_command for %s = %q, want %q", source, want.Name, got.ValidateCommand, want.ValidateCommand)
 	}
 	if got.RunArgs != nil {
 		t.Fatalf("%s run args for %s = %#v, want omitted from json", source, want.Name, got.RunArgs)
@@ -834,7 +839,7 @@ func workflowListText(workflows []workflowInfo) string {
 }
 
 func workflowShowText(workflow workflowInfo) string {
-	return fmt.Sprintf("%s\n%s\n\ncommand: %s\nrun_command: %s\n", workflow.Name, workflow.Description, workflow.Command, workflow.RunCommand)
+	return fmt.Sprintf("%s\n%s\n\ncommand: %s\nrun_command: %s\nvalidate_command: %s\n", workflow.Name, workflow.Description, workflow.Command, workflow.RunCommand, workflow.ValidateCommand)
 }
 
 func decodeWorkflowCheckResult(t *testing.T, body string) workflowCheckResult {
@@ -986,7 +991,7 @@ func workflowDelegatesExternally(workflow workflowInfo) bool {
 		return false
 	}
 	switch workflow.RunArgs[0] {
-	case "check", "gallery", "skills", "workflows":
+	case "check", "gallery", "short", "skills", "workflows":
 		return false
 	default:
 		return true

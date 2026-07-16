@@ -1200,10 +1200,239 @@ func TestRunWorkflowsShowPrintsCanonicalCommand(t *testing.T) {
 		"Render vertical Shorts",
 		"command: zv shorts render --recording-result <recording-result.json> --out <shorts-dir>",
 		"run_command: zv workflows run shorts-render",
+		"validate_command: zv workflows validate shorts-render",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 		}
+	}
+}
+
+func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
+	for _, workflow := range workflowCatalog() {
+		if workflow.Arguments.Positionals == nil {
+			t.Fatalf("workflow %q positionals are nil, want an empty array when absent", workflow.Name)
+		}
+		if workflow.Arguments.RequiredFlags == nil {
+			t.Fatalf("workflow %q required flags are nil, want an empty array when absent", workflow.Name)
+		}
+		if workflow.Arguments.OptionalValueFlags == nil {
+			t.Fatalf("workflow %q optional value flags are nil, want an empty array when absent", workflow.Name)
+		}
+		if workflow.Arguments.BooleanFlags == nil {
+			t.Fatalf("workflow %q boolean flags are nil, want an empty array when absent", workflow.Name)
+		}
+		if workflow.Arguments.ConditionalRequirements == nil {
+			t.Fatalf("workflow %q conditional requirements are nil, want an empty array when absent", workflow.Name)
+		}
+		for _, flag := range workflow.Arguments.RequiredFlags {
+			if containsString(workflow.Arguments.OptionalValueFlags, flag) {
+				t.Fatalf("workflow %q exposes required flag %q as optional", workflow.Name, flag)
+			}
+		}
+	}
+
+	short, ok := findWorkflow("short")
+	if !ok {
+		t.Fatal("short workflow not found")
+	}
+	if got, want := strings.Join(short.Arguments.RequiredFlags, " "), "--prompt"; got != want {
+		t.Fatalf("short required flags = %q, want %q", got, want)
+	}
+	if got, want := len(short.Arguments.Positionals), 1; got != want {
+		t.Fatalf("short positionals = %#v, want one", short.Arguments.Positionals)
+	}
+	if got := short.Arguments.Positionals[0]; got.Name != "demo" || got.Placeholder != "<demo.dem>" || got.Required {
+		t.Fatalf("short demo positional = %#v, want conditional demo path", got)
+	}
+	if got, want := len(short.Arguments.ConditionalRequirements), 1; got != want {
+		t.Fatalf("short conditional requirements = %#v, want one", short.Arguments.ConditionalRequirements)
+	}
+	shortRequirement := short.Arguments.ConditionalRequirements[0]
+	if got, want := strings.Join(shortRequirement.UnlessAnyFlags, " "), "--from-recording"; got != want {
+		t.Fatalf("short conditional unless flags = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(shortRequirement.RequiredPositionals, " "), "demo"; got != want {
+		t.Fatalf("short conditional positionals = %q, want %q", got, want)
+	}
+	if !short.Safety.SupportsDryRun || !short.Safety.LongRunning || short.Safety.ReadOnly {
+		t.Fatalf("short safety = %#v, want mutating long-running workflow with dry-run", short.Safety)
+	}
+
+	parse, ok := findWorkflow("demo-parse")
+	if !ok {
+		t.Fatal("demo-parse workflow not found")
+	}
+	if got, want := strings.Join(parse.Arguments.RequiredFlags, " "), "--demo --steamid --out"; got != want {
+		t.Fatalf("demo-parse required flags = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(parse.Arguments.OptionalValueFlags, " "), "--segment-mode --rules"; got != want {
+		t.Fatalf("demo-parse optional value flags = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(parse.Arguments.BooleanFlags, " "), "--verbose"; got != want {
+		t.Fatalf("demo-parse boolean flags = %q, want %q", got, want)
+	}
+
+	record, ok := findWorkflow("record")
+	if !ok {
+		t.Fatal("record workflow not found")
+	}
+	if got, want := strings.Join(record.Arguments.RequiredFlags, " "), "--killplan --demo --out"; got != want {
+		t.Fatalf("record required flags = %q, want %q", got, want)
+	}
+	for _, flag := range []string{"--hlae", "--cs2", "--hud", "--fps"} {
+		if !containsString(record.Arguments.OptionalValueFlags, flag) {
+			t.Fatalf("record optional value flags = %#v, want %s", record.Arguments.OptionalValueFlags, flag)
+		}
+	}
+	if got, want := len(record.Arguments.ConditionalRequirements), 1; got != want {
+		t.Fatalf("record conditional requirements = %#v, want one", record.Arguments.ConditionalRequirements)
+	}
+	recordRequirement := record.Arguments.ConditionalRequirements[0]
+	if got, want := strings.Join(recordRequirement.UnlessAnyFlags, " "), "--dry-run"; got != want {
+		t.Fatalf("record conditional unless flags = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(recordRequirement.RequiredFlags, " "), "--hlae --cs2"; got != want {
+		t.Fatalf("record conditional flags = %q, want %q", got, want)
+	}
+	if !record.Safety.SupportsDryRun || !record.Safety.LongRunning || record.Safety.ReadOnly {
+		t.Fatalf("record safety = %#v, want mutating long-running workflow with dry-run", record.Safety)
+	}
+
+	projectCheck, ok := findWorkflow("project-check")
+	if !ok {
+		t.Fatal("project-check workflow not found")
+	}
+	if got, want := strings.Join(projectCheck.Arguments.OptionalValueFlags, " "), "--format"; got != want {
+		t.Fatalf("project-check optional value flags = %q, want %q", got, want)
+	}
+	if !projectCheck.Safety.ReadOnly || projectCheck.Safety.LongRunning || projectCheck.Safety.SupportsDryRun {
+		t.Fatalf("project-check safety = %#v, want short read-only workflow", projectCheck.Safety)
+	}
+
+	serve, ok := findWorkflow("serve")
+	if !ok {
+		t.Fatal("serve workflow not found")
+	}
+	if !serve.Safety.LongRunning || serve.Safety.ReadOnly || serve.Safety.SupportsDryRun {
+		t.Fatalf("serve safety = %#v, want long-running service without dry-run", serve.Safety)
+	}
+}
+
+func TestRunWorkflowsValidateJSONDoesNotExecute(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+	code := Run([]string{
+		"zv", "workflows", "validate", "demo-parse", "--format", "json", "--",
+		"--demo", "inferno.dem",
+		"--steamid", "76561198000000000",
+		"--out", "plan.json",
+		"--verbose",
+	}, &stdout, &stderr, nil, runner)
+
+	if got, want := code, exitSuccess; got != want {
+		t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	if got := runner.name; got != "" {
+		t.Fatalf("runner.name = %q, want no delegated command", got)
+	}
+	var result workflowValidationResult
+	if err := json.Unmarshal([]byte(stdout.String()), &result); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if !result.OK || result.Executed || result.Error != "" {
+		t.Fatalf("result = %#v, want valid unexecuted preflight", result)
+	}
+	if got, want := result.Scope, "arguments"; got != want {
+		t.Fatalf("scope = %q, want %q", got, want)
+	}
+	if got, want := result.Workflow, "demo-parse"; got != want {
+		t.Fatalf("workflow = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(result.Argv, " "), "zv demo parse --demo inferno.dem --steamid 76561198000000000 --out plan.json --verbose"; got != want {
+		t.Fatalf("argv = %q, want %q", got, want)
+	}
+	if result.Safety == nil || result.Safety.ReadOnly || result.Safety.LongRunning || result.Safety.SupportsDryRun {
+		t.Fatalf("safety = %#v, want short mutating workflow without dry-run", result.Safety)
+	}
+}
+
+func TestRunWorkflowsValidateJSONReturnsStructuredFailureWithoutExecuting(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+	code := Run([]string{
+		"zv", "workflows", "validate", "record", "--format=json", "--",
+		"--killplan", "plan.json",
+	}, &stdout, &stderr, nil, runner)
+
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty for JSON failure", got)
+	}
+	if got := runner.name; got != "" {
+		t.Fatalf("runner.name = %q, want no delegated command", got)
+	}
+	var result workflowValidationResult
+	if err := json.Unmarshal([]byte(stdout.String()), &result); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if result.OK || result.Executed {
+		t.Fatalf("result = %#v, want invalid unexecuted preflight", result)
+	}
+	if got, want := result.Scope, "arguments"; got != want {
+		t.Fatalf("scope = %q, want %q", got, want)
+	}
+	if got, want := result.Error, `missing required flags --demo, --out for "record"`; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(result.Argv, " "), "zv record --killplan plan.json"; got != want {
+		t.Fatalf("argv = %q, want %q", got, want)
+	}
+}
+
+func TestRunWorkflowsValidateRejectsForwardedFlagsWithoutSeparator(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+	code := Run([]string{
+		"zv", "workflows", "validate", "demo-parse",
+		"--demo", "inferno.dem",
+		"--steamid", "76561198000000000",
+		"--out", "plan.json",
+	}, &stdout, &stderr, nil, runner)
+
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d", got, want)
+	}
+	if got := runner.name; got != "" {
+		t.Fatalf("runner.name = %q, want no delegated command", got)
+	}
+	if !strings.Contains(stderr.String(), `use "--" before workflow flags`) {
+		t.Fatalf("stderr = %q, want separator guidance", stderr.String())
+	}
+}
+
+func TestRunWorkflowsValidateLongRunningWorkflowDoesNotExecute(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+	code := Run([]string{"zv", "workflows", "validate", "serve", "--format", "json"}, &stdout, &stderr, nil, runner)
+
+	if got, want := code, exitSuccess; got != want {
+		t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
+	}
+	if got := runner.name; got != "" {
+		t.Fatalf("runner.name = %q, want no delegated command", got)
+	}
+	var result workflowValidationResult
+	if err := json.Unmarshal([]byte(stdout.String()), &result); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if !result.OK || result.Executed || result.Safety == nil || !result.Safety.LongRunning {
+		t.Fatalf("result = %#v, want valid unexecuted long-running preflight", result)
 	}
 }
 
@@ -1228,13 +1457,13 @@ func TestRunWorkflowsListJSON(t *testing.T) {
 	if got, want := len(rawWorkflows), len(workflowCatalog()); got != want {
 		t.Fatalf("raw workflow count = %d, want %d", got, want)
 	}
-	if got, want := workflows[0].Name, "demo-parse"; got != want {
+	if got, want := workflows[0].Name, "short"; got != want {
 		t.Fatalf("workflows[0].Name = %q, want %q", got, want)
 	}
-	if got, want := workflows[0].Command, "zv demo parse --demo <demo.dem> --steamid <SteamID64> --out <plan.json>"; got != want {
+	if got, want := workflows[0].Command, "zv short <demo.dem> --prompt <prompt>"; got != want {
 		t.Fatalf("workflows[0].Command = %q, want %q", got, want)
 	}
-	if got, want := workflows[0].RunCommand, "zv workflows run demo-parse"; got != want {
+	if got, want := workflows[0].RunCommand, "zv workflows run short"; got != want {
 		t.Fatalf("workflows[0].RunCommand = %q, want %q", got, want)
 	}
 	for i, workflow := range workflows {

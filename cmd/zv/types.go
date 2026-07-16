@@ -40,9 +40,49 @@ type workflowCheckResult struct {
 }
 
 type workflowInfo struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Command     string   `json:"command"`
-	RunCommand  string   `json:"run_command"`
-	RunArgs     []string `json:"-"`
+	Name            string            `json:"name"`
+	Description     string            `json:"description"`
+	Command         string            `json:"command"`
+	RunCommand      string            `json:"run_command"`
+	ValidateCommand string            `json:"validate_command"`
+	Arguments       workflowArguments `json:"arguments"`
+	Safety          workflowSafety    `json:"safety"`
+	RunArgs         []string          `json:"-"`
+}
+
+type workflowArguments struct {
+	Positionals             []workflowPositionalArgument     `json:"positionals"`
+	RequiredFlags           []string                         `json:"required_flags"`
+	OptionalValueFlags      []string                         `json:"optional_value_flags"`
+	BooleanFlags            []string                         `json:"boolean_flags"`
+	ConditionalRequirements []workflowConditionalRequirement `json:"conditional_requirements"`
+}
+
+type workflowPositionalArgument struct {
+	Name        string `json:"name"`
+	Placeholder string `json:"placeholder"`
+	Required    bool   `json:"required"`
+}
+
+type workflowConditionalRequirement struct {
+	Description         string   `json:"description"`
+	UnlessAnyFlags      []string `json:"unless_any_flags"`
+	RequiredFlags       []string `json:"required_flags"`
+	RequiredPositionals []string `json:"required_positionals"`
+}
+
+type workflowSafety struct {
+	ReadOnly       bool `json:"read_only"`
+	SupportsDryRun bool `json:"supports_dry_run"`
+	LongRunning    bool `json:"long_running"`
+}
+
+type workflowValidationResult struct {
+	OK       bool            `json:"ok"`
+	Scope    string          `json:"scope"`
+	Workflow string          `json:"workflow"`
+	Argv     []string        `json:"argv"`
+	Safety   *workflowSafety `json:"safety,omitempty"`
+	Executed bool            `json:"executed"`
+	Error    string          `json:"error,omitempty"`
 }

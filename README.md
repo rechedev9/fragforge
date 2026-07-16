@@ -77,6 +77,12 @@ and `execute` are registered, while each operation's exact input schema and
 current allowed values are returned on demand. Mutations are previews unless
 the caller explicitly uses `mode=apply` and `confirmed=true`.
 
+For shell-first agents, `zv workflows list --format json` and
+`zv workflows show <name> --format json` expose the canonical execution command,
+accepted required/value/boolean flags, and safety hints for read-only, dry-run,
+and long-running behavior. `zv workflows run <name> -- ...` validates that same
+contract before delegating to the stage binary.
+
 Project-local Codex and Claude Code configuration is already checked in under
 `.codex/config.toml` and `.mcp.json`. Start Studio first, then open a new agent
 session from this trusted repository's root (not from `desktop/`), because the

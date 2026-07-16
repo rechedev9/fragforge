@@ -1,6 +1,10 @@
 package main
 
-import "sync"
+import (
+	"fmt"
+	"strings"
+	"sync"
+)
 
 func findWorkflow(name string) (workflowInfo, bool) {
 	w, ok := workflowCatalogByName()[name]
@@ -27,12 +31,16 @@ func workflowCatalog() []workflowInfo {
 	return workflowCatalogOnce()
 }
 
-// buildWorkflowCatalog lists the delegated single-binary workflows. The
-// primary product flow is the composite built-in `zv short` (parse -> record
-// -> render -> publish pack in one command); it chains these stage workflows
-// instead of appearing as a catalog entry of its own.
+// buildWorkflowCatalog lists the stable workflows exposed to automation. It
+// includes the composite `zv short` product flow as well as its granular stages.
 func buildWorkflowCatalog() []workflowInfo {
 	return withWorkflowRunCommands([]workflowInfo{
+		{
+			Name:        "short",
+			Description: "Create one upload-ready Short through parse, capture, render, and publish stages.",
+			Command:     "zv short <demo.dem> --prompt <prompt>",
+			RunArgs:     []string{"short"},
+		},
 		{
 			Name:        "demo-parse",
 			Description: "Parse a CS2 demo into a kill or utility plan.",
@@ -125,10 +133,110 @@ func withWorkflowRunCommands(workflows []workflowInfo) []workflowInfo {
 		if workflows[i].Name != "" && workflows[i].RunCommand == "" {
 			workflows[i].RunCommand = workflowRunCommand(workflows[i].Name)
 		}
+		if workflows[i].Name != "" && workflows[i].ValidateCommand == "" {
+			workflows[i].ValidateCommand = workflowValidateCommand(workflows[i].Name)
+		}
+		workflows[i].Arguments = workflowArgumentMetadata(workflows[i])
+		workflows[i].Safety = workflowSafetyMetadata(workflows[i], workflows[i].Arguments)
 	}
 	return workflows
 }
 
+func workflowArgumentMetadata(workflow workflowInfo) workflowArguments {
+	required := workflowRequiredFlags(workflow)
+	commandName := fmt.Sprintf("%q", strings.Join(workflow.RunArgs, " "))
+	valueFlags := commandValueFlags(commandName, required)
+	if workflow.Name == "skills-check" || workflow.Name == "workflows-check" || workflow.Name == "project-check" {
+		valueFlags = append(valueFlags, "--format")
+	}
+
+	positionals := []workflowPositionalArgument{}
+	conditional := []workflowConditionalRequirement{}
+	switch workflow.Name {
+	case "short":
+		positionals = append(positionals, workflowPositionalArgument{
+			Name:        "demo",
+			Placeholder: "<demo.dem>",
+			Required:    false,
+		})
+		conditional = append(conditional, workflowConditionalRequirement{
+			Description:         "a demo path is required unless an existing recording result is supplied",
+			UnlessAnyFlags:      []string{"--from-recording"},
+			RequiredFlags:       []string{},
+			RequiredPositionals: []string{"demo"},
+		})
+	case "record":
+		conditional = append(conditional, workflowConditionalRequirement{
+			Description:         "capture tool paths are required for a real recording",
+			UnlessAnyFlags:      []string{"--dry-run"},
+			RequiredFlags:       []string{"--hlae", "--cs2"},
+			RequiredPositionals: []string{},
+		})
+	}
+
+	return workflowArguments{
+		Positionals:             positionals,
+		RequiredFlags:           copyStrings(required),
+		OptionalValueFlags:      flagsExcept(valueFlags, required),
+		BooleanFlags:            copyStrings(commandBoolFlags(commandName)),
+		ConditionalRequirements: conditional,
+	}
+}
+
+func workflowRequiredFlags(workflow workflowInfo) []string {
+	if workflow.Name == "record" {
+		return []string{"--killplan", "--demo", "--out"}
+	}
+	return requiredFlagsFromCommand(workflow.Command)
+}
+
+func workflowSafetyMetadata(workflow workflowInfo, arguments workflowArguments) workflowSafety {
+	readOnly := false
+	switch workflow.Name {
+	case "demo-players", "analysis-viewer", "gallery-open", "skills-check", "workflows-check", "project-check":
+		readOnly = true
+	}
+
+	longRunning := false
+	switch workflow.Name {
+	case "short", "record", "compose-final", "music-analyze", "shorts-render", "analysis-viewer", "serve":
+		longRunning = true
+	}
+
+	return workflowSafety{
+		ReadOnly:       readOnly,
+		SupportsDryRun: containsString(arguments.BooleanFlags, "--dry-run"),
+		LongRunning:    longRunning,
+	}
+}
+
+func flagsExcept(flags, excluded []string) []string {
+	out := make([]string, 0, len(flags))
+	seen := make(map[string]struct{}, len(flags))
+	for _, flag := range flags {
+		if containsString(excluded, flag) {
+			continue
+		}
+		if _, ok := seen[flag]; ok {
+			continue
+		}
+		seen[flag] = struct{}{}
+		out = append(out, flag)
+	}
+	return out
+}
+
+func copyStrings(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	return append([]string(nil), values...)
+}
+
 func workflowRunCommand(name string) string {
 	return "zv workflows run " + name
+}
+
+func workflowValidateCommand(name string) string {
+	return "zv workflows validate " + name
 }

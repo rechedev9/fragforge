@@ -100,6 +100,10 @@ func validateWorkflowCatalog(workflows []workflowInfo) []skillIssue {
 			if workflow.RunCommand != wantRunCommand {
 				issues = append(issues, skillIssue{Path: path, Message: fmt.Sprintf("workflow run command must be %q", wantRunCommand)})
 			}
+			wantValidateCommand := workflowValidateCommand(workflow.Name)
+			if workflow.ValidateCommand != wantValidateCommand {
+				issues = append(issues, skillIssue{Path: path, Message: fmt.Sprintf("workflow validate command must be %q", wantValidateCommand)})
+			}
 		}
 		fields, ok := splitCommandFields(workflow.Command)
 		if !ok {

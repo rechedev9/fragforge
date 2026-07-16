@@ -393,7 +393,7 @@ func TestRunShortValidationErrors(t *testing.T) {
 		{
 			name:       "missing demo and recording",
 			args:       []string{"zv", "short", "--prompt", "todas las kills"},
-			wantStderr: "missing demo path: pass <demo.dem> or --from-recording",
+			wantStderr: `missing demo path for "short"; pass <demo.dem> or --from-recording`,
 		},
 		{
 			name:       "missing capture tools",

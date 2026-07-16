@@ -95,8 +95,8 @@ func validateSkillCommand(command []string) string {
 			return `unexpected extra args for "serve"`
 		}
 	case "workflows":
-		if len(command) < 2 || (command[1] != "list" && command[1] != "show" && command[1] != "run" && command[1] != "check") {
-			return `uses non-standard zv command "workflows"; expected "workflows list", "workflows show", "workflows run", or "workflows check"`
+		if len(command) < 2 || (command[1] != "list" && command[1] != "show" && command[1] != "validate" && command[1] != "run" && command[1] != "check") {
+			return `uses non-standard zv command "workflows"; expected "workflows list", "workflows show", "workflows validate", "workflows run", or "workflows check"`
 		}
 		switch command[1] {
 		case "list":
@@ -105,6 +105,10 @@ func validateSkillCommand(command []string) string {
 			}
 		case "show":
 			if issue := validateWorkflowShowCommand(command[2:]); issue != "" {
+				return issue
+			}
+		case "validate":
+			if issue := validateWorkflowValidateCommand(command[2:]); issue != "" {
 				return issue
 			}
 		case "run":
@@ -243,6 +247,27 @@ func validateWorkflowRunCommand(args []string) string {
 		return issue
 	}
 	return ""
+}
+
+func validateWorkflowValidateCommand(args []string) string {
+	control, forwarded, _ := splitWorkflowValidateArgs(args)
+	_, rest, err := parseFormatArgs(control)
+	if err != nil {
+		return err.Error()
+	}
+	if len(rest) == 0 {
+		return `missing workflow name for "workflows validate"`
+	}
+	if len(rest) > 1 {
+		return `unexpected extra args for "workflows validate"; use "--" before workflow flags`
+	}
+	workflow, ok := findWorkflow(rest[0])
+	if !ok {
+		return fmt.Sprintf(`unknown workflow name %q for "workflows validate"`, rest[0])
+	}
+	command := append([]string(nil), workflow.RunArgs...)
+	command = append(command, forwarded...)
+	return validateSkillCommand(command)
 }
 
 func validateWorkflowRunForwardedArgs(workflow workflowInfo, rest []string) string {

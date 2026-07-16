@@ -74,8 +74,10 @@ func runWorkflows(args []string, stdout, stderr io.Writer, stdin io.Reader, runn
 			}
 			return exitSuccess
 		}
-		fmt.Fprintf(stdout, "%s\n%s\n\ncommand: %s\nrun_command: %s\n", workflow.Name, workflow.Description, workflow.Command, workflow.RunCommand)
+		fmt.Fprintf(stdout, "%s\n%s\n\ncommand: %s\nrun_command: %s\nvalidate_command: %s\n", workflow.Name, workflow.Description, workflow.Command, workflow.RunCommand, workflow.ValidateCommand)
 		return exitSuccess
+	case "validate":
+		return runWorkflowValidate(args[1:], stdout, stderr)
 	case "run":
 		if len(args) < 2 {
 			fmt.Fprint(stderr, workflowsRunUsage)
@@ -113,4 +115,101 @@ func runWorkflows(args []string, stdout, stderr io.Writer, stdin io.Reader, runn
 		fmt.Fprintf(stderr, "unknown workflows command %q\n%s", args[0], workflowsUsage)
 		return exitInvalidArgs
 	}
+}
+
+func runWorkflowValidate(args []string, stdout, stderr io.Writer) int {
+	if isSingleHelp(args) {
+		fmt.Fprint(stdout, workflowsValidateUsage)
+		return exitSuccess
+	}
+
+	control, forwarded, hasSeparator := splitWorkflowValidateArgs(args)
+	format, rest, err := parseFormatArgs(control)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		fmt.Fprint(stderr, workflowsValidateUsage)
+		return exitInvalidArgs
+	}
+	if len(rest) == 0 {
+		return writeWorkflowValidationFailure(format, "", nil, `missing workflow name for "workflows validate"`, stdout, stderr)
+	}
+	if len(rest) > 1 {
+		return writeWorkflowValidationFailure(format, rest[0], nil, `unexpected extra args for "workflows validate"; use "--" before workflow flags`, stdout, stderr)
+	}
+
+	workflow, ok := findWorkflow(rest[0])
+	if !ok {
+		return writeWorkflowValidationFailure(format, rest[0], nil, "workflow not found: "+rest[0], stdout, stderr)
+	}
+	if !hasSeparator && len(forwarded) > 0 {
+		return writeWorkflowValidationFailure(format, workflow.Name, &workflow, `missing "--" separator before workflow flags`, stdout, stderr)
+	}
+
+	argv := append([]string{"zv"}, workflow.RunArgs...)
+	argv = append(argv, forwarded...)
+	command := append([]string(nil), workflow.RunArgs...)
+	command = append(command, forwarded...)
+	if issue := validateSkillCommand(command); issue != "" {
+		return writeWorkflowValidationResult(format, workflowValidationResult{
+			OK:       false,
+			Scope:    "arguments",
+			Workflow: workflow.Name,
+			Argv:     argv,
+			Safety:   &workflow.Safety,
+			Executed: false,
+			Error:    issue,
+		}, stdout, stderr)
+	}
+
+	return writeWorkflowValidationResult(format, workflowValidationResult{
+		OK:       true,
+		Scope:    "arguments",
+		Workflow: workflow.Name,
+		Argv:     argv,
+		Safety:   &workflow.Safety,
+		Executed: false,
+	}, stdout, stderr)
+}
+
+func splitWorkflowValidateArgs(args []string) (control, forwarded []string, hasSeparator bool) {
+	for i, arg := range args {
+		if arg != "--" {
+			continue
+		}
+		return args[:i], args[i+1:], true
+	}
+	return args, nil, false
+}
+
+func writeWorkflowValidationFailure(format, workflow string, known *workflowInfo, issue string, stdout, stderr io.Writer) int {
+	result := workflowValidationResult{
+		OK:       false,
+		Scope:    "arguments",
+		Workflow: workflow,
+		Argv:     []string{},
+		Executed: false,
+		Error:    issue,
+	}
+	if known != nil {
+		result.Safety = &known.Safety
+	}
+	return writeWorkflowValidationResult(format, result, stdout, stderr)
+}
+
+func writeWorkflowValidationResult(format string, result workflowValidationResult, stdout, stderr io.Writer) int {
+	if format == "json" {
+		if err := writeJSON(stdout, result); err != nil {
+			fmt.Fprintf(stderr, "error: writing json: %v\n", err)
+			return exitUnexpected
+		}
+	} else if result.OK {
+		fmt.Fprintf(stdout, "OK: workflow %q arguments are valid; no command executed\n", result.Workflow)
+	} else {
+		fmt.Fprintf(stderr, "error: %s\n", result.Error)
+		fmt.Fprint(stderr, workflowsValidateUsage)
+	}
+	if result.OK {
+		return exitSuccess
+	}
+	return exitInvalidArgs
 }

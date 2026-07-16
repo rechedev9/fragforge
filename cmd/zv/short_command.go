@@ -53,6 +53,11 @@ func runShort(args []string, stdout, stderr io.Writer, stdin io.Reader, runner c
 		fmt.Fprint(stdout, shortUsage)
 		return exitSuccess
 	}
+	if issue := validateShortCommand(args); issue != "" {
+		fmt.Fprintf(stderr, "error: %s\n", issue)
+		fmt.Fprint(stderr, shortUsage)
+		return exitInvalidArgs
+	}
 	opts, err := parseShortArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
