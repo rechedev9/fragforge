@@ -2,6 +2,7 @@
 
 import { Clapperboard, Eye, Crosshair, Check } from 'lucide-react';
 import type { Preset } from '@/lib/api/types';
+import { presetDescription } from '@/lib/preset-copy';
 import { cn } from '@/lib/utils';
 
 export type PresetCardsProps = {
@@ -34,7 +35,7 @@ export function PresetCards({ presets, value, onChange, disabled = false }: Pres
           key={preset.name}
           icon={PRESET_ICONS[preset.name] ?? <Clapperboard className="size-5" />}
           title={preset.label}
-          pitch={preset.description}
+          pitch={presetDescription(preset)}
           hud={preset.hudMode}
           isDefault={Boolean(preset.default)}
           selected={value === preset.name}
