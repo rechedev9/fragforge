@@ -3,7 +3,15 @@
 // polling/linking decisions the series view needs. Pure and unit-tested so the
 // UI never sprinkles status string literals across components.
 
-import { PLAN_READY_STATUSES } from './api/types.ts';
+import { PLAN_READY_STATUSES, type VideoStatus } from './api/types.ts';
+
+/** Series ids are client-minted UUIDs; anything else is a bad/guessed URL. */
+const SERIES_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True when a route/query value is a well-formed series id. */
+export function isSeriesId(value: string): boolean {
+  return SERIES_ID_RE.test(value);
+}
 
 /**
  * Raw orchestrator job statuses grouped into the Spanish label shown on each
@@ -100,4 +108,34 @@ export function summarizeSeriesStatuses(statuses: readonly string[]): SeriesStat
     else summary.pending += 1;
   }
   return summary;
+}
+
+/**
+ * A map's latest reel, as the series view shows it. Reel states come from the
+ * client reconcile loop ({@link VideoStatus}), not from the job status: they
+ * cover what the job status cannot see, chiefly "reel en cola" while the job is
+ * still `parsed` because the capture waits its turn on the orchestrator's
+ * serial capture lane, plus the terminal ready/failed outcome of the artifact.
+ */
+const SERIES_REEL_STATES: Record<VideoStatus, { label: string; tone: SeriesStatusTone; active: boolean }> = {
+  queued: { label: 'reel en cola', tone: 'pending', active: true },
+  recording: { label: 'grabando reel', tone: 'progress', active: true },
+  composing: { label: 'renderizando reel', tone: 'progress', active: true },
+  ready: { label: 'reel listo', tone: 'done', active: false },
+  failed: { label: 'reel fallido', tone: 'failed', active: false },
+};
+
+/** The Spanish pill label for a map's reel state. */
+export function seriesReelLabel(status: VideoStatus): string {
+  return SERIES_REEL_STATES[status].label;
+}
+
+/** The pill tone for a map's reel state. */
+export function seriesReelTone(status: VideoStatus): SeriesStatusTone {
+  return SERIES_REEL_STATES[status].tone;
+}
+
+/** True while a reel is still moving toward its artifact (keep polling the series). */
+export function seriesReelIsActive(status: VideoStatus): boolean {
+  return SERIES_REEL_STATES[status].active;
 }

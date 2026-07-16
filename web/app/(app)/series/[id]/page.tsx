@@ -5,8 +5,12 @@ import Link from 'next/link';
 import { Layers, ChevronRight } from 'lucide-react';
 import { api } from '@/lib/api';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
-import type { SeriesDemo } from '@/lib/api/types';
+import type { SeriesDemo, Video } from '@/lib/api/types';
 import {
+  isSeriesId,
+  seriesReelIsActive,
+  seriesReelLabel,
+  seriesReelTone,
   seriesStatusLabel,
   seriesStatusTone,
   seriesStatusIsPending,
@@ -22,9 +26,6 @@ import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-
-/** Series ids are client-minted UUIDs; anything else is a bad/guessed URL. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Fast while any map is still working, relaxed once the series has settled. */
 const FAST_MS = 2500;
@@ -61,6 +62,21 @@ function seriesDescription(statuses: readonly string[]): string {
   return `${parts.join(' · ')}.`;
 }
 
+/**
+ * Each map's newest reel: the Library reels that belong to this series' jobs,
+ * keyed by job. listVideos returns reels newest-first, so the first hit per
+ * job is the one the map card should describe.
+ */
+function latestReelPerJob(demos: readonly SeriesDemo[], videos: readonly Video[]): ReadonlyMap<string, Video> {
+  const jobIds = new Set(demos.map((d) => d.jobId));
+  const byJob = new Map<string, Video>();
+  for (const video of videos) {
+    if (video.jobId === undefined || !jobIds.has(video.jobId)) continue;
+    if (!byJob.has(video.jobId)) byJob.set(video.jobId, video);
+  }
+  return byJob;
+}
+
 /** Pill colours per status tone, matching the app's cyan/amber/destructive language. */
 const TONE_CLASSES: Record<SeriesStatusTone, string> = {
   pending: 'border-border bg-muted/60 text-muted-foreground',
@@ -79,9 +95,10 @@ const TONE_CLASSES: Record<SeriesStatusTone, string> = {
  */
 export default function SeriesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const valid = UUID_RE.test(id);
+  const valid = isSeriesId(id);
 
   const [demos, setDemos] = useState<SeriesDemo[] | null>(null);
+  const [reelByJob, setReelByJob] = useState<ReadonlyMap<string, Video>>(new Map());
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<'offline' | 'generic' | null>(null);
   // Read the latest demos inside the poll tick without re-subscribing the loop:
@@ -95,6 +112,7 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
     // id; otherwise the previous series' demos linger and the loading state
     // never re-renders when switching series.
     setDemos(null);
+    setReelByJob(new Map());
     setLoaded(false);
     setLoadError(null);
     demosRef.current = null;
@@ -104,17 +122,24 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
     const stop = startPollLoop({
       tick: async () => {
         try {
-          const list = await api.getSeries(id);
+          // listVideos also runs the reel reconcile tick, so keeping this page
+          // open is enough to drive every queued reel through record → render;
+          // the user never has to visit the Library for the queue to advance.
+          const [list, videos] = await Promise.all([api.getSeries(id), api.listVideos()]);
           if (!active) return 'idle';
+          const reels = latestReelPerJob(list, videos);
           demosRef.current = list;
           setDemos(list);
+          setReelByJob(reels);
           setLoadError(null);
           setLoaded(true);
-          const pending = list.some((d) => seriesStatusIsPending(d.status));
-          // A settled series (no map still working) does one fetch, renders, and
-          // stops: keep polling only while some map is pending. stopLoop is
-          // assigned before this async tick can reach here (the tick suspends on
-          // the getSeries await), so the call is safe.
+          const pending =
+            list.some((d) => seriesStatusIsPending(d.status)) ||
+            Array.from(reels.values()).some((v) => seriesReelIsActive(v.status));
+          // A settled series (no map still working, no reel still forging) does
+          // one fetch, renders, and stops: keep polling only while something is
+          // pending. stopLoop is assigned before this async tick can reach here
+          // (the tick suspends on the awaits above), so the call is safe.
           if (!pending) stopLoop?.();
           return pending ? 'fast' : 'idle';
         } catch (err) {
@@ -204,17 +229,32 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
 
       <div className="flex flex-col gap-3">
         {list.map((demo, i) => (
-          <SeriesDemoCard key={demo.jobId} demo={demo} index={i} />
+          <SeriesDemoCard key={demo.jobId} demo={demo} index={i} seriesId={id} reel={reelByJob.get(demo.jobId)} />
         ))}
       </div>
     </div>
   );
 }
 
-/** One map's row: title + score/status, plus a CTA into its picker when ready. */
-function SeriesDemoCard({ demo, index }: { demo: SeriesDemo; index: number }) {
-  const tone = seriesStatusTone(demo.status);
-  const label = seriesStatusLabel(demo.status);
+/**
+ * One map's row: title + score/status, plus a CTA into its picker when ready.
+ * When the map already has a reel, the pill describes the reel (en cola →
+ * grabando → renderizando → listo) instead of the raw job status, so queueing
+ * plays on every map of the series reads as one visible capture queue.
+ */
+function SeriesDemoCard({
+  demo,
+  index,
+  seriesId,
+  reel,
+}: {
+  demo: SeriesDemo;
+  index: number;
+  seriesId: string;
+  reel?: Video;
+}) {
+  const tone = reel ? seriesReelTone(reel.status) : seriesStatusTone(demo.status);
+  const label = reel ? seriesReelLabel(reel.status) : seriesStatusLabel(demo.status);
   const forgeable = seriesStatusIsForgeable(demo.status);
   const failed = demo.status === 'failed';
 
@@ -251,9 +291,14 @@ function SeriesDemoCard({ demo, index }: { demo: SeriesDemo; index: number }) {
           {label}
         </span>
         {forgeable ? (
-          <Button asChild size="sm" className="font-[family-name:var(--font-display)] tracking-[0.05em]">
-            <Link href={'/matches/' + demo.jobId}>
-              ELEGIR JUGADAS
+          <Button
+            asChild
+            size="sm"
+            variant={reel ? 'secondary' : 'default'}
+            className="font-[family-name:var(--font-display)] tracking-[0.05em]"
+          >
+            <Link href={`/matches/${demo.jobId}?series=${seriesId}`}>
+              {reel ? 'OTRO REEL' : 'ELEGIR JUGADAS'}
               <ChevronRight className="size-4" />
             </Link>
           </Button>

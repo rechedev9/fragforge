@@ -139,6 +139,7 @@ function buildEditRequest(edit: EditConfig): EditRequestBody {
 function videoFromIntent(intent: ReelIntent): Video {
   return {
     id: intent.videoId,
+    jobId: intent.jobId,
     title: intent.title,
     map: intent.map,
     score: intent.score,

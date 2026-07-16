@@ -6,6 +6,7 @@ import { Music } from 'lucide-react';
 import type { EditConfig, Match, Play, Preset } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { DEFAULT_EDIT_CONFIG } from '@/lib/api/reel-store';
+import { isSeriesId } from '@/lib/series-status';
 import { formatKd, playsSelectionLabel, ratingClass, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -31,8 +32,19 @@ function isWin(score: string): boolean {
   return parsed ? parsed[0] > parsed[1] : false;
 }
 
-export default function FindHighlightsPage({ params }: { params: Promise<{ id: string }> }) {
+export default function FindHighlightsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ series?: string | string[] }>;
+}) {
   const { id } = use(params);
+  // Set when the picker was entered from a series map card: creating a reel
+  // then returns to the series so the user can queue the remaining maps,
+  // instead of dead-ending in the Library with the rest of the series lost.
+  const { series } = use(searchParams);
+  const seriesId = typeof series === 'string' && isSeriesId(series) ? series : null;
   const router = useRouter();
 
   const [match, setMatch] = useState<Match | null>(null);
@@ -128,7 +140,7 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
         variant,
         editConfig,
       });
-      router.push('/videos');
+      router.push(seriesId ? `/series/${seriesId}` : '/videos');
     } catch {
       setCreating(false);
     }
@@ -163,8 +175,12 @@ export default function FindHighlightsPage({ params }: { params: Promise<{ id: s
   // score block and let the mono meta line carry the play count instead.
   const hasScore = match.score.trim() !== '';
   const fromUpload = match.source === 'upload';
-  const backHref = fromUpload ? '/upload' : '/matches';
-  const backLabel = fromUpload ? 'SUBIR DEMO' : 'PARTIDAS';
+  let backHref = fromUpload ? '/upload' : '/matches';
+  let backLabel = fromUpload ? 'SUBIR DEMO' : 'PARTIDAS';
+  if (seriesId) {
+    backHref = `/series/${seriesId}`;
+    backLabel = 'SERIE';
+  }
   const meta = [
     timeAgo(match.playedAt),
     `${n} ${n === 1 ? 'jugada' : 'jugadas'}`,

@@ -422,6 +422,7 @@ export class MockApiClient implements ApiClient {
 
     const video: Video = {
       id,
+      jobId: input.matchId,
       title: `${playLabel} - ${modeLabel}`,
       map: match?.map ?? 'Unknown',
       score: match?.score ?? '',

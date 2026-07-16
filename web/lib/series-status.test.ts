@@ -2,7 +2,12 @@
 // Run: node --test series-status.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { VideoStatus } from './api/types.ts';
 import {
+  isSeriesId,
+  seriesReelIsActive,
+  seriesReelLabel,
+  seriesReelTone,
   seriesStatusLabel,
   seriesStatusTone,
   seriesStatusIsPending,
@@ -98,4 +103,34 @@ test('seriesTitle reads singular for one map and plural otherwise', () => {
   assert.equal(seriesTitle(1), 'SERIE DE 1 MAPA');
   assert.equal(seriesTitle(2), 'SERIE DE 2 MAPAS');
   assert.equal(seriesTitle(5), 'SERIE DE 5 MAPAS');
+});
+
+test('isSeriesId accepts client-minted UUIDs and rejects other route values', () => {
+  assert.equal(isSeriesId('4c6192d1-0bfa-4713-aa69-0d094641d8aa'), true);
+  assert.equal(isSeriesId('4C6192D1-0BFA-4713-AA69-0D094641D8AA'), true);
+  for (const bad of ['', 'serie-1', '4c6192d1', '4c6192d1-0bfa-4713-aa69-0d094641d8aa-extra']) {
+    assert.equal(isSeriesId(bad), false, bad);
+  }
+});
+
+test('labels every reel status in Spanish with its tone', () => {
+  const cases: Array<[VideoStatus, string, string]> = [
+    ['queued', 'reel en cola', 'pending'],
+    ['recording', 'grabando reel', 'progress'],
+    ['composing', 'renderizando reel', 'progress'],
+    ['ready', 'reel listo', 'done'],
+    ['failed', 'reel fallido', 'failed'],
+  ];
+  for (const [status, label, tone] of cases) {
+    assert.equal(seriesReelLabel(status), label, status);
+    assert.equal(seriesReelTone(status), tone, status);
+  }
+});
+
+test('treats queued/recording/composing reels as active so the series keeps polling', () => {
+  assert.equal(seriesReelIsActive('queued'), true);
+  assert.equal(seriesReelIsActive('recording'), true);
+  assert.equal(seriesReelIsActive('composing'), true);
+  assert.equal(seriesReelIsActive('ready'), false);
+  assert.equal(seriesReelIsActive('failed'), false);
 });
