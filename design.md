@@ -959,7 +959,7 @@ Guardrails:
 - job must be `parsed` or `recorded`
 - kill plan must exist
 - HLAE path must be configured
-- use `C:\HLAE-2.190.1\HLAE.exe` on this machine
+- use the latest official HLAE release; auto-detection selects the highest numeric version under `C:\HLAE-*\HLAE.exe`
 - CS2 launch args must include `-windowed`
 
 ### `start_render_variant`

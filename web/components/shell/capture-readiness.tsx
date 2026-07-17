@@ -32,7 +32,7 @@ const STATUS_META: Record<CaptureStatus, { label: string; text: string; hint: st
 /** The three record tools, with a friendly name and a typical Windows path. */
 const TOOL_GUIDE: Array<{ name: string; label: string; example: string }> = [
   { name: 'ZV_RECORDER_PATH', label: 'Grabador FragForge', example: 'C:\\...\\bin\\zv-recorder.exe' },
-  { name: 'ZV_HLAE_PATH', label: 'HLAE', example: 'C:\\HLAE-2.190.1\\HLAE.exe' },
+  { name: 'ZV_HLAE_PATH', label: 'HLAE', example: 'C:\\HLAE-<latest-version>\\HLAE.exe' },
   { name: 'ZV_CS2_PATH', label: 'CS2', example: 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Counter-Strike Global Offensive\\game\\bin\\win64\\cs2.exe' },
 ];
 

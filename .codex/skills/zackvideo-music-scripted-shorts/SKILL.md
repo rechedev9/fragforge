@@ -35,15 +35,15 @@ If the SteamID64 is unknown, list players:
 .\bin\zv.exe workflows run demo-players -- --demo <demo.dem>
 ```
 
-Record with HLAE/CS2 only when the user has authorized capture:
+Record with HLAE/CS2 only when the user has authorized capture. Verify that
+`zv capabilities --format json` selects the latest official HLAE release before
+starting; install the newer release if the detected version is stale:
 
 ```powershell
 .\bin\zv.exe workflows run record -- `
   --killplan <run>\plan.json `
   --demo <demo.dem> `
   --out <run>\recording-deathnotices-120 `
-  --hlae C:\HLAE-2.190.1\HLAE.exe `
-  --cs2 "<cs2.exe>" `
   --hud deathnotices `
   --fps 120 `
   --video-crf 16 `

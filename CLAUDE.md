@@ -85,6 +85,23 @@ credentials; xAI remains the automatic transcription and translation fallback.
 Both journeys support `short-9x16` (1080x1920 TikTok/Shorts) and
 `landscape-16x9` (1920x1080 YouTube); discover stream geometry through
 `zv stream variants --format json`.
+
+Before any non-dry-run capture or render for a demo video, stop at the
+creative brief gate. Ask the user only for choices they have not already supplied:
+delivery format/aspect ratio, HUD and killfeed treatment, kill effect,
+transition, kill numbering/counter, intro/outro, music, and thumbnail strategy
+(`generated gameplay candidates` or `no cover`). Group the unanswered choices into one concise message, offer concrete
+options supported by the CLI, and receive explicit approval. If the user says
+to decide autonomously, state the resolved defaults and treat that delegation
+as approval. Preserve the approved choices in the exact preflight argv; do not
+silently replace them with preset defaults later.
+
+Thumbnail approval is a second gate after cover candidates exist. Show the
+cover sheet or candidate images, ask the user to choose one, and do not call the
+pack upload-ready until a candidate is selected or the user explicitly
+delegates automatic selection. A request that already names a thumbnail or
+delegates its choice satisfies this gate; never repeat answered questions.
+
 Use JSON output for decisions, preserve the exact argv reported by preflight,
 and follow the existing explicit-authorization rules before HLAE/CS2 capture or
 long renders. MCP is optional and disabled by default in `.codex/config.toml`;
@@ -336,8 +353,8 @@ Demo cleanup:
 
 Local capture path:
 
-- The orchestrator auto-detects the capture tools on startup so the user does not set env vars: `zv-recorder` next to the orchestrator binary, HLAE at `C:\HLAE-*\HLAE.exe`, and `cs2.exe` via Steam's `libraryfolders.vdf` (`cmd/zv-orchestrator/detect.go`). Explicit `ZV_RECORDER_PATH`/`ZV_HLAE_PATH`/`ZV_CS2_PATH` still win. `GET /api/capabilities` reports each tool's `source` (`detected`/`env`/`none`) and accessibility, which the web "Capture" card surfaces (and the record/generate handlers 409 with an actionable message when capture is not configured).
-- Use `C:\HLAE-2.190.1\HLAE.exe` for HLAE capture on this machine; auto-detection prefers a versioned `C:\HLAE-*` over the bare `C:\HLAE\HLAE.exe`.
+- The orchestrator auto-detects the capture tools on startup so the user does not set env vars: `zv-recorder` next to the orchestrator binary, the highest installed HLAE version matching `C:\HLAE-*\HLAE.exe`, and `cs2.exe` via Steam's `libraryfolders.vdf` (`internal/capturetools/detect.go`). Version comparison is numeric, not lexical. Explicit `ZV_RECORDER_PATH`/`ZV_HLAE_PATH`/`ZV_CS2_PATH` still win. `GET /api/capabilities` reports each tool's `source` (`detected`/`env`/`none`) and accessibility, which the web "Capture" card surfaces (and the record/generate handlers 409 with an actionable message when capture is not configured).
+- Always use the latest official HLAE release for capture; never pin a release number in repository instructions or command examples. Before a non-dry-run capture, compare the version reported by `zv capabilities --format json` with the latest official AdvancedFX release and install the newer release when the local copy is stale.
 - Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for FragForge capture runs.
 - Always launch CS2 through HLAE in windowed mode for recording runs; the CS2 command line must include `-windowed`, and demos must not be recorded in fullscreen or borderless fullscreen.
 

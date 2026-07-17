@@ -65,7 +65,7 @@ func TestRunShortChainsAllStages(t *testing.T) {
 		"--prompt", "haz un short con todas las kills de martinez",
 		"--target-steamid", "76561198000000000",
 		"--out", outDir,
-		"--hlae", `C:\HLAE-2.190.1\HLAE.exe`,
+		"--hlae", `C:\Tools\HLAE.exe`,
 		"--cs2", `C:\cs2.exe`,
 	}, &stdout, &stderr, nil, runner)
 
@@ -78,7 +78,7 @@ func TestRunShortChainsAllStages(t *testing.T) {
 	wantArgs := [][]string{
 		{"--list-presets"},
 		{"parse", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", filepath.Join(outDir, "killplan.json")},
-		{"--killplan", filepath.Join(outDir, "killplan.json"), "--demo", "inferno.dem", "--out", filepath.Join(outDir, "recording"), "--hlae", `C:\HLAE-2.190.1\HLAE.exe`, "--cs2", `C:\cs2.exe`, "--hud", "deathnotices", "--portrait-safe-killfeed"},
+		{"--killplan", filepath.Join(outDir, "killplan.json"), "--demo", "inferno.dem", "--out", filepath.Join(outDir, "recording"), "--hlae", `C:\Tools\HLAE.exe`, "--cs2", `C:\cs2.exe`, "--hud", "deathnotices", "--portrait-safe-killfeed"},
 		{"--recording-result", filepath.Join(outDir, "recording", "recording-result.json"), "--out", filepath.Join(outDir, "shorts"), "--publish-dir", filepath.Join(outDir, "shortslistosparasubir"), "--preset", "viral-60-clean", "--output-format", "short-9x16", "--kill-effect", "punch-in", "--transition", "flash", "--killplan", filepath.Join(outDir, "killplan.json"), "--compile-segments"},
 	}
 	wantBinaries := []string{"zv-editor", "zv-parser", "zv-recorder", "zv-editor"}

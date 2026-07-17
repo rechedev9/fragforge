@@ -17,13 +17,40 @@ Use FragForge as the deterministic source of truth: parse demo segments, record 
 - Treat `data/` and rendered media as output unless the task explicitly asks to clean or inspect artifacts.
 - Do not stage or commit generated MP4/WAV/PNG/WebP/JPG/HTML publish artifacts, local binaries, or capture output.
 - Do not clean, delete, or overwrite existing run artifacts unless the user explicitly asks.
-- Use `C:\HLAE-2.190.1\HLAE.exe` for local capture. Do not use `C:\HLAE\HLAE.exe`.
-- Before any non-dry-run capture, verify `Test-Path C:\HLAE-2.190.1\HLAE.exe` and stop if any command references `C:\HLAE\HLAE.exe`.
+- Use the latest official HLAE release for local capture. Confirm the highest installed version with `zv capabilities --format json`, compare it with the latest official AdvancedFX release, and update before capture when necessary.
+- Let FragForge auto-detect the highest numeric version under `C:\HLAE-*\HLAE.exe`; use `--hlae` only for an explicit override. Never use `C:\HLAE\HLAE.exe`.
 - CS2 must launch through HLAE in windowed mode for recording runs. The CS2
   command line must include `-windowed`; do not record demos in fullscreen or
   borderless fullscreen.
 - Use `--dry-run` before changing recording settings or when only inspecting planned commands/manifests.
 - Do not run HLAE/CS2 or long renders unless the user explicitly wants a capture/render run.
+
+## Creative Brief Gate
+
+Before non-dry-run capture or render, ask only the creative choices the user
+has not already answered. Group them into one concise request and use the CLI's
+supported choices:
+
+- delivery: `short-9x16` or `landscape-16x9`;
+- game presentation: `gameplay` (full HUD), `deathnotices`, or `clean`, with a readable factual
+  killfeed;
+- kill effect: `clean`, `punch-in`, `velocity`, or `freeze-flash`;
+- transition: `cut`, `flash`, `whip`, or `dip`;
+- kill numbering/counter: disabled or enabled; enabled includes the built-in
+  milestone labels such as 2K/3K/ACE;
+- intro/outro text and music;
+- thumbnail generation: gameplay cover candidates or no cover. Custom designed
+  cover text is not part of the current render CLI contract and must not be
+  promised as a render option.
+
+Do not ask again for decisions already present in the request. If the user
+delegates creative control, state the resolved defaults and continue. Otherwise
+wait for explicit approval, then preserve every answer in the exact dry-run and
+real render argv.
+
+After rendering cover candidates, show the cover sheet or candidate images and
+ask the user to select the final thumbnail. The pack is not upload-ready until
+the user selects one or explicitly delegates automatic selection.
 
 ## Inputs
 
@@ -65,8 +92,6 @@ Generate the HLAE script first. Remove `--dry-run` only when the user wants an a
   --killplan <run>\plan.json `
   --demo <demo.dem> `
   --out <run>\recording-deathnotices-120 `
-  --hlae C:\HLAE-2.190.1\HLAE.exe `
-  --cs2 "<cs2.exe>" `
   --hud deathnotices `
   --fps 120 `
   --video-crf 16 `

@@ -664,7 +664,8 @@ func TestRunWorkflowsCheckRejectsAgentInstructionHLAEDrift(t *testing.T) {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
 	for _, want := range []string{
-		`CLAUDE.md: missing canonical workflow command C:\HLAE-2.190.1\HLAE.exe`,
+		`CLAUDE.md: missing canonical workflow command highest installed HLAE version`,
+		`CLAUDE.md: missing canonical workflow command latest official HLAE release`,
 		`CLAUDE.md: missing canonical workflow command C:\HLAE\HLAE.exe`,
 	} {
 		if !strings.Contains(stderr.String(), want) {

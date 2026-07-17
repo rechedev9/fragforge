@@ -7,7 +7,7 @@
 # record stage — HLAE and CS2 (Steam) installed locally. No Postgres/Redis: the
 # orchestrator runs in memory mode with an inline task queue.
 #
-# Tool paths default to this dev machine (see CLAUDE.md) and are env-overridable.
+# Tool paths are auto-detected; explicit environment overrides still win.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,7 +18,7 @@ DATA="${ZV_DATA_DIR:-$ROOT/.local/data}"
 WORK="${ZV_MEDIA_WORK_DIR:-$ROOT/.local/work}"
 HTTP_ADDR="${ZV_HTTP_ADDR:-127.0.0.1:8080}"
 
-HLAE="${ZV_HLAE_PATH:-C:/HLAE-2.190.1/HLAE.exe}"
+HLAE="${ZV_HLAE_PATH:-}"
 CS2="${ZV_CS2_PATH:-C:/Program Files (x86)/Steam/steamapps/common/Counter-Strike Global Offensive/game/bin/win64/cs2.exe}"
 FFMPEG="${ZV_FFMPEG_PATH:-$(command -v ffmpeg || true)}"
 FFPROBE="${ZV_FFPROBE_PATH:-$(command -v ffprobe || true)}"

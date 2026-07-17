@@ -50,15 +50,15 @@ Prefer exact `name_in_demo` plus SteamID64. If the target name is fuzzy, list li
 - Use stable segment IDs: `d01-killer`, `d01-target`, `d02-killer`, `d02-target`, etc.
 - Use exact in-demo names for camera switching when SteamID/account-id switching fails or when prior QA shows the victim POV by mistake.
 
-4. Record with gameplay HUD:
+4. Confirm that `zv capabilities --format json` selects the latest official
+   HLAE release, updating the local version if necessary, then record with
+   gameplay HUD:
 
 ```powershell
 .\bin\zv.exe workflows run record -- `
   --killplan <run>\plans\<plan>.json `
   --demo <demo.dem> `
   --out <run>\recording-<plan>-gameplay-120 `
-  --hlae C:\HLAE-2.190.1\HLAE.exe `
-  --cs2 "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe" `
   --hud gameplay `
   --fps 120 `
   --video-crf 16 `

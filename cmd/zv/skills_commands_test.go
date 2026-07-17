@@ -606,7 +606,7 @@ func TestRunSkillsCheckRejectsWorkflowCommandMissingRequiredFlags(t *testing.T) 
 		},
 		{
 			name:    "unquoted path with spaces",
-			line:    `.\bin\zv.exe workflows run record -- --killplan plan.json --demo demo.dem --out recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe`,
+			line:    `.\bin\zv.exe workflows run record -- --killplan plan.json --demo demo.dem --out recording --hlae C:\Tools\HLAE.exe --cs2 C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe`,
 			wantErr: `unexpected positional arg "2\\game\\bin\\win64\\cs2.exe" for "record"; quote paths with spaces`,
 		},
 		{

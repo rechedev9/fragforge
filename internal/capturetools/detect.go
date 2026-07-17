@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/rechedev9/fragforge/internal/recording"
@@ -120,11 +121,9 @@ func detectSibling(name string) string {
 	return firstExisting(filepath.Join(filepath.Dir(exe), name))
 }
 
-const preferredHLAEPath = `C:\HLAE-2.190.1\HLAE.exe`
-
 // detectHLAE deliberately ignores the known-wrong bare C:\HLAE install. The
-// capture pipeline is qualified against 2.190.1, so prefer that installation
-// when present and only fall back to the highest versioned installation.
+// highest installed versioned release always wins so CS2 signature updates do
+// not leave capture pinned to an older AfxHookSource2 build.
 func detectHLAE() string {
 	if runtime.GOOS != "windows" {
 		return ""
@@ -133,16 +132,84 @@ func detectHLAE() string {
 }
 
 func selectHLAE(matches []string) string {
+	versioned := make([]string, 0, len(matches))
 	for _, match := range matches {
-		if strings.EqualFold(match, preferredHLAEPath) {
-			return match
+		if _, ok := hlaeVersion(match); ok {
+			versioned = append(versioned, match)
 		}
 	}
-	if len(matches) == 0 {
+	if len(versioned) == 0 {
 		return ""
 	}
-	sort.Strings(matches)
-	return matches[len(matches)-1]
+	sort.Slice(versioned, func(i, j int) bool {
+		left, _ := hlaeVersion(versioned[i])
+		right, _ := hlaeVersion(versioned[j])
+		if comparison := compareVersionParts(left, right); comparison != 0 {
+			return comparison < 0
+		}
+		return strings.ToLower(versioned[i]) < strings.ToLower(versioned[j])
+	})
+	return versioned[len(versioned)-1]
+}
+
+func hlaeVersion(path string) ([]int, bool) {
+	normalized := strings.TrimRight(strings.ReplaceAll(path, `\`, "/"), "/")
+	separator := strings.LastIndexByte(normalized, '/')
+	if separator < 0 {
+		return nil, false
+	}
+	parent := strings.TrimRight(normalized[:separator], "/")
+	separator = strings.LastIndexByte(parent, '/')
+	dir := parent[separator+1:]
+	const prefix = "HLAE-"
+	if len(dir) <= len(prefix) || !strings.EqualFold(dir[:len(prefix)], prefix) {
+		return nil, false
+	}
+	raw := dir[len(prefix):]
+	end := 0
+	for end < len(raw) && ((raw[end] >= '0' && raw[end] <= '9') || raw[end] == '.') {
+		end++
+	}
+	raw = strings.Trim(raw[:end], ".")
+	if raw == "" {
+		return nil, false
+	}
+	parts := strings.Split(raw, ".")
+	version := make([]int, len(parts))
+	for i, part := range parts {
+		if part == "" {
+			return nil, false
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, false
+		}
+		version[i] = value
+	}
+	return version, true
+}
+
+func compareVersionParts(left, right []int) int {
+	length := len(left)
+	if len(right) > length {
+		length = len(right)
+	}
+	for i := 0; i < length; i++ {
+		var leftPart, rightPart int
+		if i < len(left) {
+			leftPart = left[i]
+		}
+		if i < len(right) {
+			rightPart = right[i]
+		}
+		if leftPart < rightPart {
+			return -1
+		}
+		if leftPart > rightPart {
+			return 1
+		}
+	}
+	return 0
 }
 
 func detectCS2() string {

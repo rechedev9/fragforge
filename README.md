@@ -118,11 +118,21 @@ zv shorts render --recording-result data\runs\match\recording\recording-result.j
 The first four stages are cheap and reviewable. Remove `--dry-run` from
 `demo select` to persist the approved plan, then from capture and render only
 after the player, segment order, output geometry, and edit choices are final.
+The demo flow exposes two required human gates: `creative-brief` asks only the
+still-unanswered choices for HUD/killfeed, effects, transitions, kill numbering,
+intro/outro, music, and thumbnail direction; `thumbnail-selection` presents the
+generated cover candidates before the pack is declared upload-ready. That
+second gate applies only when covers are enabled; `--covers=false` has no
+thumbnail to approve. A user can explicitly delegate either choice, but agents
+must not silently skip an applicable gate.
 
 `short --dry-run --format json` returns one JSON plan containing the resolved
 player, selection, preset, output paths, and exact stage argv with
 `executed: false`. For real `short` and `record` runs, missing HLAE/CS2 flags
 are filled from environment or local autodetection; explicit flags still win.
+HLAE autodetection compares version numbers and selects the highest installed
+`C:\HLAE-*\HLAE.exe`. Keep that installation on the latest official AdvancedFX
+release rather than pinning a release in commands or documentation.
 The primary `short` workflow keeps render intermediates under `shorts/` and
 writes the final upload-ready pack to `<run>/shortslistosparasubir/`.
 

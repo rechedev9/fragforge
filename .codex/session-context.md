@@ -68,6 +68,6 @@ Recommended next implementation path:
 ## Constraints To Preserve
 
 - Do not run HLAE/CS2 or long renders unless explicitly asked.
-- Use `C:\HLAE-2.190.1\HLAE.exe` for capture if capture is later requested.
+- Use the latest official HLAE release for capture and rely on numeric latest-version auto-detection.
 - Treat `data/` media outputs as generated artifacts.
 - Avoid Redis/UI rework unless the user explicitly reopens those topics.

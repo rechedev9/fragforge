@@ -37,10 +37,19 @@ Do not skip the selection/review boundary before HLAE or a paid caption/render
 pass. Reviewed Spanish word timings make the caption stage credential-free;
 xAI is only the automatic transcription and translation fallback.
 
+The demo journey also exposes two agent gates. `creative-brief` asks only for
+unanswered format, HUD/killfeed, effect, transition, kill-numbering,
+intro/outro, music, and thumbnail choices before expensive work.
+`thumbnail-selection` applies when covers are enabled, shows generated
+candidates, and requires a selection or an explicit delegation before the pack
+is considered upload-ready. With `--covers=false`, there is no thumbnail gate.
+
 The JSON dry-run is one resolved document with `executed: false`, exact stage
 argv, and output paths. Real `short` and `record` calls auto-fill missing
 HLAE/CS2 paths from the same detection shown by `capabilities`; do not repeat
 those paths in agent-generated commands unless overriding detection.
+Detection selects the highest installed numeric HLAE version, and capture work
+must keep it aligned with the latest official AdvancedFX release.
 The `output.publish_dir` field points to the required upload-ready
 `<run>\shortslistosparasubir` folder; `output.shorts_dir` contains intermediates.
 
@@ -244,7 +253,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv demo moments --killplan testdata/agent-killplan.json --format json
 ./bin/zv demo select --killplan testdata/agent-killplan.json --segments seg-001 --out data/runs/agent-doc/selected-plan.json --dry-run --format json
 ./bin/zv utility audit --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
-./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
+./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording
 ./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
 ./bin/zv music analyze --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
 ./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts --publish-dir data/runs/run-004/shortslistosparasubir
@@ -275,7 +284,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows run demo-moments -- --killplan testdata/agent-killplan.json --format json
 ./bin/zv workflows run demo-select -- --killplan testdata/agent-killplan.json --segments seg-001 --out data/runs/agent-doc/selected-plan.json --dry-run --format json
 ./bin/zv workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data/lineups --out utility-audit.csv
-./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\HLAE-2.190.1\HLAE.exe --cs2 "C:\Games\Counter-Strike 2\game\bin\win64\cs2.exe"
+./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording
 ./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4
 ./bin/zv workflows run music-analyze -- --input data/music/track.mp4 --out data/runs/run-004/rhythm.json
 ./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts --publish-dir data/runs/run-004/shortslistosparasubir

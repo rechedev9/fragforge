@@ -64,7 +64,7 @@ func TestDetectFindsSibling(t *testing.T) {
 	}
 }
 
-func TestSelectHLAEPrefersQualifiedVersion(t *testing.T) {
+func TestSelectHLAEPrefersLatestInstalledVersion(t *testing.T) {
 	tests := []struct {
 		name    string
 		matches []string
@@ -72,19 +72,39 @@ func TestSelectHLAEPrefersQualifiedVersion(t *testing.T) {
 	}{
 		{name: "missing"},
 		{
-			name:    "highest versioned fallback",
+			name:    "highest versioned install",
 			matches: []string{`C:\HLAE-2.189.0\HLAE.exe`, `C:\HLAE-2.190.2\HLAE.exe`},
 			want:    `C:\HLAE-2.190.2\HLAE.exe`,
 		},
 		{
-			name:    "qualified version beats newer install",
-			matches: []string{`C:\HLAE-2.190.2-fragforge-fixed\HLAE.exe`, preferredHLAEPath},
-			want:    preferredHLAEPath,
+			name:    "new release beats formerly qualified install",
+			matches: []string{`C:\HLAE-2.191.1\HLAE.exe`, `C:\HLAE-2.190.1\HLAE.exe`},
+			want:    `C:\HLAE-2.191.1\HLAE.exe`,
 		},
 		{
-			name:    "qualified path comparison is case insensitive",
-			matches: []string{`c:\hlae-2.190.1\hlae.exe`, `C:\HLAE-2.190.2\HLAE.exe`},
-			want:    `c:\hlae-2.190.1\hlae.exe`,
+			name:    "numeric comparison is not lexical",
+			matches: []string{`C:\HLAE-2.9.9\HLAE.exe`, `C:\HLAE-2.10.0\HLAE.exe`},
+			want:    `C:\HLAE-2.10.0\HLAE.exe`,
+		},
+		{
+			name:    "numeric comparison supports slash paths",
+			matches: []string{`C:/HLAE-2.9.9/HLAE.exe`, `C:/HLAE-2.10.0/HLAE.exe`},
+			want:    `C:/HLAE-2.10.0/HLAE.exe`,
+		},
+		{
+			name:    "version suffix remains comparable",
+			matches: []string{`C:\HLAE-2.190.2-fragforge-fixed\HLAE.exe`, `C:\HLAE-2.190.1\HLAE.exe`},
+			want:    `C:\HLAE-2.190.2-fragforge-fixed\HLAE.exe`,
+		},
+		{
+			name:    "version prefix comparison is case insensitive",
+			matches: []string{`c:\hlae-2.191.1\hlae.exe`, `C:\HLAE-2.190.2\HLAE.exe`},
+			want:    `c:\hlae-2.191.1\hlae.exe`,
+		},
+		{
+			name:    "versioned install beats malformed directory",
+			matches: []string{`C:\HLAE-latest\HLAE.exe`, `C:\HLAE-2.191.1\HLAE.exe`},
+			want:    `C:\HLAE-2.191.1\HLAE.exe`,
 		},
 	}
 	for _, tt := range tests {
@@ -93,6 +113,13 @@ func TestSelectHLAEPrefersQualifiedVersion(t *testing.T) {
 				t.Fatalf("selectHLAE() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSelectHLAERejectsOnlyMalformedDirectories(t *testing.T) {
+	matches := []string{`C:\HLAE-old\HLAE.exe`, `C:\HLAE-latest\HLAE.exe`}
+	if got := selectHLAE(matches); got != "" {
+		t.Fatalf("selectHLAE() = %q, want no detected version", got)
 	}
 }
 

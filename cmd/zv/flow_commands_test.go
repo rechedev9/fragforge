@@ -32,6 +32,9 @@ func TestRunFlowsShowDemoJSONIsCompleteAgentJourney(t *testing.T) {
 		"zv demo moments",
 		"zv demo select",
 		"zv record",
+		"creative-brief",
+		"kill numbering or counter",
+		"thumbnail-selection",
 		editor.OutputFormatShort9x16,
 		editor.OutputFormatLandscape16x9,
 		"shortslistosparasubir",
@@ -39,6 +42,44 @@ func TestRunFlowsShowDemoJSONIsCompleteAgentJourney(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("flow JSON missing %q: %s", want, body)
 		}
+	}
+}
+
+func TestDemoFlowRequiresCreativeAndThumbnailGates(t *testing.T) {
+	flow, ok := findProductionFlow("demo")
+	if !ok {
+		t.Fatal("demo flow missing")
+	}
+	gates := make(map[string]flowPhase)
+	for _, phase := range flow.Phases {
+		if phase.Gate {
+			gates[phase.ID] = phase
+		}
+	}
+	for _, id := range []string{"creative-brief", "thumbnail-selection"} {
+		phase, ok := gates[id]
+		if !ok || phase.Decision == "" {
+			t.Fatalf("gate %q = %#v, want required decision", id, phase)
+		}
+	}
+	phases := make(map[string]flowPhase, len(flow.Phases))
+	for _, phase := range flow.Phases {
+		phases[phase.ID] = phase
+	}
+	for _, want := range []string{"--hud <gameplay|clean|deathnotices>", "--kill-effect <approved-effect>", "--kill-counter=<true|false>", "--covers=<true|false>"} {
+		commands := phases["capture-preflight"].Command + phases["edit-preflight"].Command + phases["edit"].Command
+		if !strings.Contains(commands, want) {
+			t.Fatalf("approved choice %q missing from downstream commands: %s", want, commands)
+		}
+	}
+	if !strings.Contains(phases["edit"].Produces, "upload-ready pack when covers are disabled") {
+		t.Fatalf("edit produces %q, want no-cover completion branch", phases["edit"].Produces)
+	}
+	if !strings.Contains(phases["thumbnail-selection"].Produces, "upload-ready") {
+		t.Fatalf("thumbnail gate produces %q, want upload-ready pack", phases["thumbnail-selection"].Produces)
+	}
+	if phases["thumbnail-selection"].When != "covers enabled" {
+		t.Fatalf("thumbnail gate condition = %q, want covers enabled", phases["thumbnail-selection"].When)
 	}
 }
 
