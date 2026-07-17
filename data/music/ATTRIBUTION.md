@@ -45,6 +45,21 @@ https://archive.org/details/freepd — released under Creative Commons Zero (CC0
 | epic-1      | Adventure                   | FreePD | CC0     | https://archive.org/details/freepd |
 | epic-2      | Video Games Trailer         | FreePD | CC0     | https://archive.org/details/freepd |
 | synthwave-2 | Neon and Kickboxing         | FreePD | CC0     | https://archive.org/details/freepd |
+| dnb-3        | Drum n Bass E Energy       | FreePD | CC0     | https://archive.org/details/freepd |
+| dnb-4        | Drum n Bass C Super Shaker | FreePD | CC0     | https://archive.org/details/freepd |
+| house-1      | House B Hard Off           | FreePD | CC0     | https://archive.org/details/freepd |
+| house-2      | House I Aquabeat           | FreePD | CC0     | https://archive.org/details/freepd |
+| trance-1     | Trance A Metal Rush        | FreePD | CC0     | https://archive.org/details/freepd |
+| trance-2     | Trance E Frantic Bomb      | FreePD | CC0     | https://archive.org/details/freepd |
+| trap-2       | Hip Hop Dark Shot          | FreePD | CC0     | https://archive.org/details/freepd |
+| trap-3       | Hip Hop B Thick Beat       | FreePD | CC0     | https://archive.org/details/freepd |
+| metal-1      | Metaltania                 | FreePD | CC0     | https://archive.org/details/freepd |
+| rock-1       | Dark Rock                  | FreePD | CC0     | https://archive.org/details/freepd |
+| aggressive-2 | Chase Pulse Faster         | FreePD | CC0     | https://archive.org/details/freepd |
+| edm-4        | ElectroFreak               | FreePD | CC0     | https://archive.org/details/freepd |
+| chill-1      | Chill Urban                | FreePD | CC0     | https://archive.org/details/freepd |
+| chill-2      | Electro Chill A            | FreePD | CC0     | https://archive.org/details/freepd |
+| epic-3       | Battle Theme               | FreePD | CC0     | https://archive.org/details/freepd |
 
 These tracks are public domain. No credit line is legally required.
 
