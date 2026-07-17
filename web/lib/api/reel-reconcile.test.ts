@@ -3,7 +3,7 @@
 // reconcile state machine is testable with zero new dependencies (Node 24 node:test).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canHaveRenderState, deriveReelView } from './reel-reconcile.ts';
+import { canHaveRenderState, deriveReelView, unrecoverableJobGoneView, viewForJobGone } from './reel-reconcile.ts';
 import type { ReconcileInput } from './reel-reconcile.ts';
 
 /** deriveReelView with sane defaults so each case states only what it varies. */
@@ -94,6 +94,44 @@ test('unknown job status → queued, no action (never guess an action)', () => {
 
 test('failed without a reason still reports failed (no spurious empty reason key)', () => {
   assert.deepEqual(view({ jobStatus: 'failed' }), { status: 'failed', action: 'none' });
+});
+
+test('unrecoverableJobGoneView: failed + unrecoverable with a failure reason', () => {
+  const v = unrecoverableJobGoneView();
+  assert.equal(v.status, 'failed');
+  assert.equal(v.action, 'none');
+  assert.equal(v.unrecoverable, true);
+  assert.ok(v.failureReason, 'the card needs a human-readable reason');
+});
+
+test('viewForJobGone: latches only after consecutive 404 ticks', () => {
+  // One spurious 404 (wrong orchestrator briefly answering) must not brand the
+  // reel unrecoverable — the card's advice (delete + re-forge) destroys the
+  // rendered artifact, so a single bad poll leaves the view untouched.
+  const cases: Array<{ strikes: number; latched: boolean }> = [
+    { strikes: 0, latched: false },
+    { strikes: 1, latched: false },
+    { strikes: 2, latched: true },
+    { strikes: 3, latched: true },
+  ];
+  for (const { strikes, latched } of cases) {
+    const view = viewForJobGone(strikes);
+    if (latched) {
+      assert.deepEqual(view, unrecoverableJobGoneView(), `strikes=${strikes} should latch`);
+    } else {
+      assert.equal(view, null, `strikes=${strikes} should leave the view untouched`);
+    }
+  }
+});
+
+test('a normal job failure stays recoverable (retry can re-drive it)', () => {
+  const v = view({ jobStatus: 'failed', jobFailureReason: 'recorder exited with code 1' });
+  assert.equal('unrecoverable' in v, false);
+});
+
+test('a normal render failure stays recoverable (retry can re-drive it)', () => {
+  const v = view({ jobStatus: 'recorded', renderStatus: 'failed', renderFailureReason: 'ffmpeg error' });
+  assert.equal('unrecoverable' in v, false);
 });
 
 test('canHaveRenderState: true only once a render POST can have been driven', () => {

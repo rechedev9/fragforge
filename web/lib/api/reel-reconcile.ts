@@ -56,7 +56,52 @@ export type ReelView = {
   failureReason?: string;
   /** Set only when status is 'recording' and the orchestrator reported progress. */
   captureProgress?: CaptureProgress;
+  /**
+   * Set only when the failure can never be retried: the orchestrator job the
+   * reel was forged from no longer exists, so neither re-record nor re-render
+   * can bring it back. The UI hides Retry for these and tells the user to
+   * delete and re-forge from the match instead.
+   */
+  unrecoverable?: true;
 };
+
+/**
+ * Failure reason for a reel whose orchestrator job has vanished (a 404 on the
+ * status poll). In sqlite/memory mode an orchestrator restart prunes finished
+ * jobs, so the source of truth for the reel is gone; retry could never succeed.
+ */
+const ORCHESTRATOR_JOB_GONE_REASON =
+  'job no longer available (the local orchestrator may have restarted)';
+
+/**
+ * The view for a reel whose orchestrator job is gone (the status poll returned
+ * an authoritative 404). It is failed AND unrecoverable: no retry can re-drive
+ * it because record and render both need the job that no longer exists. The
+ * caller must not attempt to re-drive it, and the card hides Retry accordingly.
+ */
+export function unrecoverableJobGoneView(): ReelView {
+  return { ...failed(ORCHESTRATOR_JOB_GONE_REASON), unrecoverable: true };
+}
+
+/**
+ * Consecutive 404 status polls required before a reel is latched unrecoverable.
+ * A single 404 can be spurious (the web app briefly reaching a different or
+ * misconfigured orchestrator that does not know an existing job), and the
+ * unrecoverable card steers the user to delete the reel — which destroys the
+ * rendered artifact — so one bad poll must never be enough.
+ */
+const JOB_GONE_LATCH_TICKS = 2;
+
+/**
+ * The view to apply after `consecutive404s` back-to-back 404 status polls, or
+ * null to leave the reel's current view untouched so the next reconcile tick
+ * re-checks. Below the latch threshold nothing changes (a transient wrong
+ * answer self-heals invisibly); at the threshold the job is authoritatively
+ * gone and the reel latches failed + unrecoverable.
+ */
+export function viewForJobGone(consecutive404s: number): ReelView | null {
+  return consecutive404s >= JOB_GONE_LATCH_TICKS ? unrecoverableJobGoneView() : null;
+}
 
 function failed(reason?: string): ReelView {
   return reason

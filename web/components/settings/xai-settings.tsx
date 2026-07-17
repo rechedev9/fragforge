@@ -12,6 +12,7 @@ import {
   type XAISettingsStatus,
 } from '@/lib/desktop-settings';
 import { Button } from '@/components/ui/button';
+import { DesktopOnlyCard } from '@/components/settings/desktop-only-card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
@@ -335,19 +336,9 @@ function Message({ tone, children }: { tone: 'success' | 'error'; children: Reac
 
 function DesktopOnlyState(): ReactNode {
   return (
-    <section className="studio-panel max-w-3xl p-6" aria-labelledby="desktop-only-title">
-      <div className="flex gap-4">
-        <WifiOff className="mt-0.5 size-6 shrink-0 text-muted-foreground" aria-hidden />
-        <div>
-          <h2 id="desktop-only-title" className="font-[family-name:var(--font-display)] text-xl font-semibold text-foreground">
-            Disponible en FragForge Studio para Windows
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Abre esta pantalla desde la aplicación de escritorio para guardar la clave con la protección de Windows. Por seguridad no existe una alternativa HTTP en el navegador.
-          </p>
-        </div>
-      </div>
-    </section>
+    <DesktopOnlyCard titleId="desktop-only-title" title="Credenciales de subtítulos con Grok">
+      Abre esta pantalla desde la aplicación de escritorio para guardar la clave con la protección de Windows. Por seguridad no existe una alternativa HTTP en el navegador.
+    </DesktopOnlyCard>
   );
 }
 

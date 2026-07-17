@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { CircleCheck, Copy, LoaderCircle, Plug, TriangleAlert, WifiOff } from 'lucide-react';
+import { CircleCheck, Copy, LoaderCircle, Plug, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { getDesktopSettingsBridge, type MCPConfigInfo } from '@/lib/desktop-settings';
 import { Button } from '@/components/ui/button';
+import { DesktopOnlyCard } from '@/components/settings/desktop-only-card';
 
 /**
  * Registration card for the local MCP server: shows this machine's launcher
@@ -39,19 +40,9 @@ export function MCPSettings(): ReactNode {
 
   if (state === 'browser') {
     return (
-      <section className="studio-panel max-w-3xl p-6" aria-labelledby="mcp-desktop-only-title">
-        <div className="flex gap-4">
-          <WifiOff className="mt-0.5 size-6 shrink-0 text-muted-foreground" aria-hidden />
-          <div>
-            <h2 id="mcp-desktop-only-title" className="font-[family-name:var(--font-display)] text-xl font-semibold text-foreground">
-              Disponible en FragForge Studio para Windows
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Abre esta pantalla desde la aplicación de escritorio: el comando de registro incluye la ruta real del lanzador MCP instalado en tu equipo.
-            </p>
-          </div>
-        </div>
-      </section>
+      <DesktopOnlyCard titleId="mcp-desktop-only-title" title="Registro del asistente por MCP">
+        Abre esta pantalla desde la aplicación de escritorio: el comando de registro incluye la ruta real del lanzador MCP instalado en tu equipo.
+      </DesktopOnlyCard>
     );
   }
 

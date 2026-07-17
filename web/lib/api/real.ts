@@ -3,7 +3,7 @@ import type { Match, Play, Song, Video, FeedItem, RenderMode, DemoPlayer, Preset
 import { SERVICE_UNAVAILABLE_CODE, PLAN_READY_STATUSES } from './types';
 import { MockApiClient } from './mock';
 import { planToMatch, planToPlays, type KillPlan } from './map';
-import { canHaveRenderState, deriveReelView, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
+import { canHaveRenderState, deriveReelView, unrecoverableJobGoneView, viewForJobGone, type ReelAction, type ReelView, type RenderStatus } from './reel-reconcile';
 import { loadReelIntents, saveReelIntents, DEFAULT_VARIANT, DEFAULT_EDIT_CONFIG, type ReelIntent } from './reel-store';
 import { dataPlane, type DataPlane } from './dataplane';
 import { parsePublishAssistant, type PublishAssistant } from './publish-assistant';
@@ -187,6 +187,9 @@ export class RealApiClient implements ApiClient {
   private readonly intents = new Map<string, ReelIntent>();
   /** Reels with a record/render POST in flight, so a tick never double-drives. */
   private readonly driving = new Set<string>();
+
+  /** Consecutive 404 status polls per reel, feeding the unrecoverable latch. */
+  private readonly jobGoneTicks = new Map<string, number>();
   /** Server-reported artifact names for each reel (the file names the editor wrote). */
   private readonly artifactNames = new Map<string, { video: string; cover?: string }>();
   /**
@@ -450,6 +453,13 @@ export class RealApiClient implements ApiClient {
     const intent = this.intents.get(id);
     if (!intent) return this.fallback.retryVideo(id);
 
+    // An unrecoverable reel (its orchestrator job is gone) can never be re-driven:
+    // record and render both need the vanished job, so retry is a no-op that
+    // returns the reel unchanged. The card hides Retry for these, but guard here
+    // too so a stale caller can never re-mark it failed with the same reason.
+    const current = this.reels.get(id);
+    if (current?.unrecoverable) return { ...current };
+
     this.applyView(intent, { status: 'queued', action: 'none' });
     const [job, render] = await Promise.all([
       this.fetchStatusFull(intent.jobId),
@@ -535,6 +545,7 @@ export class RealApiClient implements ApiClient {
       this.intents.delete(videoId);
       this.reels.delete(videoId);
       this.artifactNames.delete(videoId);
+      this.jobGoneTicks.delete(videoId);
     }
     this.seriesMatches.delete(jobId);
     saveReelIntents(Array.from(this.intents.values()));
@@ -556,14 +567,18 @@ export class RealApiClient implements ApiClient {
   private async reconcileOne(intent: ReelIntent): Promise<void> {
     const job = await this.fetchStatusFull(intent.jobId);
     if (job === null) {
-      // Memory-mode orchestrator restart drops jobs; surface it instead of spinning.
-      this.applyView(intent, {
-        status: 'failed',
-        action: 'none',
-        failureReason: 'job no longer available (the local orchestrator may have restarted)',
-      });
+      // Memory-mode orchestrator restart drops jobs; the reel is unrecoverable
+      // (retry can never re-drive a job that no longer exists). A single 404
+      // can also be spurious (a wrong orchestrator briefly answering), so the
+      // latch needs consecutive 404 ticks: below the threshold the view stays
+      // untouched and the reel remains in the active set for the next tick.
+      const strikes = (this.jobGoneTicks.get(intent.videoId) ?? 0) + 1;
+      this.jobGoneTicks.set(intent.videoId, strikes);
+      const gone = viewForJobGone(strikes);
+      if (gone) this.applyView(intent, gone);
       return;
     }
+    this.jobGoneTicks.delete(intent.videoId);
     // The render variant only exists once a render POST has been driven (at/after
     // 'recorded'); before that the GET is a guaranteed 404 that floods the browser
     // network console the whole recording phase, so gate the call on the job status
@@ -596,6 +611,12 @@ export class RealApiClient implements ApiClient {
     // captureProgress is present only while recording (view carries it through);
     // any other status clears it so a stale percent never lingers on the card.
     const next: Video = { ...base, status: view.status, failureReason: view.failureReason, captureProgress: view.captureProgress };
+    // The unrecoverable flag is a latch: once the job is authoritatively gone it
+    // stays gone, so a racing plain-failed view (e.g. an in-flight drive() error
+    // landing after the latch) must not clear it. Written by presence, never as
+    // an explicit undefined key, to match the view layer's encoding.
+    delete next.unrecoverable;
+    if (view.unrecoverable || base.unrecoverable) next.unrecoverable = true;
     // The server-reported artifact names are present once the render is ready
     // (fetchRenderStatus fills them). If a tick sees ready before the names are
     // known, leave the URLs unset so the card keeps its placeholder until the
@@ -651,6 +672,15 @@ export class RealApiClient implements ApiClient {
         // A 503 means the orchestrator is momentarily unreachable; let the next
         // reconcile tick retry instead of permanently failing the reel.
         if (body.code === SERVICE_UNAVAILABLE_CODE) return;
+        // A 404 means the job the POST addressed no longer exists (orchestrator
+        // restarted between the dispatching tick and this response): latch the
+        // reel unrecoverable directly, because a plain failed view here would be
+        // skipped by the reconcile loop and never re-checked, leaving a live
+        // Retry button for a gone job.
+        if (res.status === 404) {
+          this.applyView(intent, unrecoverableJobGoneView());
+          return;
+        }
         // Anything else is durable (e.g. the 409 "recording is not configured on
         // this machine; set ZV_RECORDER_PATH, ZV_HLAE_PATH and ZV_CS2_PATH and
         // restart the orchestrator"): surface it so the Library shows why the reel

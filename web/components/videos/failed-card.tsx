@@ -12,9 +12,12 @@ import { DeleteVideoButton } from '@/components/videos/delete-video-button';
  * reason and a Retry that re-drives the failed stage (re-record or re-render);
  * on success the reel rejoins the Rendering then Ready sections via the
  * reconcile loop. Without this, a failed reel used to vanish from the Library.
+ * When the reel is unrecoverable (its orchestrator job is gone), Retry could
+ * never succeed, so the card hides it and points the user to delete + re-forge.
  */
 export function FailedCard({ video, onChange }: { video: Video; onChange: () => void }) {
   const [retrying, setRetrying] = useState(false);
+  const unrecoverable = video.unrecoverable ?? false;
 
   async function onRetry() {
     if (retrying) return;
@@ -22,8 +25,11 @@ export function FailedCard({ video, onChange }: { video: Video; onChange: () => 
     try {
       await api.retryVideo(video.id);
       onChange();
-    } catch {
-      setRetrying(false); // surface the button again so the user can try once more
+    } finally {
+      // Always re-arm the button: a retry can resolve while the reel stays
+      // failed (e.g. capture still unconfigured), and a card stuck at
+      // "Reintentando…" would need a reload to try again.
+      setRetrying(false);
     }
   }
 
@@ -47,18 +53,26 @@ export function FailedCard({ video, onChange }: { video: Video; onChange: () => 
           {video.title}
         </p>
         <p className="mt-1 line-clamp-2 text-sm leading-5 text-destructive">
-          {video.failureReason ?? 'El reel falló en tu equipo.'}
+          {/* Unrecoverable reels carry an internal English reason; show the
+              Spanish explanation instead of leaking it into the UI. */}
+          {unrecoverable
+            ? 'El orquestador ya no tiene esta captura (puede haberse reiniciado).'
+            : (video.failureReason ?? 'El reel falló en tu equipo.')}
         </p>
         <p className="mt-3 border-t border-destructive/20 pt-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Reintenta para retomar desde la etapa que falló
+          {unrecoverable
+            ? 'Elimina la tarjeta y sube la demo otra vez para forjarla de nuevo.'
+            : 'Reintenta para retomar desde la etapa que falló'}
         </p>
       </div>
 
       <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
-        <Button className="flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
-          <RotateCcw className="size-4" />
-          {retrying ? 'Reintentando…' : 'Reintentar'}
-        </Button>
+        {!unrecoverable && (
+          <Button className="flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
+            <RotateCcw className="size-4" />
+            {retrying ? 'Reintentando…' : 'Reintentar'}
+          </Button>
+        )}
         <DeleteVideoButton video={video} onDeleted={onChange} />
       </div>
     </div>
