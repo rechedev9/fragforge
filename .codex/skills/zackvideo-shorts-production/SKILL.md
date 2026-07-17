@@ -90,9 +90,10 @@ For standard viral kill clips, use the same render workflow with `--preset viral
 ```powershell
 .\bin\zv.exe workflows run shorts-render -- `
   --recording-result <run>\recording-deathnotices-120\recording-result.json `
-  --killplan <run>\plan.json `
-  --out <run>\shorts-viral60-clean-<player>-<map> `
-  --preset viral-60-clean `
+	--killplan <run>\plan.json `
+	--out <run>\shorts-viral60-clean-<player>-<map> `
+	--publish-dir <run>\shortslistosparasubir `
+	--preset viral-60-clean `
   --compile-segments `
   --video-crf 16 `
   --video-preset slow `
@@ -139,7 +140,7 @@ When the user asks for separate long videos by map or player:
 Open the generated gallery when it was not opened by the render command:
 
 ```powershell
-.\bin\zv.exe workflows run gallery-open -- --path <out>\publish\index.html
+.\bin\zv.exe workflows run gallery-open -- --path <run>\shortslistosparasubir\index.html
 ```
 
 Check the gallery and `publish-summary.md` for:

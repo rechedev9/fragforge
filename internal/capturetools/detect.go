@@ -120,13 +120,24 @@ func detectSibling(name string) string {
 	return firstExisting(filepath.Join(filepath.Dir(exe), name))
 }
 
-// detectHLAE deliberately ignores the known-wrong bare C:\HLAE install and
-// selects the highest versioned C:\HLAE-* installation.
+const preferredHLAEPath = `C:\HLAE-2.190.1\HLAE.exe`
+
+// detectHLAE deliberately ignores the known-wrong bare C:\HLAE install. The
+// capture pipeline is qualified against 2.190.1, so prefer that installation
+// when present and only fall back to the highest versioned installation.
 func detectHLAE() string {
 	if runtime.GOOS != "windows" {
 		return ""
 	}
-	matches := keepExisting(globNoErr(`C:\HLAE-*\HLAE.exe`))
+	return selectHLAE(keepExisting(globNoErr(`C:\HLAE-*\HLAE.exe`)))
+}
+
+func selectHLAE(matches []string) string {
+	for _, match := range matches {
+		if strings.EqualFold(match, preferredHLAEPath) {
+			return match
+		}
+	}
 	if len(matches) == 0 {
 		return ""
 	}

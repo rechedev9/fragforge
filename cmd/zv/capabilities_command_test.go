@@ -17,6 +17,7 @@ func TestRunCapabilitiesJSONReportsReadyTools(t *testing.T) {
 		}
 		t.Setenv(name, path)
 	}
+	t.Setenv("XAI_API_KEY", "xai_test_secret_not_for_output")
 
 	var stdout, stderr strings.Builder
 	code := runCapabilities([]string{"--format", "json"}, &stdout, &stderr)
@@ -27,8 +28,14 @@ func TestRunCapabilitiesJSONReportsReadyTools(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &report); err != nil {
 		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
 	}
-	if !report.LocalStudioReady || !report.Record.Ready || !report.Compose.Ready || !report.Render.Ready {
+	if !report.LocalStudioReady || !report.Record.Ready || !report.Compose.Ready || !report.Render.Ready || !report.Stream.Ready {
 		t.Fatalf("report = %#v, want all local stages ready", report)
+	}
+	if !report.Stream.KillfeedDetectionReady || !report.Stream.SpanishCaptionsReady || report.Stream.CaptionsProvider != "xai" {
+		t.Fatalf("stream = %#v, want killfeed and Spanish captions ready", report.Stream)
+	}
+	if strings.Contains(stdout.String(), "xai_test_secret_not_for_output") {
+		t.Fatal("capabilities output exposed XAI_API_KEY")
 	}
 	for _, group := range []localCapabilityGroup{report.Record, report.Compose, report.Render} {
 		for _, tool := range group.Tools {
@@ -44,6 +51,7 @@ func TestRunCapabilitiesJSONReportsMissingToolsWithoutFailing(t *testing.T) {
 	for _, name := range []string{"ZV_RECORDER_PATH", "ZV_HLAE_PATH", "ZV_CS2_PATH", "ZV_COMPOSER_PATH", "ZV_EDITOR_PATH", "ZV_FFMPEG_PATH", "ZV_FFPROBE_PATH"} {
 		t.Setenv(name, missing)
 	}
+	t.Setenv("XAI_API_KEY", "")
 
 	var stdout, stderr strings.Builder
 	code := runCapabilities([]string{"--format=json"}, &stdout, &stderr)
@@ -54,8 +62,31 @@ func TestRunCapabilitiesJSONReportsMissingToolsWithoutFailing(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &report); err != nil {
 		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
 	}
-	if report.LocalStudioReady || report.Record.Ready || report.Compose.Ready || report.Render.Ready {
+	if report.LocalStudioReady || report.Record.Ready || report.Compose.Ready || report.Render.Ready || report.Stream.Ready || report.Stream.KillfeedDetectionReady || report.Stream.SpanishCaptionsReady {
 		t.Fatalf("report = %#v, want unavailable tools reported as normal state", report)
+	}
+}
+
+func TestRunCapabilitiesKillfeedDetectionRequiresFFprobe(t *testing.T) {
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg.exe")
+	if err := os.WriteFile(ffmpeg, []byte("stub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ZV_FFMPEG_PATH", ffmpeg)
+	t.Setenv("ZV_FFPROBE_PATH", filepath.Join(dir, "missing-ffprobe.exe"))
+
+	var stdout, stderr strings.Builder
+	code := runCapabilities([]string{"--format=json"}, &stdout, &stderr)
+	if got, want := code, exitSuccess; got != want {
+		t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
+	}
+	var report localCapabilities
+	if err := json.Unmarshal([]byte(stdout.String()), &report); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if report.Stream.KillfeedDetectionReady {
+		t.Fatalf("stream = %#v, killfeed detection needs both ffmpeg and ffprobe", report.Stream)
 	}
 }
 

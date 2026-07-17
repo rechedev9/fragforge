@@ -69,7 +69,8 @@ The runtime precedence is:
 
 1. `XAI_API_KEY` inherited by the desktop process.
 2. The current Windows user's encrypted key saved from `/settings`.
-3. No xAI credential (stream captions remain unavailable).
+3. No xAI credential (automatic transcription is unavailable, but reviewed
+   Spanish `caption_words` imported with `zv stream captions` still render).
 
 There is no shared-key or team build mode. Packaging strips `XAI_API_KEY` from
 the build, web, and electron-builder environments, and the installer manifest
@@ -114,11 +115,20 @@ the durable job without uploading the same video twice.
 
 The repository already contains both client configurations:
 
-- Codex: `.codex/config.toml`
+- Codex: `.codex/config.toml` (registered but disabled by default)
 - Claude Code: `.mcp.json`
 
-They launch Node's built-in TypeScript stripper, so use Node 22.10+
-and start FragForge Studio before opening a new Codex or Claude Code session.
+Codex Desktop uses `.\bin\zv.exe` as its primary FragForge interface and does
+not need Studio for normal CLI work. Start each task with
+`.\bin\zv.exe capabilities --format json`, then inspect
+`.\bin\zv.exe flows show demo --format json` or `flows show stream` before
+crossing the player/clip selection and expensive capture/render boundaries.
+Both journeys expose vertical 9:16 and landscape 16:9 delivery through the
+same structured CLI. To opt into MCP, set `enabled = true` in
+the `mcp_servers.fragforge` block, start FragForge Studio, and then open a new
+Codex session. The MCP launchers use Node's built-in TypeScript stripper, so
+use Node 22.10+.
+
 Launch the client from the repository root (for example,
 `codex --cd C:\Users\reche\Documents\zackvideo`), not from `desktop/`: the
 checked-in `cwd = "."` and TypeScript entry paths are intentionally root-relative.
@@ -170,6 +180,7 @@ needed):
 
 ```toml
 [mcp_servers.fragforge]
+enabled = true
 command = "cmd.exe"
 args = ["/d", "/s", "/c", 'C:\Users\<you>\AppData\Local\Programs\FragForge Studio\fragforge-mcp.cmd']
 startup_timeout_sec = 10

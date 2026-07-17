@@ -10,13 +10,24 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/rechedev9/fragforge/internal/capturetools"
 )
 
 type commandRunner interface {
 	Run(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error
 }
 
+type capturePathProvider interface {
+	CapturePaths() capturetools.Paths
+}
+
 type osCommandRunner struct{}
+
+func (osCommandRunner) CapturePaths() capturetools.Paths {
+	paths, _ := capturetools.Detect(capturetools.FromEnvironment())
+	return paths
+}
 
 func (osCommandRunner) Run(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// #nosec G204 -- this CLI delegates only to fixed FragForge subcommand binaries.
@@ -42,10 +53,33 @@ func runDelegate(name string, args []string, stdout, stderr io.Writer, stdin io.
 
 func runCanonicalDelegate(command []string, name string, args []string, stdout, stderr io.Writer, stdin io.Reader, runner commandRunner) int {
 	if issue := validateSkillCommand(command); issue != "" {
-		fmt.Fprintf(stderr, "error: %s\n", issue)
-		return exitInvalidArgs
+		return writeCanonicalValidationError(command, issue, stdout, stderr)
 	}
 	return runDelegate(name, args, stdout, stderr, stdin, runner)
+}
+
+func writeCanonicalValidationError(command []string, issue string, stdout, stderr io.Writer) int {
+	if shortJSONRequested(command) {
+		if err := writeJSON(stdout, map[string]any{
+			"ok":       false,
+			"scope":    "arguments",
+			"executed": false,
+			"error":    issue,
+		}); err != nil {
+			fmt.Fprintf(stderr, "error: writing json: %v\n", err)
+			return exitUnexpected
+		}
+		return exitInvalidArgs
+	}
+	fmt.Fprintf(stderr, "error: %s\n", issue)
+	return exitInvalidArgs
+}
+
+func capturePathsFor(runner commandRunner) capturetools.Paths {
+	if provider, ok := runner.(capturePathProvider); ok {
+		return provider.CapturePaths()
+	}
+	return capturetools.FromEnvironment()
 }
 
 func resolveExecutable(name string) string {

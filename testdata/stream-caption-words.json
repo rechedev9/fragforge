@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "clip_id": "clip-001",
+  "language": "es",
+  "words": [
+    {
+      "word": "Buena",
+      "start_seconds": 0.5,
+      "end_seconds": 0.9
+    },
+    {
+      "word": "jugada",
+      "start_seconds": 1.0,
+      "end_seconds": 1.5
+    }
+  ]
+}

@@ -895,8 +895,8 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if len(plan.Clips) == 0 {
 		return fmt.Errorf("edit plan has no clips")
 	}
-	if plan.Captions.Enabled && !cfg.captionsConfigured() {
-		return fmt.Errorf("edit plan enables captions but xAI is not configured (configure an xAI key in FragForge Studio Settings or set XAI_API_KEY, then restart)")
+	if plan.Captions.Enabled && j.Probe.AudioCodec != "" && !cfg.captionsConfigured() && plan.CaptionsNeedBackend() {
+		return fmt.Errorf("edit plan has an audible clip with neither reviewed caption words, a reviewed no-speech decision, nor xAI configured (review it with zv stream captions, configure an xAI key in FragForge Studio Settings, or set XAI_API_KEY, then restart)")
 	}
 	bannerFontPath := ""
 	if plan.StreamerBanner.Nick != "" || plan.HasTextOverlays() {
@@ -940,9 +940,12 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		}
 	}
 	for _, clip := range plan.Clips {
-		noticePaths, err := renderClipKillfeedNotices(workDir, clip)
-		if err != nil {
-			return err
+		var noticePaths [][]string
+		if plan.Variant != streamclips.VariantStreamerLandscape16x9 {
+			noticePaths, err = renderClipKillfeedNotices(workDir, clip)
+			if err != nil {
+				return err
+			}
 		}
 		textPaths, err := writeClipOverlayTexts(workDir, clip)
 		if err != nil {
@@ -966,15 +969,28 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		}
 
 		publishPath := outPath
-		publishClipID := clip.ID
+		videoArtifactID := clip.ID
 		if plan.Captions.Enabled {
 			switch {
-			case cfg.xaiConfigured() && j.Probe.AudioCodec == "":
-				warnings = append(warnings, fmt.Sprintf("clip %s: source has no audio, publishing without captions", clip.ID))
 			case clip.SourceAudioMuted():
 				// Captions must describe what the viewer hears; a muted clip
 				// would otherwise get subtitles narrating inaudible speech.
 				warnings = append(warnings, fmt.Sprintf("clip %s: original audio is muted by the clip edit, publishing without captions", clip.ID))
+			case j.Probe.AudioCodec == "":
+				warnings = append(warnings, fmt.Sprintf("clip %s: source has no audio, publishing without captions", clip.ID))
+			case clip.CaptionReviewed && len(clip.CaptionWords) == 0:
+				warnings = append(warnings, fmt.Sprintf("clip %s: reviewed as containing no speech, publishing without captions", clip.ID))
+			case len(clip.CaptionWords) > 0:
+				cues := make([]captions.WordCue, len(clip.CaptionWords))
+				for i, word := range clip.CaptionWords {
+					cues[i] = captions.WordCue{Word: word.Word, StartSeconds: word.StartSeconds, EndSeconds: word.EndSeconds}
+				}
+				captionedPath, err := w.burnCaptionCues(runCtx, cfg, workDir, outPath, cues, clip.EffectiveSpeed(), j.ID, variant, clip.ID)
+				if err != nil {
+					return err
+				}
+				publishPath = captionedPath
+				videoArtifactID = clip.ID + "_captioned"
 			default:
 				transcriptionPath := outPath
 				var recoverTranscription func() ([]captions.WordCue, error)
@@ -1006,20 +1022,22 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 				switch {
 				case captionedPath != "":
 					publishPath = captionedPath
-					publishClipID = clip.ID + "_captioned"
+					videoArtifactID = clip.ID + "_captioned"
 				case warning != "":
 					warnings = append(warnings, warning)
 				}
 			}
 		}
 
-		key, err := streamclips.RenderVideoKey(j.ID, variant, publishClipID)
+		key, err := streamclips.RenderVideoKey(j.ID, variant, videoArtifactID)
 		if err != nil {
 			return err
 		}
 		if err := uploadFile(w.storage, key, publishPath); err != nil {
 			return fmt.Errorf("upload stream clip %s: %w", clip.ID, err)
 		}
+		// Only the video artifact filename gains _captioned. NewVideoEntry keeps
+		// the original plan clip ID stable so caption sidecars remain addressable.
 		videos = append(videos, streamclips.NewVideoEntry(clip, key))
 	}
 
@@ -1534,6 +1552,17 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 	if err != nil {
 		return "", "", fmt.Errorf("translate clip %s subtitles to spanish: %w", clipID, err)
 	}
+	captionedPath, err = w.burnCaptionCues(ctx, cfg, workDir, clipPath, cues, cueSpeed, id, variant, clipID)
+	if err != nil {
+		return "", "", err
+	}
+	return captionedPath, "", nil
+}
+
+// burnCaptionCues burns already-reviewed Spanish cues. It is shared by cloud
+// captions after transcription/translation and by the agent-first caption
+// import path, which deliberately needs no cloud credentials.
+func (w *StreamRenderWorker) burnCaptionCues(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath string, cues []captions.WordCue, cueSpeed float64, id uuid.UUID, variant, clipID string) (string, error) {
 	if cueSpeed != 1 {
 		for i := range cues {
 			cues[i].StartSeconds /= cueSpeed
@@ -1545,7 +1574,7 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 	})
 	fontPath, err := mediafont.Materialize()
 	if err != nil {
-		return "", "", fmt.Errorf("materialize caption font for clip %s: %w", clipID, err)
+		return "", fmt.Errorf("materialize caption font for clip %s: %w", clipID, err)
 	}
 
 	// Place the caption relative to the variant's facecam/gameplay split so it
@@ -1553,25 +1582,25 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 	// variant is unknown.
 	style := captions.DefaultStyle()
 	if lv, ok := streamclips.VariantByName(variant); ok {
-		style = captions.LayoutStyle(lv.FaceOutputHeight, lv.FaceOutputHeight+lv.GameOutputHeight)
+		style = captions.LayoutStyleForOutput(lv.FaceOutputHeight, lv.OutputWidth, lv.FaceOutputHeight+lv.GameOutputHeight)
 	}
 	assContent, err := captions.BuildASS(cues, style)
 	if err != nil {
-		return "", "", fmt.Errorf("build captions for clip %s: %w", clipID, err)
+		return "", fmt.Errorf("build captions for clip %s: %w", clipID, err)
 	}
 	assPath := filepath.Join(workDir, "captions", clipID+".ass")
 	if err := os.MkdirAll(filepath.Dir(assPath), 0o750); err != nil {
-		return "", "", err
+		return "", err
 	}
 	if err := os.WriteFile(assPath, []byte(assContent), 0o600); err != nil {
-		return "", "", fmt.Errorf("write captions for clip %s: %w", clipID, err)
+		return "", fmt.Errorf("write captions for clip %s: %w", clipID, err)
 	}
 	captionKey, err := streamclips.RenderCaptionKey(id, variant, clipID)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	if err := uploadFile(w.storage, captionKey, assPath); err != nil {
-		return "", "", fmt.Errorf("upload captions for clip %s: %w", clipID, err)
+		return "", fmt.Errorf("upload captions for clip %s: %w", clipID, err)
 	}
 
 	out := filepath.Join(filepath.Dir(clipPath), clipID+"_captioned.mp4")
@@ -1586,9 +1615,9 @@ func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRen
 		out,
 	}
 	if _, err := w.runner.Run(ctx, cfg.FFmpegPath, args...); err != nil {
-		return "", "", fmt.Errorf("burn captions for clip %s: %w", clipID, err)
+		return "", fmt.Errorf("burn captions for clip %s: %w", clipID, err)
 	}
-	return out, "", nil
+	return out, nil
 }
 
 func (w *StreamRenderWorker) writeStreamState(id uuid.UUID, variant string, status streamclips.Status, warnings []string, errMsg string, videos []streamclips.VideoEntry) error {

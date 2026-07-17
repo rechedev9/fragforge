@@ -7,7 +7,7 @@ import (
 
 func TestVariantNamesAndDefault(t *testing.T) {
 	names := VariantNames()
-	want := []string{VariantStreamer4060, VariantStreamerVerticalStack, VariantStreamerFullframeNoCam}
+	want := []string{VariantStreamer4060, VariantStreamerVerticalStack, VariantStreamerFullframeNoCam, VariantStreamerLandscape16x9}
 	if len(names) != len(want) {
 		t.Fatalf("VariantNames() = %v, want %v", names, want)
 	}
@@ -31,6 +31,7 @@ func TestVariantByName(t *testing.T) {
 		{VariantStreamer4060, true},
 		{VariantStreamerVerticalStack, true},
 		{VariantStreamerFullframeNoCam, true},
+		{VariantStreamerLandscape16x9, true},
 		{"other", false},
 	}
 	for _, tt := range tests {
@@ -67,6 +68,7 @@ func TestVariantBannerDefaults(t *testing.T) {
 		{name: VariantStreamer4060, want: 0.374},
 		{name: VariantStreamerVerticalStack, want: 520.0 / 1920.0},
 		{name: VariantStreamerFullframeNoCam, want: 0.2},
+		{name: VariantStreamerLandscape16x9, want: 0.94},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,6 +106,19 @@ func TestVariantFullframeNoCamGeometry(t *testing.T) {
 	}
 }
 
+func TestVariantLandscape16x9Geometry(t *testing.T) {
+	v, ok := VariantByName(VariantStreamerLandscape16x9)
+	if !ok {
+		t.Fatal("VariantByName(streamer-landscape-16x9) ok = false")
+	}
+	if !v.FullFrame {
+		t.Fatal("streamer-landscape-16x9 must preserve the full source frame")
+	}
+	if v.OutputWidth != 1920 || v.GameOutputHeight != 1080 {
+		t.Fatalf("geometry = %+v, want 1920x1080 full frame", v)
+	}
+}
+
 func TestDefaultEditPlanUsesDefaultVariantAndIsValid(t *testing.T) {
 	plan := DefaultEditPlan()
 	if plan.Variant != VariantStreamer4060 {
@@ -127,6 +142,7 @@ func TestEditPlanValidateRejectsUnknownVariantWithValidList(t *testing.T) {
 		VariantStreamer4060,
 		VariantStreamerVerticalStack,
 		VariantStreamerFullframeNoCam,
+		VariantStreamerLandscape16x9,
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Validate() error = %q, want it to contain %q", err.Error(), want)

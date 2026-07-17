@@ -11,6 +11,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -49,6 +50,7 @@ func run() error {
 		fps                  = flag.Int("fps", 0, "recording FPS; defaults to recorder preset")
 		videoCRF             = flag.Int("video-crf", 0, "HLAE stream CRF; defaults to recorder preset")
 		dryRun               = flag.Bool("dry-run", false, "generate plan and script without launching HLAE")
+		format               = flag.String("format", "text", "result summary format: text or json")
 		fake                 = flag.Bool("fake", false, "generate placeholder segment clips instead of launching HLAE/CS2 (e2e/CI)")
 		timeout              = flag.Duration("timeout", 15*time.Minute, "maximum duration to wait for CS2")
 	)
@@ -61,6 +63,9 @@ func run() error {
 
 	if *killPlanPath == "" || *demoPath == "" || *outDir == "" {
 		return fmt.Errorf("--killplan, --demo, and --out are required")
+	}
+	if *format != "text" && *format != "json" {
+		return fmt.Errorf("unsupported format %q", *format)
 	}
 	if !*dryRun && !fakeMode && (*hlaeExe == "" || *cs2Exe == "") {
 		return fmt.Errorf("--hlae and --cs2 are required unless --dry-run is set")
@@ -130,7 +135,7 @@ func run() error {
 	}
 
 	if *dryRun {
-		return writeResult(plan.OutputDir, result)
+		return writeResultAndReport(plan.OutputDir, result, true, *format, os.Stdout)
 	}
 
 	if fakeMode {
@@ -144,7 +149,7 @@ func run() error {
 		}
 		result.Artifacts = artifacts
 		result.Warnings = recording.ValidateArtifacts(plan, result.Artifacts)
-		return writeResult(plan.OutputDir, result)
+		return writeResultAndReport(plan.OutputDir, result, false, *format, os.Stdout)
 	}
 
 	ffprobePath := recording.FindFFprobe()
@@ -235,7 +240,7 @@ func run() error {
 		_ = writeResult(plan.OutputDir, result)
 		return err
 	}
-	return writeResult(plan.OutputDir, result)
+	return writeResultAndReport(plan.OutputDir, result, false, *format, os.Stdout)
 }
 
 // generateFakeSegments produces one placeholder mp4 per plan segment (at the
@@ -727,4 +732,43 @@ func writeResult(outDir string, result recording.RecordingResult) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(outDir, "recording-result.json"), append(b, '\n'), 0o600)
+}
+
+type recordingSummary struct {
+	OK            bool     `json:"ok"`
+	DryRun        bool     `json:"dry_run"`
+	Executed      bool     `json:"executed"`
+	ResultPath    string   `json:"result_path"`
+	ScriptPath    string   `json:"script_path"`
+	SegmentCount  int      `json:"segment_count"`
+	ArtifactCount int      `json:"artifact_count"`
+	Warnings      []string `json:"warnings"`
+}
+
+func writeResultAndReport(outDir string, result recording.RecordingResult, dryRun bool, format string, w io.Writer) error {
+	if err := writeResult(outDir, result); err != nil {
+		return err
+	}
+	summary := recordingSummary{
+		OK:            true,
+		DryRun:        dryRun,
+		Executed:      !dryRun,
+		ResultPath:    filepath.Join(outDir, "recording-result.json"),
+		ScriptPath:    result.Script,
+		SegmentCount:  len(result.Plan.Segments),
+		ArtifactCount: len(result.Artifacts),
+		Warnings:      append([]string{}, result.Warnings...),
+	}
+	if format == "json" {
+		encoder := json.NewEncoder(w)
+		encoder.SetEscapeHTML(false)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(summary)
+	}
+	fmt.Fprintf(w, "recording_result\t%s\n", summary.ResultPath)
+	fmt.Fprintf(w, "recording_script\t%s\n", summary.ScriptPath)
+	fmt.Fprintf(w, "segments\t%d\n", summary.SegmentCount)
+	fmt.Fprintf(w, "artifacts\t%d\n", summary.ArtifactCount)
+	fmt.Fprintf(w, "dry_run\t%t\n", summary.DryRun)
+	return nil
 }

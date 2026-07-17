@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.1",
+  "generated_at": "2026-07-16T00:00:00Z",
+  "demo": {
+    "path": "testdata/agent-demo.dem",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "map": "de_nuke",
+    "tickrate": 64,
+    "duration_ticks": 640
+  },
+  "target": {
+    "steamid64": "76561198377256168",
+    "name_in_demo": "Joey-",
+    "team_at_start": "CT"
+  },
+  "segments": [
+    {
+      "id": "seg-001",
+      "round": 1,
+      "tick_start": 64,
+      "tick_end": 192,
+      "kills": [
+        {
+          "tick": 128,
+          "weapon": "ak47",
+          "headshot": true,
+          "wallbang": false,
+          "victim": {
+            "steamid64": "76561198000000001",
+            "name_in_demo": "opponent",
+            "team_at_kill": "T"
+          },
+          "killer_pos": [0, 0, 0],
+          "victim_pos": [1, 1, 1]
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "total_kills_target": 1,
+    "kills_after_filters": 1,
+    "segments_created": 1,
+    "duration_seconds_total": 2
+  }
+}

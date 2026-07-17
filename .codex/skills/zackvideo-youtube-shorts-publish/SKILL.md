@@ -13,7 +13,7 @@ visibility, scheduling, and publication decisions inside YouTube Studio.
 FragForge writes publish assets under:
 
 ```text
-<shorts>\publish\
+<run>\shortslistosparasubir\
 ```
 
 Expected files:
@@ -28,7 +28,7 @@ Expected files:
 Open the gallery for review:
 
 ```powershell
-.\bin\zv.exe workflows run gallery-open -- --path <shorts>\publish\index.html
+.\bin\zv.exe workflows run gallery-open -- --path <run>\shortslistosparasubir\index.html
 ```
 
 ## Title/Captions

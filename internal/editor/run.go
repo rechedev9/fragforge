@@ -37,7 +37,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 	publishDir := cfg.PublishDir
 	if publishDir == "" {
-		publishDir = filepath.Join(outDir, "publish")
+		publishDir = defaultPublishDir(outDir)
 	} else {
 		publishDir, err = filepath.Abs(publishDir)
 		if err != nil {
@@ -207,6 +207,10 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return result, err
 	}
 	return result, nil
+}
+
+func defaultPublishDir(outDir string) string {
+	return filepath.Join(outDir, "shortslistosparasubir")
 }
 
 func (c Config) validate() error {

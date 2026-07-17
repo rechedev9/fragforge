@@ -19,6 +19,16 @@ func runDemo(args []string, stdout, stderr io.Writer, stdin io.Reader, runner co
 		return runCanonicalDelegate(append([]string{"demo"}, args...), "zv-parser", append([]string{"parse"}, args[1:]...), stdout, stderr, stdin, runner)
 	case "players":
 		return runCanonicalDelegate(append([]string{"demo"}, args...), "zv-demo-players", args[1:], stdout, stderr, stdin, runner)
+	case "moments":
+		if issue := validateSkillCommand(append([]string{"demo"}, args...)); issue != "" {
+			return writeCanonicalValidationError(args[1:], issue, stdout, stderr)
+		}
+		return runDemoMoments(args[1:], stdout, stderr)
+	case "select":
+		if issue := validateSkillCommand(append([]string{"demo"}, args...)); issue != "" {
+			return writeCanonicalValidationError(args[1:], issue, stdout, stderr)
+		}
+		return runDemoSelect(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown demo command %q\n%s", args[0], demoUsage)
 		return exitInvalidArgs

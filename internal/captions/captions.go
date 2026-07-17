@@ -1,7 +1,7 @@
-// Package captions renders TikTok-style word-pop karaoke subtitles for
-// 1080x1920 vertical Shorts. It turns timed word cues into an ASS (Advanced
-// SubStation Alpha) subtitle track that libass/FFmpeg can burn in, with one
-// word highlighted at a time as it is spoken.
+// Package captions renders word-pop karaoke subtitles for 1080x1920 vertical
+// Shorts and 1920x1080 long-form videos. It turns timed word cues into an ASS
+// (Advanced SubStation Alpha) subtitle track that libass/FFmpeg can burn in,
+// with one word highlighted at a time as it is spoken.
 package captions
 
 import (
@@ -146,8 +146,16 @@ func DefaultStyle() Style {
 // band height in output pixels (0 for a full-frame layout) and outputHeight is
 // the full output height. Invalid dimensions fall back to DefaultStyle.
 func LayoutStyle(faceHeight, outputHeight int) Style {
+	return LayoutStyleForOutput(faceHeight, 1080, outputHeight)
+}
+
+// LayoutStyleForOutput places captions relative to arbitrary output geometry.
+// Vertical stream variants use 1080x1920; landscape delivery uses 1920x1080.
+// Keeping PlayRes equal to the encoded frame makes ASS placement and font size
+// deterministic in both formats.
+func LayoutStyleForOutput(faceHeight, outputWidth, outputHeight int) Style {
 	style := DefaultStyle()
-	if outputHeight <= 0 {
+	if outputWidth <= 0 || outputHeight <= 0 {
 		return style
 	}
 	if faceHeight < 0 {
@@ -159,10 +167,11 @@ func LayoutStyle(faceHeight, outputHeight int) Style {
 	gameplayHeight := outputHeight - faceHeight
 	captionCenterY := faceHeight + int(math.Round(captionGameplayBandFraction*float64(gameplayHeight)))
 
+	style.PlayResX = outputWidth
 	style.PlayResY = outputHeight
 	style.Alignment = 5
 	style.MarginV = 0
-	style.PosX = style.PlayResX / 2
+	style.PosX = outputWidth / 2
 	style.PosY = captionCenterY
 	return style
 }
@@ -176,10 +185,10 @@ const maxWordGapSeconds = 1.2
 // BuildASS renders cues into a complete ASS subtitle document using style.
 // Consecutive words are grouped into caption windows of up to
 // style.WordsPerLine words; a window also breaks early when the gap to the
-// next word exceeds 1.2s. Each window becomes one Dialogue line spanning the
-// window's start to end, with per-word \k karaoke tags so the active word's
-// fill colour animates from PrimaryColour to HighlightColour as it is
-// spoken.
+// next word exceeds 1.2s or the previous word ends a sentence. Each window
+// becomes one Dialogue line spanning the window's start to end, with per-word
+// \k karaoke tags so the active word's fill colour animates from PrimaryColour
+// to HighlightColour as it is spoken.
 //
 // cues must be non-empty, already sorted by StartSeconds, non-overlapping,
 // and have positive durations (EndSeconds > StartSeconds); BuildASS returns
@@ -231,7 +240,9 @@ func validateCues(cues []WordCue) error {
 
 // windowCues groups consecutive cues into caption windows of up to
 // wordsPerLine words each, breaking a window early when the gap to the next
-// word exceeds maxWordGapSeconds.
+// word exceeds maxWordGapSeconds or the previous word ends a sentence. The
+// punctuation boundary keeps a completed phrase from remaining on screen with
+// words that have not been spoken yet.
 func windowCues(cues []WordCue, wordsPerLine int) [][]WordCue {
 	if wordsPerLine <= 0 {
 		wordsPerLine = 1
@@ -241,7 +252,7 @@ func windowCues(cues []WordCue, wordsPerLine int) [][]WordCue {
 	current := []WordCue{cues[0]}
 	for i := 1; i < len(cues); i++ {
 		gap := cues[i].StartSeconds - cues[i-1].EndSeconds
-		if len(current) >= wordsPerLine || gap > maxWordGapSeconds {
+		if len(current) >= wordsPerLine || gap > maxWordGapSeconds || endsSentence(cues[i-1].Word) {
 			windows = append(windows, current)
 			current = nil
 		}
@@ -249,6 +260,14 @@ func windowCues(cues []WordCue, wordsPerLine int) [][]WordCue {
 	}
 	windows = append(windows, current)
 	return windows
+}
+
+func endsSentence(word string) bool {
+	word = strings.TrimSpace(word)
+	return strings.HasSuffix(word, ".") ||
+		strings.HasSuffix(word, "!") ||
+		strings.HasSuffix(word, "?") ||
+		strings.HasSuffix(word, "…")
 }
 
 // dialogueLine renders one ASS Dialogue line for a caption window, with a

@@ -941,6 +941,62 @@ func TestBuildFFmpegArgsDefaultsFullFrameBannerToTwentyPercent(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegArgsLandscapePreservesSourceKillfeedAndUsesCompactLowerThird(t *testing.T) {
+	layout, ok := VariantByName(VariantStreamerLandscape16x9)
+	if !ok {
+		t.Fatal("landscape layout is not registered")
+	}
+	plan := EditPlan{
+		Variant:        layout.Name,
+		GameplayCrop:   layout.DefaultGameplayCrop,
+		KillfeedCrop:   &CropRect{X: 0.82, Y: 0.05, Width: 0.17, Height: 0.18},
+		StreamerBanner: StreamerBannerPlan{Nick: "zacketizorcs2"},
+	}
+	clip := ClipRange{ID: "clip-001", StartSeconds: 0, EndSeconds: 5, KillfeedSeconds: []float64{2.75}}
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:     "source.mp4",
+		OutputPath:     "out.mp4",
+		BannerFontPath: "font.ttf",
+	}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black[content]",
+		"color=c=0x111319:s=520x64:r=60:d=5.000",
+		"text='@zacketizorcs2'",
+		"overlay=x='32':y=983:eval=frame",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q: %s", want, joined)
+		}
+	}
+	for _, unwanted := range []string{"color=c=0x9146ff:s=1920x96", "killfeed0", "nsharp0_0"} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("landscape args contain %q: %s", unwanted, joined)
+		}
+	}
+}
+
+func TestFFmpegDrawtextTextEscapesFilterMetacharacters(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "option delimiters", value: "o'clock:50%,[x]", want: `o\'clock\:50\%\,\[x\]`},
+		{name: "backslash", value: `a\b`, want: `a\\b`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ffmpegDrawtextText(tt.value); got != tt.want {
+				t.Fatalf("ffmpegDrawtextText(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildFFmpegArgsDefaultsLegacyBannerToStackSeam(t *testing.T) {
 	layout, ok := VariantByName(VariantStreamerVerticalStack)
 	if !ok {
@@ -1117,6 +1173,28 @@ func TestBuildFFmpegArgsFullframeNoCamCommand(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %s", want, joined)
 		}
+	}
+}
+
+func TestBuildFFmpegArgsLandscape16x9PreservesFullFrame(t *testing.T) {
+	plan := EditPlan{
+		Variant:      VariantStreamerLandscape16x9,
+		GameplayCrop: CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+	}
+	clip := ClipRange{ID: "clip-001", StartSeconds: 0, EndSeconds: 5}
+	args, err := BuildFFmpegArgs(FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"}, plan, clip)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "vstack") {
+		t.Fatalf("landscape args must preserve the source frame without stacking: %s", joined)
+	}
+	if want := "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"; !strings.Contains(joined, want) {
+		t.Fatalf("args missing %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "force_original_aspect_ratio=increase,crop=1920:1080") {
+		t.Fatalf("landscape args crop non-16:9 sources: %s", joined)
 	}
 }
 

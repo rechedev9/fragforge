@@ -23,7 +23,7 @@ func run() error {
 		recordingResultPath = flag.String("recording-result", "", "path to recording-result.json")
 		killPlanPath        = flag.String("killplan", "", "optional path to kill plan JSON; auto-discovered from pipeline-result.json when omitted")
 		outDir              = flag.String("out", "", "shorts output directory")
-		publishDir          = flag.String("publish-dir", "", "publish pack output directory; defaults to <out>/publish")
+		publishDir          = flag.String("publish-dir", "", "publish pack output directory; defaults to <out>/shortslistosparasubir")
 		preset              = flag.String("preset", editor.DefaultPreset().Name, "editor preset: "+strings.Join(editor.PresetNames(), ", "))
 		effectsPath         = flag.String("effects", "", "optional Lua effects script; overrides --effects-preset")
 		effectsPreset       = flag.String("effects-preset", "", "effects preset: viral-ultra-clean; defaults by preset")

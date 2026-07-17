@@ -131,6 +131,8 @@ func workflowDelegatedCommand(args []string) string {
 			return "zv-parser"
 		case "players":
 			return "zv-demo-players"
+		case "moments", "select":
+			return "zv"
 		}
 	case "utility":
 		if len(args) >= 2 && args[1] == "audit" {
@@ -145,6 +147,10 @@ func workflowDelegatedCommand(args []string) string {
 	case "shorts":
 		if len(args) >= 2 && args[1] == "render" {
 			return "zv-editor"
+		}
+	case "stream":
+		if len(args) >= 2 && (args[1] == "variants" || args[1] == "plan" || args[1] == "killfeed" || args[1] == "transcribe" || args[1] == "captions" || args[1] == "render") {
+			return "zv-stream"
 		}
 	case "music":
 		if len(args) >= 2 && args[1] == "analyze" {

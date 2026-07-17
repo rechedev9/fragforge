@@ -41,11 +41,13 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 	case "utility":
 		return runUtility(args[1:], stdout, stderr, stdin, runner)
 	case "record":
-		return runCanonicalDelegate(args, "zv-recorder", args[1:], stdout, stderr, stdin, runner)
+		return runRecord(args[1:], stdout, stderr, stdin, runner)
 	case "compose":
 		return runCompose(args[1:], stdout, stderr, stdin, runner)
 	case "shorts":
 		return runShorts(args[1:], stdout, stderr, stdin, runner)
+	case "stream":
+		return runStream(args[1:], stdout, stderr, stdin, runner)
 	case "music":
 		return runMusic(args[1:], stdout, stderr, stdin, runner)
 	case "analysis":
@@ -58,6 +60,8 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 		return runSkills(args[1:], stdout, stderr)
 	case "workflows":
 		return runWorkflows(args[1:], stdout, stderr, stdin, runner)
+	case "flows":
+		return runFlows(args[1:], stdout, stderr)
 	case "serve":
 		if len(args) == 2 && isHelp(args[1]) {
 			fmt.Fprint(stdout, serveUsage)

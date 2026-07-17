@@ -31,14 +31,18 @@ func validateSkillCommand(command []string) string {
 			return issue
 		}
 	case "demo":
-		if len(command) < 2 || (command[1] != "parse" && command[1] != "players") {
-			return `uses non-standard zv command "demo"; expected "demo parse" or "demo players"`
+		if len(command) < 2 || (command[1] != "parse" && command[1] != "players" && command[1] != "moments" && command[1] != "select") {
+			return `uses non-standard zv command "demo"; expected "demo parse", "demo players", "demo moments", or "demo select"`
 		}
 		switch command[1] {
 		case "parse":
 			return validateRequiredFlags(`"demo parse"`, command[2:], requiredFlagsForRunArgs("demo", "parse")...)
 		case "players":
 			return validateRequiredFlags(`"demo players"`, command[2:], requiredFlagsForRunArgs("demo", "players")...)
+		case "moments":
+			return validateRequiredFlags(`"demo moments"`, command[2:], requiredFlagsForRunArgs("demo", "moments")...)
+		case "select":
+			return validateRequiredFlags(`"demo select"`, command[2:], requiredFlagsForRunArgs("demo", "select")...)
 		}
 	case "utility":
 		if len(command) < 2 || command[1] != "audit" {
@@ -54,7 +58,31 @@ func validateSkillCommand(command []string) string {
 		if len(command) < 2 || command[1] != "render" {
 			return `uses non-standard zv command "shorts"; expected "shorts render"`
 		}
-		return validateRequiredFlags(`"shorts render"`, command[2:], requiredFlagsForRunArgs("shorts", "render")...)
+		if issue := validateRequiredFlags(`"shorts render"`, command[2:], requiredFlagsForRunArgs("shorts", "render")...); issue != "" {
+			return issue
+		}
+		if preset, ok := flagValue(command[2:], "--preset"); ok && !containsString(supportedPresetNames(), preset) {
+			return fmt.Sprintf("unsupported preset %q for \"shorts render\"; supported presets: %s", preset, strings.Join(supportedPresetNames(), ", "))
+		}
+		return ""
+	case "stream":
+		if len(command) < 2 || (command[1] != "variants" && command[1] != "plan" && command[1] != "killfeed" && command[1] != "transcribe" && command[1] != "captions" && command[1] != "render") {
+			return `uses non-standard zv command "stream"; expected "stream variants", "stream plan", "stream killfeed", "stream transcribe", "stream captions", or "stream render"`
+		}
+		switch command[1] {
+		case "variants":
+			return validateFormattedCommand("stream variants", command[2:])
+		case "plan":
+			return validateRequiredFlags(`"stream plan"`, command[2:], requiredFlagsForRunArgs("stream", "plan")...)
+		case "killfeed":
+			return validateRequiredFlags(`"stream killfeed"`, command[2:], requiredFlagsForRunArgs("stream", "killfeed")...)
+		case "transcribe":
+			return validateRequiredFlags(`"stream transcribe"`, command[2:], requiredFlagsForRunArgs("stream", "transcribe")...)
+		case "captions":
+			return validateRequiredFlags(`"stream captions"`, command[2:], requiredFlagsForRunArgs("stream", "captions")...)
+		case "render":
+			return validateRequiredFlags(`"stream render"`, command[2:], requiredFlagsForRunArgs("stream", "render")...)
+		}
 	case "music":
 		if len(command) < 2 || command[1] != "analyze" {
 			return `uses non-standard zv command "music"; expected "music analyze"`
@@ -124,6 +152,23 @@ func validateSkillCommand(command []string) string {
 				return issue
 			}
 		}
+	case "flows":
+		if len(command) < 2 || (command[1] != "list" && command[1] != "show") {
+			return `uses non-standard zv command "flows"; expected "flows list" or "flows show"`
+		}
+		switch command[1] {
+		case "list":
+			return validateFormattedCommand("flows list", command[2:])
+		case "show":
+			format, rest, err := parseFormatArgs(command[2:])
+			_ = format
+			if err != nil {
+				return err.Error()
+			}
+			if len(rest) != 1 || (rest[0] != "demo" && rest[0] != "stream") {
+				return `"flows show" requires exactly one of: demo, stream`
+			}
+		}
 	default:
 		return fmt.Sprintf("uses non-standard zv command %q", command[0])
 	}
@@ -161,6 +206,14 @@ func validateShortCommand(args []string) string {
 	}
 	if !hasDemo && !hasFlagValue(rest, "--from-recording") {
 		return `missing demo path for "short"; pass <demo.dem> or --from-recording <recording-result.json>`
+	}
+	if format, ok := flagValue(rest, "--format"); ok {
+		if format != "text" && format != "json" {
+			return fmt.Sprintf("unsupported format %q for \"short\"", format)
+		}
+		if format == "json" && !booleanFlagIsTrue(rest, "--dry-run") {
+			return `--format json requires --dry-run for "short"`
+		}
 	}
 	return ""
 }
@@ -326,7 +379,7 @@ func validateRequiredFlags(commandName string, args []string, required ...string
 	}
 	valueFlags := commandValueFlags(commandName, required)
 	boolFlags := commandBoolFlags(commandName)
-	if flag := duplicateFlag(args); flag != "" {
+	if flag := duplicateFlag(args, commandRepeatableFlags(commandName)...); flag != "" {
 		return fmt.Sprintf("duplicate flag %s for %s", flag, commandName)
 	}
 	if flag := unknownFlag(args, valueFlags, boolFlags); flag != "" {
@@ -347,20 +400,6 @@ func validateRequiredFlags(commandName string, args []string, required ...string
 	if len(missing) > 1 {
 		return fmt.Sprintf("missing required flags %s for %s", strings.Join(missing, ", "), commandName)
 	}
-	if len(missing) == 0 && commandName == `"record"` && !booleanFlagIsTrue(args, "--dry-run") {
-		var captureMissing []string
-		for _, name := range []string{"--hlae", "--cs2"} {
-			if !hasFlagValue(args, name) {
-				captureMissing = append(captureMissing, name)
-			}
-		}
-		if len(captureMissing) == 1 {
-			return fmt.Sprintf("missing required flag %s for %s unless --dry-run is set", captureMissing[0], commandName)
-		}
-		if len(captureMissing) > 1 {
-			return fmt.Sprintf("missing required flags %s for %s unless --dry-run is set", strings.Join(captureMissing, ", "), commandName)
-		}
-	}
 	if flag, value := booleanFlagSeparateValue(args, boolFlags); flag != "" {
 		return fmt.Sprintf("boolean flag %s for %s does not take separate value %q; use %s=%s", flag, commandName, value, flag, value)
 	}
@@ -379,13 +418,17 @@ func commandValueFlags(commandName string, required []string) []string {
 	case `"demo parse"`:
 		flags = append(flags, "--segment-mode", "--rules")
 	case `"demo players"`:
-		flags = append(flags, "--contains")
+		flags = append(flags, "--contains", "--out", "--format")
+	case `"demo moments"`:
+		flags = append(flags, "--out", "--top", "--format")
+	case `"demo select"`:
+		flags = append(flags, "--format")
 	case `"utility audit"`:
 		flags = append(flags, "--format")
 	case `"short"`:
-		flags = append(flags, "--preset", "--out", "--music", "--target-steamid", "--hlae", "--cs2", "--from-recording")
+		flags = append(flags, "--preset", "--out", "--music", "--target-steamid", "--hlae", "--cs2", "--from-recording", "--format", "--output-format", "--kill-effect", "--transition")
 	case `"record"`:
-		flags = append(flags, "--hlae", "--cs2", "--hud", "--fps", "--video-crf", "--timeout")
+		flags = append(flags, "--hlae", "--cs2", "--hud", "--fps", "--video-crf", "--timeout", "--format")
 	case `"compose final"`:
 		flags = append(flags, "--ffmpeg", "--timeout")
 	case `"shorts render"`:
@@ -396,16 +439,63 @@ func commandValueFlags(commandName string, required []string) []string {
 			"--effects",
 			"--effects-preset",
 			"--music",
+			"--music-volume",
 			"--rhythm",
+			"--output-format",
+			"--kill-effect",
+			"--transition",
+			"--intro-text",
+			"--outro-text",
+			"--tail-trim",
 			"--fps",
 			"--lineup-catalog",
 			"--segments",
 			"--limit",
 			"--video-crf",
 			"--video-preset",
+			"--render-jobs",
 			"--ffmpeg",
 			"--ffprobe",
 		)
+	case `"stream plan"`:
+		flags = append(flags,
+			"--variant",
+			"--clip-id",
+			"--clip-start",
+			"--clip-end",
+			"--title",
+			"--streamer",
+			"--face-crop",
+			"--gameplay-crop",
+			"--killfeed-crop",
+			"--ffmpeg",
+			"--ffprobe",
+			"--format",
+		)
+	case `"stream render"`:
+		flags = append(flags,
+			"--title",
+			"--ffmpeg",
+			"--ffprobe",
+			"--timeout",
+			"--work-dir",
+			"--music-dir",
+			"--format",
+		)
+	case `"stream transcribe"`:
+		flags = append(flags,
+			"--clip-id",
+			"--language",
+			"--ffmpeg",
+			"--ffprobe",
+			"--work-dir",
+			"--timeout",
+			"--format",
+		)
+	case `"stream killfeed"`:
+		flags = append(flags, "--format")
+	case `"stream captions"`:
+		flags = append(flags, "--format")
 	case `"music analyze"`:
 		flags = append(flags,
 			"--killplan",
@@ -429,7 +519,11 @@ func commandBoolFlags(commandName string) []string {
 	switch commandName {
 	case `"demo parse"`:
 		return []string{"--verbose"}
-	case `"short"`, `"compose final"`:
+	case `"demo select"`:
+		return []string{"--dry-run"}
+	case `"short"`:
+		return []string{"--dry-run", "--intro", "--outro"}
+	case `"compose final"`:
 		return []string{"--dry-run"}
 	case `"record"`:
 		return []string{"--dry-run", "--portrait-safe-killfeed"}
@@ -440,6 +534,11 @@ func commandBoolFlags(commandName string) []string {
 			"--covers",
 			"--dry-run",
 			"--hq-filters",
+			"--intro",
+			"--outro",
+			"--hook",
+			"--kill-counter",
+			"--killfeed-overlay",
 			"--no-covers",
 			"--open-gallery",
 			"--quality-checks",
@@ -447,12 +546,29 @@ func commandBoolFlags(commandName string) []string {
 			"--temporal-smoothing",
 			"--compile-segments",
 		}
+	case `"stream plan"`:
+		return []string{"--captions", "--detect-killfeed", "--dry-run"}
+	case `"stream render"`:
+		return []string{"--dry-run"}
+	case `"stream killfeed"`:
+		return []string{"--dry-run"}
+	case `"stream transcribe"`:
+		return []string{"--dry-run"}
+	case `"stream captions"`:
+		return []string{"--dry-run"}
 	default:
 		return nil
 	}
 }
 
-func duplicateFlag(args []string) string {
+func commandRepeatableFlags(commandName string) []string {
+	if commandName == `"stream transcribe"` {
+		return []string{"--model"}
+	}
+	return nil
+}
+
+func duplicateFlag(args []string, repeatable ...string) string {
 	seen := make(map[string]struct{})
 	for _, arg := range args {
 		if !strings.HasPrefix(arg, "--") {
@@ -462,7 +578,7 @@ func duplicateFlag(args []string) string {
 		if before, _, ok := strings.Cut(arg, "="); ok {
 			name = before
 		}
-		if _, ok := seen[name]; ok {
+		if _, ok := seen[name]; ok && !containsString(repeatable, name) {
 			return name
 		}
 		seen[name] = struct{}{}

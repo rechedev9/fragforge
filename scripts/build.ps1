@@ -8,6 +8,7 @@ $commands = @(
     "zv-recorder",
     "zv-composer",
     "zv-editor",
+	"zv-stream",
     "zv-rhythm",
     "zv-analysis-viewer",
     "zv-tactical-data",

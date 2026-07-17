@@ -1,8 +1,8 @@
 # FragForge
 
-Deterministic CS2 demo-to-video pipeline. Drop a `.dem`, describe the clip you
-want, and get an upload-ready vertical Short: always 1080x1920 at 60fps, with
-viral-style editing by default.
+Deterministic CS2 demo/stream-to-video pipeline. Give its agent-first CLI a
+`.dem` or a stream clip and produce upload-ready 1080x1920 vertical videos or
+1920x1080 long-form videos at 60fps, with polished editing by default.
 
 FragForge ships as a Windows desktop installer.
 Download it from the [`landing/`](./landing) site - there is no hosted service to sign up for.
@@ -16,7 +16,7 @@ audio is sent to xAI only when cloud subtitles are enabled.
 .dem + prompt
   -> parse demo into a kill plan and scored moments
   -> record the right segments with HLAE/CS2
-  -> render the Short with a viral preset (1080x1920 @ 60fps)
+  -> render at 1080x1920 or 1920x1080 with the viral editing contract (60fps)
   -> publish pack: MP4, cover, caption, gallery, manifest
 ```
 
@@ -42,8 +42,13 @@ Useful flags:
 | Flag | Purpose |
 |------|---------|
 | `--dry-run` | Print the resolved plan (player, selection, preset, output spec) without running anything. |
+| `--format json` | With `--dry-run`, emit the resolved plan as one machine-readable JSON document. |
 | `--from-recording <recording-result.json>` | Skip parse + record and render from an existing recording. |
 | `--music <audio>` | Music track for beat-synced montages. |
+| `--output-format short-9x16\|landscape-16x9` | Choose TikTok/Shorts or long-form YouTube geometry. |
+| `--kill-effect clean\|punch-in\|velocity\|freeze-flash` | Choose the kill emphasis used by the edit contract. |
+| `--transition cut\|flash\|whip\|dip` | Choose the transition language between selected plays. |
+| `--intro`, `--outro` | Add explicit bookend text without editing a lower-level render plan. |
 | `--hlae`, `--cs2` | Tool paths (or `ZV_HLAE_PATH` / `ZV_CS2_PATH`). |
 | `--out <dir>` | Output directory. |
 
@@ -66,41 +71,155 @@ in-process queue (HLAE/CS2 auto-detected), then starts the web UI and opens
 The flow is: upload a demo -> pick a player -> pick specific kills -> create the
 reel, at which point HLAE + CS2 open to capture and the edit is applied.
 
-### Codex and Claude Code (MCP)
+### Codex app (CLI-first)
 
-This source tree includes a local TypeScript MCP server for FragForge Studio,
-so Codex or Claude Code can inspect live jobs, discover
-players/segments/presets/songs, start
-approved pipeline actions, follow render status, and obtain artifact URLs.
-It uses a Cloudflare-inspired progressive-disclosure contract: only `search`
-and `execute` are registered, while each operation's exact input schema and
-current allowed values are returned on demand. Mutations are previews unless
-the caller explicitly uses `mode=apply` and `confirmed=true`.
+Open the repository root in Codex Desktop and select Codex. `AGENTS.md` loads
+the project rules automatically, and Codex operates FragForge through the
+unified Windows CLI; Studio does not need to be running. Build the local
+binaries once after cloning or after CLI changes:
 
-For shell-first agents, `zv workflows list --format json` and
-`zv workflows show <name> --format json` expose the primary `short` flow and
-every granular workflow with canonical run/preflight commands, positionals,
-required and optional flags, conditional requirements, enum-like allowed
-values/defaults, and safety hints for read-only, dry-run, and long-running
-behavior. `zv workflows validate <name> --format json -- ...` checks that
-argument contract without executing anything; `zv workflows run <name> -- ...`
-checks the same contract before delegating to the command. Before a costly
-capture, `zv capabilities --format json` reports the resolved local tool paths,
-their source (`env`, `detected`, or `none`), accessibility, and aggregate
-record/compose/render/`local_studio_ready` state without starting a worker or media
-process.
+```powershell
+.\scripts\build.ps1
+```
 
-Project-local Codex and Claude Code configuration is already checked in under
-`.codex/config.toml` and `.mcp.json`. Start Studio first, then open a new agent
-session from this trusted repository's root (not from `desktop/`), because the
-checked-in launcher paths are root-relative. Already-published v2.0.3 release
-assets are unchanged; an installer must be rebuilt and published separately to
-include this MCP launcher. See the complete setup, installed-app
-commands, operation model, and security notes in
+The deterministic agent loop is:
+
+```powershell
+.\bin\zv.exe capabilities --format json
+.\bin\zv.exe flows show demo --format json
+.\bin\zv.exe flows show stream --format json
+.\bin\zv.exe workflows list --format json
+.\bin\zv.exe workflows show short --format json
+.\bin\zv.exe workflows validate short --format json -- match.dem --prompt "all kills 76561198148986856" --dry-run --format json
+.\bin\zv.exe workflows run short -- match.dem --prompt "all kills 76561198148986856" --dry-run --format json
+```
+
+`capabilities` reports local record/compose/render/stream readiness without
+starting workers or media processes, including separate booleans for local
+killfeed detection and xAI-backed Spanish captions. Workflow discovery exposes canonical commands,
+positionals, flags, conditional requirements, allowed values, defaults, and
+safety hints. Validation checks the exact argv without executing it; after it
+succeeds, Codex can run the same argv. Remove both `--dry-run --format json`
+only when an actual capture/render was requested; real execution streams
+human-readable stage progress.
+
+For a reviewable demo journey, use the granular commands instead of asking an
+agent to guess across decision boundaries:
+
+```powershell
+zv demo players --demo match.dem --format json --out data\runs\match\players.json
+zv demo parse --demo match.dem --steamid 76561198148986856 --out data\runs\match\plan.json
+zv demo moments --killplan data\runs\match\plan.json --top 10 --format json --out data\runs\match\moments.json
+zv demo select --killplan data\runs\match\plan.json --segments seg-003,seg-007 --out data\runs\match\selected-plan.json --dry-run --format json
+zv record --killplan data\runs\match\selected-plan.json --demo match.dem --out data\runs\match\recording --dry-run --format json
+zv shorts render --recording-result data\runs\match\recording\recording-result.json --out data\runs\match\shorts --publish-dir data\runs\match\shortslistosparasubir --output-format landscape-16x9 --kill-effect velocity --transition whip --dry-run
+```
+
+The first four stages are cheap and reviewable. Remove `--dry-run` from
+`demo select` to persist the approved plan, then from capture and render only
+after the player, segment order, output geometry, and edit choices are final.
+
+`short --dry-run --format json` returns one JSON plan containing the resolved
+player, selection, preset, output paths, and exact stage argv with
+`executed: false`. For real `short` and `record` runs, missing HLAE/CS2 flags
+are filled from environment or local autodetection; explicit flags still win.
+The primary `short` workflow keeps render intermediates under `shorts/` and
+writes the final upload-ready pack to `<run>/shortslistosparasubir/`.
+
+Stream/VOD clips use the same CLI-first loop. Codex first discovers the layout
+registry, probes the source into an editable plan, then validates and renders
+that plan locally:
+
+```powershell
+./bin/zv stream variants --format json
+
+# Preflight the plan without writing it.
+./bin/zv stream plan --input stream.mp4 --out data/runs/stream/edit-plan.json --captions --killfeed-crop 0.82,0.05,0.17,0.18 --detect-killfeed --dry-run --format json
+
+# After approval, persist every contract before the next stage consumes it.
+./bin/zv stream plan --input stream.mp4 --out data/runs/stream/edit-plan.json --captions --killfeed-crop 0.82,0.05,0.17,0.18 --detect-killfeed --format json
+./bin/zv stream killfeed --plan data/runs/stream/edit-plan.json --events data/runs/stream/killfeed-events.json --out data/runs/stream/reviewed-plan.json --dry-run --format json
+./bin/zv stream killfeed --plan data/runs/stream/edit-plan.json --events data/runs/stream/killfeed-events.json --out data/runs/stream/reviewed-plan.json --format json
+./bin/zv stream transcribe --input stream.mp4 --plan data/runs/stream/reviewed-plan.json --model data/models/whisper/ggml-large-v3.bin --model data/models/whisper/ggml-large-v3-turbo-q5_0.bin --vad-model data/models/whisper/ggml-silero-v6.2.0.bin --out data/runs/stream/transcript-review.json --dry-run --format json
+./bin/zv stream transcribe --input stream.mp4 --plan data/runs/stream/reviewed-plan.json --model data/models/whisper/ggml-large-v3.bin --model data/models/whisper/ggml-large-v3-turbo-q5_0.bin --vad-model data/models/whisper/ggml-silero-v6.2.0.bin --out data/runs/stream/transcript-review.json --format json
+./bin/zv stream captions --plan data/runs/stream/reviewed-plan.json --words data/runs/stream/caption-words.json --out data/runs/stream/final-plan.json --dry-run --format json
+./bin/zv stream captions --plan data/runs/stream/reviewed-plan.json --words data/runs/stream/caption-words.json --out data/runs/stream/final-plan.json --format json
+./bin/zv stream render --input stream.mp4 --plan data/runs/stream/final-plan.json --out data/runs/stream --dry-run --format json
+./bin/zv stream render --input stream.mp4 --plan data/runs/stream/final-plan.json --out data/runs/stream --format json
+
+# The same persisted sequence through the workflow registry.
+./bin/zv workflows validate stream-plan --format json -- --input stream.mp4 --out data/runs/stream/edit-plan.json --captions --killfeed-crop 0.82,0.05,0.17,0.18 --detect-killfeed
+./bin/zv workflows run stream-plan -- --input stream.mp4 --out data/runs/stream/edit-plan.json --captions --killfeed-crop 0.82,0.05,0.17,0.18 --detect-killfeed
+./bin/zv workflows validate stream-killfeed --format json -- --plan data/runs/stream/edit-plan.json --events data/runs/stream/killfeed-events.json --out data/runs/stream/reviewed-plan.json --dry-run
+./bin/zv workflows run stream-killfeed -- --plan data/runs/stream/edit-plan.json --events data/runs/stream/killfeed-events.json --out data/runs/stream/reviewed-plan.json
+./bin/zv workflows validate stream-transcribe --format json -- --input stream.mp4 --plan data/runs/stream/reviewed-plan.json --model data/models/whisper/ggml-large-v3.bin --model data/models/whisper/ggml-large-v3-turbo-q5_0.bin --vad-model data/models/whisper/ggml-silero-v6.2.0.bin --out data/runs/stream/transcript-review.json --dry-run
+./bin/zv workflows run stream-transcribe -- --input stream.mp4 --plan data/runs/stream/reviewed-plan.json --model data/models/whisper/ggml-large-v3.bin --model data/models/whisper/ggml-large-v3-turbo-q5_0.bin --vad-model data/models/whisper/ggml-silero-v6.2.0.bin --out data/runs/stream/transcript-review.json
+./bin/zv workflows validate stream-captions --format json -- --plan data/runs/stream/reviewed-plan.json --words data/runs/stream/caption-words.json --out data/runs/stream/final-plan.json --dry-run
+./bin/zv workflows run stream-captions -- --plan data/runs/stream/reviewed-plan.json --words data/runs/stream/caption-words.json --out data/runs/stream/final-plan.json
+./bin/zv workflows validate stream-render --format json -- --input stream.mp4 --plan data/runs/stream/final-plan.json --out data/runs/stream --dry-run
+./bin/zv workflows run stream-render -- --input stream.mp4 --plan data/runs/stream/final-plan.json --out data/runs/stream
+```
+
+Every `--dry-run` line above is a preflight only: it never creates its `--out`
+artifact. Run the immediately following persistence command after approval
+before continuing to the dependent stage. The final non-dry `stream render` is
+the expensive local media operation. Its upload-ready pack includes a cover JPG
+chosen from the confirmed killfeed cue with the most kills (or a stable fallback
+frame when no kills are confirmed), alongside the video, captions, manifest,
+and gallery. Build `killfeed-events.json` from the
+detected cue frames and `caption-words.json` from factual Spanish text/timings;
+the files under `testdata/` are schema examples, not generic stream content.
+
+`stream transcribe` is the credential-free local evidence stage. It runs every
+supplied Whisper model over both raw mono audio and a dialogue-enhanced pass,
+uses the supplied Silero VAD model, records each model SHA-256, and writes a
+`review_status: "requires_review"` document. It intentionally does not emit
+renderable `caption_words`: gameplay sounds can resemble speech, so an agent or
+person must compare the passes, reject disagreements, and save only verified
+Spanish words and clip-relative timings before `stream captions` accepts them.
+Detected killfeed false positives are represented honestly with an empty
+`kills` array and removed by `stream killfeed`. Likewise, a reviewed audible
+clip with no speech uses `"no_speech": true, "words": []`; the renderer then
+publishes it without captions and without requiring a cloud key.
+
+Use the default vertical variant for TikTok/Shorts or pass
+`--variant streamer-landscape-16x9` to `stream plan` for a 1920x1080 YouTube
+edit that preserves the complete source frame, HUD, killfeed, and facecam.
+
+The edit plan is the reviewable contract for clip ranges, normalized facecam,
+gameplay and killfeed crops, exact `killfeed_seconds`/`killfeed_kills`, Spanish
+captions, music, effects, and text. `stream captions` imports reviewed Spanish
+word timings and renders them without a cloud credential. If a plan enables
+captions without reviewed `caption_words` for every audible clip,
+`XAI_API_KEY` supplies the automatic transcription and Spanish translation
+fallback. Burned captions retain an ASS sidecar for QA. Final MP4s, captions,
+manifest, and local gallery are written to `<run>/shortslistosparasubir/`.
+
+`--detect-killfeed` is local and deterministic: it scans only the selected clip
+range for highlighted CS2 notice births and writes their source timestamps into
+the plan. When no structured `killfeed_kills` are supplied, rendering preserves
+the exact source notice as a frozen crop rather than inventing player names.
+`stream killfeed` imports reviewed attacker, victim, side, weapon, and modifier
+fields only when every event timestamp matches a detected cue; this gives
+agents a strict factual boundary instead of asking them to hand-edit the plan.
+
+Ask naturally from the app, for example: “usa la CLI de FragForge para revisar
+las capacidades, valida un Short con todas las kills de este demo y ejecútalo”.
+The repo-local production skills add the specialized parse, capture, render,
+QA, and publishing steps while continuing to use `zv workflows run`.
+
+#### Optional Studio MCP
+
+The local TypeScript MCP server remains available for tasks that specifically
+need the running Studio queue/UI, but it is disabled by default for Codex in
+`.codex/config.toml`. Enable it explicitly and start Studio before opening a
+new session. Claude Code's `.mcp.json` integration is unchanged.
+
+The MCP uses progressive disclosure through `search` and `execute`; mutations
+stay in preview until `mode=apply` and `confirmed=true`. Already-published
+v2.0.3 release assets are unchanged. See setup, installed-app commands,
+security notes, and evaluation instructions in
 [`desktop/README.md`](./desktop/README.md#model-context-protocol-mcp).
-For deterministic source evaluation, run `cd desktop; pnpm run eval:mcp:gate`;
-it rebuilds the local orchestrator and writes scored JSON/Markdown reports to
-`data/mcp-evals/`.
 
 ### Manual YouTube publication assistant
 
@@ -147,9 +266,9 @@ Manager -> Windows Credentials** if desired.
 The single supported preset lives in `internal/editor/preset.go`: `viral-60-clean`.
 The loadout catalog (`internal/renderplan`), the
 HTTP API (`/api/presets`, `/api/loadouts`, render-variant validation), the
-workbench UI, and the render worker all derive from that registry. The preset
-outputs 1080x1920 at 60fps. Unknown preset names are rejected with the valid
-list.
+workbench UI, and the render worker all derive from that registry. It defaults
+to 1080x1920 at 60fps; `--output-format landscape-16x9` uses the same editing
+contract at 1920x1080. Unknown preset names are rejected with the valid list.
 
 List them any time with `zv presets` (`--format json` for automation).
 
@@ -304,11 +423,18 @@ scripted use:
 
 ```bash
 ./bin/zv demo parse --demo match.dem --steamid 76561198000000000 --out plan.json
-./bin/zv demo players --demo match.dem
+./bin/zv demo players --demo match.dem --format json --out players.json
+./bin/zv demo moments --killplan testdata/agent-killplan.json --top 10 --format json --out data/runs/agent-doc/moments.json
+./bin/zv demo select --killplan testdata/agent-killplan.json --segments seg-001 --out data/runs/agent-doc/selected-plan.json --dry-run --format json
 ./bin/zv record --killplan plan.json --demo match.dem --out run/recording --hlae <HLAE.exe> --cs2 <cs2.exe>
-./bin/zv shorts render --recording-result run/recording/recording-result.json --out run/shorts --preset viral-60-clean
+./bin/zv shorts render --recording-result run/recording/recording-result.json --out run/shorts --publish-dir run/shortslistosparasubir --preset viral-60-clean --output-format short-9x16
 ./bin/zv compose final --recording-result run/recording/recording-result.json --out run/final.mp4
 ./bin/zv music analyze --input track.mp3 --killplan plan.json --out run/rhythm.json
+./bin/zv stream killfeed --plan data/runs/stream/edit-plan.json --events testdata/stream-killfeed-events.json --out data/runs/stream/reviewed-plan.json --dry-run --format json
+./bin/zv stream captions --plan data/runs/stream/reviewed-plan.json --words testdata/stream-caption-words.json --out data/runs/stream/final-plan.json --dry-run --format json
+./bin/zv flows list --format json
+./bin/zv flows show demo --format json
+./bin/zv flows show stream --format json
 ./bin/zv presets
 ./bin/zv capabilities --format json
 ./bin/zv check
@@ -327,6 +453,9 @@ Other command groups: `zv utility audit` (lineup catalogs), `zv analysis`
   `--skip-existing` and `--open-gallery`.
 - `--render-jobs N` caps how many shorts render concurrently (default 0 =
   automatic CPU-based limit; pass 1 to force sequential rendering).
+- `--output-format short-9x16|landscape-16x9`, `--kill-effect`, `--transition`,
+  `--intro-text`, and `--outro-text` expose the high-level delivery and editing
+  decisions without requiring an agent to rewrite manifests.
 - `--dry-run` writes planned manifests, captions, FFmpeg commands, and cover
   prompts without rendering.
 - `--music`, `--rhythm`, `--compile-segments` for music-scripted compilation
@@ -339,11 +468,12 @@ Other command groups: `zv utility audit` (lineup catalogs), `zv analysis`
 - `--music`, `--rhythm`, and `--compile-segments` for music-synced
   compilations with the same `viral-60-clean` visual standard.
 
-Every render writes a publish pack under `shorts/publish/`: clean MP4
+Every render writes its upload-ready pack under the run's
+`shortslistosparasubir/` directory: clean MP4
 filenames, caption files, cover JPGs, `pack-manifest.json`,
 `publish-summary.md`, and an `index.html` review gallery with copy buttons.
-Outputs are validated as 1080x1920 H.264 60fps and warned if they exceed the
-180s Shorts limit.
+Outputs are validated against the selected 1080x1920 or 1920x1080 H.264 60fps
+profile. Vertical outputs are warned if they exceed the 180s Shorts limit.
 
 ## Media artifacts and cleanup
 

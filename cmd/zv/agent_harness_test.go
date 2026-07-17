@@ -48,6 +48,44 @@ func TestRepoSkillsUseUnifiedCLI(t *testing.T) {
 	}
 }
 
+func TestCodexAppUsesCLIAsPrimaryInterface(t *testing.T) {
+	root := repoRoot(t)
+
+	configPath := filepath.Join(root, ".codex", "config.toml")
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", configPath, err)
+	}
+	configBody := string(config)
+	for _, want := range []string{
+		"[mcp_servers.fragforge]",
+		"enabled = false",
+	} {
+		if !strings.Contains(configBody, want) {
+			t.Fatalf("%s does not contain %q", configPath, want)
+		}
+	}
+
+	agentPath := filepath.Join(root, "CLAUDE.md")
+	agentInstructions, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", agentPath, err)
+	}
+	agentBody := string(agentInstructions)
+	for _, want := range []string{
+		"## Codex Desktop: CLI-first",
+		`.\bin\zv.exe capabilities --format json`,
+		`.\bin\zv.exe workflows show short --format json`,
+		`.\bin\zv.exe workflows validate short --format json -- match.dem --prompt "all kills 76561198000000000" --dry-run --format json`,
+		`.\bin\zv.exe workflows run short -- match.dem --prompt "all kills 76561198000000000" --dry-run --format json`,
+		"MCP is optional",
+	} {
+		if !strings.Contains(agentBody, want) {
+			t.Fatalf("%s does not contain %q", agentPath, want)
+		}
+	}
+}
+
 func TestGoGateRunsProjectCheck(t *testing.T) {
 	root := repoRoot(t)
 	path := filepath.Join(root, "scripts", "go-gate.sh")

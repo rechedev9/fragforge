@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rechedev9/fragforge/internal/capturetools"
 	"github.com/rechedev9/fragforge/internal/editor"
 )
 
@@ -24,6 +25,12 @@ type shortOptions struct {
 	HLAEPath      string
 	CS2Path       string
 	FromRecording string
+	Format        string
+	OutputFormat  string
+	KillEffect    string
+	Transition    string
+	Intro         bool
+	Outro         bool
 	DryRun        bool
 }
 
@@ -34,18 +41,71 @@ type shortStage struct {
 	args   []string
 }
 
-// shortPlan is the fully resolved one-command plan: always a 1080x1920@60fps
-// vertical Short by construction of the preset registry.
+// shortPlan is the fully resolved one-command plan for either the product's
+// 1080x1920 vertical delivery or its 1920x1080 long-form delivery.
 type shortPlan struct {
-	preset     editor.RenderPreset
-	intent     shortIntent
-	player     string
-	selection  string
-	outDir     string
-	shortsDir  string
-	publishDir string
-	stageDirs  []string // directories the stage binaries write into; created before stage 1
-	stages     []shortStage
+	preset       editor.RenderPreset
+	intent       shortIntent
+	player       string
+	selection    string
+	outputFormat string
+	killEffect   string
+	transition   string
+	intro        bool
+	outro        bool
+	outDir       string
+	shortsDir    string
+	publishDir   string
+	stageDirs    []string // directories the stage binaries write into; created before stage 1
+	stages       []shortStage
+}
+
+type shortDryRunResult struct {
+	OK        bool               `json:"ok"`
+	DryRun    bool               `json:"dry_run"`
+	Executed  bool               `json:"executed"`
+	Player    string             `json:"player"`
+	Selection string             `json:"selection"`
+	Preset    shortDryRunPreset  `json:"preset"`
+	Edit      shortDryRunEdit    `json:"edit"`
+	Output    shortDryRunOutput  `json:"output"`
+	Stages    []shortDryRunStage `json:"stages"`
+}
+
+type shortErrorResult struct {
+	OK       bool   `json:"ok"`
+	DryRun   bool   `json:"dry_run"`
+	Executed bool   `json:"executed"`
+	Error    string `json:"error"`
+}
+
+type shortDryRunPreset struct {
+	Name   string `json:"name"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	FPS    int    `json:"fps"`
+}
+
+type shortDryRunEdit struct {
+	OutputFormat string `json:"output_format"`
+	KillEffect   string `json:"kill_effect"`
+	Transition   string `json:"transition"`
+	Intro        bool   `json:"intro"`
+	Outro        bool   `json:"outro"`
+}
+
+type shortDryRunOutput struct {
+	RunDir     string `json:"run_dir"`
+	ShortsDir  string `json:"shorts_dir"`
+	PublishDir string `json:"publish_dir"`
+}
+
+type shortDryRunStage struct {
+	Index      int      `json:"index"`
+	Total      int      `json:"total"`
+	Label      string   `json:"label"`
+	Executable string   `json:"executable"`
+	Args       []string `json:"args"`
 }
 
 func runShort(args []string, stdout, stderr io.Writer, stdin io.Reader, runner commandRunner) int {
@@ -53,25 +113,45 @@ func runShort(args []string, stdout, stderr io.Writer, stdin io.Reader, runner c
 		fmt.Fprint(stdout, shortUsage)
 		return exitSuccess
 	}
+	jsonOutput := shortJSONRequested(args)
+	dryRun := booleanFlagIsTrue(args, "--dry-run")
 	if issue := validateShortCommand(args); issue != "" {
+		if jsonOutput {
+			return writeShortJSONError(issue, dryRun, stdout, stderr)
+		}
 		fmt.Fprintf(stderr, "error: %s\n", issue)
 		fmt.Fprint(stderr, shortUsage)
 		return exitInvalidArgs
 	}
 	opts, err := parseShortArgs(args)
 	if err != nil {
+		if jsonOutput {
+			return writeShortJSONError(err.Error(), dryRun, stdout, stderr)
+		}
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		fmt.Fprint(stderr, shortUsage)
 		return exitInvalidArgs
 	}
-	plan, err := resolveShortPlan(opts)
+	plan, err := resolveShortPlan(opts, capturePathsFor(runner))
 	if err != nil {
+		if jsonOutput {
+			return writeShortJSONError(err.Error(), opts.DryRun, stdout, stderr)
+		}
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return exitInvalidArgs
 	}
+	if opts.DryRun && opts.Format == "json" {
+		if err := writeJSON(stdout, buildShortDryRunResult(plan)); err != nil {
+			fmt.Fprintf(stderr, "error: writing json: %v\n", err)
+			return exitUnexpected
+		}
+		return exitSuccess
+	}
 	fmt.Fprintf(stdout, "player: %s\n", plan.player)
 	fmt.Fprintf(stdout, "selection: %s\n", plan.selection)
-	fmt.Fprintf(stdout, "preset: %s (%dx%d @ %dfps)\n", plan.preset.Name, plan.preset.Width, plan.preset.Height, plan.preset.FPS)
+	width, height := shortOutputDimensions(plan.outputFormat)
+	fmt.Fprintf(stdout, "preset: %s (%dx%d @ %dfps, %s)\n", plan.preset.Name, width, height, plan.preset.FPS, plan.outputFormat)
+	fmt.Fprintf(stdout, "edit: %s kills, %s transitions, intro=%t, outro=%t\n", plan.killEffect, plan.transition, plan.intro, plan.outro)
 	if opts.DryRun {
 		printShortPlan(stdout, plan)
 		return exitSuccess
@@ -101,6 +181,24 @@ func runShort(args []string, stdout, stderr io.Writer, stdin io.Reader, runner c
 	return exitSuccess
 }
 
+func shortJSONRequested(args []string) bool {
+	format, ok := flagValue(args, "--format")
+	return ok && format == "json"
+}
+
+func writeShortJSONError(message string, dryRun bool, stdout, stderr io.Writer) int {
+	if err := writeJSON(stdout, shortErrorResult{
+		OK:       false,
+		DryRun:   dryRun,
+		Executed: false,
+		Error:    message,
+	}); err != nil {
+		fmt.Fprintf(stderr, "error: writing json: %v\n", err)
+		return exitUnexpected
+	}
+	return exitInvalidArgs
+}
+
 func parseShortArgs(args []string) (shortOptions, error) {
 	var opts shortOptions
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -117,6 +215,12 @@ func parseShortArgs(args []string) (shortOptions, error) {
 	fs.StringVar(&opts.HLAEPath, "hlae", os.Getenv("ZV_HLAE_PATH"), "path to HLAE.exe; defaults to ZV_HLAE_PATH")
 	fs.StringVar(&opts.CS2Path, "cs2", os.Getenv("ZV_CS2_PATH"), "path to cs2.exe; defaults to ZV_CS2_PATH")
 	fs.StringVar(&opts.FromRecording, "from-recording", "", "existing recording-result.json; skips the parse and record stages")
+	fs.StringVar(&opts.Format, "format", "text", "output format for --dry-run: text or json")
+	fs.StringVar(&opts.OutputFormat, "output-format", "", "short-9x16 or landscape-16x9; defaults from prompt or short-9x16")
+	fs.StringVar(&opts.KillEffect, "kill-effect", editor.KillEffectPunchIn, "clean, punch-in, velocity, or freeze-flash")
+	fs.StringVar(&opts.Transition, "transition", editor.TransitionFlash, "cut, flash, whip, or dip")
+	fs.BoolVar(&opts.Intro, "intro", false, "add a professional intro title overlay")
+	fs.BoolVar(&opts.Outro, "outro", false, "add a professional outro title overlay")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the resolved plan without launching HLAE/CS2 or FFmpeg")
 	if err := fs.Parse(args); err != nil {
 		return shortOptions{}, err
@@ -130,10 +234,25 @@ func parseShortArgs(args []string) (shortOptions, error) {
 	if opts.DemoPath == "" && opts.FromRecording == "" {
 		return shortOptions{}, fmt.Errorf("missing demo path: pass <demo.dem> or --from-recording <recording-result.json>")
 	}
+	if opts.Format != "text" && opts.Format != "json" {
+		return shortOptions{}, fmt.Errorf("unsupported format %q", opts.Format)
+	}
+	if opts.Format == "json" && !opts.DryRun {
+		return shortOptions{}, fmt.Errorf("--format json requires --dry-run")
+	}
+	if opts.OutputFormat != "" && opts.OutputFormat != editor.OutputFormatShort9x16 && opts.OutputFormat != editor.OutputFormatLandscape16x9 {
+		return shortOptions{}, fmt.Errorf("unsupported output format %q", opts.OutputFormat)
+	}
+	if !containsString([]string{editor.KillEffectClean, editor.KillEffectPunchIn, editor.KillEffectVelocity, editor.KillEffectFreezeFlash}, opts.KillEffect) {
+		return shortOptions{}, fmt.Errorf("unsupported kill effect %q", opts.KillEffect)
+	}
+	if !containsString([]string{editor.TransitionCut, editor.TransitionFlash, editor.TransitionWhip, editor.TransitionDip}, opts.Transition) {
+		return shortOptions{}, fmt.Errorf("unsupported transition %q", opts.Transition)
+	}
 	return opts, nil
 }
 
-func resolveShortPlan(opts shortOptions) (shortPlan, error) {
+func resolveShortPlan(opts shortOptions, capturePaths capturetools.Paths) (shortPlan, error) {
 	intent := interpretShortPrompt(opts.Prompt)
 	preset, err := resolveShortPreset(opts, intent)
 	if err != nil {
@@ -144,10 +263,20 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 		return shortPlan{}, fmt.Errorf("beat-synced shorts require --music <audio file>")
 	}
 
-	plan := shortPlan{preset: preset, intent: intent, outDir: shortOutDir(opts)}
+	outputFormat := opts.OutputFormat
+	if outputFormat == "" {
+		outputFormat = intent.OutputFormat
+	}
+	if outputFormat == "" {
+		outputFormat = editor.OutputFormatShort9x16
+	}
+	plan := shortPlan{
+		preset: preset, intent: intent, outDir: shortOutDir(opts), outputFormat: outputFormat,
+		killEffect: opts.KillEffect, transition: opts.Transition, intro: opts.Intro, outro: opts.Outro,
+	}
 	plan.stageDirs = []string{plan.outDir}
 	plan.shortsDir = filepath.Join(plan.outDir, "shorts")
-	plan.publishDir = filepath.Join(plan.shortsDir, "publish")
+	plan.publishDir = filepath.Join(plan.outDir, "shortslistosparasubir")
 	plan.player = "from existing recording"
 	plan.selection = "all kills (one compiled short)"
 	if intent.BestMoments {
@@ -165,7 +294,7 @@ func resolveShortPlan(opts shortOptions) (shortPlan, error) {
 		if intent.TargetName != "" {
 			plan.player = steamID + " (" + intent.TargetName + ")"
 		}
-		hlae, cs2, err := resolveShortCaptureTools(opts)
+		hlae, cs2, err := resolveShortCaptureTools(opts, capturePaths)
 		if err != nil {
 			return shortPlan{}, err
 		}
@@ -226,9 +355,9 @@ func resolveShortPreset(opts shortOptions, intent shortIntent) (editor.RenderPre
 	if name == "" {
 		return editor.DefaultPreset(), nil
 	}
-	preset, ok := editor.PresetByName(name)
+	preset, ok := supportedPresetByName(name)
 	if !ok {
-		return editor.RenderPreset{}, fmt.Errorf("unknown preset %q (valid presets: %s)", name, strings.Join(editor.PresetNames(), ", "))
+		return editor.RenderPreset{}, fmt.Errorf("unsupported preset %q (supported presets: %s)", name, strings.Join(supportedPresetNames(), ", "))
 	}
 	return preset, nil
 }
@@ -269,8 +398,14 @@ func resolveShortSteamID(opts shortOptions, intent shortIntent) (string, error) 
 	return steamID, nil
 }
 
-func resolveShortCaptureTools(opts shortOptions) (hlae, cs2 string, err error) {
+func resolveShortCaptureTools(opts shortOptions, detected capturetools.Paths) (hlae, cs2 string, err error) {
 	hlae, cs2 = opts.HLAEPath, opts.CS2Path
+	if hlae == "" {
+		hlae = detected.HLAE
+	}
+	if cs2 == "" {
+		cs2 = detected.CS2
+	}
 	if opts.DryRun {
 		if hlae == "" {
 			hlae = "<HLAE.exe>"
@@ -282,19 +417,33 @@ func resolveShortCaptureTools(opts shortOptions) (hlae, cs2 string, err error) {
 	}
 	var missing []string
 	if hlae == "" {
-		missing = append(missing, "--hlae (or ZV_HLAE_PATH)")
+		missing = append(missing, "HLAE")
 	}
 	if cs2 == "" {
-		missing = append(missing, "--cs2 (or ZV_CS2_PATH)")
+		missing = append(missing, "CS2")
 	}
 	if len(missing) > 0 {
-		return "", "", fmt.Errorf("missing %s for the recording stage unless --dry-run or --from-recording is set", strings.Join(missing, " and "))
+		return "", "", fmt.Errorf("capture tools are unavailable (%s); inspect zv capabilities --format json, pass --hlae/--cs2, or use --dry-run", strings.Join(missing, " and "))
 	}
 	return hlae, cs2, nil
 }
 
 func shortRenderArgs(opts shortOptions, plan shortPlan, killPlanPath, recordingResult, rhythmPath string) []string {
-	args := []string{"--recording-result", recordingResult, "--out", plan.shortsDir, "--preset", plan.preset.Name}
+	args := []string{
+		"--recording-result", recordingResult,
+		"--out", plan.shortsDir,
+		"--publish-dir", plan.publishDir,
+		"--preset", plan.preset.Name,
+		"--output-format", plan.outputFormat,
+		"--kill-effect", plan.killEffect,
+		"--transition", plan.transition,
+	}
+	if plan.intro {
+		args = append(args, "--intro")
+	}
+	if plan.outro {
+		args = append(args, "--outro")
+	}
 	if killPlanPath != "" {
 		args = append(args, "--killplan", killPlanPath)
 	}
@@ -335,4 +484,51 @@ func printShortPlan(stdout io.Writer, plan shortPlan) {
 	fmt.Fprintf(stdout, "shorts: %s\n", plan.shortsDir)
 	fmt.Fprintf(stdout, "publish pack: %s\n", plan.publishDir)
 	fmt.Fprintln(stdout, "dry-run: no stages executed")
+}
+
+func buildShortDryRunResult(plan shortPlan) shortDryRunResult {
+	stages := make([]shortDryRunStage, 0, len(plan.stages))
+	for i, stage := range plan.stages {
+		stages = append(stages, shortDryRunStage{
+			Index:      i + 1,
+			Total:      len(plan.stages),
+			Label:      stage.label,
+			Executable: stage.binary,
+			Args:       append([]string(nil), stage.args...),
+		})
+	}
+	width, height := shortOutputDimensions(plan.outputFormat)
+	return shortDryRunResult{
+		OK:        true,
+		DryRun:    true,
+		Executed:  false,
+		Player:    plan.player,
+		Selection: plan.selection,
+		Preset: shortDryRunPreset{
+			Name:   plan.preset.Name,
+			Width:  width,
+			Height: height,
+			FPS:    plan.preset.FPS,
+		},
+		Edit: shortDryRunEdit{
+			OutputFormat: plan.outputFormat,
+			KillEffect:   plan.killEffect,
+			Transition:   plan.transition,
+			Intro:        plan.intro,
+			Outro:        plan.outro,
+		},
+		Output: shortDryRunOutput{
+			RunDir:     plan.outDir,
+			ShortsDir:  plan.shortsDir,
+			PublishDir: plan.publishDir,
+		},
+		Stages: stages,
+	}
+}
+
+func shortOutputDimensions(outputFormat string) (int, int) {
+	if outputFormat == editor.OutputFormatLandscape16x9 {
+		return 1920, 1080
+	}
+	return 1080, 1920
 }

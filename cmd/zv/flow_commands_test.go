@@ -1,0 +1,118 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/rechedev9/fragforge/internal/editor"
+	"github.com/rechedev9/fragforge/internal/streamclips"
+)
+
+func TestRunFlowsShowDemoJSONIsCompleteAgentJourney(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"zv", "flows", "show", "demo", "--format", "json"}, &stdout, &stderr, nil, &fakeRunner{})
+	if code != exitSuccess || stderr.Len() != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+	var result struct {
+		OK   bool           `json:"ok"`
+		Flow productionFlow `json:"flow"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK || result.Flow.Name != "demo" || len(result.Flow.Phases) < 8 {
+		t.Fatalf("result = %#v", result)
+	}
+	body := stdout.String()
+	for _, want := range []string{
+		"zv demo players",
+		"zv demo moments",
+		"zv demo select",
+		"zv record",
+		editor.OutputFormatShort9x16,
+		editor.OutputFormatLandscape16x9,
+		"shortslistosparasubir",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("flow JSON missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestRunFlowsShowStreamIncludesLandscapeAndCaptionDecision(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"zv", "flows", "show", "stream", "--format=json"}, &stdout, &stderr, nil, &fakeRunner{})
+	if code != exitSuccess || stderr.Len() != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+	var result struct {
+		Flow productionFlow `json:"flow"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	commands := make(map[string]string, len(result.Flow.Phases))
+	for _, phase := range result.Flow.Phases {
+		commands[phase.ID] = phase.Command
+	}
+	for _, id := range []string{"plan", "enrich", "captions", "render"} {
+		if commands[id] == "" || strings.Contains(commands[id], "--dry-run") {
+			t.Fatalf("persistent phase %q = %q, want a real artifact-producing command", id, commands[id])
+		}
+	}
+	for _, id := range []string{"plan-preflight", "killfeed-preflight", "captions-preflight", "render-preflight"} {
+		if !strings.Contains(commands[id], "--dry-run") {
+			t.Fatalf("preflight phase %q = %q, want --dry-run", id, commands[id])
+		}
+	}
+	for _, output := range result.Flow.Outputs {
+		if output.Destination != "<run>/render/shortslistosparasubir" {
+			t.Fatalf("stream output destination = %q, want render publish directory", output.Destination)
+		}
+	}
+	body := stdout.String()
+	for _, want := range []string{
+		streamclips.VariantStreamerLandscape16x9,
+		"--detect-killfeed",
+		"--captions",
+		"factual notices",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("flow JSON missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestDemoArtifactWritingPreflightsAreNotReadOnly(t *testing.T) {
+	flow, ok := findProductionFlow("demo")
+	if !ok {
+		t.Fatal("demo flow missing")
+	}
+	for _, phase := range flow.Phases {
+		if phase.ID == "capture-preflight" || phase.ID == "edit-preflight" {
+			if phase.ReadOnly || phase.Produces == "" {
+				t.Fatalf("phase %s = %#v, want mutating dry-run metadata", phase.ID, phase)
+			}
+		}
+	}
+}
+
+func TestRunFlowsRejectsUnknownFlowAsJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"zv", "flows", "show", "other", "--format", "json"}, &stdout, &stderr, nil, &fakeRunner{})
+	if code != exitInvalidArgs || stderr.Len() != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.OK {
+		t.Fatalf("result = %#v", result)
+	}
+}

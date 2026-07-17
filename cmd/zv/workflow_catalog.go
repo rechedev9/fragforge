@@ -8,6 +8,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/editor"
 	"github.com/rechedev9/fragforge/internal/parser"
 	"github.com/rechedev9/fragforge/internal/recording"
+	"github.com/rechedev9/fragforge/internal/streamclips"
 )
 
 func findWorkflow(name string) (workflowInfo, bool) {
@@ -59,9 +60,21 @@ func buildWorkflowCatalog() []workflowInfo {
 		},
 		{
 			Name:        "demo-players",
-			Description: "List demo participants and SteamID64 values.",
+			Description: "List demo participants and SteamID64 values as text or structured JSON.",
 			Command:     "zv demo players --demo <demo.dem>",
 			RunArgs:     []string{"demo", "players"},
+		},
+		{
+			Name:        "demo-moments",
+			Description: "Score and rank planned demo segments before capture.",
+			Command:     "zv demo moments --killplan <plan.json>",
+			RunArgs:     []string{"demo", "moments"},
+		},
+		{
+			Name:        "demo-select",
+			Description: "Create a recorder-ready plan containing an ordered segment selection.",
+			Command:     "zv demo select --killplan <plan.json> --segments <ids> --out <selected-plan.json>",
+			RunArgs:     []string{"demo", "select"},
 		},
 		{
 			Name:        "utility-audit",
@@ -72,7 +85,7 @@ func buildWorkflowCatalog() []workflowInfo {
 		{
 			Name:        "record",
 			Description: "Record planned demo segments with HLAE/CS2.",
-			Command:     "zv record --killplan <plan.json> --demo <demo.dem> --out <recording-dir> --hlae <HLAE.exe> --cs2 <cs2.exe>",
+			Command:     "zv record --killplan <plan.json> --demo <demo.dem> --out <recording-dir>",
 			RunArgs:     []string{"record"},
 		},
 		{
@@ -89,9 +102,45 @@ func buildWorkflowCatalog() []workflowInfo {
 		},
 		{
 			Name:        "shorts-render",
-			Description: "Render vertical Shorts from a recording result.",
+			Description: "Render vertical or landscape videos; the upload-ready pack defaults to <shorts-dir>/shortslistosparasubir.",
 			Command:     "zv shorts render --recording-result <recording-result.json> --out <shorts-dir>",
 			RunArgs:     []string{"shorts", "render"},
+		},
+		{
+			Name:        "stream-variants",
+			Description: "List local stream layout variants and default crops.",
+			Command:     "zv stream variants",
+			RunArgs:     []string{"stream", "variants"},
+		},
+		{
+			Name:        "stream-plan",
+			Description: "Probe a stream video and create a validated local edit plan.",
+			Command:     "zv stream plan --input <stream.mp4> --out <edit-plan.json>",
+			RunArgs:     []string{"stream", "plan"},
+		},
+		{
+			Name:        "stream-killfeed",
+			Description: "Import reviewed factual killfeed notices into a detected stream plan.",
+			Command:     "zv stream killfeed --plan <edit-plan.json> --events <killfeed-events.json> --out <reviewed-plan.json>",
+			RunArgs:     []string{"stream", "killfeed"},
+		},
+		{
+			Name:        "stream-transcribe",
+			Description: "Generate local multi-pass Whisper candidates that remain explicitly unreviewed.",
+			Command:     "zv stream transcribe --input <stream.mp4> --plan <edit-plan.json> --model <ggml-model.bin> --vad-model <ggml-vad.bin> --out <transcript-review.json>",
+			RunArgs:     []string{"stream", "transcribe"},
+		},
+		{
+			Name:        "stream-captions",
+			Description: "Import reviewed Spanish word timings without requiring a cloud transcription key.",
+			Command:     "zv stream captions --plan <edit-plan.json> --words <caption-words.json> --out <captioned-plan.json>",
+			RunArgs:     []string{"stream", "captions"},
+		},
+		{
+			Name:        "stream-render",
+			Description: "Render stream clips, killfeed, and Spanish captions into an upload-ready local pack.",
+			Command:     "zv stream render --input <stream.mp4> --plan <edit-plan.json> --out <run-dir>",
+			RunArgs:     []string{"stream", "render"},
 		},
 		{
 			Name:        "analysis-tactical-data",
@@ -108,7 +157,7 @@ func buildWorkflowCatalog() []workflowInfo {
 		{
 			Name:        "gallery-open",
 			Description: "Open a generated publish gallery for review.",
-			Command:     "zv gallery open --path <shorts-dir>/publish/index.html",
+			Command:     "zv gallery open --path <run>/shortslistosparasubir/index.html",
 			RunArgs:     []string{"gallery", "open"},
 		},
 		{
@@ -156,7 +205,7 @@ func workflowArgumentMetadata(workflow workflowInfo) workflowArguments {
 	required := workflowRequiredFlags(workflow)
 	commandName := fmt.Sprintf("%q", strings.Join(workflow.RunArgs, " "))
 	valueFlags := commandValueFlags(commandName, required)
-	if workflow.Name == "capabilities" || workflow.Name == "skills-check" || workflow.Name == "workflows-check" || workflow.Name == "project-check" {
+	if workflow.Name == "capabilities" || workflow.Name == "stream-variants" || workflow.Name == "skills-check" || workflow.Name == "workflows-check" || workflow.Name == "project-check" {
 		valueFlags = append(valueFlags, "--format")
 	}
 
@@ -174,13 +223,6 @@ func workflowArgumentMetadata(workflow workflowInfo) workflowArguments {
 			UnlessAnyFlags:      []string{"--from-recording"},
 			RequiredFlags:       []string{},
 			RequiredPositionals: []string{"demo"},
-		})
-	case "record":
-		conditional = append(conditional, workflowConditionalRequirement{
-			Description:         "capture tool paths are required for a real recording",
-			UnlessAnyFlags:      []string{"--dry-run"},
-			RequiredFlags:       []string{"--hlae", "--cs2"},
-			RequiredPositionals: []string{},
 		})
 	}
 
@@ -207,7 +249,11 @@ func workflowValueConstraints(workflow workflowInfo) []workflowValueConstraint {
 	switch workflow.Name {
 	case "short":
 		return []workflowValueConstraint{
-			constraint("--preset", editor.DefaultPreset().Name, "zv presets --format json", editor.PresetNames()...),
+			constraint("--preset", editor.DefaultPreset().Name, "zv presets --format json", supportedPresetNames()...),
+			constraint("--output-format", editor.OutputFormatShort9x16, "", editor.OutputFormatShort9x16, editor.OutputFormatLandscape16x9),
+			constraint("--kill-effect", editor.KillEffectPunchIn, "", editor.KillEffectClean, editor.KillEffectPunchIn, editor.KillEffectVelocity, editor.KillEffectFreezeFlash),
+			constraint("--transition", editor.TransitionFlash, "", editor.TransitionCut, editor.TransitionFlash, editor.TransitionWhip, editor.TransitionDip),
+			constraint("--format", "text", "", "text", "json"),
 		}
 	case "demo-parse":
 		return []workflowValueConstraint{
@@ -222,14 +268,27 @@ func workflowValueConstraints(workflow workflowInfo) []workflowValueConstraint {
 		return []workflowValueConstraint{
 			constraint("--hud", string(recording.HUDModeGameplay), "",
 				string(recording.HUDModeGameplay), string(recording.HUDModeClean), string(recording.HUDModeDeathnotices)),
+			constraint("--format", "text", "", "text", "json"),
 		}
 	case "shorts-render":
 		defaultPreset := editor.DefaultPreset()
 		return []workflowValueConstraint{
-			constraint("--preset", defaultPreset.Name, "zv presets --format json", editor.PresetNames()...),
+			constraint("--preset", defaultPreset.Name, "zv presets --format json", supportedPresetNames()...),
 			constraint("--effects-preset", defaultPreset.EffectsPreset, "", editor.EffectsPresetViralUltraClean),
+			constraint("--output-format", editor.OutputFormatShort9x16, "", editor.OutputFormatShort9x16, editor.OutputFormatLandscape16x9),
+			constraint("--kill-effect", editor.KillEffectPunchIn, "", editor.KillEffectClean, editor.KillEffectPunchIn, editor.KillEffectVelocity, editor.KillEffectFreezeFlash),
+			constraint("--transition", editor.TransitionFlash, "", editor.TransitionCut, editor.TransitionFlash, editor.TransitionWhip, editor.TransitionDip),
 			constraint("--video-preset", defaultPreset.VideoPreset, "",
 				"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"),
+		}
+	case "stream-plan":
+		return []workflowValueConstraint{
+			constraint("--variant", streamclips.DefaultVariant().Name, "zv stream variants --format json", streamclips.VariantNames()...),
+			constraint("--format", "text", "", "text", "json"),
+		}
+	case "stream-render", "stream-killfeed", "stream-transcribe", "stream-captions", "stream-variants", "demo-players", "demo-moments", "demo-select":
+		return []workflowValueConstraint{
+			constraint("--format", "text", "", "text", "json"),
 		}
 	case "capabilities", "skills-check", "workflows-check", "project-check":
 		return []workflowValueConstraint{
@@ -250,13 +309,13 @@ func workflowRequiredFlags(workflow workflowInfo) []string {
 func workflowSafetyMetadata(workflow workflowInfo, arguments workflowArguments) workflowSafety {
 	readOnly := false
 	switch workflow.Name {
-	case "capabilities", "demo-players", "analysis-viewer", "gallery-open", "skills-check", "workflows-check", "project-check":
+	case "capabilities", "stream-variants", "analysis-viewer", "gallery-open", "skills-check", "workflows-check", "project-check":
 		readOnly = true
 	}
 
 	longRunning := false
 	switch workflow.Name {
-	case "short", "record", "compose-final", "music-analyze", "shorts-render", "analysis-viewer", "serve":
+	case "short", "record", "compose-final", "music-analyze", "shorts-render", "stream-plan", "stream-transcribe", "stream-render", "analysis-viewer", "serve":
 		longRunning = true
 	}
 

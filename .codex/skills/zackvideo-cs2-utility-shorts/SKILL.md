@@ -49,9 +49,10 @@ Use `--dry-run` first when changing recording settings.
 ```powershell
 .\bin\zv.exe workflows run shorts-render -- `
   --recording-result <run>\recording\recording-result.json `
-  --killplan <run>\plan-utility.json `
-  --out <run>\shorts-utility `
-  --preset viral-60-clean `
+	--killplan <run>\plan-utility.json `
+	--out <run>\shorts-utility `
+	--publish-dir <run>\shortslistosparasubir `
+	--preset viral-60-clean `
   --lineup-catalog data\lineups
 ```
 
@@ -60,7 +61,7 @@ Use `--skip-existing` only when changing captions/metadata but not burned-in ove
 5. Open the review gallery:
 
 ```powershell
-.\bin\zv.exe workflows run gallery-open -- --path <run>\shorts-utility\publish\index.html
+.\bin\zv.exe workflows run gallery-open -- --path <run>\shortslistosparasubir\index.html
 ```
 
 ## Review Rules

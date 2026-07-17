@@ -35,6 +35,64 @@ Two ways to run the pipeline:
 - CLI (`zv short`, or the granular stage commands) runs the whole chain in-process on the local machine.
 - Orchestrator (`zv serve`) exposes an HTTP API and runs parser/media work on an in-process inline queue, with job state in SQLite (or in memory for tests).
 
+## Codex Desktop: CLI-first
+
+When this repository is opened in Codex Desktop, the unified `zv` CLI is the
+primary product interface. Codex loads these instructions through the tracked
+`AGENTS.md` symlink. Do not require FragForge Studio or MCP for normal demo,
+recording, render, QA, or publishing work.
+
+Use this agent flow from the repository root in PowerShell:
+
+1. If `bin\zv.exe` is missing or does not recognize a documented command, run
+   `.\scripts\build.ps1` once to refresh the local binaries.
+2. Inspect machine readiness:
+
+   ```powershell
+   .\bin\zv.exe capabilities --format json
+   ```
+
+3. Discover the end-to-end journey, then the atomic command contract:
+
+   ```powershell
+   .\bin\zv.exe flows show demo --format json
+   .\bin\zv.exe flows show stream --format json
+   .\bin\zv.exe workflows list --format json
+   .\bin\zv.exe workflows show short --format json
+   .\bin\zv.exe workflows show demo-moments --format json
+   ```
+
+4. Before execution, preflight the exact arguments:
+
+   ```powershell
+   .\bin\zv.exe workflows validate short --format json -- match.dem --prompt "all kills 76561198000000000" --dry-run --format json
+   ```
+
+5. Execute only after a successful preflight:
+
+   ```powershell
+   .\bin\zv.exe workflows run short -- match.dem --prompt "all kills 76561198000000000" --dry-run --format json
+   ```
+
+Use the staged demo journey when the user wants to choose the player or plays:
+`demo players -> demo parse -> demo moments -> demo select -> record -> shorts
+render`. `demo select` is the decision boundary before expensive capture and
+preserves the requested narrative order. Prefer workflow `short` only when the
+target and selection policy are already fully specified. The stream journey is
+`stream variants -> stream plan -> stream killfeed -> stream captions -> stream
+render`. Reviewed Spanish word timings make captions independent of cloud
+credentials; xAI remains the automatic transcription and translation fallback.
+Both journeys support `short-9x16` (1080x1920 TikTok/Shorts) and
+`landscape-16x9` (1920x1080 YouTube); discover stream geometry through
+`zv stream variants --format json`.
+Use JSON output for decisions, preserve the exact argv reported by preflight,
+and follow the existing explicit-authorization rules before HLAE/CS2 capture or
+long renders. MCP is optional and disabled by default in `.codex/config.toml`;
+enable it only for work that specifically needs a running Studio queue or UI.
+The unified `short` and `record` commands resolve missing HLAE/CS2 paths through
+the same environment/local autodetection reported by `zv capabilities`; agents
+should not copy detected paths back into argv unless explicitly overriding them.
+
 The orchestrator drives a job state machine: `queued -> parsing -> parsed -> recording -> recorded -> composing -> composed -> done` (or `failed`).
 Each worker is idempotent: it checks whether the durable artifact already exists and skips the external media command if so, which makes manual retries safe.
 Pure stages (parse, compose) retry automatically; recording does not retry automatically because it costs minutes and a GPU, so it is marked `failed` for the user to decide.
@@ -98,7 +156,8 @@ Build and run:
 Build all binaries into `.\bin` with `.\scripts\build.ps1`, then:
 
 ```powershell
-zv short match.dem --prompt "las mejores kills" --target-steamid 76561198000000000
+zv short match.dem --prompt "las mejores kills" --target-steamid 76561198000000000 --output-format short-9x16
+zv short match.dem --prompt "video largo 16:9" --target-steamid 76561198000000000 --output-format landscape-16x9
 zv short match.dem --prompt "all kills" --target-steamid 76561198000000000 --dry-run
 zv batch C:\Users\you\Downloads\replays --recursive
 zv metrics
@@ -107,7 +166,7 @@ zv presets
 zv check
 ```
 
-`zv short` chains parse -> moments -> HLAE/CS2 recording -> render and interprets the prompt deterministically (Spanish and English): a 17-digit number or `--target-steamid` selects the player, `mejores`/`best`/`highlights` selects top moments (otherwise all kills are compiled), `musica`/`music`/`beat` adds beat analysis (needs `--music`), and an explicit preset name or `--preset` overrides the default `viral-60-clean`.
+`zv short` chains parse -> moments -> HLAE/CS2 recording -> render and interprets the prompt deterministically (Spanish and English): a 17-digit number or `--target-steamid` selects the player, `mejores`/`best`/`highlights` selects top moments (otherwise all kills are compiled), `musica`/`music`/`beat` adds beat analysis (needs `--music`), `16:9`/`horizontal`/`video largo` selects landscape output, and an explicit preset name or `--preset` overrides the default `viral-60-clean`.
 `--dry-run` resolves the plan without running anything, and rerunning a failed stage with `--from-recording <recording-result.json>` skips parse and record.
 `zv check` sanity-checks the project contract (skills, workflows, docs); `zv presets` lists render presets.
 `zv batch`, `zv metrics`, and `zv errors` are the error-tracking commands (see Observability below).

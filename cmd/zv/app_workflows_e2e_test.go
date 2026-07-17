@@ -145,7 +145,7 @@ func TestZVBinaryEveryWorkflowRunCommandEndToEnd(t *testing.T) {
 			switch {
 			case workflow.RunArgs[0] == "gallery":
 				wantOpenPathCalls++
-			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "capabilities" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
+			case !workflowDelegatesExternally(workflow):
 			default:
 				wantSubcommandCalls++
 			}
@@ -241,7 +241,7 @@ func TestZVBinaryEveryWorkflowRunAcceptsEqualsRequiredFlagsEndToEnd(t *testing.T
 			switch {
 			case workflow.RunArgs[0] == "gallery":
 				wantOpenPathCalls++
-			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "capabilities" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
+			case !workflowDelegatesExternally(workflow):
 			default:
 				wantSubcommandCalls++
 			}
@@ -457,7 +457,7 @@ func TestZVBinaryCanonicalWorkflowFlagsAreScopedEndToEnd(t *testing.T) {
 	}
 }
 
-func TestZVBinaryRecordRequiresCaptureToolsUnlessDryRunEndToEnd(t *testing.T) {
+func TestZVBinaryRecordAutoDetectsCaptureToolsEndToEnd(t *testing.T) {
 	tempDir := t.TempDir()
 	exe := buildZVBinary(t, tempDir)
 	installFakeDelegatedSubcommands(t, filepath.Dir(exe))
@@ -465,6 +465,7 @@ func TestZVBinaryRecordRequiresCaptureToolsUnlessDryRunEndToEnd(t *testing.T) {
 	valid := []struct {
 		name           string
 		args           []string
+		env            []string
 		wantExecutable string
 		wantArgs       []string
 	}{
@@ -486,6 +487,26 @@ func TestZVBinaryRecordRequiresCaptureToolsUnlessDryRunEndToEnd(t *testing.T) {
 			wantExecutable: executableName("zv-recorder"),
 			wantArgs:       []string{"--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording", "--hlae", "HLAE.exe", "--cs2", "cs2.exe"},
 		},
+		{
+			name: "direct auto detected capture tools",
+			args: []string{"record", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording"},
+			env: []string{
+				`ZV_HLAE_PATH=C:\Detected\HLAE.exe`,
+				`ZV_CS2_PATH=C:\Detected\cs2.exe`,
+			},
+			wantExecutable: executableName("zv-recorder"),
+			wantArgs:       []string{"--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording", "--hlae", `C:\Detected\HLAE.exe`, "--cs2", `C:\Detected\cs2.exe`},
+		},
+		{
+			name: "workflow auto detected capture tools",
+			args: []string{"workflows", "run", "record", "--", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording", "--dry-run=false"},
+			env: []string{
+				`ZV_HLAE_PATH=C:\Detected\HLAE.exe`,
+				`ZV_CS2_PATH=C:\Detected\cs2.exe`,
+			},
+			wantExecutable: executableName("zv-recorder"),
+			wantArgs:       []string{"--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording", "--dry-run=false", "--hlae", `C:\Detected\HLAE.exe`, "--cs2", `C:\Detected\cs2.exe`},
+		},
 	}
 	for _, tt := range valid {
 		t.Run("valid/"+tt.name, func(t *testing.T) {
@@ -494,6 +515,7 @@ func TestZVBinaryRecordRequiresCaptureToolsUnlessDryRunEndToEnd(t *testing.T) {
 				"ZV_FAKE_SUBCOMMAND=1",
 				"ZV_FAKE_SUBCOMMAND_LOG=" + subcommandLogPath,
 			}
+			env = append(env, tt.env...)
 
 			stdout, stderr := runZVBinarySplitWithEnv(t, exe, tempDir, env, tt.args...)
 
@@ -516,49 +538,6 @@ func TestZVBinaryRecordRequiresCaptureToolsUnlessDryRunEndToEnd(t *testing.T) {
 		})
 	}
 
-	invalid := []struct {
-		name       string
-		args       []string
-		wantStderr string
-	}{
-		{
-			name:       "direct missing both capture tools",
-			args:       []string{"record", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording"},
-			wantStderr: "error: missing required flags --hlae, --cs2 for \"record\" unless --dry-run is set\n",
-		},
-		{
-			name:       "workflow dry run false missing both capture tools",
-			args:       []string{"workflows", "run", "record", "--", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording", "--dry-run=false"},
-			wantStderr: "error: missing required flags --hlae, --cs2 for \"record\" unless --dry-run is set\n" + workflowsRunUsage,
-		},
-		{
-			name:       "direct missing cs2",
-			args:       []string{"record", "--killplan", "plan.json", "--demo", "inferno.dem", "--out", "recording", "--hlae", "HLAE.exe"},
-			wantStderr: "error: missing required flag --cs2 for \"record\" unless --dry-run is set\n",
-		},
-	}
-	for _, tt := range invalid {
-		t.Run("invalid/"+tt.name, func(t *testing.T) {
-			subcommandLogPath := filepath.Join(tempDir, "invalid-"+strings.ReplaceAll(tt.name, " ", "-")+".jsonl")
-			env := []string{
-				"ZV_FAKE_SUBCOMMAND=1",
-				"ZV_FAKE_SUBCOMMAND_LOG=" + subcommandLogPath,
-			}
-
-			stdout, stderr, code := runZVBinaryFailureSplitWithEnv(t, exe, tempDir, env, tt.args...)
-
-			if got, want := code, exitInvalidArgs; got != want {
-				t.Fatalf("exit code = %d, want %d\nstdout:\n%s\nstderr:\n%s", got, want, stdout, stderr)
-			}
-			if stdout != "" {
-				t.Fatalf("stdout = %q, want empty", stdout)
-			}
-			if got, want := stderr, tt.wantStderr; got != want {
-				t.Fatalf("stderr = %q, want %q", got, want)
-			}
-			assertPathDoesNotExist(t, subcommandLogPath)
-		})
-	}
 }
 
 func TestZVBinaryRecordWorkflowDiscoveryDocumentsCaptureContractEndToEnd(t *testing.T) {
@@ -571,7 +550,7 @@ func TestZVBinaryRecordWorkflowDiscoveryDocumentsCaptureContractEndToEnd(t *test
 		t.Fatalf("workflows show record stderr = %q, want empty", showTextStderr)
 	}
 	for _, want := range []string{
-		"command: zv record --killplan <plan.json> --demo <demo.dem> --out <recording-dir> --hlae <HLAE.exe> --cs2 <cs2.exe>",
+		"command: zv record --killplan <plan.json> --demo <demo.dem> --out <recording-dir>",
 		"run_command: zv workflows run record",
 	} {
 		if !strings.Contains(showText, want) {
@@ -587,7 +566,7 @@ func TestZVBinaryRecordWorkflowDiscoveryDocumentsCaptureContractEndToEnd(t *test
 	if err := json.Unmarshal([]byte(showJSON), &shown); err != nil {
 		t.Fatalf("unmarshal workflows show record json: %v\n%s", err, showJSON)
 	}
-	if got, want := shown.Command, "zv record --killplan <plan.json> --demo <demo.dem> --out <recording-dir> --hlae <HLAE.exe> --cs2 <cs2.exe>"; got != want {
+	if got, want := shown.Command, "zv record --killplan <plan.json> --demo <demo.dem> --out <recording-dir>"; got != want {
 		t.Fatalf("record workflow command = %q, want %q", got, want)
 	}
 	if got, want := shown.RunCommand, "zv workflows run record"; got != want {
@@ -1443,7 +1422,7 @@ func TestZVBinaryEveryDirectWorkflowAcceptsEqualsRequiredFlagsEndToEnd(t *testin
 			switch {
 			case workflow.RunArgs[0] == "gallery":
 				wantOpenPathCalls++
-			case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "capabilities" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
+			case !workflowDelegatesExternally(workflow):
 			default:
 				wantSubcommandCalls++
 			}
@@ -1751,7 +1730,7 @@ func TestZVBinaryWorkflowListJSONRunCommandsEndToEnd(t *testing.T) {
 		switch {
 		case catalogWorkflow.RunArgs[0] == "gallery":
 			wantOpenPathCalls++
-		case catalogWorkflow.RunArgs[0] == "short" || catalogWorkflow.RunArgs[0] == "capabilities" || catalogWorkflow.RunArgs[0] == "skills" || catalogWorkflow.RunArgs[0] == "workflows" || catalogWorkflow.RunArgs[0] == "check":
+		case !workflowDelegatesExternally(catalogWorkflow):
 		default:
 			wantSubcommandCalls++
 		}
@@ -1938,7 +1917,7 @@ func TestZVBinaryWorkflowShowJSONRunCommandsEndToEnd(t *testing.T) {
 		switch {
 		case catalogWorkflow.RunArgs[0] == "gallery":
 			wantOpenPathCalls++
-		case catalogWorkflow.RunArgs[0] == "short" || catalogWorkflow.RunArgs[0] == "capabilities" || catalogWorkflow.RunArgs[0] == "skills" || catalogWorkflow.RunArgs[0] == "workflows" || catalogWorkflow.RunArgs[0] == "check":
+		case !workflowDelegatesExternally(catalogWorkflow):
 		default:
 			wantSubcommandCalls++
 		}

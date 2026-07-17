@@ -88,8 +88,15 @@ type ClipRange struct {
 	// KillfeedKills is index-aligned with KillfeedSeconds. Each inner slice
 	// contains only the notices born at that cue, not a cumulative snapshot.
 	KillfeedKills [][]KillfeedKill `json:"killfeed_kills,omitempty"`
-	Title         string           `json:"title,omitempty"`
-	Edit          *ClipEdit        `json:"edit,omitempty"`
+	// CaptionWords are reviewed Spanish word cues relative to this clip's
+	// source range. When present they are burned directly and no cloud
+	// transcription key is required.
+	CaptionWords []CaptionWord `json:"caption_words,omitempty"`
+	// CaptionReviewed distinguishes an intentionally empty, human-reviewed
+	// no-speech clip from one that still needs transcription.
+	CaptionReviewed bool      `json:"caption_reviewed,omitempty"`
+	Title           string    `json:"title,omitempty"`
+	Edit            *ClipEdit `json:"edit,omitempty"`
 }
 
 // Clip edit limits. Speed stays within what chained atempo filters reproduce
@@ -159,6 +166,15 @@ type KillfeedKill struct {
 	Blind        bool   `json:"blind,omitempty"`
 	InAir        bool   `json:"in_air,omitempty"`
 	FlashAssist  bool   `json:"flash_assist,omitempty"`
+}
+
+// CaptionWord is one reviewed Spanish word on the clip-relative source
+// timeline. It mirrors captions.WordCue without coupling saved edit plans to a
+// renderer package.
+type CaptionWord struct {
+	Word         string  `json:"word"`
+	StartSeconds float64 `json:"start_seconds"`
+	EndSeconds   float64 `json:"end_seconds"`
 }
 
 type EditPlan struct {
@@ -505,6 +521,35 @@ func (c ClipRange) Validate() error {
 			}
 		}
 	}
+	lastEnd := 0.0
+	for i, cue := range c.CaptionWords {
+		word := strings.TrimSpace(cue.Word)
+		if word == "" {
+			return fmt.Errorf("clip %s caption word %d is blank", c.ID, i)
+		}
+		if len([]rune(word)) > 80 {
+			return fmt.Errorf("clip %s caption word %d exceeds 80 characters", c.ID, i)
+		}
+		if strings.ContainsAny(word, "\r\n") {
+			return fmt.Errorf("clip %s caption word %d contains a line break", c.ID, i)
+		}
+		if math.IsNaN(cue.StartSeconds) || math.IsInf(cue.StartSeconds, 0) || cue.StartSeconds < 0 {
+			return fmt.Errorf("clip %s caption word %d start_seconds must be finite and >= 0", c.ID, i)
+		}
+		if math.IsNaN(cue.EndSeconds) || math.IsInf(cue.EndSeconds, 0) || cue.EndSeconds <= cue.StartSeconds {
+			return fmt.Errorf("clip %s caption word %d end_seconds must be finite and greater than start_seconds", c.ID, i)
+		}
+		if cue.EndSeconds-cue.StartSeconds > 2.5 {
+			return fmt.Errorf("clip %s caption word %d lasts more than 2.5 seconds", c.ID, i)
+		}
+		if cue.EndSeconds > c.EndSeconds-c.StartSeconds+0.001 {
+			return fmt.Errorf("clip %s caption word %d exceeds the clip duration", c.ID, i)
+		}
+		if i > 0 && cue.StartSeconds < lastEnd {
+			return fmt.Errorf("clip %s caption words overlap or are unsorted at index %d", c.ID, i)
+		}
+		lastEnd = cue.EndSeconds
+	}
 	if err := c.Edit.validate(c.ID, c.EndSeconds-c.StartSeconds); err != nil {
 		return err
 	}
@@ -711,7 +756,29 @@ func normalizeClipRange(clip ClipRange) ClipRange {
 		clip.KillfeedKills,
 	)
 	clip.Edit = normalizeClipEdit(clip.Edit)
+	if len(clip.CaptionWords) > 0 {
+		clip.CaptionWords = append([]CaptionWord(nil), clip.CaptionWords...)
+		for i := range clip.CaptionWords {
+			clip.CaptionWords[i].Word = strings.TrimSpace(clip.CaptionWords[i].Word)
+		}
+	}
 	return clip
+}
+
+// CaptionsNeedBackend reports whether at least one audible clip still needs
+// transcription because it has neither reviewed Spanish words nor a reviewed
+// no-speech decision. Muted clips do not need captions because their source
+// speech is not present in the output.
+func (p EditPlan) CaptionsNeedBackend() bool {
+	if !p.Captions.Enabled {
+		return false
+	}
+	for _, clip := range p.Clips {
+		if !clip.SourceAudioMuted() && len(clip.CaptionWords) == 0 && !clip.CaptionReviewed {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeClipEdit trims overlay text and collapses an all-defaults edit back

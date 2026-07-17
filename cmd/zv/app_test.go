@@ -176,6 +176,18 @@ func TestRunUnknownCommandReturnsInvalidArgs(t *testing.T) {
 	}
 }
 
+func TestRunStreamValidationErrorsAreMachineReadable(t *testing.T) {
+	runner := &fakeRunner{}
+	var stdout, stderr strings.Builder
+	code := Run([]string{"zv", "stream", "render", "--format", "json"}, &stdout, &stderr, nil, runner)
+	if code != exitInvalidArgs || runner.name != "" || stderr.Len() != 0 {
+		t.Fatalf("code = %d, delegated to = %q, stderr = %q", code, runner.name, stderr.String())
+	}
+	if !json.Valid([]byte(stdout.String())) {
+		t.Fatalf("stdout = %q, want validation JSON", stdout.String())
+	}
+}
+
 func TestRunDelegateReportsRunnerError(t *testing.T) {
 	runner := &fakeRunner{err: errors.New("boom")}
 	var stdout, stderr strings.Builder

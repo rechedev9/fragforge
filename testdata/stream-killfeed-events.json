@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "clip_id": "clip-001",
+  "cues": [
+    {
+      "at_seconds": 2.75,
+      "kills": [
+        {
+          "attacker_side": "CT",
+          "attacker_name": "ZaCkk",
+          "victim_side": "T",
+          "victim_name": "ar4nit",
+          "weapon": "awp",
+          "headshot": true,
+          "wallbang": true
+        },
+        {
+          "attacker_side": "CT",
+          "attacker_name": "ZaCkk",
+          "victim_side": "T",
+          "victim_name": "Nmokes",
+          "weapon": "awp"
+        }
+      ]
+    },
+    {
+      "at_seconds": 8.625,
+      "kills": [
+        {
+          "attacker_side": "CT",
+          "attacker_name": "ZaCkk",
+          "victim_side": "T",
+          "victim_name": "bek657",
+          "weapon": "awp"
+        }
+      ]
+    }
+  ]
+}

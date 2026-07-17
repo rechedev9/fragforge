@@ -64,6 +64,38 @@ func TestDetectFindsSibling(t *testing.T) {
 	}
 }
 
+func TestSelectHLAEPrefersQualifiedVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		matches []string
+		want    string
+	}{
+		{name: "missing"},
+		{
+			name:    "highest versioned fallback",
+			matches: []string{`C:\HLAE-2.189.0\HLAE.exe`, `C:\HLAE-2.190.2\HLAE.exe`},
+			want:    `C:\HLAE-2.190.2\HLAE.exe`,
+		},
+		{
+			name:    "qualified version beats newer install",
+			matches: []string{`C:\HLAE-2.190.2-fragforge-fixed\HLAE.exe`, preferredHLAEPath},
+			want:    preferredHLAEPath,
+		},
+		{
+			name:    "qualified path comparison is case insensitive",
+			matches: []string{`c:\hlae-2.190.1\hlae.exe`, `C:\HLAE-2.190.2\HLAE.exe`},
+			want:    `c:\hlae-2.190.1\hlae.exe`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := selectHLAE(tt.matches); got != tt.want {
+				t.Fatalf("selectHLAE() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveToolReportsInaccessibleExplicitPath(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing.exe")
 	tool := ResolveTool("ZV_HLAE_PATH", missing, Sources{"ZV_HLAE_PATH": SourceEnvironment})

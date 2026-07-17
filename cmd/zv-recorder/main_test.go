@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"image/png"
 	"os"
@@ -30,6 +32,28 @@ func TestCS2LaunchCommandLineUsesWindowedMode(t *testing.T) {
 	}
 	if strings.Index(got, "-windowed") > strings.Index(got, "-w 1920") {
 		t.Fatalf("cs2LaunchCommandLine() = %q, want -windowed before resolution flags", got)
+	}
+}
+
+func TestWriteResultAndReportEmitsMachineReadableDryRunSummary(t *testing.T) {
+	outDir := t.TempDir()
+	result := recording.RecordingResult{
+		Plan:   recording.RecordingPlan{Segments: []recording.RecordingSegment{{ID: "seg-001"}, {ID: "seg-004"}}},
+		Script: filepath.Join(outDir, "recording.js"),
+	}
+	var output bytes.Buffer
+	if err := writeResultAndReport(outDir, result, true, "json", &output); err != nil {
+		t.Fatal(err)
+	}
+	var got recordingSummary
+	if err := json.Unmarshal(output.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.OK || !got.DryRun || got.Executed || got.SegmentCount != 2 {
+		t.Fatalf("summary = %#v", got)
+	}
+	if _, err := os.Stat(got.ResultPath); err != nil {
+		t.Fatalf("recording result: %v", err)
 	}
 }
 

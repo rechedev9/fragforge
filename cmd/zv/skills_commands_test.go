@@ -471,7 +471,7 @@ func TestRunSkillsCheckRejectsNonCanonicalNestedWorkflowCommand(t *testing.T) {
 		{
 			name:    "demo",
 			line:    `.\bin\zv.exe demo inspect --demo demo.dem`,
-			wantErr: `uses non-standard zv command "demo"; expected "demo parse" or "demo players"`,
+			wantErr: `uses non-standard zv command "demo"; expected "demo parse", "demo players", "demo moments", or "demo select"`,
 		},
 		{
 			name:    "shorts",

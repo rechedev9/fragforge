@@ -87,6 +87,9 @@ func TestZVBinaryHelpCoversWorkflowCatalogEndToEnd(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("root help stderr = %q, want empty", stderr)
 	}
+	if !strings.Contains(stdout, "zv workflows validate <name>") {
+		t.Fatalf("root help does not document the zero-execution workflow preflight:\n%s", stdout)
+	}
 	rootStems := usageCommandStems(stdout)
 	groupStems := make(map[string]map[string]struct{})
 	for _, workflow := range workflowCatalog() {

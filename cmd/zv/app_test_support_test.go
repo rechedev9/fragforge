@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -569,42 +568,6 @@ func recordCommandArgsForPublishedExample(command []string) ([]string, bool) {
 	return command[3:], true
 }
 
-func recordCommandHasDryRunOrCaptureTools(args []string) bool {
-	return recordCommandDryRunIsTrue(args) ||
-		(recordCommandFlagHasValue(args, "--hlae") && recordCommandFlagHasValue(args, "--cs2"))
-}
-
-func recordCommandDryRunIsTrue(args []string) bool {
-	for i, arg := range args {
-		if arg == "--dry-run" {
-			if i+1 < len(args) {
-				if value, err := strconv.ParseBool(args[i+1]); err == nil {
-					return value
-				}
-			}
-			return true
-		}
-		const prefix = "--dry-run="
-		if strings.HasPrefix(arg, prefix) {
-			value, err := strconv.ParseBool(strings.TrimPrefix(arg, prefix))
-			return err == nil && value
-		}
-	}
-	return false
-}
-
-func recordCommandFlagHasValue(args []string, flag string) bool {
-	for i, arg := range args {
-		if arg == flag {
-			return i+1 < len(args) && args[i+1] != "" && !strings.HasPrefix(args[i+1], "--")
-		}
-		if strings.HasPrefix(arg, flag+"=") {
-			return strings.TrimPrefix(arg, flag+"=") != ""
-		}
-	}
-	return false
-}
-
 func workflowRunCommandArgs(t *testing.T, workflow workflowInfo) []string {
 	t.Helper()
 	fields, ok := splitCommandFields(workflow.RunCommand)
@@ -638,6 +601,13 @@ func workflowRunSampleForwardedArgs(t *testing.T, workflow workflowInfo, gallery
 		return []string{"--", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", "run/plan.json"}
 	case "demo-players":
 		return []string{"--", "--demo", "inferno.dem"}
+	case "demo-moments":
+		planPath := writeDemoReviewPlan(t, filepath.Dir(filepath.Dir(galleryPath)))
+		return []string{"--", "--killplan", planPath}
+	case "demo-select":
+		baseDir := filepath.Dir(filepath.Dir(galleryPath))
+		planPath := writeDemoReviewPlan(t, baseDir)
+		return []string{"--", "--killplan", planPath, "--segments", "seg-001", "--out", filepath.Join(baseDir, "selected-plan.json"), "--dry-run"}
 	case "utility-audit":
 		return []string{"--", "--plan", "run/plan.json", "--lineup-catalog", "data/lineups", "--out", "run/utility-audit.csv"}
 	case "record":
@@ -646,6 +616,18 @@ func workflowRunSampleForwardedArgs(t *testing.T, workflow workflowInfo, gallery
 		return []string{"--", "--recording-result", "run/recording/recording-result.json", "--out", "run/final.mp4", "--dry-run"}
 	case "shorts-render":
 		return []string{"--", "--recording-result", "run/recording/recording-result.json", "--out", "run/shorts"}
+	case "stream-variants":
+		return nil
+	case "stream-plan":
+		return []string{"--", "--input", "stream.mp4", "--out", "run/stream-edit-plan.json", "--dry-run"}
+	case "stream-killfeed":
+		return []string{"--", "--plan", "run/stream-edit-plan.json", "--events", "run/killfeed-events.json", "--out", "run/reviewed-plan.json", "--dry-run"}
+	case "stream-transcribe":
+		return []string{"--", "--input", "stream.mp4", "--plan", "run/reviewed-plan.json", "--model", "run/whisper.bin", "--vad-model", "run/vad.bin", "--out", "run/transcript-review.json", "--dry-run"}
+	case "stream-captions":
+		return []string{"--", "--plan", "run/reviewed-plan.json", "--words", "run/caption-words.json", "--out", "run/final-plan.json", "--dry-run"}
+	case "stream-render":
+		return []string{"--", "--input", "stream.mp4", "--plan", "run/stream-edit-plan.json", "--out", "run/stream", "--dry-run"}
 	case "music-analyze":
 		return []string{"--", "--input", "data/music/track.mp4", "--out", "run/rhythm.json"}
 	case "analysis-tactical-data":
@@ -685,7 +667,7 @@ func workflowRunSampleArgsWithoutSeparator(t *testing.T, workflow workflowInfo, 
 		return append([]string(nil), forwarded[1:]...)
 	}
 	switch workflow.Name {
-	case "capabilities", "skills-check", "workflows-check", "project-check":
+	case "capabilities", "stream-variants", "skills-check", "workflows-check", "project-check":
 		return []string{"--format", "json"}
 	case "serve":
 		return []string{"--help"}
@@ -1006,6 +988,9 @@ func assertDiscoveredWorkflowRunMatchesDirect(t *testing.T, exe, root, source st
 }
 
 func workflowDelegatesExternally(workflow workflowInfo) bool {
+	if workflow.Name == "demo-moments" || workflow.Name == "demo-select" {
+		return false
+	}
 	if len(workflow.RunArgs) == 0 {
 		return false
 	}
@@ -1185,7 +1170,13 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\\HLAE-2.190.1\\HLAE.exe --cs2 \"C:\\Games\\Counter-Strike 2\\game\\bin\\win64\\cs2.exe\"",
 		"./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4",
 		"./bin/zv music analyze --input data/music/track.mp4 --out data/runs/run-004/rhythm.json",
-		"./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts",
+		"./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts --publish-dir data/runs/run-004/shortslistosparasubir",
+		"./bin/zv stream variants",
+		"./bin/zv stream plan --input stream.mp4 --out data/runs/stream/edit-plan.json --captions --dry-run",
+		"./bin/zv stream killfeed --plan data/runs/stream/edit-plan.json --events data/runs/stream/killfeed-events.json --out data/runs/stream/reviewed-plan.json --dry-run",
+		"./bin/zv stream transcribe --input stream.mp4 --plan data/runs/stream/reviewed-plan.json --model whisper.bin --vad-model vad.bin --out data/runs/stream/transcript-review.json --dry-run",
+		"./bin/zv stream captions --plan data/runs/stream/reviewed-plan.json --words data/runs/stream/caption-words.json --out data/runs/stream/final-plan.json --dry-run",
+		"./bin/zv stream render --input stream.mp4 --plan data/runs/stream/edit-plan.json --out data/runs/stream --dry-run",
 		"./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000",
 		"./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json",
 		"./bin/zv gallery open --path data/runs/run-004/shorts/publish/index.html",
@@ -1214,6 +1205,18 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"./bin/zv workflows show music-analyze --format json",
 		"./bin/zv workflows show shorts-render",
 		"./bin/zv workflows show shorts-render --format json",
+		"./bin/zv workflows show stream-variants",
+		"./bin/zv workflows show stream-variants --format json",
+		"./bin/zv workflows show stream-plan",
+		"./bin/zv workflows show stream-plan --format json",
+		"./bin/zv workflows show stream-killfeed",
+		"./bin/zv workflows show stream-killfeed --format json",
+		"./bin/zv workflows show stream-transcribe",
+		"./bin/zv workflows show stream-transcribe --format json",
+		"./bin/zv workflows show stream-captions",
+		"./bin/zv workflows show stream-captions --format json",
+		"./bin/zv workflows show stream-render",
+		"./bin/zv workflows show stream-render --format json",
 		"./bin/zv workflows show analysis-tactical-data",
 		"./bin/zv workflows show analysis-tactical-data --format json",
 		"./bin/zv workflows show analysis-viewer",
@@ -1234,7 +1237,13 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\\HLAE-2.190.1\\HLAE.exe --cs2 \"C:\\Games\\Counter-Strike 2\\game\\bin\\win64\\cs2.exe\"",
 		"./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4",
 		"./bin/zv workflows run music-analyze -- --input data/music/track.mp4 --out data/runs/run-004/rhythm.json",
-		"./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts",
+		"./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts --publish-dir data/runs/run-004/shortslistosparasubir",
+		"./bin/zv workflows run stream-variants",
+		"./bin/zv workflows run stream-plan -- --input stream.mp4 --out data/runs/stream/edit-plan.json --captions --dry-run",
+		"./bin/zv workflows run stream-killfeed -- --plan data/runs/stream/edit-plan.json --events data/runs/stream/killfeed-events.json --out data/runs/stream/reviewed-plan.json --dry-run",
+		"./bin/zv workflows run stream-transcribe -- --input stream.mp4 --plan data/runs/stream/reviewed-plan.json --model whisper.bin --vad-model vad.bin --out data/runs/stream/transcript-review.json --dry-run",
+		"./bin/zv workflows run stream-captions -- --plan data/runs/stream/reviewed-plan.json --words data/runs/stream/caption-words.json --out data/runs/stream/final-plan.json --dry-run",
+		"./bin/zv workflows run stream-render -- --input stream.mp4 --plan data/runs/stream/edit-plan.json --out data/runs/stream --dry-run",
 		"./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000",
 		"./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json",
 		"./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts/publish/index.html",
@@ -1397,6 +1406,18 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"./bin/zv workflows show music-analyze --format json",
 		"./bin/zv workflows show shorts-render",
 		"./bin/zv workflows show shorts-render --format json",
+		"./bin/zv workflows show stream-variants",
+		"./bin/zv workflows show stream-variants --format json",
+		"./bin/zv workflows show stream-plan",
+		"./bin/zv workflows show stream-plan --format json",
+		"./bin/zv workflows show stream-killfeed",
+		"./bin/zv workflows show stream-killfeed --format json",
+		"./bin/zv workflows show stream-transcribe",
+		"./bin/zv workflows show stream-transcribe --format json",
+		"./bin/zv workflows show stream-captions",
+		"./bin/zv workflows show stream-captions --format json",
+		"./bin/zv workflows show stream-render",
+		"./bin/zv workflows show stream-render --format json",
 		"./bin/zv workflows show analysis-tactical-data",
 		"./bin/zv workflows show analysis-tactical-data --format json",
 		"./bin/zv workflows show analysis-viewer",
@@ -1417,7 +1438,13 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"./bin/zv record --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\\HLAE-2.190.1\\HLAE.exe --cs2 \"C:\\Games\\Counter-Strike 2\\game\\bin\\win64\\cs2.exe\"",
 		"./bin/zv compose final --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4",
 		"./bin/zv music analyze --input data/music/track.mp4 --out data/runs/run-004/rhythm.json",
-		"./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts",
+		"./bin/zv shorts render --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts --publish-dir data/runs/run-004/shortslistosparasubir",
+		"./bin/zv stream variants",
+		"./bin/zv stream plan --input stream.mp4 --out data/runs/stream/edit-plan.json --captions --dry-run",
+		"./bin/zv stream killfeed --plan data/runs/stream/edit-plan.json --events data/runs/stream/killfeed-events.json --out data/runs/stream/reviewed-plan.json --dry-run",
+		"./bin/zv stream transcribe --input stream.mp4 --plan data/runs/stream/reviewed-plan.json --model whisper.bin --vad-model vad.bin --out data/runs/stream/transcript-review.json --dry-run",
+		"./bin/zv stream captions --plan data/runs/stream/reviewed-plan.json --words data/runs/stream/caption-words.json --out data/runs/stream/final-plan.json --dry-run",
+		"./bin/zv stream render --input stream.mp4 --plan data/runs/stream/edit-plan.json --out data/runs/stream --dry-run",
 		"./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000",
 		"./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json",
 		"./bin/zv gallery open --path data/runs/run-004/shorts/publish/index.html",
@@ -1428,7 +1455,13 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"./bin/zv workflows run record -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --hlae C:\\HLAE-2.190.1\\HLAE.exe --cs2 \"C:\\Games\\Counter-Strike 2\\game\\bin\\win64\\cs2.exe\"",
 		"./bin/zv workflows run compose-final -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/final.mp4",
 		"./bin/zv workflows run music-analyze -- --input data/music/track.mp4 --out data/runs/run-004/rhythm.json",
-		"./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts",
+		"./bin/zv workflows run shorts-render -- --recording-result data/runs/run-004/recording/recording-result.json --out data/runs/run-004/shorts --publish-dir data/runs/run-004/shortslistosparasubir",
+		"./bin/zv workflows run stream-variants",
+		"./bin/zv workflows run stream-plan -- --input stream.mp4 --out data/runs/stream/edit-plan.json --captions --dry-run",
+		"./bin/zv workflows run stream-killfeed -- --plan data/runs/stream/edit-plan.json --events data/runs/stream/killfeed-events.json --out data/runs/stream/reviewed-plan.json --dry-run",
+		"./bin/zv workflows run stream-transcribe -- --input stream.mp4 --plan data/runs/stream/reviewed-plan.json --model whisper.bin --vad-model vad.bin --out data/runs/stream/transcript-review.json --dry-run",
+		"./bin/zv workflows run stream-captions -- --plan data/runs/stream/reviewed-plan.json --words data/runs/stream/caption-words.json --out data/runs/stream/final-plan.json --dry-run",
+		"./bin/zv workflows run stream-render -- --input stream.mp4 --plan data/runs/stream/edit-plan.json --out data/runs/stream --dry-run",
 		"./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000",
 		"./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json",
 		"./bin/zv workflows run gallery-open -- --path data/runs/run-004/shorts/publish/index.html",

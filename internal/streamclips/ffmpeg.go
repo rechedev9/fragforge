@@ -13,14 +13,17 @@ import (
 )
 
 const (
-	outputFPS          = 60
-	defaultVideoCRF    = 18
-	defaultAACBitrate  = "192k"
-	defaultPreset      = "slow"
-	bannerHeight       = 96
-	bannerSlideSeconds = 0.35
-	bannerColor        = "0x9146ff"
-	bannerAccentColor  = "0x5b1ba9"
+	outputFPS             = 60
+	defaultVideoCRF       = 18
+	defaultAACBitrate     = "192k"
+	defaultPreset         = "slow"
+	bannerHeight          = 96
+	bannerSlideSeconds    = 0.35
+	bannerColor           = "0x9146ff"
+	bannerAccentColor     = "0x5b1ba9"
+	landscapeBannerWidth  = 520
+	landscapeBannerHeight = 64
+	landscapeBannerX      = 32
 	// killfeedFrozenWidth is the on-output width of a frozen killfeed-crop strip.
 	// It mirrors the web preview's KILLFEED_WIDTH so the preview matches the
 	// render, and is scaled ~1.5x with the synthetic notices for a matching look.
@@ -213,11 +216,13 @@ func BuildFFmpegArgs(in FFmpegInputs, plan EditPlan, clip ClipRange) ([]string, 
 
 // buildFilterGraph renders the split/scale/stack filtergraph for a facecam
 // layout, or a single crop/scale chain for a full-frame (no facecam) layout.
-// Plans without killfeed cues retain the original graph byte-for-byte. Clips
-// with cues overlay a synthetic kill notice per cue (when a pre-rendered PNG is
-// supplied) or a WYSIWYG frozen crop of the killfeed region as a fallback.
+// Plans without killfeed cues retain the original graph byte-for-byte. Vertical
+// clips with cues overlay a synthetic kill notice per cue (when a pre-rendered
+// PNG is supplied) or a WYSIWYG frozen crop of the killfeed region as a
+// fallback. Landscape preserves the source killfeed in place and treats the
+// reviewed events as metadata, avoiding a duplicate notice over the full frame.
 func buildFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRange, noticePaths [][]string, bannerFontPath string, textPaths []string, duration float64, noticeInputBase int) string {
-	if len(clip.KillfeedSeconds) == 0 {
+	if len(clip.KillfeedSeconds) == 0 || layout.Name == VariantStreamerLandscape16x9 {
 		return buildStandardFilterGraph(layout, plan, clip, bannerFontPath, textPaths, duration)
 	}
 	return buildKillfeedFilterGraph(layout, plan, clip, noticePaths, bannerFontPath, textPaths, duration, noticeInputBase)
@@ -327,7 +332,14 @@ func buildStandardFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRang
 	}
 
 	var content string
-	if layout.FullFrame {
+	if layout.Name == VariantStreamerLandscape16x9 {
+		content = fmt.Sprintf(
+			"[0:v]%s,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black%s",
+			cropFilter(plan.GameplayCrop),
+			layout.OutputWidth, layout.GameOutputHeight, layout.OutputWidth, layout.GameOutputHeight,
+			outputLabel,
+		)
+	} else if layout.FullFrame {
 		content = fmt.Sprintf(
 			"[0:v]%s,scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d%s",
 			cropFilter(plan.GameplayCrop),
@@ -637,6 +649,9 @@ func killfeedStackY(baseY int, start, end float64, prior []noticeLifetime) strin
 // streamerBannerFilter builds the strip independently and overlays it on the
 // completed layout so the entire banner can move as one unit.
 func streamerBannerFilter(layout LayoutVariant, banner StreamerBannerPlan, fontPath string, duration float64) string {
+	if layout.Name == VariantStreamerLandscape16x9 {
+		return landscapeStreamerBannerFilter(layout, banner, fontPath, duration)
+	}
 	outputHeight := layout.FaceOutputHeight + layout.GameOutputHeight
 	centerY := int(math.Round(layout.DefaultBannerPositionY * float64(outputHeight)))
 	if banner.PositionY != nil {
@@ -669,7 +684,42 @@ func streamerBannerFilter(layout LayoutVariant, banner StreamerBannerPlan, fontP
 		bannerColor, layout.OutputWidth, bannerHeight, outputFPS, secondsArg(duration),
 		bannerHeight, bannerAccentColor,
 		bannerAccentColor,
-		ffmpegFilterPath(fontPath), banner.Nick, bannerAccentColor, bannerHeight,
+		ffmpegFilterPath(fontPath), ffmpegDrawtextText(banner.Nick), bannerAccentColor, bannerHeight,
+		x, top,
+	)
+}
+
+// landscapeStreamerBannerFilter renders a compact broadcast lower-third. The
+// vertical product banner is intentionally full-width because it separates the
+// stacked facecam/game bands; reusing it on 16:9 obscures gameplay and HUD.
+func landscapeStreamerBannerFilter(layout LayoutVariant, banner StreamerBannerPlan, fontPath string, duration float64) string {
+	outputHeight := layout.FaceOutputHeight + layout.GameOutputHeight
+	centerY := int(math.Round(layout.DefaultBannerPositionY * float64(outputHeight)))
+	if banner.PositionY != nil {
+		centerY = int(math.Round(*banner.PositionY * float64(outputHeight)))
+	}
+	top := centerY - landscapeBannerHeight/2
+	x := strconv.Itoa(landscapeBannerX)
+	if banner.SlideEnabled {
+		phase := math.Min(bannerSlideSeconds, duration/2)
+		exitStart := duration - phase
+		x = fmt.Sprintf(
+			`if(lt(t\,%s)\,%d-w*(1-t/%s)\,if(lt(t\,%s)\,%d\,%d-w*(t-%s)/%s))`,
+			floatArg(phase), landscapeBannerX, floatArg(phase), floatArg(exitStart), landscapeBannerX,
+			landscapeBannerX, floatArg(exitStart), floatArg(phase),
+		)
+	}
+	return fmt.Sprintf(
+		"color=c=0x111319:s=%dx%d:r=%d:d=%s,"+
+			"setpts=PTS-STARTPTS,"+
+			"drawbox=x=0:y=0:w=8:h=%d:color=%s:t=fill,"+
+			"drawtext=fontfile='%s':text='@%s':fontcolor=white:fontsize=32:borderw=1:bordercolor=black@0.55:"+
+			"shadowcolor=black@0.45:shadowx=2:shadowy=2:x=28:y=(%d-text_h)/2[banner];"+
+			"[content]setpts=PTS-STARTPTS[contentpts];"+
+			"[contentpts][banner]overlay=x='%s':y=%d:eval=frame:eof_action=pass:shortest=0[bannered]",
+		landscapeBannerWidth, landscapeBannerHeight, outputFPS, secondsArg(duration),
+		landscapeBannerHeight, bannerColor,
+		ffmpegFilterPath(fontPath), ffmpegDrawtextText(banner.Nick), landscapeBannerHeight,
 		x, top,
 	)
 }
@@ -722,6 +772,22 @@ func ffmpegFilterPath(value string) string {
 	value = strings.ReplaceAll(value, `\`, "/")
 	value = strings.ReplaceAll(value, ":", `\:`)
 	return strings.ReplaceAll(value, "'", `\'`)
+}
+
+// ffmpegDrawtextText escapes a literal value embedded in drawtext's text
+// option. Streamer handles are validated separately, but keeping this boundary
+// safe prevents future plan formats from turning text into filtergraph syntax.
+func ffmpegDrawtextText(value string) string {
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		`'`, `\'`,
+		`:`, `\:`,
+		`,`, `\,`,
+		`[`, `\[`,
+		`]`, `\]`,
+		`%`, `\%`,
+	)
+	return replacer.Replace(value)
 }
 
 // killfeedFreezeOffset returns the in-clip timestamp whose frame a frozen

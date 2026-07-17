@@ -398,3 +398,58 @@ func TestNormalizeEditPlanCollapsesIdentityEdit(t *testing.T) {
 		})
 	}
 }
+
+func TestClipRangeValidatesReviewedCaptionWords(t *testing.T) {
+	tests := []struct {
+		name    string
+		words   []CaptionWord
+		wantErr string
+	}{
+		{name: "valid", words: []CaptionWord{{Word: "Buena", StartSeconds: 0.2, EndSeconds: 0.6}, {Word: "jugada", StartSeconds: 0.7, EndSeconds: 1.2}}},
+		{name: "blank", words: []CaptionWord{{Word: " ", StartSeconds: 0, EndSeconds: 0.5}}, wantErr: "is blank"},
+		{name: "overlap", words: []CaptionWord{{Word: "uno", StartSeconds: 0, EndSeconds: 1}, {Word: "dos", StartSeconds: 0.8, EndSeconds: 1.2}}, wantErr: "overlap or are unsorted"},
+		{name: "outside clip", words: []CaptionWord{{Word: "tarde", StartSeconds: 9.5, EndSeconds: 10.5}}, wantErr: "exceeds the clip duration"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clip := ClipRange{ID: "clip-001", StartSeconds: 5, EndSeconds: 15, CaptionWords: tt.words}
+			err := clip.Validate()
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("Validate error = %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("Validate error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestEditPlanReportsWhenCaptionsNeedBackend(t *testing.T) {
+	plan := DefaultEditPlan()
+	plan.Captions = CaptionsPlan{Enabled: true, Language: "es"}
+	plan.Clips = []ClipRange{
+		{ID: "one", StartSeconds: 0, EndSeconds: 2, CaptionWords: []CaptionWord{{Word: "uno", StartSeconds: 0, EndSeconds: 0.5}}},
+		{ID: "two", StartSeconds: 2, EndSeconds: 4, CaptionWords: []CaptionWord{{Word: "dos", StartSeconds: 0, EndSeconds: 0.5}}},
+	}
+	if plan.CaptionsNeedBackend() {
+		t.Fatal("CaptionsNeedBackend = true with reviewed words on every clip")
+	}
+	plan.Clips[1].CaptionWords = nil
+	if !plan.CaptionsNeedBackend() {
+		t.Fatal("CaptionsNeedBackend = false with an audible clip missing words")
+	}
+	plan.Clips[1].CaptionReviewed = true
+	if plan.CaptionsNeedBackend() {
+		t.Fatal("CaptionsNeedBackend = true when an audible clip was reviewed as no speech")
+	}
+	plan.Clips[1].CaptionReviewed = false
+	muted := 0.0
+	plan.Clips[1].Edit = &ClipEdit{SourceVolume: &muted}
+	if plan.CaptionsNeedBackend() {
+		t.Fatal("CaptionsNeedBackend = true when only a muted clip is missing words")
+	}
+	plan.Captions.Enabled = false
+	if plan.CaptionsNeedBackend() {
+		t.Fatal("CaptionsNeedBackend = true when captions are disabled")
+	}
+}

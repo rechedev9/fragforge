@@ -21,6 +21,9 @@ type shortIntent struct {
 	BeatSync bool
 	// Preset is a render preset named explicitly in the prompt, if any.
 	Preset string
+	// OutputFormat selects a 16:9 long-form render when the prompt names an
+	// unambiguous landscape format. Empty keeps the vertical product default.
+	OutputFormat string
 }
 
 var (
@@ -48,6 +51,10 @@ var shortBestMomentsKeywords = []string{
 	"best", "mejores", "highlight", "destacad", "top ",
 }
 
+var shortLandscapeKeywords = []string{
+	"16:9", "16x9", "landscape", "horizontal", "video largo", "vídeo largo", "long video", "youtube long",
+}
+
 // interpretShortPrompt maps a free-form prompt to a deterministic intent.
 func interpretShortPrompt(prompt string) shortIntent {
 	lowered := strings.ToLower(prompt)
@@ -56,6 +63,9 @@ func interpretShortPrompt(prompt string) shortIntent {
 		Preset:        promptPresetName(lowered),
 		BeatSync:      containsAnyKeyword(lowered, shortBeatSyncKeywords),
 		BestMoments:   containsAnyKeyword(lowered, shortBestMomentsKeywords),
+	}
+	if containsAnyKeyword(lowered, shortLandscapeKeywords) {
+		intent.OutputFormat = editor.OutputFormatLandscape16x9
 	}
 	intent.TargetName = promptTargetName(lowered)
 	return intent

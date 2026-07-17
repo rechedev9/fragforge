@@ -26,7 +26,8 @@ type RenderPreset struct {
 	Label       string
 	Description string
 
-	// Output geometry. Every FragForge short renders at 1080x1920 / 60fps.
+	// Default output geometry. An explicit output format may select the proven
+	// 1920x1080 path while keeping the preset's encoder and effects contract.
 	FPS    int
 	Width  int
 	Height int
@@ -61,8 +62,8 @@ type RenderPreset struct {
 // renderPresets is the single source of preset knowledge: encoder defaults,
 // filtergraph layout, default effects, feature flags, and grading. The first
 // entry is the product default.
-// renderPresets share the same proven vertical render path (effects, encoder,
-// feature flags, 1080x1920/60fps); they differ only in the recording-stage
+// renderPresets share the same proven render path (effects, encoder, feature
+// flags, 60fps); they differ only in the recording-stage
 // HUDMode, which is what the user actually sees as "Kill Feed" vs "Clean POV"
 // vs "Full HUD". The render stage never reads HUDMode (see RenderPreset.HUDMode);
 // it travels to zv-recorder --hud at record time.

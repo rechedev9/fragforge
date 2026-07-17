@@ -492,9 +492,10 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 	}
 }
 
-func TestStreamRenderWorkerPublishesUncaptionedWhenXAISourceHasNoAudio(t *testing.T) {
+func TestStreamRenderWorkerPublishesUncaptionedWhenSourceHasNoAudio(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	plan.Clips[0].CaptionWords = []streamclips.CaptionWord{{Word: "inaudible", StartSeconds: 0, EndSeconds: 0.5}}
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -1003,6 +1004,7 @@ func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) 
 	}
 	repo := newFakeStreamRepo(streamclips.Job{
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
 	})
 
 	// XAIAPIKey is not set: the worker must fail fast
@@ -1018,8 +1020,97 @@ func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) 
 	if err == nil {
 		t.Fatal("HandleRenderStreamClip returned nil error, want an error")
 	}
-	if !strings.Contains(err.Error(), "xAI is not configured") {
-		t.Fatalf("got error %q, want it to mention that xAI is not configured", err.Error())
+	if !strings.Contains(err.Error(), "neither reviewed caption words") {
+		t.Fatalf("got error %q, want it to mention reviewed caption words", err.Error())
+	}
+}
+
+func TestStreamRenderWorkerBurnsReviewedCaptionsWithoutCloudKey(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	plan.Clips[0].CaptionWords = []streamclips.CaptionWord{
+		{Word: "Buena", StartSeconds: 0, EndSeconds: 0.5},
+		{Word: "jugada", StartSeconds: 0.5, EndSeconds: 1},
+	}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{WorkDir: t.TempDir(), FFmpegPath: "ffmpeg"})
+	w.runner = runner
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		t.Fatal("reviewed captions must not call a cloud transcriber")
+		return nil, nil
+	}
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+	captionKey, err := streamclips.RenderCaptionKey(id, streamclips.VariantStreamer4060, "clip-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ass, ok := store.files[captionKey]
+	if !ok || !strings.Contains(string(ass), "Buena") || !strings.Contains(string(ass), "jugada") {
+		t.Fatalf("reviewed ASS caption = %q", ass)
+	}
+}
+
+func TestStreamRenderWorkerPublishesReviewedNoSpeechWithoutCloudKey(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	plan.Clips[0].CaptionReviewed = true
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{WorkDir: t.TempDir(), FFmpegPath: "ffmpeg"})
+	w.runner = runner
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		t.Fatal("reviewed no-speech clip must not call a caption backend")
+		return nil, nil
+	}
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+	if got, want := len(runner.calls), 1; got != want {
+		t.Fatalf("runner calls = %d, want %d render call", got, want)
+	}
+	stateKey, err := streamclips.RenderStateKey(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(store.files[stateKey]), "reviewed as containing no speech") {
+		t.Fatalf("render state missing no-speech warning: %s", store.files[stateKey])
 	}
 }
 
@@ -1173,5 +1264,43 @@ func TestStreamRenderWorkerSkipsCaptionsWhenClipMutesSourceAudio(t *testing.T) {
 	}
 	if !strings.Contains(string(store.files[stateKey]), "original audio is muted") {
 		t.Fatalf("render state missing muted-audio warning: %s", store.files[stateKey])
+	}
+}
+
+func TestStreamRenderWorkerAllowsMutedClipWithoutCaptionBackend(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	muted := 0.0
+	plan.Clips[0].Edit = &streamclips.ClipEdit{SourceVolume: &muted}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
+	})
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("video-bytes"), 0o644)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{WorkDir: t.TempDir(), FFmpegPath: "ffmpeg"})
+	w.runner = runner
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		t.Fatal("muted clip must not call a caption backend")
+		return nil, nil
+	}
+	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
+		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	}
+	if got, want := len(runner.calls), 1; got != want {
+		t.Fatalf("runner calls = %d, want %d render call", got, want)
 	}
 }

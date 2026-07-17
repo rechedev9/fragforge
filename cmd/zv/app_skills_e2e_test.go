@@ -548,7 +548,7 @@ func TestZVBinaryUtilityShortsSkillRecordWorkflowDocumentsCaptureToolsEndToEnd(t
 	}
 }
 
-func TestZVBinaryCurrentDocsAndSkillsRecordExamplesDocumentDryRunOrCaptureToolsEndToEnd(t *testing.T) {
+func TestZVBinaryCurrentDocsAndSkillsRecordExamplesUseValidUnifiedCommandsEndToEnd(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
 	type publishedRecordCommand struct {
@@ -592,18 +592,13 @@ func TestZVBinaryCurrentDocsAndSkillsRecordExamplesDocumentDryRunOrCaptureToolsE
 	}
 
 	for _, command := range commands {
-		args, ok := recordCommandArgsForPublishedExample(command.command)
-		if !ok {
-			continue
+		if issue := validateSkillCommand(command.command); issue != "" {
+			t.Fatalf("%s: invalid record example %q: %s", command.source, command.command, issue)
 		}
-		if recordCommandHasDryRunOrCaptureTools(args) {
-			continue
-		}
-		t.Fatalf("%s: record example must include --dry-run or both --hlae and --cs2: %#v", command.source, command.command)
 	}
 }
 
-func TestZVBinarySkillsCheckRejectsRecordExamplesWithoutDryRunOrCaptureToolsEndToEnd(t *testing.T) {
+func TestZVBinarySkillsCheckAcceptsAutoDetectedRecordExampleEndToEnd(t *testing.T) {
 	tempDir := t.TempDir()
 	exe := buildZVBinary(t, tempDir)
 	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
@@ -618,11 +613,7 @@ func TestZVBinarySkillsCheckRejectsRecordExamplesWithoutDryRunOrCaptureToolsEndT
 		"",
 	}, "\n"))
 
-	stdout, stderr, code := runZVBinaryFailureSplit(t, exe, tempDir, "skills", "check", "--format", "json")
-
-	if got, want := code, exitInvalidArgs; got != want {
-		t.Fatalf("code = %d, want %d\nstdout:\n%s\nstderr:\n%s", got, want, stdout, stderr)
-	}
+	stdout, stderr := runZVBinarySplit(t, exe, tempDir, "skills", "check", "--format", "json")
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want empty for json output", stderr)
 	}
@@ -630,12 +621,8 @@ func TestZVBinarySkillsCheckRejectsRecordExamplesWithoutDryRunOrCaptureToolsEndT
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout)
 	}
-	if result.OK {
-		t.Fatalf("result.OK = true, want false")
-	}
-	want := `missing required flags --hlae, --cs2 for "record" unless --dry-run is set`
-	if !hasIssueContaining(result.Issues, want) {
-		t.Fatalf("issues = %#v, want %q", result.Issues, want)
+	if !result.OK || len(result.Issues) != 0 {
+		t.Fatalf("result = %#v, want valid auto-detected record example", result)
 	}
 }
 
@@ -1085,7 +1072,7 @@ func TestZVBinaryCurrentWorkflowDocExamplesEndToEnd(t *testing.T) {
 		switch {
 		case len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open":
 			wantOpenPathCalls++
-		case workflow.RunArgs[0] == "short" || workflow.RunArgs[0] == "capabilities" || workflow.RunArgs[0] == "skills" || workflow.RunArgs[0] == "workflows" || workflow.RunArgs[0] == "check":
+		case !workflowDelegatesExternally(workflow):
 		default:
 			wantSubcommandCalls++
 		}
@@ -1133,7 +1120,11 @@ func TestZVBinaryCurrentDirectDocExamplesEndToEnd(t *testing.T) {
 		switch command[0] {
 		case "gallery":
 			wantOpenPathCalls++
-		case "demo", "utility", "record", "compose", "shorts", "music", "analysis", "serve":
+		case "demo":
+			if len(command) < 2 || (command[1] != "moments" && command[1] != "select") {
+				wantSubcommandCalls++
+			}
+		case "utility", "record", "compose", "shorts", "music", "stream", "analysis", "serve":
 			wantSubcommandCalls++
 		}
 		runZVBinaryWithEnv(t, exe, root, env, command...)

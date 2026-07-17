@@ -51,7 +51,7 @@ func runPresets(args []string, stdout, stderr io.Writer) int {
 
 func presetListEntries() []presetListEntry {
 	defaultName := editor.DefaultPreset().Name
-	names := editor.PresetNames()
+	names := supportedPresetNames()
 	entries := make([]presetListEntry, 0, len(names))
 	for _, name := range names {
 		preset, ok := editor.PresetByName(name)

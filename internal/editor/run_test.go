@@ -21,6 +21,7 @@ func TestRunDryRunWritesManifestsPromptsAndDoesNotExecuteFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
+	publishDir := defaultPublishDir(outDir)
 	missingFFmpeg := filepath.Join(dir, "missing-ffmpeg")
 
 	result, err := Run(context.Background(), Config{
@@ -42,10 +43,10 @@ func TestRunDryRunWritesManifestsPromptsAndDoesNotExecuteFFmpeg(t *testing.T) {
 		filepath.Join(outDir, "edit-manifest.json"),
 		filepath.Join(outDir, "shorts-result.json"),
 		filepath.Join(outDir, "prompts", "short-001-seg-001-cover.md"),
-		filepath.Join(outDir, "publish", "pack-manifest.json"),
-		filepath.Join(outDir, "publish", "index.html"),
-		filepath.Join(outDir, "publish", "publish-summary.md"),
-		filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.caption.txt"),
+		filepath.Join(publishDir, "pack-manifest.json"),
+		filepath.Join(publishDir, "index.html"),
+		filepath.Join(publishDir, "publish-summary.md"),
+		filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.caption.txt"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected file missing %s: %v", path, err)
@@ -54,10 +55,10 @@ func TestRunDryRunWritesManifestsPromptsAndDoesNotExecuteFFmpeg(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(outDir, "short-001-seg-001.mp4")); !os.IsNotExist(err) {
 		t.Fatalf("dry-run should not create video, stat err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.mp4")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.mp4")); !os.IsNotExist(err) {
 		t.Fatalf("dry-run should not publish video, stat err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg")); !os.IsNotExist(err) {
 		t.Fatalf("dry-run should not create cover, stat err = %v", err)
 	}
 	if result.Shorts[0].CoverPath == "" || result.Shorts[0].CoverTimeSeconds == 0 {
@@ -70,6 +71,7 @@ func TestRunDryRunFiltersSegmentsAndLimit(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
+	publishDir := defaultPublishDir(outDir)
 
 	result, err := Run(context.Background(), Config{
 		RecordingResultPath: recordingResultPath,
@@ -88,10 +90,10 @@ func TestRunDryRunFiltersSegmentsAndLimit(t *testing.T) {
 	if len(result.Shorts) != 1 || result.Shorts[0].SegmentID != "seg-002" {
 		t.Fatalf("shorts = %#v", result.Shorts)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "02_seg-002_martinezsa_de_ancient_1k_awp.caption.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(publishDir, "02_seg-002_martinezsa_de_ancient_1k_awp.caption.txt")); err != nil {
 		t.Fatalf("filtered caption missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.caption.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.caption.txt")); !os.IsNotExist(err) {
 		t.Fatalf("unselected caption should not exist, stat err = %v", err)
 	}
 }
@@ -101,6 +103,7 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
+	publishDir := defaultPublishDir(outDir)
 	ffmpegPath := fakeFFmpeg(t, dir)
 
 	result, err := Run(context.Background(), Config{
@@ -124,13 +127,13 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 	if first.PublishArtifact.SizeBytes == 0 {
 		t.Fatalf("publish artifact missing size: %#v", first.PublishArtifact)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.mp4")); err != nil {
+	if _, err := os.Stat(filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.mp4")); err != nil {
 		t.Fatalf("publish output missing: %v", err)
 	}
 	if first.CoverArtifact.SizeBytes == 0 {
 		t.Fatalf("cover artifact missing size: %#v", first.CoverArtifact)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg")); err != nil {
+	if _, err := os.Stat(filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg")); err != nil {
 		t.Fatalf("cover output missing: %v", err)
 	}
 	if got := argAfter(first.FFmpegCommand, "-vf"); !strings.Contains(got, "crop=1080:1920") {
@@ -156,7 +159,7 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 	}
 
 	var pack PackManifest
-	b, err = os.ReadFile(filepath.Join(outDir, "publish", "pack-manifest.json"))
+	b, err = os.ReadFile(filepath.Join(publishDir, "pack-manifest.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,10 +169,10 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 	if len(pack.Items) != 2 || pack.Items[0].Video == "" || pack.Items[0].CoverPath == "" || !strings.Contains(pack.Items[0].Caption, "#CS2") {
 		t.Fatalf("pack manifest = %#v", pack.Items)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "index.html")); err != nil {
+	if _, err := os.Stat(filepath.Join(publishDir, "index.html")); err != nil {
 		t.Fatalf("publish gallery missing: %v", err)
 	}
-	indexHTML, err := os.ReadFile(filepath.Join(outDir, "publish", "index.html"))
+	indexHTML, err := os.ReadFile(filepath.Join(publishDir, "index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +190,7 @@ func TestRunWithFakeFFmpegWritesShortResults(t *testing.T) {
 			t.Fatalf("publish gallery missing %q:\n%s", want, indexHTML)
 		}
 	}
-	summary, err := os.ReadFile(filepath.Join(outDir, "publish", "publish-summary.md"))
+	summary, err := os.ReadFile(filepath.Join(publishDir, "publish-summary.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,13 +234,14 @@ func TestRunSkipExistingReusesRenderedFiles(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
+	publishDir := defaultPublishDir(outDir)
 	for _, path := range []string{
 		filepath.Join(outDir, "short-001-seg-001.mp4"),
 		filepath.Join(outDir, "short-002-seg-002.mp4"),
-		filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg"),
-		filepath.Join(outDir, "publish", "02_seg-002_martinezsa_de_ancient_1k_awp.cover.jpg"),
-		filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.sheet.jpg"),
-		filepath.Join(outDir, "publish", "02_seg-002_martinezsa_de_ancient_1k_awp.sheet.jpg"),
+		filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg"),
+		filepath.Join(publishDir, "02_seg-002_martinezsa_de_ancient_1k_awp.cover.jpg"),
+		filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.sheet.jpg"),
+		filepath.Join(publishDir, "02_seg-002_martinezsa_de_ancient_1k_awp.sheet.jpg"),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -265,7 +269,7 @@ func TestRunSkipExistingReusesRenderedFiles(t *testing.T) {
 	if result.Shorts[0].OutputArtifact.SizeBytes == 0 || result.Shorts[0].CoverArtifact.SizeBytes == 0 {
 		t.Fatalf("reused artifacts missing size: %#v", result.Shorts[0])
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.mp4")); err != nil {
+	if _, err := os.Stat(filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.mp4")); err != nil {
 		t.Fatalf("publish output missing after reuse: %v", err)
 	}
 }
@@ -275,6 +279,7 @@ func TestRunNoCoversSkipsCoverOutputs(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
+	publishDir := defaultPublishDir(outDir)
 	ffmpegPath := fakeFFmpeg(t, dir)
 
 	result, err := Run(context.Background(), Config{
@@ -292,7 +297,7 @@ func TestRunNoCoversSkipsCoverOutputs(t *testing.T) {
 	if result.Shorts[0].CoverPath != "" || len(result.Shorts[0].CoverCommand) != 0 {
 		t.Fatalf("cover data should be empty: %#v", result.Shorts[0])
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.cover.jpg")); !os.IsNotExist(err) {
 		t.Fatalf("cover should not exist, stat err = %v", err)
 	}
 }
@@ -302,6 +307,7 @@ func TestRunCoverFailureIsWarningOnly(t *testing.T) {
 	dir := t.TempDir()
 	recordingResultPath := writeRecordingResultFixture(t, dir)
 	outDir := filepath.Join(dir, "shorts")
+	publishDir := defaultPublishDir(outDir)
 	ffmpegPath := fakeFFmpegFailingCovers(t, dir)
 
 	result, err := Run(context.Background(), Config{
@@ -312,7 +318,7 @@ func TestRunCoverFailureIsWarningOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "publish", "01_seg-001_martinezsa_de_ancient_2k_ak47.mp4")); err != nil {
+	if _, err := os.Stat(filepath.Join(publishDir, "01_seg-001_martinezsa_de_ancient_2k_ak47.mp4")); err != nil {
 		t.Fatalf("publish output missing: %v", err)
 	}
 	joined := strings.Join(result.Warnings, "\n")

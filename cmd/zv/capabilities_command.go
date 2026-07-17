@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
+	"strings"
 
 	"github.com/rechedev9/fragforge/internal/capturetools"
 )
@@ -13,10 +15,20 @@ type localCapabilityGroup struct {
 }
 
 type localCapabilities struct {
-	LocalStudioReady bool                 `json:"local_studio_ready"`
-	Record           localCapabilityGroup `json:"record"`
-	Compose          localCapabilityGroup `json:"compose"`
-	Render           localCapabilityGroup `json:"render"`
+	LocalStudioReady bool                  `json:"local_studio_ready"`
+	Record           localCapabilityGroup  `json:"record"`
+	Compose          localCapabilityGroup  `json:"compose"`
+	Render           localCapabilityGroup  `json:"render"`
+	Stream           localStreamCapability `json:"stream"`
+}
+
+type localStreamCapability struct {
+	Ready                  bool                `json:"ready"`
+	KillfeedDetectionReady bool                `json:"killfeed_detection_ready"`
+	SpanishCaptionsReady   bool                `json:"spanish_captions_ready"`
+	CaptionsProvider       string              `json:"captions_provider"`
+	CaptionsConfiguration  string              `json:"captions_configuration"`
+	Tools                  []capturetools.Tool `json:"tools"`
 }
 
 func runCapabilities(args []string, stdout, stderr io.Writer) int {
@@ -50,6 +62,7 @@ func runCapabilities(args []string, stdout, stderr io.Writer) int {
 	writeLocalCapabilityGroup(stdout, "record", report.Record)
 	writeLocalCapabilityGroup(stdout, "compose", report.Compose)
 	writeLocalCapabilityGroup(stdout, "render", report.Render)
+	writeLocalStreamCapability(stdout, report.Stream)
 	return exitSuccess
 }
 
@@ -68,14 +81,39 @@ func buildLocalCapabilities(paths capturetools.Paths, sources capturetools.Sourc
 		capturetools.ResolveTool("ZV_FFMPEG_PATH", paths.FFmpeg, sources),
 		capturetools.ResolveTool("ZV_FFPROBE_PATH", paths.FFprobe, sources),
 	}}
+	stream := localStreamCapability{
+		CaptionsProvider:      "xai",
+		CaptionsConfiguration: "set XAI_API_KEY",
+		Tools: []capturetools.Tool{
+			capturetools.ResolveTool("ZV_FFMPEG_PATH", paths.FFmpeg, sources),
+			capturetools.ResolveTool("ZV_FFPROBE_PATH", paths.FFprobe, sources),
+		},
+	}
 	record.Ready = allToolsAccessible(record.Tools)
 	compose.Ready = allToolsAccessible(compose.Tools)
 	render.Ready = allToolsAccessible(render.Tools)
+	stream.Ready = allToolsAccessible(stream.Tools)
+	stream.KillfeedDetectionReady = stream.Ready
+	stream.SpanishCaptionsReady = stream.Ready && strings.TrimSpace(os.Getenv("XAI_API_KEY")) != ""
 	return localCapabilities{
 		LocalStudioReady: record.Ready && compose.Ready && render.Ready,
 		Record:           record,
 		Compose:          compose,
 		Render:           render,
+		Stream:           stream,
+	}
+}
+
+func writeLocalStreamCapability(w io.Writer, stream localStreamCapability) {
+	fmt.Fprintf(w, "stream_ready: %t\n", stream.Ready)
+	fmt.Fprintf(w, "  killfeed_detection_ready: %t\n", stream.KillfeedDetectionReady)
+	fmt.Fprintf(w, "  spanish_captions_ready: %t provider=%s configuration=%s\n", stream.SpanishCaptionsReady, stream.CaptionsProvider, stream.CaptionsConfiguration)
+	for _, tool := range stream.Tools {
+		path := tool.Path
+		if path == "" {
+			path = "-"
+		}
+		fmt.Fprintf(w, "  %s: source=%s accessible=%t path=%s\n", tool.Name, tool.Source, tool.Accessible, path)
 	}
 }
 

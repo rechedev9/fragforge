@@ -245,6 +245,7 @@ func defaultLegacyCommandEntrypointNames() []string {
 		"zv-demo-players",
 		"zv-recorder",
 		"zv-editor",
+		"zv-stream",
 		"zv-composer",
 		"zv-orchestrator",
 		"zv-tactical-data",

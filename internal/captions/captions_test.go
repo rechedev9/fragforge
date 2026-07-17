@@ -183,6 +183,22 @@ func TestBuildASS_LayoutStyleUsesPosAndMidCenter(t *testing.T) {
 	}
 }
 
+func TestBuildASS_LayoutStyleSupportsLandscapeOutput(t *testing.T) {
+	cues := []WordCue{{Word: "hola", StartSeconds: 0, EndSeconds: 0.3}}
+	got, err := BuildASS(cues, LayoutStyleForOutput(0, 1920, 1080))
+	if err != nil {
+		t.Fatalf("BuildASS returned error: %v", err)
+	}
+	for _, want := range []string{
+		"PlayResX: 1920\nPlayResY: 1080",
+		`\pos(960,378)`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("got ASS body %q, want it to contain %q", got, want)
+		}
+	}
+}
+
 func TestBuildASS_EntranceTagOncePerLine(t *testing.T) {
 	style := DefaultStyle()
 	style.WordsPerLine = 2
@@ -259,6 +275,32 @@ func TestBuildASS_GapSplitsWindow(t *testing.T) {
 	wantSecond := `Dialogue: 0,0:00:02.80,0:00:03.20,Karaoke,,0,0,0,,{` + entranceTag + `\k40}va`
 	if !strings.Contains(got, wantSecond) {
 		t.Fatalf("got ASS body %q, want it to contain %q", got, wantSecond)
+	}
+}
+
+func TestBuildASS_SentencePunctuationSplitsWindow(t *testing.T) {
+	style := DefaultStyle()
+	style.WordsPerLine = 4
+
+	cues := []WordCue{
+		{Word: "¡Toma!", StartSeconds: 0, EndSeconds: 0.4},
+		{Word: "¿Estás", StartSeconds: 0.5, EndSeconds: 0.8},
+		{Word: "feliz?", StartSeconds: 0.8, EndSeconds: 1.1},
+		{Word: "Vamos", StartSeconds: 1.2, EndSeconds: 1.6},
+	}
+
+	got, err := BuildASS(cues, style)
+	if err != nil {
+		t.Fatalf("BuildASS returned error: %v", err)
+	}
+	for _, want := range []string{
+		`Dialogue: 0,0:00:00.00,0:00:00.40,Karaoke,,0,0,0,,{` + entranceTag + `\k40}¡Toma!`,
+		`Dialogue: 0,0:00:00.50,0:00:01.10,Karaoke,,0,0,0,,{` + entranceTag + `\k30}¿Estás {\k30}feliz?`,
+		`Dialogue: 0,0:00:01.20,0:00:01.60,Karaoke,,0,0,0,,{` + entranceTag + `\k40}Vamos`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("got ASS body %q, want it to contain %q", got, want)
+		}
 	}
 }
 

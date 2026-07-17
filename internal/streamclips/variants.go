@@ -13,6 +13,12 @@ const (
 	// VariantStreamerFullframeNoCam drops the facecam band entirely and
 	// fills the whole 1080x1920 frame with the gameplay crop.
 	VariantStreamerFullframeNoCam = "streamer-fullframe-nocam"
+
+	// VariantStreamerLandscape16x9 preserves a full 1920x1080 stream frame
+	// for long-form YouTube delivery. Existing facecam/HUD composition in the
+	// source remains untouched; captions and factual killfeed overlays can
+	// still be added by the same edit plan.
+	VariantStreamerLandscape16x9 = "streamer-landscape-16x9"
 )
 
 // LayoutVariant is one declarative entry in the layout variant registry: the
@@ -25,13 +31,12 @@ type LayoutVariant struct {
 	Description string
 
 	// FullFrame reports whether this variant has no facecam band: the
-	// gameplay crop fills the entire 1080x1920 output on its own and
+	// gameplay crop fills the entire output on its own and
 	// FaceCrop is ignored (Validate does not require it).
 	FullFrame bool
 
 	// Output geometry. OutputWidth is shared by both bands. For a
-	// FullFrame variant only OutputWidth/GameOutputHeight are used, and
-	// GameOutputHeight is the full frame height (1920).
+	// FullFrame variant only OutputWidth/GameOutputHeight are used.
 	OutputWidth      int
 	FaceOutputHeight int
 	GameOutputHeight int
@@ -81,6 +86,16 @@ var layoutVariants = []LayoutVariant{
 		GameOutputHeight:       1920,
 		DefaultGameplayCrop:    CropRect{X: 0, Y: 0, Width: 1, Height: 1},
 		DefaultBannerPositionY: 0.2,
+	},
+	{
+		Name:                   VariantStreamerLandscape16x9,
+		Label:                  "YouTube Landscape 16:9",
+		Description:            "long-form 1920x1080 output that preserves the complete stream frame",
+		FullFrame:              true,
+		OutputWidth:            1920,
+		GameOutputHeight:       1080,
+		DefaultGameplayCrop:    CropRect{X: 0, Y: 0, Width: 1, Height: 1},
+		DefaultBannerPositionY: 0.94,
 	},
 }
 

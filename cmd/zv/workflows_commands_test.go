@@ -1177,7 +1177,7 @@ func TestRunWorkflowsListShowsCanonicalCatalog(t *testing.T) {
 	for _, want := range []string{
 		"demo-parse\tParse a CS2 demo",
 		"compose-final\tConcatenate recorded segment clips into a final MP4.",
-		"shorts-render\tRender vertical Shorts",
+		"shorts-render\tRender vertical or landscape videos",
 		"analysis-tactical-data\tExport sampled tactical data",
 		"analysis-viewer\tServe a local analysis review UI.",
 		"workflows-check\tValidate skills, workflow catalog, and current workflow docs.",
@@ -1197,7 +1197,7 @@ func TestRunWorkflowsShowPrintsCanonicalCommand(t *testing.T) {
 	}
 	for _, want := range []string{
 		"shorts-render",
-		"Render vertical Shorts",
+		"Render vertical or landscape videos",
 		"command: zv shorts render --recording-result <recording-result.json> --out <shorts-dir>",
 		"run_command: zv workflows run shorts-render",
 		"validate_command: zv workflows validate shorts-render",
@@ -1265,11 +1265,15 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 		t.Fatalf("short safety = %#v, want mutating long-running workflow with dry-run", short.Safety)
 	}
 	shortPreset := workflowValueConstraintForFlag(t, short, "--preset")
-	if got, want := strings.Join(shortPreset.AllowedValues, " "), "viral-60-clean clean-pov-60 full-hud-60"; got != want {
+	if got, want := strings.Join(shortPreset.AllowedValues, " "), "viral-60-clean"; got != want {
 		t.Fatalf("short preset values = %q, want %q", got, want)
 	}
 	if shortPreset.Default != "viral-60-clean" || shortPreset.DiscoveryCommand != "zv presets --format json" {
 		t.Fatalf("short preset metadata = %#v, want default and discovery command", shortPreset)
+	}
+	shortFormat := workflowValueConstraintForFlag(t, short, "--format")
+	if got, want := strings.Join(shortFormat.AllowedValues, " "), "text json"; got != want || shortFormat.Default != "text" {
+		t.Fatalf("short format metadata = %#v, want text/json with text default", shortFormat)
 	}
 
 	parse, ok := findWorkflow("demo-parse")
@@ -1290,6 +1294,14 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 		t.Fatalf("demo-parse segment mode metadata = %#v, want kills/smokes/utility with kills default", segmentMode)
 	}
 
+	demoPlayers, ok := findWorkflow("demo-players")
+	if !ok {
+		t.Fatal("demo-players workflow not found")
+	}
+	if demoPlayers.Safety.ReadOnly {
+		t.Fatalf("demo-players safety = %#v, want mutating because --out can persist a roster", demoPlayers.Safety)
+	}
+
 	record, ok := findWorkflow("record")
 	if !ok {
 		t.Fatal("record workflow not found")
@@ -1302,15 +1314,8 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 			t.Fatalf("record optional value flags = %#v, want %s", record.Arguments.OptionalValueFlags, flag)
 		}
 	}
-	if got, want := len(record.Arguments.ConditionalRequirements), 1; got != want {
-		t.Fatalf("record conditional requirements = %#v, want one", record.Arguments.ConditionalRequirements)
-	}
-	recordRequirement := record.Arguments.ConditionalRequirements[0]
-	if got, want := strings.Join(recordRequirement.UnlessAnyFlags, " "), "--dry-run"; got != want {
-		t.Fatalf("record conditional unless flags = %q, want %q", got, want)
-	}
-	if got, want := strings.Join(recordRequirement.RequiredFlags, " "), "--hlae --cs2"; got != want {
-		t.Fatalf("record conditional flags = %q, want %q", got, want)
+	if got := len(record.Arguments.ConditionalRequirements); got != 0 {
+		t.Fatalf("record conditional requirements = %#v, want none because capture paths are auto-detected", record.Arguments.ConditionalRequirements)
 	}
 	if !record.Safety.SupportsDryRun || !record.Safety.LongRunning || record.Safety.ReadOnly {
 		t.Fatalf("record safety = %#v, want mutating long-running workflow with dry-run", record.Safety)
@@ -1943,7 +1948,7 @@ func TestValidateWorkflowCatalogRejectsNonCanonicalCommands(t *testing.T) {
 
 	issues := validateWorkflowCatalog(workflows)
 	for _, want := range []string{
-		`workflow:demo-parse: workflow command is not canonical: uses non-standard zv command "demo"; expected "demo parse" or "demo players"`,
+		`workflow:demo-parse: workflow command is not canonical: uses non-standard zv command "demo"; expected "demo parse", "demo players", "demo moments", or "demo select"`,
 		`workflow:demo-parse: workflow run command must be "zv workflows run demo-parse"`,
 		"workflow:demo-parse: duplicate workflow name",
 		`workflow:missing-description: workflow run command must be "zv workflows run missing-description"`,
