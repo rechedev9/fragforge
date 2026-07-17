@@ -43,9 +43,11 @@ func TestZVBinaryRepoSkillWorkflowRunsEndToEnd(t *testing.T) {
 		if !ok {
 			t.Fatalf("workflow %q from repo skill is not cataloged", workflowName)
 		}
-		if len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open" {
+		switch {
+		case len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open":
 			wantOpenPathCalls++
-		} else {
+		case !workflowDelegatesExternally(workflow):
+		default:
 			wantSubcommandCalls++
 		}
 		runZVBinaryWithEnv(t, exe, root, env, command...)
@@ -96,9 +98,11 @@ func TestZVBinaryRepoSkillRequiredWorkflowRunsBySkillEndToEnd(t *testing.T) {
 			seenBySkill[entry.skillName] = make(map[string]bool)
 		}
 		seenBySkill[entry.skillName][workflowName] = true
-		if len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open" {
+		switch {
+		case len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open":
 			wantOpenPathCalls++
-		} else {
+		case !workflowDelegatesExternally(workflow):
+		default:
 			wantSubcommandCalls++
 		}
 		runZVBinaryWithEnv(t, exe, root, env, entry.command...)
@@ -252,9 +256,11 @@ func TestZVBinarySkillsShowWorkflowRunsEndToEnd(t *testing.T) {
 			if !ok {
 				t.Fatalf("workflow %q from skills show %s is not cataloged", workflowName, skill.Name)
 			}
-			if len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open" {
+			switch {
+			case len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open":
 				wantOpenPathCalls++
-			} else {
+			case !workflowDelegatesExternally(workflow):
+			default:
 				wantSubcommandCalls++
 			}
 			runZVBinaryWithEnv(t, exe, root, env, command...)
@@ -420,9 +426,11 @@ func TestZVBinarySkillsListJSONDiscoveryWorkflowRunsEndToEnd(t *testing.T) {
 				t.Fatalf("workflow %q from skills list discovery for %s is not cataloged", workflowName, skill.Name)
 			}
 			seenBySkill[skill.Name][workflowName] = true
-			if len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open" {
+			switch {
+			case len(workflow.RunArgs) >= 2 && workflow.RunArgs[0] == "gallery" && workflow.RunArgs[1] == "open":
 				wantOpenPathCalls++
-			} else {
+			case !workflowDelegatesExternally(workflow):
+			default:
 				wantSubcommandCalls++
 			}
 			runZVBinaryWithEnv(t, exe, root, env, command...)
@@ -606,6 +614,10 @@ func TestZVBinarySkillsCheckAcceptsAutoDetectedRecordExampleEndToEnd(t *testing.
 		"name: alpha",
 		`description: "Alpha workflow"`,
 		"---",
+		"",
+		"## Creative Brief Gate",
+		"",
+		"Ask the user for the unanswered creative choices before capture/render.",
 		"",
 		"```powershell",
 		`.\bin\zv.exe workflows run record -- --killplan plan.json --demo demo.dem --out recording`,

@@ -17,6 +17,22 @@ Use this skill when the user wants CS2 Shorts with external music, beat/rhythm s
 - Proven MP3 file: `https://opengameart.org/sites/default/files/Black%20Diamond.mp3`.
 - Store final upload-ready MP4s, covers, captions, manifests, and review notes under `<run>\shortslistosparasubir\...`.
 
+## Creative Brief Gate
+
+Before any non-dry-run capture or render, ask the user only for the creative choices they have not already supplied, grouped into one concise message, and wait for explicit approval:
+
+- delivery format: `short-9x16` (default) or `landscape-16x9`;
+- music: the CC0 track to use (offer the proven default below) and whether kills should cut on the beat;
+- kill selection: all kills or only the best moments;
+- kill effect and transition: `clean`, `punch-in`, `velocity`, or `freeze-flash`, and `cut`, `flash`, `whip`, or `dip`;
+- kill numbering/counter and milestone labels on or off;
+- intro/outro text;
+- thumbnail strategy: generated gameplay cover candidates or no cover.
+
+If the user delegates creative control, state the resolved defaults and treat that delegation as approval.
+Preserve every approved answer in the exact recording and render argv; do not silently replace them with preset defaults later.
+After cover candidates exist, show them and ask the user to choose the final thumbnail before calling the pack upload-ready, unless the user delegated that choice.
+
 ## Workflow
 
 Parse the target player's segments:

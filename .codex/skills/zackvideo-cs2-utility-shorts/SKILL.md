@@ -7,6 +7,23 @@ description: "Create CS2 utility Shorts from a demo with FragForge: parse utilit
 
 Use this skill when the user wants Shorts about CS2 utility from a demo, especially smokes/flashes/molotovs for one player. Use the standard `viral-60-clean` preset; alternate effects presets are retired.
 
+## Creative Brief Gate
+
+Before any non-dry-run capture or render, ask the user only for the creative choices they have not already supplied, grouped into one concise message, and wait for explicit approval:
+
+- delivery format: `short-9x16` (default) or `landscape-16x9`;
+- HUD and killfeed treatment: `gameplay` (full HUD), `deathnotices`, or `clean`;
+- which utility to include: all audited lineups, one map, or a named selection;
+- destination/stance labels: keep the audited labels in captions/metadata or a custom wording;
+- kill effect and transition when kills appear in the clips: `clean`, `punch-in`, `velocity`, or `freeze-flash`, and `cut`, `flash`, `whip`, or `dip`;
+- kill numbering/counter when kills appear in the clips: disabled or enabled with the built-in milestone labels;
+- intro/outro text and music;
+- thumbnail strategy: generated gameplay cover candidates or no cover.
+
+If the user delegates creative control, state the resolved defaults and treat that delegation as approval.
+Preserve every approved answer in the exact recording and render argv; do not silently replace them with preset defaults later.
+After cover candidates exist, show them and ask the user to choose the final thumbnail before calling the pack upload-ready, unless the user delegated that choice.
+
 ## Workflow
 
 1. Parse utility segments:

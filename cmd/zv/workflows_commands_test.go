@@ -2053,6 +2053,7 @@ func TestValidateSkillWorkflowRequirementSkillsCoversCurrentRequirements(t *test
 		{Name: "zackvideo-lineup-audit"},
 		{Name: "zackvideo-music-scripted-shorts"},
 		{Name: "zackvideo-shorts-production"},
+		{Name: "zackvideo-stream-clips"},
 		{Name: "zackvideo-youtube-shorts-publish"},
 	}
 

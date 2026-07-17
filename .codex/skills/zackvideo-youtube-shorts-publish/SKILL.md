@@ -31,6 +31,18 @@ Open the gallery for review:
 .\bin\zv.exe workflows run gallery-open -- --path <run>\shortslistosparasubir\index.html
 ```
 
+## Publish Approval Gate
+
+Before presenting a pack as upload-ready, ask the user only for the publish choices they have not already supplied, grouped into one concise message:
+
+- final title wording per video, offering a concrete suggestion in the pattern below;
+- caption text and hashtag set, offering a concrete suggestion;
+- thumbnail: show the cover sheet or candidate images and ask the user to choose one, or confirm no cover;
+- language of titles/captions when the audience is not obvious from the request.
+
+If the user delegates these choices, state the resolved defaults and continue.
+Do not call the pack upload-ready until every question is answered or explicitly delegated, and never repeat a question the request already answered.
+
 ## Title/Captions
 
 Use human-readable, search-relevant titles:

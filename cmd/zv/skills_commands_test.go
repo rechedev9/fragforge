@@ -130,6 +130,10 @@ func TestRunSkillsCheckAcceptsStandardSkillWorkflows(t *testing.T) {
 		"",
 		"# alpha",
 		"",
+		"## Creative Brief Gate",
+		"",
+		"Ask the user for the unanswered creative choices before capture/render.",
+		"",
 		"```powershell",
 		`.\bin\zv.exe workflows run demo-parse -- --demo demo.dem --steamid 76561198000000000 --out plan.json`,
 		`.\bin\zv.exe workflows run utility-audit -- --plan plan.json --lineup-catalog data\lineups --out utility-audit.csv`,
@@ -799,5 +803,127 @@ func TestSkillCommandLinesReadsDocumentedCommandPrefixes(t *testing.T) {
 		if strings.Join(got, "\x00") != strings.Join(tt.want, "\x00") {
 			t.Fatalf("skillCommand(%q) = %#v, want %#v", tt.line, got, tt.want)
 		}
+	}
+}
+
+func TestRunSkillsCheckCreativeBriefGate(t *testing.T) {
+	gateSection := strings.Join([]string{
+		"## Creative Brief Gate",
+		"",
+		"Before any non-dry-run capture or render, ask the user for the",
+		"unanswered creative choices and wait for explicit approval.",
+	}, "\n")
+	captureRuns := []string{
+		"```powershell",
+		`.\bin\zv.exe workflows run demo-players -- --demo demo.dem`,
+		`.\bin\zv.exe workflows run record -- --killplan plan.json --demo demo.dem --out recording --dry-run`,
+		`.\bin\zv.exe workflows run shorts-render -- --recording-result recording\recording-result.json --out shorts`,
+		"```",
+	}
+	streamRuns := []string{
+		"```powershell",
+		`.\bin\zv.exe workflows run stream-variants -- --format json`,
+		`.\bin\zv.exe workflows run stream-plan -- --input stream.mp4 --out edit-plan.json`,
+		`.\bin\zv.exe workflows run stream-killfeed -- --plan edit-plan.json --events killfeed-events.json --out reviewed-plan.json`,
+		`.\bin\zv.exe workflows run stream-transcribe -- --input stream.mp4 --plan reviewed-plan.json --model ggml-large-v3.bin --vad-model ggml-vad.bin --out transcript-review.json`,
+		`.\bin\zv.exe workflows run stream-captions -- --plan edit-plan.json --words caption-words.json --out captioned-plan.json`,
+		`.\bin\zv.exe workflows run stream-render -- --input stream.mp4 --plan captioned-plan.json --out run --dry-run`,
+		"```",
+	}
+	auditRuns := []string{
+		"```powershell",
+		`.\bin\zv.exe workflows run utility-audit -- --plan plan-utility.json --lineup-catalog data\lineups --out utility-audit.csv`,
+		"```",
+	}
+	skillBody := func(name string, sections ...[]string) string {
+		lines := []string{
+			"---",
+			"name: " + name,
+			`description: "` + name + ` workflows"`,
+			"---",
+			"",
+			"# " + name,
+			"",
+		}
+		for _, section := range sections {
+			lines = append(lines, section...)
+			lines = append(lines, "")
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	tests := []struct {
+		name      string
+		skillName string
+		body      string
+		wantIssue bool
+	}{
+		{
+			name:      "capture skill without gate is rejected",
+			skillName: "zackvideo-cheater-pov-reels",
+			body:      skillBody("zackvideo-cheater-pov-reels", captureRuns),
+			wantIssue: true,
+		},
+		{
+			name:      "capture skill with gate passes",
+			skillName: "zackvideo-cheater-pov-reels",
+			body:      skillBody("zackvideo-cheater-pov-reels", []string{gateSection}, captureRuns),
+			wantIssue: false,
+		},
+		{
+			name:      "stream render skill without gate is rejected",
+			skillName: "zackvideo-stream-clips",
+			body:      skillBody("zackvideo-stream-clips", streamRuns),
+			wantIssue: true,
+		},
+		{
+			name:      "stream render skill with gate passes",
+			skillName: "zackvideo-stream-clips",
+			body:      skillBody("zackvideo-stream-clips", []string{gateSection}, streamRuns),
+			wantIssue: false,
+		},
+		{
+			name:      "read-only skill without gate passes",
+			skillName: "zackvideo-lineup-audit",
+			body:      skillBody("zackvideo-lineup-audit", auditRuns),
+			wantIssue: false,
+		},
+		{
+			name:      "unmapped capture skill without gate is rejected",
+			skillName: "alpha-capture",
+			body:      skillBody("alpha-capture", captureRuns),
+			wantIssue: true,
+		},
+		{
+			name:      "prose mention of the heading does not satisfy the gate",
+			skillName: "alpha-capture",
+			body:      skillBody("alpha-capture", []string{`Add a "## Creative Brief Gate" section later.`}, captureRuns),
+			wantIssue: true,
+		},
+		{
+			name:      "deeper heading does not satisfy the gate",
+			skillName: "alpha-capture",
+			body:      skillBody("alpha-capture", []string{"### Creative Brief Gate", "", "Ask the user."}, captureRuns),
+			wantIssue: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			writeSkillBody(t, tempDir, tt.skillName, tt.body)
+			withWorkingDir(t, tempDir)
+
+			var stdout, stderr strings.Builder
+			code := Run([]string{"zv", "skills", "check"}, &stdout, &stderr, nil, &fakeRunner{})
+
+			issue := `does not document a "## Creative Brief Gate" section for capture/render workflows`
+			gotIssue := strings.Contains(stderr.String(), issue)
+			if gotIssue != tt.wantIssue {
+				t.Fatalf("gate issue reported = %v, want %v; stderr=%s", gotIssue, tt.wantIssue, stderr.String())
+			}
+			if tt.wantIssue && code != exitInvalidArgs {
+				t.Fatalf("code = %d, want %d", code, exitInvalidArgs)
+			}
+		})
 	}
 }

@@ -199,7 +199,8 @@ func skillWorkflowRequirementMap() map[string][]string {
 		"zackvideo-cs2-utility-shorts":     {"demo-parse", "utility-audit", "record", "shorts-render", "gallery-open"},
 		"zackvideo-lineup-audit":           {"utility-audit"},
 		"zackvideo-music-scripted-shorts":  {"demo-parse", "demo-players", "record", "music-analyze", "shorts-render", "gallery-open"},
-		"zackvideo-shorts-production":      {"demo-parse", "demo-players", "utility-audit", "record", "shorts-render", "gallery-open"},
+		"zackvideo-shorts-production":      {"demo-parse", "demo-players", "demo-moments", "demo-select", "utility-audit", "record", "shorts-render", "gallery-open"},
+		"zackvideo-stream-clips":           {"stream-variants", "stream-plan", "stream-killfeed", "stream-transcribe", "stream-captions", "stream-render"},
 		"zackvideo-youtube-shorts-publish": {"gallery-open"},
 	}
 }

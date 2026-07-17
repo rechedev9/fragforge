@@ -9,6 +9,25 @@ Use this skill when the user wants a funny CS2 video against a suspected cheater
 
 Pair this with `zackvideo-shorts-production` for the normal recording/rendering pipeline.
 
+## Creative Brief Gate
+
+Before any non-dry-run capture or render, ask the user only for the creative choices they have not already supplied, grouped into one concise message, and wait for explicit approval:
+
+- delivery format: vertical `short-9x16` reel (default) or `landscape-16x9`;
+- HUD treatment: full `gameplay` HUD (default for this skill so both POVs are readable) or `deathnotices`;
+- kill effect on each death block: `clean`, `punch-in`, `velocity`, or `freeze-flash`;
+- block labels: the killer/target label wording, or the suggested defaults below;
+- kill numbering: `D01`, `D02`, ... counters on or off;
+- intro/outro text: none (default) or user-provided wording;
+- music: none (default) or a user-provided track;
+- thumbnail strategy: generated gameplay cover candidates or no cover.
+
+The transition between blocks is fixed by the reel shape (concat only, no `xfade`), so do not offer it as a choice.
+
+If the user delegates creative control, state the resolved defaults and treat that delegation as approval.
+Preserve every approved answer in the exact recording and render argv; do not silently replace them with preset defaults later.
+After cover candidates exist, show them and ask the user to choose the final thumbnail before calling the pack upload-ready, unless the user delegated that choice.
+
 ## Required Shape
 
 The final video is one long vertical Short-style reel, never separate per-kill Shorts unless explicitly requested.

@@ -196,7 +196,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 		"== shell syntax ==",
 		"== Codex sees AGENTS.md ==",
 		"== FragForge workflow contract ==",
-		fmt.Sprintf("OK: 6 skills, %d workflows, 11 workflow docs, and 19 agent prompt wrappers checked", len(workflowCatalog())),
+		fmt.Sprintf("OK: 7 skills, %d workflows, 11 workflow docs, and 19 agent prompt wrappers checked", len(workflowCatalog())),
 		"OK: Codex harness is wired",
 	} {
 		if !strings.Contains(body, want) {

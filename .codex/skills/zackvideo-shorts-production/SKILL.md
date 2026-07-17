@@ -70,6 +70,34 @@ the user selects one or explicitly delegates automatic selection.
 .\bin\zv.exe workflows run demo-players -- --demo <demo.dem>
 ```
 
+## Selection Gate
+
+When the user wants to choose which kills or plays make the final video, stop at the selection gate before any capture.
+Score the planned segments, show the ranked moments, and ask the user which segments to keep and in what order:
+
+```powershell
+.\bin\zv.exe workflows run demo-moments -- `
+  --killplan testdata/agent-killplan.json `
+  --format json
+```
+
+Build the recorder-ready plan from the approved selection, preserving the user's requested narrative order.
+Point `--killplan` at the run's parsed plan, list the approved segment IDs in the approved order, and remove `--dry-run` to write the selected plan:
+
+```powershell
+.\bin\zv.exe workflows run demo-select -- `
+  --killplan testdata/agent-killplan.json `
+  --segments seg-001 `
+  --out data\runs\agent-doc\selected-plan.json `
+  --dry-run `
+  --format json
+```
+
+Skip this gate only when the user already fully specified the target and selection policy, for example "all kills" for one SteamID64.
+Record from the selected plan when the gate ran; never silently record segments the user filtered out.
+
+## Utility Audit
+
 - For utility/lineup Shorts, audit labels after parsing:
 
 ```powershell
