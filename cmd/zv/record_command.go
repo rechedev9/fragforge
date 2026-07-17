@@ -54,6 +54,7 @@ func runRecord(args []string, stdout, stderr io.Writer, stdin io.Reader, runner 
 		return exitSuccess
 	}
 	message := strings.TrimSpace(delegateStderr.String())
+	message = strings.TrimPrefix(message, "error: ")
 	if message == "" {
 		message = fmt.Sprintf("zv-recorder exited with code %d", code)
 	}

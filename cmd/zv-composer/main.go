@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -18,8 +17,51 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatal(err)
+		if jsonFormatRequested(os.Args[1:]) {
+			summary := compositionErrorSummary{
+				OK:       false,
+				DryRun:   dryRunRequested(os.Args[1:]),
+				Executed: false,
+				Error:    err.Error(),
+			}
+			if encodeErr := json.NewEncoder(os.Stdout).Encode(summary); encodeErr == nil {
+				os.Exit(1)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
+}
+
+// compositionErrorSummary mirrors the success envelope shape on failures so
+// --format json consumers always get {ok, dry_run, executed, error} on stdout
+// instead of a timestamped log line on stderr.
+type compositionErrorSummary struct {
+	OK       bool   `json:"ok"`
+	DryRun   bool   `json:"dry_run"`
+	Executed bool   `json:"executed"`
+	Error    string `json:"error"`
+}
+
+func jsonFormatRequested(args []string) bool {
+	for i, arg := range args {
+		if arg == "--format=json" || arg == "-format=json" {
+			return true
+		}
+		if (arg == "--format" || arg == "-format") && i+1 < len(args) && args[i+1] == "json" {
+			return true
+		}
+	}
+	return false
+}
+
+func dryRunRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "--dry-run" || arg == "-dry-run" || arg == "--dry-run=true" || arg == "-dry-run=true" {
+			return true
+		}
+	}
+	return false
 }
 
 func run() error {

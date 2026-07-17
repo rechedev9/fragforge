@@ -30,12 +30,15 @@ func main() {
 	if err == nil {
 		return
 	}
+	// Plain stderr, no log timestamps: the zv wrapper forwards this text as the
+	// error field of its JSON envelope.
 	var hookErr *hookIncompatibleError
 	if errors.As(err, &hookErr) {
-		log.Print(err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(exitHookIncompatible)
 	}
-	log.Fatal(err)
+	fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	os.Exit(1)
 }
 
 func run() error {

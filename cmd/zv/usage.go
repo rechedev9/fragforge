@@ -227,6 +227,7 @@ Demo flags:
 Stream flags:
   --input <mp4>          stream/VOD source (required)
   --events <json>        reviewed killfeed events; skips import when absent
+  --killfeed-crop <x,y,w,h>  killfeed region for cue detection (required with --events)
   --words <json>         reviewed Spanish caption words; skips import when absent
   --run-dir <dir>        run output directory (required)
 

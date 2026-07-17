@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -89,6 +90,7 @@ func runFlowsRun(args []string, stdout, stderr io.Writer, stdin io.Reader, runne
 	input := fs.String("input", "", "stream video path")
 	events := fs.String("events", "", "reviewed killfeed events JSON")
 	words := fs.String("words", "", "reviewed caption words JSON")
+	killfeedCrop := fs.String("killfeed-crop", "", "killfeed crop region x,y,w,h for cue detection")
 	if err := fs.Parse(rest); err != nil {
 		return writeFlowError(args, stdout, stderr, err, flowsRunUsage)
 	}
@@ -108,15 +110,34 @@ func runFlowsRun(args []string, stdout, stderr io.Writer, stdin io.Reader, runne
 	var steps []flowRunStep
 	switch flowName {
 	case "demo":
+		// Parse runs only when no kill plan is supplied and needs both inputs;
+		// fail fast instead of creating a run dir for a chain that cannot start.
+		if strings.TrimSpace(*killplanPath) == "" {
+			if strings.TrimSpace(*demo) == "" {
+				return writeFlowError(args, stdout, stderr,
+					fmt.Errorf(`the demo flow requires --demo (or --killplan to skip parse)`), flowsRunUsage)
+			}
+			if strings.TrimSpace(*steamid) == "" {
+				return writeFlowError(args, stdout, stderr,
+					fmt.Errorf(`--demo requires --steamid for "demo parse"`), flowsRunUsage)
+			}
+		}
 		if err := os.MkdirAll(*runDir, 0o750); err != nil {
 			return writeFlowError(args, stdout, stderr, fmt.Errorf("create run dir: %w", err), "")
 		}
 		steps = demoFlowRunSteps(*runDir, *demo, *steamid, *killplanPath)
 	case "stream":
+		// The factual killfeed import matches reviewed events against detected
+		// cues, and detection needs a crop region; fail fast instead of running
+		// a plan whose import phase can never succeed.
+		if strings.TrimSpace(*events) != "" && strings.TrimSpace(*killfeedCrop) == "" {
+			return writeFlowError(args, stdout, stderr,
+				fmt.Errorf(`--events requires --killfeed-crop <x,y,w,h> so "stream plan" can detect killfeed cues`), flowsRunUsage)
+		}
 		if err := os.MkdirAll(*runDir, 0o750); err != nil {
 			return writeFlowError(args, stdout, stderr, fmt.Errorf("create run dir: %w", err), "")
 		}
-		steps = streamFlowRunSteps(*runDir, *input, *events, *words)
+		steps = streamFlowRunSteps(*runDir, *input, *events, *words, *killfeedCrop)
 	default:
 		return writeFlowError(args, stdout, stderr,
 			fmt.Errorf(`unknown flow %q for "flows run"; expected demo or stream`, flowName), flowsRunUsage)
@@ -254,7 +275,7 @@ func demoFlowRunSteps(runDir, demo, steamid, killplanFlag string) []flowRunStep 
 // real; it probes media with ffprobe), the killfeed and captions imports (each
 // skipped when its reviewed input is absent), and the render dry run. The plan
 // input to each later phase advances to the latest persisted document.
-func streamFlowRunSteps(runDir, input, events, words string) []flowRunStep {
+func streamFlowRunSteps(runDir, input, events, words, killfeedCrop string) []flowRunStep {
 	editPlan := filepath.Join(runDir, "edit-plan.json")
 	reviewedPlan := filepath.Join(runDir, "reviewed-plan.json")
 	finalPlan := filepath.Join(runDir, "final-plan.json")
@@ -278,8 +299,16 @@ func streamFlowRunSteps(runDir, input, events, words string) []flowRunStep {
 			if strings.TrimSpace(input) == "" {
 				return flowRunAction{}, fmt.Errorf("stream plan requires --input")
 			}
+			argv := []string{"stream", "plan", "--input", input, "--out", editPlan}
+			// The factual killfeed import matches reviewed events against
+			// detected cues, so the plan must detect them or the import can
+			// never succeed.
+			if strings.TrimSpace(events) != "" {
+				argv = append(argv, "--killfeed-crop", killfeedCrop, "--detect-killfeed")
+			}
+			argv = append(argv, "--format", "json")
 			return flowRunAction{
-				argv:    []string{"stream", "plan", "--input", input, "--out", editPlan, "--format", "json"},
+				argv:    argv,
 				outputs: []string{editPlan},
 			}, nil
 		}},
@@ -342,6 +371,14 @@ func existingPaths(paths []string) []string {
 func flowPhaseFailureReason(stderr, stdout string, code int) string {
 	if line := firstNonEmptyLine(stderr); line != "" {
 		return line
+	}
+	// Stage commands report failures as {ok:false, error:...} JSON on stdout;
+	// surface the message instead of the raw JSON's first line ("{").
+	var envelope struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err == nil && strings.TrimSpace(envelope.Error) != "" {
+		return envelope.Error
 	}
 	if line := firstNonEmptyLine(stdout); line != "" {
 		return line

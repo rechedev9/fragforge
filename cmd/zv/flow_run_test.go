@@ -141,7 +141,7 @@ func TestFlowRunnerStepsCoverRegistryPhases(t *testing.T) {
 		},
 		{
 			flow:  "stream",
-			steps: streamFlowRunSteps("run", "stream.mp4", "", ""),
+			steps: streamFlowRunSteps("run", "stream.mp4", "", "", ""),
 			runnerPhase: map[string]string{
 				"plan":     "plan",
 				"killfeed": "enrich",
@@ -177,6 +177,131 @@ func TestFlowRunnerStepsCoverRegistryPhases(t *testing.T) {
 					continue
 				}
 				t.Fatalf("flow %q phase %q has no runner step and is not exempt; add runner coverage or exempt it", tc.flow, phase.ID)
+			}
+		})
+	}
+}
+
+func TestStreamFlowRunPlanDetectsKillfeedOnlyWhenEventsProvided(t *testing.T) {
+	cases := []struct {
+		name         string
+		events       string
+		killfeedCrop string
+		wantDetect   bool
+	}{
+		{name: "events provided enables detection with crop", events: "events.json", killfeedCrop: "0.66,0.04,0.32,0.25", wantDetect: true},
+		{name: "no events skips detection", events: "", killfeedCrop: "", wantDetect: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			steps := streamFlowRunSteps("run", "stream.mp4", tc.events, "", tc.killfeedCrop)
+			if got, want := steps[0].id, "plan"; got != want {
+				t.Fatalf("steps[0].id = %q, want %q", got, want)
+			}
+			action, err := steps[0].build()
+			if err != nil {
+				t.Fatalf("build plan step: %v", err)
+			}
+			if got, want := containsString(action.argv, "--detect-killfeed"), tc.wantDetect; got != want {
+				t.Fatalf("plan argv --detect-killfeed = %v, want %v; argv = %v", got, want, action.argv)
+			}
+			if got, want := containsString(action.argv, "--killfeed-crop"), tc.wantDetect; got != want {
+				t.Fatalf("plan argv --killfeed-crop = %v, want %v; argv = %v", got, want, action.argv)
+			}
+		})
+	}
+}
+
+func TestFlowsRunStreamEventsRequireKillfeedCrop(t *testing.T) {
+	ws := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"zv", "flows", "run", "stream",
+		"--input", "stream.mp4",
+		"--events", "events.json",
+		"--run-dir", ws,
+		"--dry-run"}, &stdout, &stderr, nil, &fakeRunner{})
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
+	}
+	if want := "--events requires --killfeed-crop"; !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
+func TestFlowsRunDemoFailsFastOnMissingParseInputs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "demo without steamid",
+			args: []string{"--demo", "match.dem"},
+			want: "--demo requires --steamid",
+		},
+		{
+			name: "neither demo nor killplan",
+			args: []string{},
+			want: "requires --demo (or --killplan to skip parse)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runDir := filepath.Join(t.TempDir(), "run")
+			args := append([]string{"zv", "flows", "run", "demo", "--run-dir", runDir, "--dry-run"}, tc.args...)
+			var stdout, stderr bytes.Buffer
+			code := Run(args, &stdout, &stderr, nil, &fakeRunner{})
+			if got, want := code, exitInvalidArgs; got != want {
+				t.Fatalf("code = %d, want %d; stderr=%s", got, want, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.want)
+			}
+			if _, err := os.Stat(runDir); !os.IsNotExist(err) {
+				t.Fatalf("run dir %s exists after fail-fast rejection; stat err = %v", runDir, err)
+			}
+		})
+	}
+}
+
+func TestFlowPhaseFailureReason(t *testing.T) {
+	cases := []struct {
+		name   string
+		stderr string
+		stdout string
+		code   int
+		want   string
+	}{
+		{
+			name:   "json error field wins over raw json lines",
+			stdout: "{\n  \"ok\": false,\n  \"error\": \"killfeed events has 2 cues; clip clip-001 has 0 detected cues\"\n}",
+			code:   1,
+			want:   "killfeed events has 2 cues; clip clip-001 has 0 detected cues",
+		},
+		{
+			name:   "stderr line wins when present",
+			stderr: "error: plan file not found: plan.json",
+			stdout: `{"ok":false,"error":"unused"}`,
+			code:   3,
+			want:   "error: plan file not found: plan.json",
+		},
+		{
+			name:   "plain stdout falls back to first line",
+			stdout: "something went wrong\nmore detail",
+			code:   1,
+			want:   "something went wrong",
+		},
+		{
+			name: "empty output falls back to exit code",
+			code: 4,
+			want: "exit 4",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := flowPhaseFailureReason(tc.stderr, tc.stdout, tc.code)
+			if got != tc.want {
+				t.Fatalf("flowPhaseFailureReason() = %q, want %q", got, tc.want)
 			}
 		})
 	}

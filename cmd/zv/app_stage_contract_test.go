@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -132,4 +133,63 @@ func writeStageContractPlan(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// TestStageCommandsEmitJSONErrorEnvelope pins the failure-side contract of the
+// stage commands' --format json mode: failures must land on stdout as
+// {ok:false, error} JSON with a plain error message, never as timestamped log
+// lines (the systematic dry-run probes caught compose emitting log.Fatal output
+// and the recorder polluting the envelope with a log timestamp prefix).
+func TestStageCommandsEmitJSONErrorEnvelope(t *testing.T) {
+	t.Parallel()
+	exe := buildDelegatedBinaries(t)
+
+	ws := t.TempDir()
+	badPlan := filepath.Join(ws, "bad-plan.json")
+	if err := os.WriteFile(badPlan, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("write malformed plan fixture: %v", err)
+	}
+	demo := filepath.Join(ws, "demo.dem")
+	if err := os.WriteFile(demo, []byte("dummy demo"), 0o600); err != nil {
+		t.Fatalf("write demo fixture: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "compose final missing recording result",
+			args: []string{"compose", "final", "--recording-result", filepath.Join(ws, "missing.json"), "--out", filepath.Join(ws, "final.mp4"), "--dry-run", "--format", "json"},
+		},
+		{
+			name: "record malformed killplan",
+			args: []string{"record", "--killplan", badPlan, "--demo", demo, "--out", filepath.Join(ws, "recording"), "--dry-run", "--format", "json"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, _, code := runZVBinaryFailureSplit(t, exe, ws, tc.args...)
+			if code == 0 {
+				t.Fatalf("%s: exit code = 0, want failure", tc.name)
+			}
+			var row struct {
+				OK    bool   `json:"ok"`
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &row); err != nil {
+				t.Fatalf("%s: stdout is not a JSON error envelope: %v\n%s", tc.name, err, stdout)
+			}
+			if row.OK {
+				t.Fatalf("%s: ok = true, want false: %s", tc.name, stdout)
+			}
+			if strings.TrimSpace(row.Error) == "" {
+				t.Fatalf("%s: error message empty: %s", tc.name, stdout)
+			}
+			if timestamped := regexp.MustCompile(`\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}`); timestamped.MatchString(row.Error) {
+				t.Fatalf("%s: error message carries a log timestamp: %q", tc.name, row.Error)
+			}
+		})
+	}
 }

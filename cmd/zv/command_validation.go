@@ -555,7 +555,7 @@ func commandValueFlags(commandName string, required []string) []string {
 	case `"analysis view"`:
 		flags = append(flags, "--addr")
 	case `"flows run"`:
-		flags = append(flags, "--demo", "--steamid", "--killplan", "--input", "--events", "--words", "--format")
+		flags = append(flags, "--demo", "--steamid", "--killplan", "--input", "--events", "--words", "--killfeed-crop", "--format")
 	}
 	return flags
 }

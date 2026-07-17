@@ -283,6 +283,12 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv gallery open --path data/runs/run-004/shortslistosparasubir/index.html
 # Chain the whole demo journey safely; supply --killplan to skip parse and omit --demo to skip capture.
 ./bin/zv flows run demo --killplan testdata/agent-killplan.json --run-dir data/runs/agent-doc --dry-run --format json
+# The stream journey form needs real media, so it is documented here in prose only:
+# "zv flows run stream --input <stream.mp4> --run-dir <dir> --dry-run" chains plan,
+# killfeed, captions, and render. Reviewed --events require --killfeed-crop x,y,w,h
+# (normalized) so the plan can detect the cues the factual import matches against;
+# --words imports reviewed Spanish caption timings. Either import is skipped with a
+# reason when its flag is absent.
 ./bin/zv serve
 ./bin/zv workflows run short -- testdata/foo.dem --prompt "all kills 76561198000000000" --dry-run
 ./bin/zv workflows run capabilities -- --format json
