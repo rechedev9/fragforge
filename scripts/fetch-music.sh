@@ -9,7 +9,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CATALOG="$ROOT/data/music/catalog.json"
-DEST="${ZV_MUSIC_DIR:-$ROOT/.local/data/music}"
+# Default to <repo>/data/music: the same directory the orchestrator serves when
+# ZV_MUSIC_DIR is unset, so bare provisioning and a default `zv serve` agree.
+DEST="${ZV_MUSIC_DIR:-$ROOT/data/music}"
 FFPROBE="${ZV_FFPROBE_PATH:-$(command -v ffprobe || true)}"
 
 if [ ! -f "$CATALOG" ]; then

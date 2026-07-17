@@ -49,6 +49,40 @@ if (-not (Test-Path (Join-Path $webDir "node_modules"))) {
 
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 
+# Provision the music library into <repo>\data\music, the directory the
+# orchestrator serves when ZV_MUSIC_DIR is unset. Best-effort: a machine that is
+# offline (or already provisioned) still boots Local Studio, just with whatever
+# tracks are present. sha256 mismatches are discarded so a truncated download
+# never poisons the library.
+$musicDir = Join-Path $dataDir "music"
+$catalogPath = Join-Path $musicDir "catalog.json"
+if (Test-Path $catalogPath) {
+    Write-Host "[local-studio] provisioning music library (best-effort)..."
+    try {
+        $catalog = Get-Content $catalogPath -Raw | ConvertFrom-Json
+        foreach ($track in $catalog.tracks) {
+            if (-not $track.downloadUrl -or -not $track.id -or -not $track.ext -or -not $track.sha256) { continue }
+            $trackPath = Join-Path $musicDir "$($track.id).$($track.ext)"
+            if (Test-Path $trackPath) { continue }
+            try {
+                Invoke-WebRequest -Uri $track.downloadUrl -OutFile $trackPath -UseBasicParsing -TimeoutSec 60
+                $digest = (Get-FileHash -Path $trackPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($digest -ne $track.sha256.ToLowerInvariant()) {
+                    Remove-Item $trackPath -Force
+                    Write-Host "[local-studio]   discarded $($track.id) (sha256 mismatch)"
+                } else {
+                    Write-Host "[local-studio]   downloaded $($track.id).$($track.ext)"
+                }
+            } catch {
+                if (Test-Path $trackPath) { Remove-Item $trackPath -Force -ErrorAction SilentlyContinue }
+                Write-Host "[local-studio]   skipped $($track.id): $($_.Exception.Message)"
+            }
+        }
+    } catch {
+        Write-Host "[local-studio] music provisioning skipped: $($_.Exception.Message)"
+    }
+}
+
 Write-Host "[local-studio] starting orchestrator (SQLite jobs, capture auto-detected)..."
 # Set in the session so the orchestrator child inherits them (works on both
 # Windows PowerShell 5.1 and PowerShell 7; Start-Process -Environment is 7.4+).

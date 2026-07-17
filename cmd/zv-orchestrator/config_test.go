@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -313,12 +314,63 @@ func TestLoadConfigFirecrawlAPIKey(t *testing.T) {
 	}
 }
 
+func TestLoadConfigMusicDirDefaultsUnderDataDir(t *testing.T) {
+	// Local Studio never sets ZV_MUSIC_DIR, so an empty value must resolve to the
+	// on-disk library the repo ships at <DataDir>/music. Otherwise the songs API
+	// returns an empty catalog and the web background-music picker stays blank.
+	tests := []struct {
+		name     string
+		musicDir string
+		dataDir  string
+		want     string
+	}{
+		{
+			name:     "explicit env wins verbatim",
+			musicDir: "C:\\custom\\songs",
+			dataDir:  "C:\\zv-data",
+			want:     "C:\\custom\\songs",
+		},
+		{
+			name:    "empty env defaults under configured data dir",
+			dataDir: "C:\\zv-data",
+			want:    filepath.Join("C:\\zv-data", "music"),
+		},
+		{
+			name: "empty env defaults under default data dir",
+			want: filepath.Join("./data", "music"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("ZV_DATABASE_URL", "memory")
+			if tt.dataDir != "" {
+				t.Setenv("ZV_DATA_DIR", tt.dataDir)
+			}
+			if tt.musicDir != "" {
+				t.Setenv("ZV_MUSIC_DIR", tt.musicDir)
+			}
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("loadConfig error = %v", err)
+			}
+			if got, want := cfg.MusicDir, tt.want; got != want {
+				t.Fatalf("MusicDir = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"ZV_HTTP_ADDR",
 		"ZV_DATABASE_URL",
 		"ZV_DATA_DIR",
+		"ZV_MUSIC_DIR",
+		"ZV_RECORD_HUD",
+		"ZV_YTDLP_PATH",
 		"ZV_WORKER_CONCURRENCY",
 		"ZV_MEDIA_WORK_DIR",
 		"ZV_RECORDER_PATH",

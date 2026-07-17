@@ -77,7 +77,6 @@ func loadConfig() (config, error) {
 		RecordHUD:       os.Getenv("ZV_RECORD_HUD"),
 		FFmpegPath:      os.Getenv("ZV_FFMPEG_PATH"),
 		FFprobePath:     os.Getenv("ZV_FFPROBE_PATH"),
-		MusicDir:        os.Getenv("ZV_MUSIC_DIR"),
 		MutationToken:   os.Getenv(mutationTokenEnvironmentVariable),
 		DiscoverySecret: os.Getenv(discoverySecretEnvironmentVariable),
 		CodexPath:       os.Getenv("ZV_CODEX_PATH"),
@@ -90,6 +89,12 @@ func loadConfig() (config, error) {
 		// references. It is optional and never sent to the web renderer.
 		FirecrawlAPIKey: os.Getenv(firecrawlAPIKeyEnvironmentVariable),
 	}
+	// The music library defaults to <DataDir>/music, where the repo keeps the
+	// catalog and scripts/fetch-music.sh downloads the audio, so an unset
+	// ZV_MUSIC_DIR yields a populated songs catalog once tracks are provisioned.
+	// An explicit ZV_MUSIC_DIR wins. Set after the literal because the default
+	// derives from the resolved DataDir.
+	c.MusicDir = envOr("ZV_MUSIC_DIR", filepath.Join(c.DataDir, "music"))
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
 	}
