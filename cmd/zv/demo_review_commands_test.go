@@ -42,6 +42,45 @@ func TestRunDemoMomentsRanksCandidatesAndWritesArtifact(t *testing.T) {
 	}
 }
 
+func TestRunDemoMomentsDryRunScoresWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	planPath := writeDemoReviewPlan(t, dir)
+	outPath := filepath.Join(dir, "review", "moments.json")
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"zv", "demo", "moments", "--killplan", planPath,
+		"--out", outPath, "--dry-run", "--format", "json",
+	}, &stdout, &stderr, nil, &fakeRunner{})
+	if code != exitSuccess || stderr.Len() != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+	var result demoMomentsResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK || !result.DryRun || result.Executed {
+		t.Fatalf("result = %#v, want ok+dry_run without executed", result)
+	}
+	if result.Count != 3 || len(result.Document.Moments) != 3 {
+		t.Fatalf("scored moments = %d, want 3", result.Count)
+	}
+	if got, want := result.Output, mustAbs(t, outPath); got != want {
+		t.Fatalf("output = %q, want resolved path %q", got, want)
+	}
+	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
+		t.Fatalf("output stat error = %v, want not exist (dry-run must not write)", err)
+	}
+}
+
+func mustAbs(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("abs %q: %v", path, err)
+	}
+	return abs
+}
+
 func TestRunDemoReviewHelpIsReachable(t *testing.T) {
 	tests := []struct {
 		subcommand string

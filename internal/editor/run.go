@@ -151,48 +151,34 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	manifest.Warnings = append(metadataWarnings, manifest.Warnings...)
 	result := resultFromManifest(manifest, cfg.DryRun)
 
+	resultPath := filepath.Join(outDir, "shorts-result.json")
 	if err := os.MkdirAll(filepath.Join(outDir, "prompts"), 0o750); err != nil {
-		result.Error = err.Error()
-		_ = WriteResult(filepath.Join(outDir, "shorts-result.json"), result)
-		return result, err
+		return failResult(resultPath, result, err)
 	}
 	result.Warnings = append(result.Warnings, writePrompts(manifest)...)
 	result.Warnings = append(result.Warnings, writeCaptions(manifest)...)
 	if err := WritePublishSummary(manifest.SummaryPath, manifest); err != nil {
-		result.Error = err.Error()
-		_ = WriteResult(filepath.Join(outDir, "shorts-result.json"), result)
-		return result, err
+		return failResult(resultPath, result, err)
 	}
 	if err := WriteManifest(filepath.Join(outDir, "edit-manifest.json"), manifest); err != nil {
-		result.Error = err.Error()
-		_ = WriteResult(filepath.Join(outDir, "shorts-result.json"), result)
-		return result, err
+		return failResult(resultPath, result, err)
 	}
 	if err := WriteUnmatchedSmokes(manifest); err != nil {
-		result.Error = err.Error()
-		_ = WriteResult(filepath.Join(outDir, "shorts-result.json"), result)
-		return result, err
+		return failResult(resultPath, result, err)
 	}
 
-	resultPath := filepath.Join(outDir, "shorts-result.json")
 	packPath := filepath.Join(publishDir, "pack-manifest.json")
 	if cfg.DryRun {
 		if err := WritePackManifest(packPath, PackManifestFromManifest(manifest, result)); err != nil {
-			result.Error = err.Error()
-			_ = WriteResult(resultPath, result)
-			return result, err
+			return failResult(resultPath, result, err)
 		}
 		if err := WritePublishGallery(manifest.GalleryPath, manifest); err != nil {
-			result.Error = err.Error()
-			_ = WriteResult(resultPath, result)
-			return result, err
+			return failResult(resultPath, result, err)
 		}
 		return result, WriteResult(resultPath, result)
 	}
 	if ffmpegPath == "" && mediaWorkRequired(manifest, coversEnabled, cfg.SkipExisting) {
-		result.Error = "ffmpeg not found"
-		_ = WriteResult(resultPath, result)
-		return result, errors.New(result.Error)
+		return failResult(resultPath, result, errors.New("ffmpeg not found"))
 	}
 	if err := renderShortPack(ctx, &manifest, &result, shortPackOptions{
 		OutputDir:      outDir,
@@ -211,6 +197,17 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 
 func defaultPublishDir(outDir string) string {
 	return filepath.Join(outDir, "shortslistosparasubir")
+}
+
+// failResult records an error on the result, marks it as not executed (no real
+// render completed), persists it, and returns it with the error. Keeping
+// Executed false on every error path stops a partially-run render from
+// reporting executed:true.
+func failResult(path string, result Result, err error) (Result, error) {
+	result.Error = err.Error()
+	result.Executed = false
+	_ = WriteResult(path, result)
+	return result, err
 }
 
 func (c Config) validate() error {
@@ -361,6 +358,7 @@ func resultFromManifest(manifest Manifest, dryRun bool) Result {
 		TemporalSmoothing: manifest.TemporalSmoothing,
 		CoversEnabled:     manifest.CoversEnabled,
 		DryRun:            dryRun,
+		Executed:          !dryRun,
 		Warnings:          append([]string(nil), manifest.Warnings...),
 		Shorts:            make([]ShortResult, 0, len(manifest.Shorts)),
 	}

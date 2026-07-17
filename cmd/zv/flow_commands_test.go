@@ -32,6 +32,8 @@ func TestRunFlowsShowDemoJSONIsCompleteAgentJourney(t *testing.T) {
 		"zv demo moments",
 		"zv demo select",
 		"zv record",
+		"parse-preflight",
+		"moments-preflight",
 		"creative-brief",
 		"kill numbering or counter",
 		"thumbnail-selection",
@@ -41,6 +43,38 @@ func TestRunFlowsShowDemoJSONIsCompleteAgentJourney(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("flow JSON missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestDemoFlowKeepsPreflightPersistRhythm(t *testing.T) {
+	flow, ok := findProductionFlow("demo")
+	if !ok {
+		t.Fatal("demo flow missing")
+	}
+	phases := make(map[string]flowPhase, len(flow.Phases))
+	for _, phase := range flow.Phases {
+		phases[phase.ID] = phase
+	}
+	// Each cheap deterministic stage exposes a read-only --dry-run preflight
+	// before the persisting command, mirroring select/capture/edit.
+	for _, pair := range []struct{ preflight, persist string }{
+		{"parse-preflight", "parse"},
+		{"moments-preflight", "moments"},
+	} {
+		pre, ok := phases[pair.preflight]
+		if !ok {
+			t.Fatalf("missing preflight phase %q", pair.preflight)
+		}
+		if !pre.ReadOnly || !strings.Contains(pre.Command, "--dry-run") {
+			t.Fatalf("preflight %q = %#v, want read-only --dry-run", pair.preflight, pre)
+		}
+		persist, ok := phases[pair.persist]
+		if !ok {
+			t.Fatalf("missing persist phase %q", pair.persist)
+		}
+		if persist.ReadOnly || strings.Contains(persist.Command, "--dry-run") {
+			t.Fatalf("persist %q = %#v, want a mutating command", pair.persist, persist)
 		}
 	}
 }

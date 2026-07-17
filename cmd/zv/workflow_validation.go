@@ -14,6 +14,7 @@ func checkWorkflows() ([]skillInfo, []workflowInfo, []workflowDoc, int, []skillI
 	issues = append(issues, validateWorkflowCatalog(workflows)...)
 	issues = append(issues, validateInternalCheckWorkflows(workflows)...)
 	issues = append(issues, validateWorkflowDelegationCoverage(workflows)...)
+	issues = append(issues, validateProductionFlows(productionFlows())...)
 	issues = append(issues, validateSkillWorkflowRequirementCatalog(workflows, skillWorkflowRequirementMap())...)
 	issues = append(issues, validateUsageCoverage(workflows, usage)...)
 	issues = append(issues, validateGroupUsageCoverage(workflows, groupUsageTexts())...)

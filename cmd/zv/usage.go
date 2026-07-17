@@ -11,7 +11,7 @@ Usage:
   zv capabilities [--format text|json]
   zv demo parse [zv-parser parse flags]
   zv demo players [zv-demo-players flags]
-  zv demo moments --killplan <plan.json> [--top <n>] [--out <moments.json>] [--format text|json]
+  zv demo moments --killplan <plan.json> [--top <n>] [--out <moments.json>] [--dry-run] [--format text|json]
   zv demo select --killplan <plan.json> --segments <ids> --out <selected-plan.json> [--dry-run] [--format text|json]
   zv utility audit [zv-parser utility-audit flags]
   zv record [zv-recorder flags]
@@ -38,6 +38,7 @@ Usage:
   zv workflows check
   zv flows list [--format text|json]
   zv flows show <demo|stream> [--format text|json]
+  zv flows run <demo|stream> --run-dir <dir> --dry-run [--format text|json]
   zv serve
   zv tui [--url <orchestrator>] [--token <token>]
 
@@ -121,11 +122,12 @@ Summarize the local error journal. --clear truncates it (use between fix-loop ru
 const demoUsage = `usage: zv demo parse [zv-parser parse flags] | zv demo players [zv-demo-players flags] | zv demo moments [flags] | zv demo select [flags]
 `
 
-const demoMomentsUsage = `usage: zv demo moments --killplan <plan.json> [--top <n>] [--out <moments.json>] [--format text|json]
+const demoMomentsUsage = `usage: zv demo moments --killplan <plan.json> [--top <n>] [--out <moments.json>] [--dry-run] [--format text|json]
 
 Score and rank every planned segment for review before expensive capture.
 The JSON result includes stable segment ids, kill counts, weapons, victims,
-reason codes, duration, and score. --out persists the same moments document.
+reason codes, duration, and score. --out persists the same moments document;
+--dry-run scores in memory and skips the write.
 `
 
 const demoSelectUsage = `usage: zv demo select --killplan <plan.json> --segments <seg-ids> --out <selected-plan.json> [--dry-run] [--format text|json]
@@ -196,14 +198,39 @@ const workflowsValidateUsage = `usage: zv workflows validate <name> [--format te
 const workflowsCheckUsage = `usage: zv workflows check [--format text|json]
 `
 
-const flowsUsage = `usage: zv flows list [--format text|json] | zv flows show <demo|stream> [--format text|json]
+const flowsUsage = `usage: zv flows list [--format text|json] | zv flows show <demo|stream> [--format text|json] | zv flows run <demo|stream> --run-dir <dir> --dry-run [--format text|json]
 
 End-to-end production journeys for agents. Workflows describe atomic commands;
 flows describe decision points and the safe order from source to upload pack.
+"flows run" chains a whole journey in --dry-run mode.
 `
 
 const flowsListUsage = `usage: zv flows list [--format text|json]
 `
 
 const flowsShowUsage = `usage: zv flows show <demo|stream> [--format text|json]
+`
+
+const flowsRunUsage = `usage: zv flows run <demo|stream> --run-dir <dir> --dry-run [flags]
+
+Chain a whole production journey safely: cheap deterministic stages run for real
+and write chainable JSON into --run-dir, expensive capture/render stages run with
+--dry-run, and creative gates are reported as skipped. Real execution stays stage
+by stage behind the creative gates, so --dry-run is required.
+
+Demo flags:
+  --demo <dem>           demo to parse and capture from
+  --steamid <SteamID64>  target POV player for demo parse
+  --killplan <plan.json> existing kill plan; skips demo parse
+  --run-dir <dir>        run output directory (required)
+
+Stream flags:
+  --input <mp4>          stream/VOD source (required)
+  --events <json>        reviewed killfeed events; skips import when absent
+  --words <json>         reviewed Spanish caption words; skips import when absent
+  --run-dir <dir>        run output directory (required)
+
+Common flags:
+  --dry-run              required; the only supported execution mode
+  --format <text|json>   report format (default text)
 `

@@ -17,6 +17,11 @@ func documentedWorkflowCommand(command string) string {
 	if len(fields) >= 2 && fields[1] == "short" {
 		return "./bin/zv short"
 	}
+	// "flows run" takes a positional flow name (demo/stream), so its command stem
+	// ends at "run" just like "short" ends before its positional demo.
+	if len(fields) >= 3 && fields[1] == "flows" && fields[2] == "run" {
+		return "./bin/zv flows run"
+	}
 	out := []string{"./bin/zv"}
 	for _, field := range fields[1:] {
 		if strings.HasPrefix(field, "--") || strings.HasPrefix(field, "<") {

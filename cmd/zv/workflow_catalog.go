@@ -161,6 +161,12 @@ func buildWorkflowCatalog() []workflowInfo {
 			RunArgs:     []string{"gallery", "open"},
 		},
 		{
+			Name:        "flows-run",
+			Description: "Chain a whole demo or stream journey in --dry-run mode into a run directory.",
+			Command:     "zv flows run <demo|stream> --run-dir <run-dir> --dry-run",
+			RunArgs:     []string{"flows", "run"},
+		},
+		{
 			Name:        "serve",
 			Description: "Start the orchestrator API and workers.",
 			Command:     "zv serve",
@@ -224,6 +230,26 @@ func workflowArgumentMetadata(workflow workflowInfo) workflowArguments {
 			RequiredFlags:       []string{},
 			RequiredPositionals: []string{"demo"},
 		})
+	case "flows-run":
+		positionals = append(positionals, workflowPositionalArgument{
+			Name:        "flow",
+			Placeholder: "<demo|stream>",
+			Required:    true,
+		})
+		conditional = append(conditional,
+			workflowConditionalRequirement{
+				Description:         "the demo flow requires a demo path (--demo) unless an existing kill plan (--killplan) is supplied",
+				UnlessAnyFlags:      []string{"--killplan"},
+				RequiredFlags:       []string{"--demo"},
+				RequiredPositionals: []string{},
+			},
+			workflowConditionalRequirement{
+				Description:         "the stream flow requires a source video (--input)",
+				UnlessAnyFlags:      []string{},
+				RequiredFlags:       []string{"--input"},
+				RequiredPositionals: []string{},
+			},
+		)
 	}
 
 	return workflowArguments{
@@ -280,13 +306,18 @@ func workflowValueConstraints(workflow workflowInfo) []workflowValueConstraint {
 			constraint("--transition", editor.TransitionFlash, "", editor.TransitionCut, editor.TransitionFlash, editor.TransitionWhip, editor.TransitionDip),
 			constraint("--video-preset", defaultPreset.VideoPreset, "",
 				"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"),
+			constraint("--format", "text", "", "text", "json"),
+		}
+	case "compose-final":
+		return []workflowValueConstraint{
+			constraint("--format", "text", "", "text", "json"),
 		}
 	case "stream-plan":
 		return []workflowValueConstraint{
 			constraint("--variant", streamclips.DefaultVariant().Name, "zv stream variants --format json", streamclips.VariantNames()...),
 			constraint("--format", "text", "", "text", "json"),
 		}
-	case "stream-render", "stream-killfeed", "stream-transcribe", "stream-captions", "stream-variants", "demo-players", "demo-moments", "demo-select":
+	case "stream-render", "stream-killfeed", "stream-transcribe", "stream-captions", "stream-variants", "demo-players", "demo-moments", "demo-select", "flows-run":
 		return []workflowValueConstraint{
 			constraint("--format", "text", "", "text", "json"),
 		}
@@ -303,6 +334,8 @@ func workflowRequiredFlags(workflow workflowInfo) []string {
 	if workflow.Name == "record" {
 		return []string{"--killplan", "--demo", "--out"}
 	}
+	// requiredFlagsFromCommand already drops the boolean --dry-run that the
+	// flows-run Command documents, so only --run-dir remains required there.
 	return requiredFlagsFromCommand(workflow.Command)
 }
 
@@ -315,7 +348,8 @@ func workflowSafetyMetadata(workflow workflowInfo, arguments workflowArguments) 
 
 	longRunning := false
 	switch workflow.Name {
-	case "short", "record", "compose-final", "music-analyze", "shorts-render", "stream-plan", "stream-transcribe", "stream-render", "analysis-viewer", "serve":
+	case "short", "record", "compose-final", "music-analyze", "shorts-render", "stream-plan", "stream-transcribe", "stream-render", "analysis-viewer", "serve", "flows-run":
+		// flows-run really parses demos and probes media across a whole journey.
 		longRunning = true
 	}
 

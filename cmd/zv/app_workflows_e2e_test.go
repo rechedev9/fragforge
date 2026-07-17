@@ -370,6 +370,10 @@ func TestZVBinaryCanonicalWorkflowFlagsAreScopedEndToEnd(t *testing.T) {
 			args: []string{"demo", "parse", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", "plan.json", "--segment-mode", "utility", "--rules", "rules.json", "--verbose"},
 		},
 		{
+			name: "demo parse dry-run",
+			args: []string{"demo", "parse", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", "plan.json", "--dry-run"},
+		},
+		{
 			name: "utility audit optional format",
 			args: []string{"utility", "audit", "--plan", "plan.json", "--lineup-catalog", "data/lineups", "--out", "audit.json", "--format", "json"},
 		},
@@ -429,8 +433,8 @@ func TestZVBinaryCanonicalWorkflowFlagsAreScopedEndToEnd(t *testing.T) {
 		},
 		{
 			name:       "workflow run demo parse rejects record boolean",
-			args:       []string{"workflows", "run", "demo-parse", "--", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", "plan.json", "--dry-run"},
-			wantStderr: "error: unknown flag --dry-run for \"demo parse\"\n" + workflowsRunUsage,
+			args:       []string{"workflows", "run", "demo-parse", "--", "--demo", "inferno.dem", "--steamid", "76561198000000000", "--out", "plan.json", "--portrait-safe-killfeed"},
+			wantStderr: "error: unknown flag --portrait-safe-killfeed for \"demo parse\"\n" + workflowsRunUsage,
 		},
 	}
 	for _, tt := range invalid {

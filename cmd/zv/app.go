@@ -61,7 +61,7 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 	case "workflows":
 		return runWorkflows(args[1:], stdout, stderr, stdin, runner)
 	case "flows":
-		return runFlows(args[1:], stdout, stderr)
+		return runFlows(args[1:], stdout, stderr, stdin, runner)
 	case "serve":
 		if len(args) == 2 && isHelp(args[1]) {
 			fmt.Fprint(stdout, serveUsage)

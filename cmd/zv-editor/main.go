@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -61,6 +65,7 @@ func run() error {
 		renderJobs          = flag.Int("render-jobs", 0, "max shorts rendered concurrently; 0 selects an automatic CPU-based limit")
 		openGallery         = flag.Bool("open-gallery", false, "open the publish gallery after a successful run")
 		dryRun              = flag.Bool("dry-run", false, "write manifests and prompts without running FFmpeg")
+		format              = flag.String("format", "text", "result summary format: text or json")
 		listPresets         = flag.Bool("list-presets", false, "print supported preset names, one per line, and exit; used by zv short to detect stale binaries")
 	)
 	flag.Parse()
@@ -71,6 +76,9 @@ func run() error {
 	}
 	if *recordingResultPath == "" || *outDir == "" {
 		return fmt.Errorf("--recording-result and --out are required")
+	}
+	if *format != "text" && *format != "json" {
+		return fmt.Errorf("unsupported format %q", *format)
 	}
 	if err := validateMusicVolume(*musicVolume); err != nil {
 		return err
@@ -123,9 +131,48 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := writeEditorSummary(os.Stdout, *format, result); err != nil {
+		return err
+	}
 	if *openGallery {
 		return openPath(result.GalleryPath)
 	}
+	return nil
+}
+
+// editorSummary is the {ok, dry_run, executed} success envelope emitted on
+// stdout, mirroring the record and compose-final stages. The durable
+// shorts-result.json artifact keeps its own richer schema.
+type editorSummary struct {
+	OK         bool     `json:"ok"`
+	DryRun     bool     `json:"dry_run"`
+	Executed   bool     `json:"executed"`
+	ResultPath string   `json:"result_path"`
+	PublishDir string   `json:"publish_dir"`
+	ShortCount int      `json:"short_count"`
+	Warnings   []string `json:"warnings"`
+}
+
+func writeEditorSummary(w io.Writer, format string, result editor.Result) error {
+	summary := editorSummary{
+		OK:         true,
+		DryRun:     result.DryRun,
+		Executed:   result.Executed,
+		ResultPath: filepath.Join(result.OutputDir, "shorts-result.json"),
+		PublishDir: result.PublishDir,
+		ShortCount: len(result.Shorts),
+		Warnings:   append([]string{}, result.Warnings...),
+	}
+	if format == "json" {
+		encoder := json.NewEncoder(w)
+		encoder.SetEscapeHTML(false)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(summary)
+	}
+	fmt.Fprintf(w, "shorts_result\t%s\n", summary.ResultPath)
+	fmt.Fprintf(w, "publish_dir\t%s\n", summary.PublishDir)
+	fmt.Fprintf(w, "shorts\t%d\n", summary.ShortCount)
+	fmt.Fprintf(w, "dry_run\t%t\n", summary.DryRun)
 	return nil
 }
 

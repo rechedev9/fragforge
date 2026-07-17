@@ -168,6 +168,10 @@ func workflowDelegatedCommand(args []string) string {
 		}
 	case "serve":
 		return "zv-orchestrator"
+	case "flows":
+		if len(args) >= 2 && args[1] == "run" {
+			return "zv"
+		}
 	case "capabilities", "gallery", "skills", "workflows", "check":
 		return "zv"
 	}

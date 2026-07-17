@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -636,6 +637,13 @@ func workflowRunSampleForwardedArgs(t *testing.T, workflow workflowInfo, gallery
 		return []string{"--", "--json", "run/analysis.json"}
 	case "gallery-open":
 		return []string{"--", "--path", galleryPath}
+	case "flows-run":
+		baseDir := filepath.Dir(filepath.Dir(galleryPath))
+		planPath := writeDemoReviewPlan(t, baseDir)
+		// A kill plan without a demo keeps the run media-free: parse is skipped,
+		// moments and select run in-process, and capture/render are skipped (no
+		// recording), so no delegated subcommand is invoked.
+		return []string{"--", "demo", "--killplan", planPath, "--run-dir", filepath.Join(baseDir, "flowdry"), "--dry-run"}
 	case "capabilities", "skills-check", "workflows-check", "project-check", "serve":
 		return nil
 	default:
@@ -995,7 +1003,7 @@ func workflowDelegatesExternally(workflow workflowInfo) bool {
 		return false
 	}
 	switch workflow.RunArgs[0] {
-	case "capabilities", "check", "gallery", "short", "skills", "workflows":
+	case "capabilities", "check", "gallery", "short", "skills", "workflows", "flows":
 		return false
 	default:
 		return true
@@ -1810,18 +1818,7 @@ func buildZVBinary(t *testing.T, _ string) string {
 	// process-wide environment and working-directory state deliberately does
 	// not, so these expensive subprocess tests can safely run concurrently.
 	t.Parallel()
-	cachedZVBinaryOnce.Do(func() {
-		cachedZVBinaryDir, cachedZVBinaryErr = os.MkdirTemp("", "zv-test-bin-*")
-		if cachedZVBinaryErr != nil {
-			return
-		}
-		cachedZVBinaryPath = filepath.Join(cachedZVBinaryDir, executableName("zv"))
-		cmd := exec.Command("go", "build", "-o", cachedZVBinaryPath, ".")
-		cachedZVBinaryOutput, cachedZVBinaryErr = cmd.CombinedOutput()
-	})
-	if cachedZVBinaryErr != nil {
-		t.Fatalf("go build ./cmd/zv: %v\n%s", cachedZVBinaryErr, cachedZVBinaryOutput)
-	}
+	ensureCachedZVBinary(t)
 
 	testBinDir, err := os.MkdirTemp(cachedZVBinaryDir, "case-*")
 	if err != nil {
@@ -1835,6 +1832,137 @@ func buildZVBinary(t *testing.T, _ string) string {
 		copyFile(t, cachedZVBinaryPath, exe)
 	}
 	return exe
+}
+
+// ensureCachedZVBinary builds the unified zv binary once for the whole package
+// test run and returns its path. It performs no t.Parallel(), so both the
+// hardlink-per-case E2E path (buildZVBinary) and buildDelegatedBinaries can
+// share the single expensive compile.
+func ensureCachedZVBinary(t *testing.T) string {
+	t.Helper()
+	cachedZVBinaryOnce.Do(func() {
+		cachedZVBinaryDir, cachedZVBinaryErr = os.MkdirTemp("", "zv-test-bin-*")
+		if cachedZVBinaryErr != nil {
+			return
+		}
+		cachedZVBinaryPath = filepath.Join(cachedZVBinaryDir, executableName("zv"))
+		cmd := exec.Command("go", "build", "-o", cachedZVBinaryPath, ".")
+		cachedZVBinaryOutput, cachedZVBinaryErr = cmd.CombinedOutput()
+	})
+	if cachedZVBinaryErr != nil {
+		t.Fatalf("go build ./cmd/zv: %v\n%s", cachedZVBinaryErr, cachedZVBinaryOutput)
+	}
+	return cachedZVBinaryPath
+}
+
+var (
+	delegatedBinariesOnce sync.Once
+	delegatedBinariesDir  string
+	delegatedBinariesExe  string
+	delegatedBinariesErr  error
+)
+
+// buildDelegatedBinaries builds the unified zv binary next to every delegated
+// stage binary a journey shells out to (parser, recorder, editor, composer,
+// stream), so a spawned `zv <stage>` resolves real siblings — delegation looks
+// next to the executable. Built once per package test run and shared by the
+// stage-contract, flow-run, and journey e2e suites instead of each keeping its
+// own build-once path. `demo moments`/`demo select` delegate back to zv itself,
+// so no extra binary is needed for them.
+func buildDelegatedBinaries(t *testing.T) string {
+	t.Helper()
+	root := repoRoot(t)
+	zvBinary := ensureCachedZVBinary(t)
+	delegatedBinariesOnce.Do(func() {
+		delegatedBinariesDir, delegatedBinariesErr = os.MkdirTemp("", "zv-delegated-bin-*")
+		if delegatedBinariesErr != nil {
+			return
+		}
+		// Reuse the already-built unified zv binary instead of compiling ./cmd/zv
+		// a second time; it must sit beside the delegated stage binaries so a
+		// spawned `zv <stage>` resolves real siblings.
+		zvDst := filepath.Join(delegatedBinariesDir, executableName("zv"))
+		if err := os.Link(zvBinary, zvDst); err != nil {
+			if delegatedBinariesErr = copyExecutable(zvBinary, zvDst); delegatedBinariesErr != nil {
+				return
+			}
+		}
+		for _, name := range []string{"zv-parser", "zv-recorder", "zv-editor", "zv-composer", "zv-stream"} {
+			out := filepath.Join(delegatedBinariesDir, executableName(name))
+			cmd := exec.Command("go", "build", "-o", out, "./cmd/"+name)
+			cmd.Dir = root
+			if combined, err := cmd.CombinedOutput(); err != nil {
+				delegatedBinariesErr = fmt.Errorf("build %s: %w\n%s", name, err, combined)
+				return
+			}
+		}
+		delegatedBinariesExe = zvDst
+	})
+	if delegatedBinariesErr != nil {
+		t.Fatalf("build delegated binaries: %v", delegatedBinariesErr)
+	}
+	return delegatedBinariesExe
+}
+
+// copyExecutable copies src to dst preserving the executable bit; used as a
+// hardlink fallback when the cached zv binary and the delegated bin dir land on
+// different filesystems.
+func copyExecutable(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// generateSyntheticSource builds a small 4s clip with a highlighted killfeed
+// notice so the stream binary-level e2e has real media to probe and render
+// against without committing any media file (repo rule). It is a deliberate
+// ~20-line duplicate of the identical helper in
+// cmd/zv-orchestrator/stream_e2e_test.go (keep the two in sync); the packages do
+// not share test helpers, so cross-referencing is the least-surprising option.
+func generateSyntheticSource(t *testing.T, ffmpegPath, outPath string) {
+	t.Helper()
+	args := []string{
+		"-y",
+		"-f", "lavfi", "-i", "color=c=blue:s=1280x720:d=4:r=30",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+		"-filter_complex", "[0:v]drawbox=x=0:y=0:w=320:h=180:color=red:t=fill,drawbox=x=1024:y=36:w=224:h=36:color=lime:t=fill,drawbox=x=1022:y=34:w=228:h=40:color=red:t=2,drawbox=x=984:y=82:w=264:h=32:color=yellow:t=fill,drawbox=x=982:y=80:w=268:h=38:color=red:t=2[v]",
+		"-map", "[v]",
+		"-map", "1:a",
+		"-c:v", "libx264",
+		"-pix_fmt", "yuv420p",
+		"-c:a", "aac",
+		"-shortest",
+		outPath,
+	}
+	runSyntheticFFmpeg(t, ffmpegPath, args...)
+}
+
+func runSyntheticFFmpeg(t *testing.T, ffmpegPath string, args ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	// #nosec G204 -- ffmpegPath comes from exec.LookPath and args are test-local literals.
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// exec.LookPath only proves an ffmpeg binary exists, not that it can
+		// synthesize the source (a build without libx264/lavfi or with an older
+		// drawbox fails here). Treat a synthesis failure as a missing capability
+		// and skip, not a hard failure. Real stage failures after a successful
+		// synth still Fatal in the callers.
+		t.Skipf("ffmpeg cannot synthesize the test source (missing capability): %v\n%s", err, out)
+	}
 }
 
 func removeAllTestArtifacts(path string) error {

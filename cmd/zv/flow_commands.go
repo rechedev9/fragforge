@@ -42,7 +42,7 @@ type flowListRow struct {
 	ShowCommand string `json:"show_command"`
 }
 
-func runFlows(args []string, stdout, stderr io.Writer) int {
+func runFlows(args []string, stdout, stderr io.Writer, stdin io.Reader, runner commandRunner) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, flowsUsage)
 		return exitInvalidArgs
@@ -56,6 +56,8 @@ func runFlows(args []string, stdout, stderr io.Writer) int {
 		return runFlowsList(args[1:], stdout, stderr)
 	case "show":
 		return runFlowsShow(args[1:], stdout, stderr)
+	case "run":
+		return runFlowsRun(args[1:], stdout, stderr, stdin, runner)
 	default:
 		fmt.Fprintf(stderr, "unknown flows command %q\n%s", args[0], flowsUsage)
 		return exitInvalidArgs
@@ -146,7 +148,9 @@ func productionFlows() []productionFlow {
 			Phases: []flowPhase{
 				{ID: "doctor", Goal: "verify local parser, HLAE, CS2, FFmpeg, and editor readiness", Command: "zv capabilities --format json", ReadOnly: true},
 				{ID: "players", Goal: "inspect the roster and choose the POV SteamID64", Command: "zv demo players --demo <match.dem> --format json", Decision: "target player", ReadOnly: true},
+				{ID: "parse-preflight", Goal: "validate the demo, target, and output path without parsing", Command: "zv demo parse --demo <match.dem> --steamid <SteamID64> --out <run>/killplan.json --dry-run", Decision: "approve deterministic parse inputs", ReadOnly: true},
 				{ID: "parse", Goal: "derive a deterministic kill plan from the demo", Command: "zv demo parse --demo <match.dem> --steamid <SteamID64> --out <run>/killplan.json", Produces: "killplan.json"},
+				{ID: "moments-preflight", Goal: "score candidate plays in memory without writing the review artifact", Command: "zv demo moments --killplan <run>/killplan.json --out <run>/moments.json --dry-run --format json", Decision: "approve factual ranking inputs", ReadOnly: true},
 				{ID: "moments", Goal: "rank factual candidate plays before GPU capture", Command: "zv demo moments --killplan <run>/killplan.json --out <run>/moments.json --format json", Decision: "segments and narrative order", Produces: "moments.json", ReadOnly: false},
 				{ID: "creative-brief", Goal: "ask only unanswered creative questions and receive approval before expensive media work", Decision: "delivery format; HUD and killfeed; kill effect; transition; kill numbering or counter; intro/outro; music; generate gameplay thumbnail candidates or no cover", Produces: "approved creative brief and exact render choices", Gate: true, ReadOnly: true},
 				{ID: "select-preflight", Goal: "validate the chosen plays and narrative order without writing", Command: "zv demo select --killplan <run>/killplan.json --segments <seg-ids> --out <run>/selected-plan.json --dry-run --format json", Decision: "approve selected segments", ReadOnly: true},

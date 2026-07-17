@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 		os.Setenv("ZV_DATA_DIR", obsDir)
 	}
 	code := m.Run()
-	for _, dir := range []string{cachedZVBinaryDir, fakeSubcommandMasterDir, obsDir} {
+	for _, dir := range []string{cachedZVBinaryDir, delegatedBinariesDir, fakeSubcommandMasterDir, obsDir} {
 		if err := removeAllTestArtifacts(dir); err != nil {
 			fmt.Fprintf(os.Stderr, "test cleanup %s: %v\n", dir, err)
 			code = 1

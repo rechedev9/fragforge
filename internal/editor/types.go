@@ -340,6 +340,7 @@ type Result struct {
 	TemporalSmoothing bool          `json:"temporal_smoothing,omitempty"`
 	CoversEnabled     bool          `json:"covers_enabled"`
 	DryRun            bool          `json:"dry_run,omitempty"`
+	Executed          bool          `json:"executed"`
 	Shorts            []ShortResult `json:"shorts"`
 	Warnings          []string      `json:"warnings,omitempty"`
 	Error             string        `json:"error,omitempty"`

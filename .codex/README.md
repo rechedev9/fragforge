@@ -242,6 +242,8 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows show workflows-check --format json
 ./bin/zv workflows show project-check
 ./bin/zv workflows show project-check --format json
+./bin/zv workflows show flows-run
+./bin/zv workflows show flows-run --format json
 ./bin/zv workflows validate short --format json -- testdata/foo.dem --prompt "all kills 76561198000000000" --dry-run
 ./bin/zv workflows validate demo-parse --format json -- --demo testdata/foo.dem --steamid 76561198000000000 --segment-mode utility --out plan.json
 ./bin/zv workflows validate record --format json -- --killplan plan.json --demo testdata/foo.dem --out data/runs/run-004/recording --dry-run --hud deathnotices
@@ -279,6 +281,8 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv analysis tactical-data --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv analysis view --json data/analysis/MarcusN1-deaths.json
 ./bin/zv gallery open --path data/runs/run-004/shortslistosparasubir/index.html
+# Chain the whole demo journey safely; supply --killplan to skip parse and omit --demo to skip capture.
+./bin/zv flows run demo --killplan testdata/agent-killplan.json --run-dir data/runs/agent-doc --dry-run --format json
 ./bin/zv serve
 ./bin/zv workflows run short -- testdata/foo.dem --prompt "all kills 76561198000000000" --dry-run
 ./bin/zv workflows run capabilities -- --format json
@@ -300,6 +304,7 @@ The unified CLI can discover the same repo-local skills:
 ./bin/zv workflows run analysis-tactical-data -- --demo testdata/foo.dem --out data/runs/run-004/tactical.json --start 1000 --end 2000
 ./bin/zv workflows run analysis-viewer -- --json data/analysis/MarcusN1-deaths.json
 ./bin/zv workflows run gallery-open -- --path data/runs/run-004/shortslistosparasubir/index.html
+./bin/zv workflows run flows-run -- demo --killplan testdata/agent-killplan.json --run-dir data/runs/agent-doc --dry-run --format json
 ./bin/zv workflows run serve
 ./bin/zv workflows run skills-check
 ./bin/zv workflows run skills-check -- --format json

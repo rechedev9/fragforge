@@ -153,8 +153,8 @@ func validateSkillCommand(command []string) string {
 			}
 		}
 	case "flows":
-		if len(command) < 2 || (command[1] != "list" && command[1] != "show") {
-			return `uses non-standard zv command "flows"; expected "flows list" or "flows show"`
+		if len(command) < 2 || (command[1] != "list" && command[1] != "show" && command[1] != "run") {
+			return `uses non-standard zv command "flows"; expected "flows list", "flows show", or "flows run"`
 		}
 		switch command[1] {
 		case "list":
@@ -168,11 +168,46 @@ func validateSkillCommand(command []string) string {
 			if len(rest) != 1 || (rest[0] != "demo" && rest[0] != "stream") {
 				return `"flows show" requires exactly one of: demo, stream`
 			}
+		case "run":
+			return validateFlowsRunCommand(command[2:])
 		}
 	default:
 		return fmt.Sprintf("uses non-standard zv command %q", command[0])
 	}
 	return ""
+}
+
+// validateFlowsRunCommand validates the canonical "flows run" contract: the flow
+// name (demo/stream, or the <demo|stream> template used in docs and the catalog)
+// must be the FIRST token, followed by the flow flags. Requiring the flow name
+// first avoids the earlier "first non-dash token" scan, which misparsed
+// "flows run --run-dir X demo" by stealing a flag value as the flow. Required-flag
+// reporting is delegated to validateRequiredFlags so the message matches every
+// other workflow. --dry-run is enforced at runtime, not here, because the only
+// supported mode is dry-run.
+func validateFlowsRunCommand(args []string) string {
+	if isSingleHelp(args) {
+		return ""
+	}
+	if len(args) == 0 {
+		// A bare invocation surfaces the shared missing-required-flag contract
+		// first (every other workflow does), then the missing flow name.
+		if issue := validateRequiredFlags(`"flows run"`, args, "--run-dir"); issue != "" {
+			return issue
+		}
+		return `missing flow name for "flows run"; expected demo or stream`
+	}
+	if strings.HasPrefix(args[0], "-") {
+		// There ARE tokens but the flow name is not first: never scan later tokens
+		// for it, which stole flag values like in "flows run --run-dir X demo".
+		return `missing flow name for "flows run"; expected demo or stream`
+	}
+	flowName := args[0]
+	rest := args[1:]
+	if flowName != "demo" && flowName != "stream" && flowName != "<demo|stream>" {
+		return fmt.Sprintf(`unknown flow %q for "flows run"; expected demo or stream`, flowName)
+	}
+	return validateRequiredFlags(`"flows run"`, rest, "--run-dir")
 }
 
 func validateBatchCommand(args []string) string {
@@ -238,9 +273,16 @@ func requiredFlagsFromCommand(command string) []string {
 	}
 	var flags []string
 	for _, field := range fields {
-		if strings.HasPrefix(field, "--") {
-			flags = append(flags, field)
+		if !strings.HasPrefix(field, "--") {
+			continue
 		}
+		// --dry-run appears in a Command template only to make the documented line
+		// runnable (flows-run rejects non-dry-run); it is a boolean, not a required
+		// value flag, so it never counts as a required flag.
+		if field == "--dry-run" {
+			continue
+		}
+		flags = append(flags, field)
 	}
 	return flags
 }
@@ -430,7 +472,7 @@ func commandValueFlags(commandName string, required []string) []string {
 	case `"record"`:
 		flags = append(flags, "--hlae", "--cs2", "--hud", "--fps", "--video-crf", "--timeout", "--format")
 	case `"compose final"`:
-		flags = append(flags, "--ffmpeg", "--timeout")
+		flags = append(flags, "--ffmpeg", "--timeout", "--format")
 	case `"shorts render"`:
 		flags = append(flags,
 			"--killplan",
@@ -456,6 +498,7 @@ func commandValueFlags(commandName string, required []string) []string {
 			"--render-jobs",
 			"--ffmpeg",
 			"--ffprobe",
+			"--format",
 		)
 	case `"stream plan"`:
 		flags = append(flags,
@@ -511,6 +554,8 @@ func commandValueFlags(commandName string, required []string) []string {
 		flags = append(flags, "--sample")
 	case `"analysis view"`:
 		flags = append(flags, "--addr")
+	case `"flows run"`:
+		flags = append(flags, "--demo", "--steamid", "--killplan", "--input", "--events", "--words", "--format")
 	}
 	return flags
 }
@@ -518,7 +563,9 @@ func commandValueFlags(commandName string, required []string) []string {
 func commandBoolFlags(commandName string) []string {
 	switch commandName {
 	case `"demo parse"`:
-		return []string{"--verbose"}
+		return []string{"--verbose", "--dry-run"}
+	case `"demo moments"`:
+		return []string{"--dry-run"}
 	case `"demo select"`:
 		return []string{"--dry-run"}
 	case `"short"`:
@@ -555,6 +602,8 @@ func commandBoolFlags(commandName string) []string {
 	case `"stream transcribe"`:
 		return []string{"--dry-run"}
 	case `"stream captions"`:
+		return []string{"--dry-run"}
+	case `"flows run"`:
 		return []string{"--dry-run"}
 	default:
 		return nil

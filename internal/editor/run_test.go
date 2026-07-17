@@ -342,6 +342,25 @@ func TestRunShortRenderFailureWritesLog(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run error = nil, want short render failure")
 	}
+	// A real render that failed must not claim it executed, and the persisted
+	// artifact must record executed:false.
+	if result.Executed {
+		t.Fatalf("result.Executed = true after a failed render, want false")
+	}
+	var persisted Result
+	body, readResultErr := os.ReadFile(filepath.Join(outDir, "shorts-result.json"))
+	if readResultErr != nil {
+		t.Fatalf("read shorts-result.json: %v", readResultErr)
+	}
+	if err := json.Unmarshal(body, &persisted); err != nil {
+		t.Fatalf("decode shorts-result.json: %v", err)
+	}
+	if persisted.Executed {
+		t.Fatalf("persisted result executed = true after a failed render, want false")
+	}
+	if persisted.Error == "" {
+		t.Fatalf("persisted result error = empty, want the render failure recorded")
+	}
 	if len(result.Shorts) == 0 || result.Shorts[0].RenderLogPath == "" {
 		t.Fatalf("render log path missing: %#v", result.Shorts)
 	}

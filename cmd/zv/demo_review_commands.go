@@ -22,6 +22,8 @@ import (
 
 type demoMomentsResult struct {
 	OK       bool             `json:"ok"`
+	DryRun   bool             `json:"dry_run"`
+	Executed bool             `json:"executed"`
 	Input    string           `json:"input"`
 	Output   string           `json:"output,omitempty"`
 	Count    int              `json:"count"`
@@ -49,6 +51,7 @@ func runDemoMoments(args []string, stdout, stderr io.Writer) int {
 	outPath := fs.String("out", "", "optional moments JSON artifact")
 	top := fs.Int("top", 0, "maximum moments, highest score first; 0 keeps all")
 	format := fs.String("format", "text", "text or json")
+	dryRun := fs.Bool("dry-run", false, "validate and score without writing")
 	if err := fs.Parse(args); err != nil {
 		return writeDemoReviewError(args, stdout, stderr, err, demoMomentsUsage, exitInvalidArgs)
 	}
@@ -85,13 +88,15 @@ func runDemoMoments(args []string, stdout, stderr io.Writer) int {
 		doc.Moments = doc.Moments[:*top]
 	}
 	absInput, _ := filepath.Abs(*killPlanPath)
-	result := demoMomentsResult{OK: true, Input: absInput, Count: len(doc.Moments), Document: doc}
+	result := demoMomentsResult{OK: true, DryRun: *dryRun, Executed: !*dryRun, Input: absInput, Count: len(doc.Moments), Document: doc}
 	if strings.TrimSpace(*outPath) != "" {
 		absOut, _ := filepath.Abs(*outPath)
-		if err := writeDemoReviewJSON(absOut, doc); err != nil {
-			return writeDemoReviewError(args, stdout, stderr, fmt.Errorf("write moments: %w", err), "", exitUnexpected)
-		}
 		result.Output = absOut
+		if !*dryRun {
+			if err := writeDemoReviewJSON(absOut, doc); err != nil {
+				return writeDemoReviewError(args, stdout, stderr, fmt.Errorf("write moments: %w", err), "", exitUnexpected)
+			}
+		}
 	}
 	if *format == "json" {
 		if err := writeJSON(stdout, result); err != nil {
@@ -108,7 +113,11 @@ func runDemoMoments(args []string, stdout, stderr io.Writer) int {
 			strings.Join(moment.ReasonCodes, ","))
 	}
 	if result.Output != "" {
-		fmt.Fprintf(stdout, "moments: %s\n", result.Output)
+		if *dryRun {
+			fmt.Fprintf(stdout, "moments: %s (not written)\n", result.Output)
+		} else {
+			fmt.Fprintf(stdout, "moments: %s\n", result.Output)
+		}
 	}
 	return exitSuccess
 }

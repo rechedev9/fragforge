@@ -357,6 +357,10 @@ func newStreamE2EServer(t *testing.T, ffmpegPath, ffprobePath string) (*httptest
 // ring (x=[1022,1250) y=[34,74)); notice B is wider, yellow, shifted left and
 // 6px below A like a real staggered killfeed, ring (x=[982,1250) y=[80,118)).
 // A sine wave audio track completes the source.
+//
+// cmd/zv/app_test_support_test.go keeps a deliberate ~20-line duplicate of this
+// helper for the stream binary-level e2e (the packages do not share test
+// helpers); keep the two in sync.
 func generateSyntheticSource(t *testing.T, ffmpegPath, outPath string) {
 	t.Helper()
 	args := []string{

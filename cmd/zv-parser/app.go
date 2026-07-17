@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -35,7 +36,7 @@ const (
 const usage = `zv-parser - parse a CS2 demo into a kill plan JSON
 
 Usage:
-  zv-parser parse --demo <path> --steamid <id> [--segment-mode kills|smokes|utility] [--rules <path>] [--out <path>] [--verbose]
+  zv-parser parse --demo <path> --steamid <id> [--segment-mode kills|smokes|utility] [--rules <path>] [--out <path>] [--dry-run] [--verbose]
   zv-parser utility-audit --plan <plan-utility.json> [--lineup-catalog <dir>] [--format csv|json] [--out <path>]
 
 Flags:
@@ -44,6 +45,7 @@ Flags:
   --segment-mode  Segment mode: kills, smokes, or utility (default "kills")
   --rules     Optional JSON file with segmentation rules
   --out       Output path, or "-" for stdout (default "-")
+  --dry-run   Validate inputs and the output path without parsing or writing
   --verbose   Log progress to stderr
   --plan      Path to a utility kill plan JSON
   --lineup-catalog  Optional directory with manual lineup catalog JSON files
@@ -78,7 +80,15 @@ type parseArgs struct {
 	segmentMode string
 	rules       string
 	out         string
+	dryRun      bool
 	verbose     bool
+}
+
+// parseDryRunResult is the validate-only envelope emitted by "parse --dry-run".
+type parseDryRunResult struct {
+	OK       bool `json:"ok"`
+	DryRun   bool `json:"dry_run"`
+	Executed bool `json:"executed"`
 }
 
 type utilityAuditArgs struct {
@@ -97,6 +107,7 @@ func runParse(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&pa.segmentMode, "segment-mode", string(parser.SegmentModeKills), "segment mode: kills, smokes, or utility")
 	fs.StringVar(&pa.rules, "rules", "", "optional JSON rules file")
 	fs.StringVar(&pa.out, "out", "-", "output path or \"-\" for stdout")
+	fs.BoolVar(&pa.dryRun, "dry-run", false, "validate inputs and the output path without parsing or writing")
 	fs.BoolVar(&pa.verbose, "verbose", false, "log progress to stderr")
 
 	if err := fs.Parse(args); err != nil {
@@ -136,6 +147,23 @@ func runParse(args []string, stdout, stderr io.Writer) int {
 		return exitFileError
 	}
 	defer demoFile.Close()
+
+	if pa.dryRun {
+		if err := outputCreatable(pa.out); err != nil {
+			fmt.Fprintf(stderr, "error: output path is not creatable: %v\n", err)
+			return exitFileError
+		}
+		b, err := json.MarshalIndent(parseDryRunResult{OK: true, DryRun: true, Executed: false}, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "error: marshaling dry-run result: %v\n", err)
+			return exitUnexpected
+		}
+		if _, err := stdout.Write(append(b, '\n')); err != nil {
+			fmt.Fprintf(stderr, "error: writing stdout: %v\n", err)
+			return exitUnexpected
+		}
+		return exitSuccess
+	}
 
 	sha, err := sha256Hex(demoFile)
 	if err != nil {
@@ -274,9 +302,6 @@ func writePlan(plan killplan.Plan, out string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: marshaling plan: %v\n", err)
 		return exitUnexpected
 	}
-	if out == "-" {
-		return writeBytes(append(b, '\n'), out, stdout, stderr)
-	}
 	return writeBytes(append(b, '\n'), out, stdout, stderr)
 }
 
@@ -288,11 +313,45 @@ func writeBytes(b []byte, out string, stdout, stderr io.Writer) int {
 		}
 		return exitSuccess
 	}
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		fmt.Fprintf(stderr, "error: creating output directory: %v\n", err)
+		return exitFileError
+	}
 	if err := os.WriteFile(out, b, 0o600); err != nil {
 		fmt.Fprintf(stderr, "error: writing output: %v\n", err)
 		return exitFileError
 	}
 	return exitSuccess
+}
+
+// outputCreatable reports whether out can be written without any mutation. A
+// "-" target is always creatable; otherwise the nearest existing ancestor of
+// the parent directory must itself be a directory.
+func outputCreatable(out string) error {
+	if out == "-" {
+		return nil
+	}
+	dir := filepath.Dir(out)
+	for {
+		info, err := os.Stat(dir)
+		if err == nil {
+			if !info.IsDir() {
+				return fmt.Errorf("%s is not a directory", dir)
+			}
+			return nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// The walk reached a filesystem root that itself does not exist
+			// (for example a nonexistent Windows drive like Q:\): nothing can
+			// be created under it, so the path is not creatable.
+			return fmt.Errorf("%s does not exist", dir)
+		}
+		dir = parent
+	}
 }
 
 func sha256Hex(r io.Reader) (string, error) {

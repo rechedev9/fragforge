@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -28,11 +29,15 @@ func run() error {
 		ffmpegPath          = flag.String("ffmpeg", "", "path to ffmpeg.exe; defaults to PATH")
 		timeout             = flag.Duration("timeout", 20*time.Minute, "maximum duration for FFmpeg composition")
 		dryRun              = flag.Bool("dry-run", false, "write composition-result.json without running FFmpeg")
+		format              = flag.String("format", "text", "result summary format: text or json")
 	)
 	flag.Parse()
 
 	if *recordingResultPath == "" || *outPath == "" {
 		return fmt.Errorf("--recording-result and --out are required")
+	}
+	if *format != "text" && *format != "json" {
+		return fmt.Errorf("unsupported format %q", *format)
 	}
 
 	absRecordingResult, err := filepath.Abs(*recordingResultPath)
@@ -58,7 +63,10 @@ func run() error {
 
 	resultPath := filepath.Join(filepath.Dir(absOut), "composition-result.json")
 	if *dryRun {
-		return writeResult(resultPath, result)
+		if err := writeResult(resultPath, result); err != nil {
+			return err
+		}
+		return writeCompositionSummary(os.Stdout, *format, result, resultPath, true)
 	}
 	// A missing segment clip is fatal; duplicate clips are resolved
 	// deterministically and recorded as warnings without aborting the render.
@@ -105,7 +113,46 @@ func run() error {
 		recordingResult.Plan.Stream.FPS,
 		composition.ClipDurationSum(clips),
 	)...)
-	return writeResult(resultPath, result)
+	if err := writeResult(resultPath, result); err != nil {
+		return err
+	}
+	return writeCompositionSummary(os.Stdout, *format, result, resultPath, false)
+}
+
+// compositionSummary is the {ok, dry_run, executed} success envelope emitted on
+// stdout, mirroring the record and shorts-render stages. The durable
+// composition-result.json artifact keeps its own schema.
+type compositionSummary struct {
+	OK         bool     `json:"ok"`
+	DryRun     bool     `json:"dry_run"`
+	Executed   bool     `json:"executed"`
+	ResultPath string   `json:"result_path"`
+	Output     string   `json:"output"`
+	ClipCount  int      `json:"clip_count"`
+	Warnings   []string `json:"warnings"`
+}
+
+func writeCompositionSummary(w io.Writer, format string, result composition.Result, resultPath string, dryRun bool) error {
+	summary := compositionSummary{
+		OK:         true,
+		DryRun:     dryRun,
+		Executed:   !dryRun,
+		ResultPath: resultPath,
+		Output:     result.Output,
+		ClipCount:  len(result.Clips),
+		Warnings:   append([]string{}, result.Warnings...),
+	}
+	if format == "json" {
+		encoder := json.NewEncoder(w)
+		encoder.SetEscapeHTML(false)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(summary)
+	}
+	fmt.Fprintf(w, "composition_result\t%s\n", summary.ResultPath)
+	fmt.Fprintf(w, "output\t%s\n", summary.Output)
+	fmt.Fprintf(w, "clips\t%d\n", summary.ClipCount)
+	fmt.Fprintf(w, "dry_run\t%t\n", summary.DryRun)
+	return nil
 }
 
 func readRecordingResult(path string) (recording.RecordingResult, error) {

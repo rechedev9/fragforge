@@ -1287,12 +1287,26 @@ func TestWorkflowCatalogExposesAgentExecutionMetadata(t *testing.T) {
 	if got, want := strings.Join(parse.Arguments.OptionalValueFlags, " "), "--segment-mode --rules"; got != want {
 		t.Fatalf("demo-parse optional value flags = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(parse.Arguments.BooleanFlags, " "), "--verbose"; got != want {
+	if got, want := strings.Join(parse.Arguments.BooleanFlags, " "), "--verbose --dry-run"; got != want {
 		t.Fatalf("demo-parse boolean flags = %q, want %q", got, want)
+	}
+	if !parse.Safety.SupportsDryRun || parse.Safety.ReadOnly || parse.Safety.LongRunning {
+		t.Fatalf("demo-parse safety = %#v, want short mutating workflow with dry-run", parse.Safety)
 	}
 	segmentMode := workflowValueConstraintForFlag(t, parse, "--segment-mode")
 	if got, want := strings.Join(segmentMode.AllowedValues, " "), "kills smokes utility"; got != want || segmentMode.Default != "kills" {
 		t.Fatalf("demo-parse segment mode metadata = %#v, want kills/smokes/utility with kills default", segmentMode)
+	}
+
+	moments, ok := findWorkflow("demo-moments")
+	if !ok {
+		t.Fatal("demo-moments workflow not found")
+	}
+	if !containsString(moments.Arguments.BooleanFlags, "--dry-run") {
+		t.Fatalf("demo-moments boolean flags = %#v, want --dry-run", moments.Arguments.BooleanFlags)
+	}
+	if !moments.Safety.SupportsDryRun || moments.Safety.LongRunning {
+		t.Fatalf("demo-moments safety = %#v, want dry-run capable and not long-running", moments.Safety)
 	}
 
 	demoPlayers, ok := findWorkflow("demo-players")
@@ -1404,8 +1418,8 @@ func TestRunWorkflowsValidateJSONDoesNotExecute(t *testing.T) {
 	if got, want := strings.Join(result.Argv, " "), "zv demo parse --demo inferno.dem --steamid 76561198000000000 --out plan.json --verbose"; got != want {
 		t.Fatalf("argv = %q, want %q", got, want)
 	}
-	if result.Safety == nil || result.Safety.ReadOnly || result.Safety.LongRunning || result.Safety.SupportsDryRun {
-		t.Fatalf("safety = %#v, want short mutating workflow without dry-run", result.Safety)
+	if result.Safety == nil || result.Safety.ReadOnly || result.Safety.LongRunning || !result.Safety.SupportsDryRun {
+		t.Fatalf("safety = %#v, want short mutating workflow with dry-run", result.Safety)
 	}
 }
 

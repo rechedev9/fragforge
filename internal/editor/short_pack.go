@@ -229,6 +229,9 @@ func (p *shortPackRenderer) writeOutputs() error {
 
 func (p *shortPackRenderer) fail(err error) error {
 	p.result.Error = err.Error()
+	// A real render that failed did not complete, so it is not executed even
+	// though it started; keep the artifact honest about partial work.
+	p.result.Executed = false
 	_ = WriteResult(p.opts.ResultPath, *p.result)
 	return err
 }
