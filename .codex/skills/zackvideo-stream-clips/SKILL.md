@@ -12,17 +12,31 @@ Reviewed word timings keep captions independent of cloud credentials; `zv stream
 
 ## Creative Brief Gate
 
-Before any non-dry-run render, ask the user only for the creative choices they have not already supplied, grouped into one concise message, and wait for explicit approval:
+Before any non-dry-run render, ask the user only for the creative choices they have not already supplied, grouped into one concise message, and wait for explicit approval. Do not treat ambiguous execution words like "go", "hazlo", "dale", "ok", or "ya deberia estar ok" as approval unless they answer a previously shown brief:
 
 - delivery/layout variant: discover the supported list first and offer the real names (`streamer-vertical-stack-40-60` facecam stack, `streamer-fullframe-nocam`, `streamer-landscape-16x9`, plus any newly listed variant);
 - clip boundaries: which stream moments to cut (start/end timestamps or clip IDs) and one title per clip;
-- killfeed treatment: factual killfeed notices on or off, and the reviewed events source when on;
-- captions: Spanish captions on or off, and whether reviewed word timings exist or local transcription candidates must be generated and reviewed first;
+- framing style: clean crop preference, whether facecam should be prominent, and whether gameplay should preserve HUD/killfeed even if that means less zoom;
+- killfeed treatment: source killfeed only, factual re-overlay on, or off. Default to no re-overlay unless the user explicitly asks for it; never add a large duplicated killfeed block by default;
+- captions: Spanish captions on or off, and whether reviewed word timings exist or local transcription candidates must be generated and reviewed first. If generated candidates contain obvious hallucinations, filler, or wrong words, correct/import reviewed words before final render;
 - music: none, or a track directory the user provides;
-- delivery shape: one clip per moment or one longer compilation.
+- delivery shape: one clip per moment or one longer compilation;
+- thumbnail/cover: generated frame cover or no cover.
 
-If the user delegates creative control, state the resolved defaults and treat that delegation as approval.
+If the user delegates creative control before a brief exists, state the resolved defaults as a concrete brief and ask for approval; only a follow-up confirmation approves the run.
 Preserve every approved answer in the exact render argv; do not silently replace answers with preset defaults later.
+
+Use this question shape for a fresh stream URL:
+
+```text
+Antes de renderizar dime/confirmame:
+1. Layout: stack vertical facecam+gameplay, full gameplay sin cam, o landscape 16:9.
+2. Recorte: limpio sin duplicar killfeed, o quieres killfeed re-overlay.
+3. Subtitulos: si/no; si si, reviso el texto antes de quemarlo.
+4. Musica: ninguna o carpeta/track.
+5. Salida: un clip unico o compilacion.
+6. Titulo/cover: titulo final y cover generado o sin cover.
+```
 
 ## Workflow
 

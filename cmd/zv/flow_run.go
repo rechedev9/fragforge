@@ -233,7 +233,7 @@ func demoFlowRunSteps(runDir, demo, steamid, killplanFlag string) []flowRunStep 
 			}, nil
 		}},
 		{id: "creative-brief", build: func() (flowRunAction, error) {
-			return flowRunAction{gate: true, reason: "creative gate: approve delivery format, HUD/killfeed, kill effect, transition, counter, intro/outro, music, and thumbnail strategy"}, nil
+			return flowRunAction{gate: true, reason: "creative gate: approve delivery format, HUD/killfeed, kill effect, transition, counter, intro/outro, music, and thumbnail strategy; ambiguous go/hazlo is not approval until it answers a shown brief"}, nil
 		}},
 		{id: "select", build: func() (flowRunAction, error) {
 			ids, err := demoFlowSegmentIDs(killplanPath)
@@ -295,6 +295,9 @@ func streamFlowRunSteps(runDir, input, events, words, killfeedCrop string) []flo
 	}
 
 	return []flowRunStep{
+		{id: "creative-brief", build: func() (flowRunAction, error) {
+			return flowRunAction{gate: true, reason: "creative gate: approve stream layout, clip bounds/title, clean crop, killfeed policy, Spanish captions/review, music, delivery shape, and cover strategy; ambiguous go/hazlo is not approval until it answers a shown brief"}, nil
+		}},
 		{id: "plan", build: func() (flowRunAction, error) {
 			if strings.TrimSpace(input) == "" {
 				return flowRunAction{}, fmt.Errorf("stream plan requires --input")

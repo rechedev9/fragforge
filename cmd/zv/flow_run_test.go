@@ -143,10 +143,11 @@ func TestFlowRunnerStepsCoverRegistryPhases(t *testing.T) {
 			flow:  "stream",
 			steps: streamFlowRunSteps("run", "stream.mp4", "", "", ""),
 			runnerPhase: map[string]string{
-				"plan":     "plan",
-				"killfeed": "enrich",
-				"captions": "captions",
-				"render":   "render",
+				"creative-brief": "creative-brief",
+				"plan":           "plan",
+				"killfeed":       "enrich",
+				"captions":       "captions",
+				"render":         "render",
 			},
 			exempt: setOf("doctor", "layouts", "plan-preflight", "killfeed-preflight", "transcribe-preflight", "transcribe", "captions-preflight", "render-preflight", "review"),
 		},
@@ -195,10 +196,17 @@ func TestStreamFlowRunPlanDetectsKillfeedOnlyWhenEventsProvided(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			steps := streamFlowRunSteps("run", "stream.mp4", tc.events, "", tc.killfeedCrop)
-			if got, want := steps[0].id, "plan"; got != want {
-				t.Fatalf("steps[0].id = %q, want %q", got, want)
+			var planStep flowRunStep
+			for _, step := range steps {
+				if step.id == "plan" {
+					planStep = step
+					break
+				}
 			}
-			action, err := steps[0].build()
+			if planStep.id == "" {
+				t.Fatalf("stream flow has no plan step: %#v", steps)
+			}
+			action, err := planStep.build()
 			if err != nil {
 				t.Fatalf("build plan step: %v", err)
 			}

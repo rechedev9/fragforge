@@ -153,7 +153,8 @@ func TestRunFlowsShowStreamIncludesLandscapeAndCaptionDecision(t *testing.T) {
 		streamclips.VariantStreamerLandscape16x9,
 		"--detect-killfeed",
 		"--captions",
-		"factual notices",
+		"killfeed source",
+		"creative-brief",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("flow JSON missing %q: %s", want, body)

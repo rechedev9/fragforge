@@ -91,10 +91,22 @@ creative brief gate. Ask the user only for choices they have not already supplie
 delivery format/aspect ratio, HUD and killfeed treatment, kill effect,
 transition, kill numbering/counter, intro/outro, music, and thumbnail strategy
 (`generated gameplay candidates` or `no cover`). Group the unanswered choices into one concise message, offer concrete
-options supported by the CLI, and receive explicit approval. If the user says
-to decide autonomously, state the resolved defaults and treat that delegation
-as approval. Preserve the approved choices in the exact preflight argv; do not
-silently replace them with preset defaults later.
+options supported by the CLI, and receive explicit approval. Do not treat
+ambiguous execution words like "go", "hazlo", "dale", "ok", or "ya deberia
+estar ok" as creative approval unless they answer a previously shown brief.
+If the user says to decide autonomously before a brief exists, first state the
+resolved defaults as a concrete brief and ask for approval; only a follow-up
+confirmation approves the run. Preserve the approved choices in the exact
+preflight argv; do not silently replace them with preset defaults later.
+
+For stream clips, the same gate applies before any non-dry-run render. Ask for
+layout/format, clip boundaries and title, clean crop/framing preference,
+killfeed treatment, Spanish subtitles and review policy, music, delivery shape,
+and thumbnail/cover strategy. Prefer a clean default proposal with no duplicated
+killfeed overlay unless the user explicitly wants one. If captions are enabled,
+generate or import Spanish caption candidates, show the reviewed text/timings
+when practical, and do not call the pack final until obvious transcript
+hallucinations or bad words are corrected.
 
 Thumbnail approval is a second gate after cover candidates exist. Show the
 cover sheet or candidate images, ask the user to choose one, and do not call the

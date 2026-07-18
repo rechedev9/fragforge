@@ -43,10 +43,26 @@ supported choices:
   cover text is not part of the current render CLI contract and must not be
   promised as a render option.
 
-Do not ask again for decisions already present in the request. If the user
-delegates creative control, state the resolved defaults and continue. Otherwise
-wait for explicit approval, then preserve every answer in the exact dry-run and
-real render argv.
+Do not ask again for decisions already present in the request. Do not treat
+ambiguous execution words like "go", "hazlo", "dale", "ok", or "ya deberia
+estar ok" as approval unless they answer a previously shown brief. If the user
+delegates creative control before a brief exists, state the resolved defaults as
+a concrete brief and ask for approval; only a follow-up confirmation approves
+the run. Otherwise wait for explicit approval, then preserve every answer in
+the exact dry-run and real render argv.
+
+Use this question shape for a fresh demo request:
+
+```text
+Antes de capturar/renderizar dime/confirmame:
+1. Formato: short-9x16 o landscape-16x9.
+2. Jugador y seleccion: SteamID/jugador, todas las kills, mejores momentos, o elijo tras enseñarte ranking.
+3. Presentacion: gameplay HUD completo, deathnotices, o clean.
+4. Estilo: kill effect, transicion, contador/milestones, intro/outro.
+5. Audio: sonido original, musica, o ambos.
+6. Subtitulos/textos: si/no y que textos quieres quemar.
+7. Thumbnail: candidates de gameplay o sin cover.
+```
 
 After rendering cover candidates, show the cover sheet or candidate images and
 ask the user to select the final thumbnail. The pack is not upload-ready until
