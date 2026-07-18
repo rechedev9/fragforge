@@ -34,6 +34,11 @@ const UUID_PROPERTY: JsonObject = {
   pattern: UUID_PATTERN,
   type: 'string',
 };
+const GENERATION_ID_PROPERTY: JsonObject = {
+  description: 'Caption or killfeed generation UUID returned by the corresponding read operation.',
+  pattern: UUID_PATTERN,
+  type: 'string',
+};
 const SAFE_TOKEN_PROPERTY: JsonObject = {
   pattern: SAFE_TOKEN_PATTERN,
   type: 'string',
@@ -102,6 +107,28 @@ const KILLFEED_KILL_PROPERTY: JsonObject = {
     weapon: { description: 'Weapon icon catalog key such as ak47.', minLength: 1, type: 'string' },
   },
   required: ['attacker_side', 'attacker_name', 'victim_side', 'victim_name', 'weapon'],
+  type: 'object',
+};
+const CAPTION_WORD_PROPERTY: JsonObject = {
+  additionalProperties: false,
+  description: 'One reviewed word timed relative to the start of its stream clip.',
+  properties: {
+    end_seconds: { exclusiveMinimum: 0, type: 'number' },
+    start_seconds: { minimum: 0, type: 'number' },
+    word: { maxLength: 80, minLength: 1, type: 'string' },
+  },
+  required: ['word', 'start_seconds', 'end_seconds'],
+  type: 'object',
+};
+const STREAM_CAPTION_REVIEW_CLIP_PROPERTY: JsonObject = {
+  additionalProperties: false,
+  description: 'One explicit review decision: provide reviewed words or set no_speech=true.',
+  properties: {
+    clip_id: SAFE_TOKEN_PROPERTY,
+    no_speech: { type: 'boolean' },
+    words: { items: CAPTION_WORD_PROPERTY, type: 'array' },
+  },
+  required: ['clip_id'],
   type: 'object',
 };
 // Vertical-center bounds shared by the streamer banner and text overlays,
@@ -350,6 +377,15 @@ const JOB_VARIANT_SCHEMA = objectSchema(
   ['job_id', 'variant'],
 );
 const STREAM_JOB_SCHEMA = objectSchema({ stream_job_id: UUID_PROPERTY }, ['stream_job_id']);
+const STREAM_CAPTION_REVIEW_SCHEMA = objectSchema({
+  clips: { items: STREAM_CAPTION_REVIEW_CLIP_PROPERTY, minItems: 1, type: 'array' },
+  generation_id: GENERATION_ID_PROPERTY,
+  stream_job_id: UUID_PROPERTY,
+}, ['stream_job_id', 'generation_id', 'clips']);
+const STREAM_GENERATION_SCHEMA = objectSchema({
+  generation_id: GENERATION_ID_PROPERTY,
+  stream_job_id: UUID_PROPERTY,
+}, ['stream_job_id', 'generation_id']);
 const STREAM_VARIANT_SCHEMA = objectSchema(
   {
     stream_job_id: UUID_PROPERTY,
@@ -729,6 +765,35 @@ const operations: readonly OperationDefinition[] = [
     run: configureStreamCaptions,
     title: 'Configure stream subtitles',
   },
+  mutationOperation({
+    category: 'streams',
+    description: 'Generate Spanish caption candidates for the enabled stream edit plan. This can use the configured xAI speech-to-text service.',
+    inputSchema: STREAM_JOB_SCHEMA,
+    keywords: ['captions', 'caption', 'subtitles', 'subtitulos', 'generate', 'transcription', 'speech to text', 'stt', 'xai', 'grok'],
+    name: 'streams.start_caption_candidates',
+    path: (input) => streamPath(input, '/captions'),
+    risk: 'costly',
+    title: 'Generate stream caption candidates',
+  }),
+  readOperation({
+    category: 'streams',
+    description: 'Read the current stream caption candidates and the generation ID required to review them.',
+    inputSchema: STREAM_JOB_SCHEMA,
+    keywords: ['captions', 'caption', 'subtitles', 'subtitulos', 'review', 'transcription'],
+    name: 'streams.get_caption_candidates',
+    path: (input) => streamPath(input, '/captions'),
+    title: 'Get stream caption candidates',
+  }),
+  mutationOperation({
+    body: (input) => without(input, 'stream_job_id'),
+    category: 'streams',
+    description: 'Persist reviewed caption words or explicit no-speech decisions for the current caption generation. This updates the stream edit plan.',
+    inputSchema: STREAM_CAPTION_REVIEW_SCHEMA,
+    keywords: ['captions', 'caption', 'subtitles', 'subtitulos', 'review', 'approve', 'words', 'no speech'],
+    name: 'streams.review_caption_candidates',
+    path: (input) => streamPath(input, '/captions/review'),
+    title: 'Review stream caption candidates',
+  }),
   {
     category: 'streams',
     description: 'Set one clip\'s edit options — playback speed, original-audio volume (0 mutes), boundary fades, and burned-in text overlays — while preserving the rest of the current stream edit plan. Sending a default value (speed 1, source_volume 1, fades 0, empty text_overlays) resets that option.',
@@ -759,6 +824,35 @@ const operations: readonly OperationDefinition[] = [
     name: 'streams.list_killfeed_weapons',
     path: () => '/api/stream-killfeed/weapons',
     title: 'List killfeed weapons',
+  }),
+  mutationOperation({
+    category: 'streams',
+    description: 'Analyze the current stream killfeed crop and clips. This queues local FFmpeg work and can use configured xAI vision for structured kills.',
+    inputSchema: STREAM_JOB_SCHEMA,
+    keywords: ['killfeed', 'analyze', 'analysis', 'ocr', 'vision', 'ffmpeg', 'xai', 'grok'],
+    name: 'streams.start_killfeed_analysis',
+    path: (input) => streamPath(input, '/killfeed'),
+    risk: 'costly',
+    title: 'Analyze stream killfeed',
+  }),
+  readOperation({
+    category: 'streams',
+    description: 'Read the current stream killfeed analysis and the generation ID required to apply it.',
+    inputSchema: STREAM_JOB_SCHEMA,
+    keywords: ['killfeed', 'analysis', 'ocr', 'vision', 'review'],
+    name: 'streams.get_killfeed_analysis',
+    path: (input) => streamPath(input, '/killfeed'),
+    title: 'Get stream killfeed analysis',
+  }),
+  mutationOperation({
+    body: (input) => without(input, 'stream_job_id'),
+    category: 'streams',
+    description: 'Apply one current killfeed analysis generation to the stream edit plan. This changes its rendered killfeed cues.',
+    inputSchema: STREAM_GENERATION_SCHEMA,
+    keywords: ['killfeed', 'analysis', 'apply', 'cues', 'ocr', 'vision'],
+    name: 'streams.apply_killfeed_analysis',
+    path: (input) => streamPath(input, '/killfeed/apply'),
+    title: 'Apply stream killfeed analysis',
   }),
   mutationOperation({
     body: (input) => ({ clip_id: stringInput(input, 'clip_id'), cue_seconds: input.cue_seconds }),
@@ -889,6 +983,7 @@ export function validateOperationInput(operation: OperationDefinition, input: Js
     if (!isJsonObject(plan)) throw new Error('arguments.plan must be an object');
     validateStreamEditPlan(plan);
   }
+  if (operation.name === 'streams.review_caption_candidates') validateStreamCaptionReview(input);
 }
 
 type LiveVariantRegistry = 'render' | 'stream';
@@ -1294,6 +1389,51 @@ function validateStreamEditPlan(plan: JsonObject): void {
   }
 }
 
+function validateStreamCaptionReview(input: JsonObject): void {
+  const clips = input.clips;
+  if (!Array.isArray(clips)) return;
+
+  const seenClipIDs = new Set<string>();
+  for (const [clipIndex, review] of clips.entries()) {
+    if (!isJsonObject(review)) continue;
+    const clipID = review.clip_id;
+    if (typeof clipID !== 'string') continue;
+    if (seenClipIDs.has(clipID)) {
+      throw new Error(`arguments.clips[${clipIndex}].clip_id duplicates an earlier review`);
+    }
+    seenClipIDs.add(clipID);
+
+    const noSpeech = review.no_speech === true;
+    const words = review.words;
+    if (noSpeech && Array.isArray(words) && words.length > 0) {
+      throw new Error(`arguments.clips[${clipIndex}] cannot include words when no_speech is true`);
+    }
+    if (!noSpeech && (!Array.isArray(words) || words.length === 0)) {
+      throw new Error(`arguments.clips[${clipIndex}] requires reviewed words or no_speech=true`);
+    }
+    if (!Array.isArray(words)) continue;
+
+    let previousEnd = 0;
+    for (const [wordIndex, wordCue] of words.entries()) {
+      if (!isJsonObject(wordCue)) continue;
+      const word = wordCue.word;
+      const start = wordCue.start_seconds;
+      const end = wordCue.end_seconds;
+      const wordPath = `arguments.clips[${clipIndex}].words[${wordIndex}]`;
+      if (typeof word !== 'string') continue;
+      if (word.trim() === '') throw new Error(`${wordPath}.word must not be blank`);
+      if (/\r|\n/.test(word)) throw new Error(`${wordPath}.word must not contain a line break`);
+      if (typeof start !== 'number' || typeof end !== 'number') continue;
+      if (end <= start) throw new Error(`${wordPath}.end_seconds must be greater than start_seconds`);
+      if (end - start > 2.5) throw new Error(`${wordPath} must last no more than 2.5 seconds`);
+      if (wordIndex > 0 && start < previousEnd) {
+        throw new Error(`${wordPath}.start_seconds must not overlap the previous word`);
+      }
+      previousEnd = end;
+    }
+  }
+}
+
 /**
  * Cross-field checks the JSON schema cannot express, mirroring
  * streamclips.ClipEdit.validate: fades must fit the sped-up output duration
@@ -1507,6 +1647,10 @@ const JOB_ELIGIBLE_STATUSES: Readonly<Record<string, readonly string[]>> = {
 };
 
 const STREAM_ELIGIBLE_STATUSES: Readonly<Record<string, readonly string[]>> = {
+  'streams.apply_killfeed_analysis': ['ready', 'rendered'],
+  'streams.review_caption_candidates': ['ready', 'rendered'],
+  'streams.start_caption_candidates': ['ready', 'rendered'],
+  'streams.start_killfeed_analysis': ['ready', 'rendered'],
   'streams.start_render': ['ready', 'rendered'],
 };
 

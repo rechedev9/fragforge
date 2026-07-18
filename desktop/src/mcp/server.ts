@@ -12,10 +12,10 @@ import {
   MissingOperationInputError,
   operationNamed,
   validateJsonSchema,
-  validateLiveOperationInput,
   validateOperationInput,
   type OperationDefinition,
 } from './operations.ts';
+import { McpOperationGateway } from './operation-gateway.ts';
 import { OrchestratorClient } from './orchestrator-client.ts';
 
 const LATEST_PROTOCOL_VERSION = '2025-11-25';
@@ -106,6 +106,7 @@ export class FragForgeMcpServer {
   readonly #diagnostics: Writable | undefined;
   readonly #elicitationTimeoutMs: number;
   readonly #maxConcurrentRequests: number;
+  readonly #operationGateway: McpOperationGateway;
   readonly #serverVersion: string;
   readonly #activeRequests = new Map<JsonRpcId, AbortController>();
   readonly #inFlightRequestIds = new Set<JsonRpcId>();
@@ -115,6 +116,7 @@ export class FragForgeMcpServer {
 
   constructor(options: FragForgeMcpServerOptions) {
     this.#client = options.client;
+    this.#operationGateway = new McpOperationGateway({ client: options.client });
     this.#diagnostics = options.diagnostics;
     this.#elicitationTimeoutMs = boundedInteger(
       options.elicitationTimeoutMs ?? DEFAULT_ELICITATION_TIMEOUT_MS,
@@ -303,35 +305,34 @@ export class FragForgeMcpServer {
       validateJsonSchema(EXECUTE_INPUT_SCHEMA, input, 'execute');
       const operationName = input.operation;
       if (typeof operationName !== 'string' || operationName === '') throw new Error('operation is required');
-      const operation = operationNamed(operationName);
-      if (operation === undefined) throw new Error(`unknown operation ${operationName}; call search first`);
       const suppliedArguments = input.arguments === undefined ? {} : input.arguments;
       if (!isJsonObject(suppliedArguments)) throw new Error('arguments must be an object');
-      const completeArguments = await this.#completeMissingInputs(operation, suppliedArguments, signal);
-      validateOperationInput(operation, completeArguments);
-
       const mode = input.mode === undefined ? 'preview' : input.mode;
       if (mode !== 'preview' && mode !== 'apply') throw new Error('mode must be preview or apply');
-      if (operation.risk !== 'read' && mode !== 'apply') {
+
+      const outcome = await this.#operationGateway.execute({
+        arguments: suppliedArguments,
+        operation: operationName,
+      }, {
+        completeInput: (operation, completeInput, completeSignal) => this.#completeMissingInputs(operation, completeInput, completeSignal ?? signal),
+        privileged: mode === 'apply' && input.confirmed === true,
+        signal,
+      });
+      if (outcome.kind === 'preview') {
+        if (mode === 'apply') {
+          throw new Error(`${outcome.operation} is ${outcome.risk}; set mode=apply and confirmed=true only after user approval`);
+        }
         return toolSuccess({
-          operation: operation.name,
-          preview: operation.preview(completeArguments),
+          operation: outcome.operation,
+          preview: outcome.preview,
           requires_confirmation: true,
-          risk: operation.risk,
+          risk: outcome.risk,
           status: 'preview',
         });
       }
-      if (operation.risk !== 'read' && input.confirmed !== true) {
-        throw new Error(`${operation.name} is ${operation.risk}; set mode=apply and confirmed=true only after user approval`);
-      }
-      await validateLiveOperationInput(this.#client, operation, completeArguments, signal);
-      const value = await operation.run(this.#client, completeArguments, signal);
-      const status = isJsonObject(value) && value.partial === true ? 'partial' : 'completed';
-      const response: JsonObject = { operation: operation.name, result: value, status };
-      if (isJsonObject(value) && value.partial === true && value.cancelled === true) {
-        response.error = typeof value.error === 'string'
-          ? value.error
-          : 'operation was cancelled after a durable partial result was created';
+      const response: JsonObject = { operation: outcome.operation, result: outcome.result, status: outcome.status };
+      if (outcome.partialFailure) {
+        response.error = outcome.error ?? 'operation was cancelled after a durable partial result was created';
         return toolFailure(response);
       }
       return toolSuccess(response);

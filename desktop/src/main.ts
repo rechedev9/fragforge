@@ -49,6 +49,18 @@ import {
   type XAISettingsStatus,
 } from './xai-settings-ipc';
 import { buildMCPConfigInfo, MCP_CONFIG_CHANNEL, parseMCPConfigRequest } from './mcp-config-ipc';
+import {
+  ASSISTANT_ACTION,
+  ASSISTANT_CHANNEL,
+  ASSISTANT_EVENT_CHANNEL,
+  parseAssistantRequest,
+  type AssistantEvent,
+  type AssistantSnapshot,
+} from './assistant-ipc';
+import { AssistantController } from './assistant/controller';
+import { AssistantHistoryStore } from './assistant/history';
+import { McpOperationGateway } from './mcp/operation-gateway';
+import { OrchestratorClient } from './mcp/orchestrator-client';
 
 // Every loopback server and health check binds/targets this host; named once so
 // the value that couples all the URLs below is not a scattered magic string.
@@ -152,6 +164,12 @@ let mainWindow: BrowserWindow | null = null;
 let activeWebOrigin: string | null = null;
 let activeXAIAPIKeySource: XAIAPIKeySource = 'none';
 let xaiRelaunchScheduled = false;
+let assistantController: AssistantController | null = null;
+
+const assistantHistoryFile = path.join(app.getPath('userData'), 'assistant', 'history.json');
+// Codex gets an intentionally empty, dedicated cwd. It is never pointed at
+// the Studio repository, media directories, credentials, or orchestrator data.
+const assistantWorkspace = path.join(app.getPath('userData'), 'assistant-workspace');
 
 /**
  * Returns the main window only if it exists and Electron hasn't torn it down
@@ -164,6 +182,33 @@ let xaiRelaunchScheduled = false;
  */
 function aliveWindow(): BrowserWindow | null {
   return mainWindow !== null && !mainWindow.isDestroyed() ? mainWindow : null;
+}
+
+function sendAssistantEvent(event: AssistantEvent): void {
+  const win = aliveWindow();
+  if (win === null || activeWebOrigin === null) return;
+  try {
+    if (new URL(win.webContents.mainFrame.url).origin !== activeWebOrigin) return;
+  } catch {
+    return;
+  }
+  win.webContents.send(ASSISTANT_EVENT_CHANNEL, event);
+}
+
+function getAssistantController(): AssistantController {
+  if (assistantController !== null) return assistantController;
+  fs.mkdirSync(assistantWorkspace, { recursive: true });
+  const client = new OrchestratorClient({ portsFile });
+  assistantController = new AssistantController({
+    cwd: assistantWorkspace,
+    gateway: new McpOperationGateway({ client }),
+    history: new AssistantHistoryStore(assistantHistoryFile),
+    log: logLine,
+    onEvent: sendAssistantEvent,
+    orchestratorClient: client,
+    version: app.getVersion(),
+  });
+  return assistantController;
 }
 
 // Origins the window is allowed to navigate to on its own, populated once the
@@ -719,10 +764,61 @@ function registerMCPConfigIPC(): void {
   });
 }
 
+function assistantFailure(error: string): AssistantSnapshot {
+  return {
+    availability: 'error',
+    busy: false,
+    error,
+    messages: [],
+    pendingActions: [],
+  };
+}
+
+function registerAssistantIPC(): void {
+  ipcMain.handle(ASSISTANT_CHANNEL, async (event, value: unknown): Promise<AssistantSnapshot> => {
+    if (!trustedXAISettingsSender(event)) return assistantFailure('Solicitud del asistente rechazada.');
+    let request;
+    try {
+      request = parseAssistantRequest(value);
+    } catch {
+      return assistantFailure('Solicitud del asistente no válida.');
+    }
+    try {
+      const controller = getAssistantController();
+      switch (request.action) {
+        case ASSISTANT_ACTION.status:
+          return await controller.status();
+        case ASSISTANT_ACTION.send:
+          await controller.send(request.message, request.context);
+          return controller.snapshot();
+        case ASSISTANT_ACTION.cancel:
+          await controller.cancel();
+          return controller.snapshot();
+        case ASSISTANT_ACTION.approve:
+          await controller.approve(request.actionId);
+          return controller.snapshot();
+        case ASSISTANT_ACTION.reject:
+          controller.reject(request.actionId);
+          return controller.snapshot();
+        case ASSISTANT_ACTION.newConversation:
+          await controller.newConversation();
+          return controller.snapshot();
+        case ASSISTANT_ACTION.clear:
+          await controller.clearHistory();
+          return controller.snapshot();
+      }
+    } catch {
+      return assistantFailure('No se pudo completar la operación del asistente.');
+    }
+  });
+}
+
 // Prevent crash watchers and retries from fighting an intentional shutdown.
 let quitting = false;
 
 function shutdown(): void {
+  assistantController?.close();
+  assistantController = null;
   stopActiveBootAttempt();
 }
 
@@ -739,6 +835,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler(() => false);
   registerXAISettingsIPC();
   registerMCPConfigIPC();
+  registerAssistantIPC();
   runBoot();
 });
 

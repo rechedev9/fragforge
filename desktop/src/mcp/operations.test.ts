@@ -433,6 +433,84 @@ test('operation schemas enforce API route and cross-field contracts', () => {
   );
 });
 
+test('stream caption and killfeed analysis operations validate and dispatch exact requests', async () => {
+  const generationID = '33333333-3333-4333-8333-333333333333';
+  const reviewInput: JsonObject = {
+    clips: [{
+      clip_id: 'clip-1',
+      words: [{ end_seconds: 0.5, start_seconds: 0, word: 'hola' }],
+    }],
+    generation_id: generationID,
+    stream_job_id: STREAM_JOB_ID,
+  };
+  const applyInput: JsonObject = { generation_id: generationID, stream_job_id: STREAM_JOB_ID };
+
+  validateOperationInput(operation('streams.review_caption_candidates'), reviewInput);
+  validateOperationInput(operation('streams.apply_killfeed_analysis'), applyInput);
+  assert.throws(
+    () => validateOperationInput(operation('streams.review_caption_candidates'), {
+      ...reviewInput,
+      clips: [{
+        clip_id: 'clip-1',
+        no_speech: true,
+        words: [{ end_seconds: 0.5, start_seconds: 0, word: 'hola' }],
+      }],
+    }),
+    /cannot include words when no_speech is true/,
+  );
+  assert.throws(
+    () => validateOperationInput(operation('streams.review_caption_candidates'), {
+      ...reviewInput,
+      clips: [{ clip_id: 'clip-1' }],
+    }),
+    /requires reviewed words or no_speech=true/,
+  );
+  assert.throws(
+    () => validateOperationInput(operation('streams.review_caption_candidates'), {
+      ...reviewInput,
+      clips: [
+        { clip_id: 'clip-1', no_speech: true },
+        { clip_id: 'clip-1', no_speech: true },
+      ],
+    }),
+    /duplicates an earlier review/,
+  );
+  assert.throws(
+    () => validateOperationInput(operation('streams.review_caption_candidates'), {
+      ...reviewInput,
+      clips: [{
+        clip_id: 'clip-1',
+        words: [{ end_seconds: 3, start_seconds: 0, word: 'hola' }],
+      }],
+    }),
+    /must last no more than 2.5 seconds/,
+  );
+
+  const double = clientDouble((request) => request.body ?? { status: 'ok' });
+  await operation('streams.start_caption_candidates').run(double.client, { stream_job_id: STREAM_JOB_ID });
+  await operation('streams.get_caption_candidates').run(double.client, { stream_job_id: STREAM_JOB_ID });
+  await operation('streams.review_caption_candidates').run(double.client, reviewInput);
+  await operation('streams.start_killfeed_analysis').run(double.client, { stream_job_id: STREAM_JOB_ID });
+  await operation('streams.get_killfeed_analysis').run(double.client, { stream_job_id: STREAM_JOB_ID });
+  await operation('streams.apply_killfeed_analysis').run(double.client, applyInput);
+
+  assert.deepEqual(double.state.requests.map((request) => [request.method ?? 'GET', request.path, request.body]), [
+    ['POST', `/api/stream-jobs/${STREAM_JOB_ID}/captions`, undefined],
+    ['GET', `/api/stream-jobs/${STREAM_JOB_ID}/captions`, undefined],
+    ['POST', `/api/stream-jobs/${STREAM_JOB_ID}/captions/review`, {
+      clips: reviewInput.clips,
+      generation_id: generationID,
+    }],
+    ['POST', `/api/stream-jobs/${STREAM_JOB_ID}/killfeed`, undefined],
+    ['GET', `/api/stream-jobs/${STREAM_JOB_ID}/killfeed`, undefined],
+    ['POST', `/api/stream-jobs/${STREAM_JOB_ID}/killfeed/apply`, { generation_id: generationID }],
+  ]);
+  assert.equal(operation('streams.start_caption_candidates').risk, 'costly');
+  assert.equal(operation('streams.review_caption_candidates').risk, 'write');
+  assert.equal(operation('streams.start_killfeed_analysis').risk, 'costly');
+  assert.equal(operation('streams.apply_killfeed_analysis').risk, 'write');
+});
+
 test('JSON schema traversal rejects inherited property-name bypasses', () => {
   assert.throws(
     () => validateJsonSchema({ required: ['toString'], type: 'object' }, {}, 'arguments'),
@@ -658,6 +736,16 @@ test('dynamic job candidates expose operation-specific state eligibility', async
   const streamCandidates = streamFields[0]?.candidates;
   if (!Array.isArray(streamCandidates)) throw new Error('expected stream candidates');
   assert.deepEqual(streamCandidates.filter(isJsonObject).map((candidate) => candidate.eligible), [false, true]);
+
+  const captionFields = await discoverDynamicInputs(double.client, operation('streams.start_caption_candidates'), {});
+  const captionCandidates = captionFields[0]?.candidates;
+  if (!Array.isArray(captionCandidates)) throw new Error('expected stream caption candidates');
+  assert.deepEqual(captionCandidates.filter(isJsonObject).map((candidate) => candidate.eligible), [false, true]);
+
+  const applyFields = await discoverDynamicInputs(double.client, operation('streams.apply_killfeed_analysis'), {});
+  const applyCandidates = applyFields[0]?.candidates;
+  if (!Array.isArray(applyCandidates)) throw new Error('expected stream killfeed candidates');
+  assert.deepEqual(applyCandidates.filter(isJsonObject).map((candidate) => candidate.eligible), [false, true]);
 });
 
 test('streams.configure_captions preserves a valid disabled face crop for full-frame renders', async () => {

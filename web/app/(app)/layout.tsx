@@ -1,6 +1,7 @@
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/shell/app-sidebar';
 import { Wordmark } from '@/components/brand/wordmark';
+import { AssistantRail } from '@/components/assistant/assistant-rail';
 
 /**
  * Authenticated app shell. Renders the persistent left sidebar (which collapses
@@ -18,9 +19,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <SidebarTrigger className="-ml-2 size-10" />
           <Wordmark />
         </header>
-        <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-8 sm:px-6 md:px-10 md:py-12 lg:px-12">
-          {children}
-        </main>
+        <div className="flex min-h-0 flex-1">
+          <main className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 py-8 sm:px-6 md:px-10 md:py-12 lg:px-12">
+            {children}
+          </main>
+          <AssistantRail />
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );
