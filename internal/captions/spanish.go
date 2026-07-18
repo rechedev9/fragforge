@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // DefaultSpanishModel is xAI's current frontier text model. Batch speech to
@@ -23,14 +22,18 @@ const (
 	// Keep a full short-form utterance together whenever possible. The previous
 	// eight-word cap split compounds such as "stream clip" across segments and
 	// caused Grok to leave the first half untranslated. Long speech still
-	// splits at natural pauses or this defensive cap.
+	// splits at natural pauses, sentence boundaries, the maximum duration of a
+	// phrase cue, or this defensive cap.
 	spanishMaxWordsPerSegment = 64
+	spanishMaxSegmentSeconds  = MaxPlausibleWordSeconds
 )
 
 // SpanishTranslator turns timed source-language cues into Spanish cues through
 // xAI's structured chat-completions API. Existing Spanish must be preserved;
-// other languages are translated. Returned words are re-timed inside each
-// source phrase envelope so the result remains suitable for karaoke captions.
+// other languages are translated. Unchanged segments retain their exact source
+// word timings. A changed translation becomes one phrase cue over the source
+// envelope because target-language word boundaries cannot be inferred from the
+// source audio honestly.
 type SpanishTranslator struct {
 	APIKey     string
 	BaseURL    string
@@ -39,10 +42,11 @@ type SpanishTranslator struct {
 }
 
 type spanishSourceSegment struct {
-	ID    int    `json:"id"`
-	Text  string `json:"text"`
-	start float64
-	end   float64
+	ID    int       `json:"id"`
+	Text  string    `json:"text"`
+	start float64   `json:"-"`
+	end   float64   `json:"-"`
+	cues  []WordCue `json:"-"`
 }
 
 type spanishTranslation struct {
@@ -99,7 +103,7 @@ func (t SpanishTranslator) Translate(ctx context.Context, source []WordCue) ([]W
 	if err != nil {
 		return nil, err
 	}
-	cues, err := retimeSpanishTranslations(segments, translations)
+	cues, err := alignSpanishTranslations(segments, translations)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +117,11 @@ func buildSpanishSourceSegments(cues []WordCue) []spanishSourceSegment {
 	segments := make([]spanishSourceSegment, 0, (len(cues)+spanishMaxWordsPerSegment-1)/spanishMaxWordsPerSegment)
 	for start := 0; start < len(cues); {
 		end := start + 1
-		for end < len(cues) && end-start < spanishMaxWordsPerSegment && cues[end].StartSeconds-cues[end-1].EndSeconds <= maxWordGapSeconds {
+		for end < len(cues) &&
+			end-start < spanishMaxWordsPerSegment &&
+			cues[end].StartSeconds-cues[end-1].EndSeconds <= maxWordGapSeconds &&
+			cues[end].EndSeconds-cues[start].StartSeconds <= spanishMaxSegmentSeconds &&
+			!endsSentence(cues[end-1].Word) {
 			end++
 		}
 		words := make([]string, 0, end-start)
@@ -125,6 +133,7 @@ func buildSpanishSourceSegments(cues []WordCue) []spanishSourceSegment {
 			Text:  strings.Join(words, " "),
 			start: cues[start].StartSeconds,
 			end:   cues[end-1].EndSeconds,
+			cues:  append([]WordCue(nil), cues[start:end]...),
 		})
 		start = end
 	}
@@ -271,29 +280,28 @@ func parseSpanishTranslationResponse(body []byte, wantSegments int) ([]spanishTr
 	return ordered, nil
 }
 
-func retimeSpanishTranslations(source []spanishSourceSegment, translated []spanishTranslation) ([]WordCue, error) {
+func alignSpanishTranslations(source []spanishSourceSegment, translated []spanishTranslation) ([]WordCue, error) {
 	if len(source) != len(translated) {
 		return nil, fmt.Errorf("captions: spanish translation segment count mismatch")
 	}
 	var cues []WordCue
 	for i, segment := range source {
-		words := strings.Fields(translated[i].Text)
-		if len(words) == 0 || segment.end <= segment.start {
+		translatedText := strings.Join(strings.Fields(translated[i].Text), " ")
+		if translatedText == "" || segment.end <= segment.start {
 			return nil, fmt.Errorf("captions: invalid spanish translation segment %d", segment.ID)
 		}
-		weights := make([]int, len(words))
-		totalWeight := 0
-		for j, word := range words {
-			weights[j] = max(1, utf8.RuneCountInString(strings.Trim(word, ".,;:!?¡¿\"'()[]{}")))
-			totalWeight += weights[j]
+		if translatedText == strings.Join(strings.Fields(segment.Text), " ") {
+			if len(segment.cues) == 0 {
+				return nil, fmt.Errorf("captions: source cues missing for unchanged spanish segment %d", segment.ID)
+			}
+			cues = append(cues, segment.cues...)
+			continue
 		}
-		elapsedWeight := 0
-		for j, word := range words {
-			start := segment.start + (segment.end-segment.start)*float64(elapsedWeight)/float64(totalWeight)
-			elapsedWeight += weights[j]
-			end := segment.start + (segment.end-segment.start)*float64(elapsedWeight)/float64(totalWeight)
-			cues = append(cues, WordCue{Word: word, StartSeconds: start, EndSeconds: end})
-		}
+		cues = append(cues, WordCue{
+			Word:         translatedText,
+			StartSeconds: segment.start,
+			EndSeconds:   segment.end,
+		})
 	}
 	return cues, nil
 }

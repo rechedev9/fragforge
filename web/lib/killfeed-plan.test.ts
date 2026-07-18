@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { addClipCue, applyClipKillfeedRead, fitPlanToSourceDuration, initialStreamClipEnd, normalizeClipKillfeed, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from './killfeed-plan.ts';
+import type { KillfeedCueProvenance } from './killfeed-plan.ts';
 import type { KillfeedKill, StreamClipRange, StreamEditPlan } from './api/streams.ts';
 
 const KILL: KillfeedKill = {
@@ -22,6 +23,11 @@ function clip(overrides: Partial<StreamClipRange> = {}): StreamClipRange {
   return { id: 'clip-1', start_seconds: 0, end_seconds: 20, ...overrides };
 }
 
+function cueProvenance(value: StreamClipRange): KillfeedCueProvenance[] | undefined {
+  return (value as StreamClipRange & { killfeed_cue_provenance?: KillfeedCueProvenance[] })
+    .killfeed_cue_provenance;
+}
+
 test('normalizeClipKillfeed sorts cues and keeps kills index-aligned', () => {
   const other: KillfeedKill = { ...KILL, attacker_name: 'second' };
   const normalized = normalizeClipKillfeed(
@@ -29,6 +35,23 @@ test('normalizeClipKillfeed sorts cues and keeps kills index-aligned', () => {
   );
   assert.deepEqual(normalized.killfeed_seconds, [4, 12]);
   assert.deepEqual(normalized.killfeed_kills, [[KILL], [other]]);
+});
+
+test('normalizeClipKillfeed keeps provenance attached by exact cue and drops stale entries', () => {
+  const normalized = normalizeClipKillfeed(clip({
+    killfeed_seconds: [12, 4],
+    ...({
+      killfeed_cue_provenance: [
+        { cue_seconds: 12, origin: 'automatic', event_id: 'event-12' },
+        { cue_seconds: 4, origin: 'manual' },
+        { cue_seconds: 9, origin: 'automatic', event_id: 'stale' },
+      ],
+    } as { killfeed_cue_provenance: KillfeedCueProvenance[] }),
+  }));
+  assert.deepEqual(cueProvenance(normalized), [
+    { cue_seconds: 4, origin: 'manual' },
+    { cue_seconds: 12, origin: 'automatic', event_id: 'event-12' },
+  ]);
 });
 
 test('normalizeClipKillfeed omits killfeed_kills when no cue has kills', () => {
@@ -166,13 +189,48 @@ test('applyClipKillfeedRead replaces cumulative snapshots with aligned event del
   assert.deepEqual(updated.killfeed_kills, [[KILL], [second], [third]]);
 });
 
-test('applyClipKillfeedRead is idempotent across near-identical detector times', () => {
+test('applyClipKillfeedRead moves the requested placeholder to the exact detector time', () => {
   const base = clip({ killfeed_seconds: [2.5], killfeed_kills: [[KILL]] });
   const updated = applyClipKillfeedRead(base, 2.5, [
     { cue_seconds: 2.504, kills: [KILL] },
   ]);
   assert.deepEqual(updated.killfeed_seconds, [2.504]);
   assert.deepEqual(updated.killfeed_kills, [[KILL]]);
+  assert.deepEqual(cueProvenance(updated), [
+    { cue_seconds: 2.504, origin: 'manual' },
+  ]);
+});
+
+test('applyClipKillfeedRead only merges events with the exact same frame timestamp', () => {
+  const nextFrame = 4 + 1 / 60;
+  const updated = applyClipKillfeedRead(clip(), 4, [
+    { cue_seconds: 4, kills: [KILL] },
+    { cue_seconds: nextFrame, kills: [{ ...KILL, victim_name: 'next-frame' }] },
+  ]);
+  assert.deepEqual(updated.killfeed_seconds, [4, nextFrame]);
+  assert.equal(updated.killfeed_kills?.length, 2);
+});
+
+test('exact event enrichment keeps its PTS cue bit-identical beside the next frame', () => {
+  const cue = 1001 / 30000;
+  const nextFrame = 1002 / 30000;
+  const base = clip({
+    killfeed_seconds: [cue, nextFrame],
+    killfeed_kills: [[], []],
+    ...({
+      killfeed_cue_provenance: [
+        { cue_seconds: cue, origin: 'automatic', event_id: 'event-cue' },
+        { cue_seconds: nextFrame, origin: 'automatic', event_id: 'event-next' },
+      ],
+    } as { killfeed_cue_provenance: KillfeedCueProvenance[] }),
+  });
+  const updated = applyClipKillfeedRead(base, cue, [{ cue_seconds: cue, kills: [KILL] }]);
+  assert.deepEqual(updated.killfeed_seconds, [cue, nextFrame]);
+  assert.deepEqual(updated.killfeed_kills, [[KILL], []]);
+  assert.deepEqual(cueProvenance(updated), [
+    { cue_seconds: cue, origin: 'automatic', event_id: 'event-cue' },
+    { cue_seconds: nextFrame, origin: 'automatic', event_id: 'event-next' },
+  ]);
 });
 
 test('applyClipKillfeedRead preserves unrelated kills from a cumulative cue', () => {
@@ -237,6 +295,9 @@ test('addClipCue inserts a cue and keeps kills aligned', () => {
   const updated = addClipCue(base, 4);
   assert.deepEqual(updated.killfeed_seconds, [4, 8]);
   assert.deepEqual(updated.killfeed_kills, [[], [KILL]]);
+  assert.deepEqual(cueProvenance(updated), [
+    { cue_seconds: 4, origin: 'manual' },
+  ]);
 });
 
 test('addClipCue ignores a duplicate cue', () => {

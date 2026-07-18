@@ -335,8 +335,8 @@ func TestBuildFFmpegArgsCreatesVerticalStackCommand(t *testing.T) {
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"-ss 1.500",
-		"-t 2.750",
+		"-ss 1.500000000",
+		"-t 2.750000000",
 		"scale=1080:768",
 		"scale=1080:1152",
 		"vstack=inputs=2",
@@ -354,6 +354,28 @@ func TestBuildFFmpegArgsCreatesVerticalStackCommand(t *testing.T) {
 	}
 	if strings.Contains(joined, "drawtext=") {
 		t.Fatalf("empty streamer nick must not add a banner: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsPreservesNativeFrameBoundaryPrecision(t *testing.T) {
+	plan := DefaultEditPlan()
+	start := float64(1001) / 30000
+	duration := float64(30030) / 30000
+	plan.Clips = []ClipRange{{ID: "clip-ntsc", StartSeconds: start, EndSeconds: start + duration}}
+
+	args, err := BuildFFmpegArgs(
+		FFmpegInputs{SourcePath: "source.mp4", OutputPath: "out.mp4"},
+		plan,
+		plan.Clips[0],
+	)
+	if err != nil {
+		t.Fatalf("BuildFFmpegArgs error = %v", err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-ss 0.033366667", "-t 1.001000000"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing native timestamp %q: %s", want, joined)
+		}
 	}
 }
 
@@ -469,10 +491,10 @@ func TestBuildFFmpegArgsMixesNoticesAndFrozenCropFallback(t *testing.T) {
 		`[nblurpre0_1]gblur=sigma=24:sigmaV=0[nblur0_1]`,
 		`[killfeedin1]trim=start=2.350000,select='eq(n\,0)',setpts=PTS-STARTPTS,crop=w=iw*0.175000:h=ih*0.100000:x=iw*0.800000:y=ih*0.050000,scale=930:-2:flags=lanczos,tpad=stop_mode=clone:stop_duration=5.000000,fade=t=out:st=4.450000:d=0.350000:alpha=1,split=2[kfsharp1][kfblurpre1]`,
 		`[kfblurpre1]gblur=sigma=24:sigmaV=0[kfblur1]`,
-		fmt.Sprintf(`[layout][nblur0_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover0]`, slide1),
-		fmt.Sprintf(`[kfover0][nsharp0_0]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[kfover1]`, slide1),
-		fmt.Sprintf(`[kfover1][nblur0_1]overlay=x='%s':y=1044-80*(between(t\,1.000000\,3.800000)):eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover2]`, slide1),
-		fmt.Sprintf(`[kfover2][nsharp0_1]overlay=x='%s':y=1044-80*(between(t\,1.000000\,3.800000)):eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[kfover3]`, slide1),
+		fmt.Sprintf(`[layout][nblur0_1]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover0]`, slide1),
+		fmt.Sprintf(`[kfover0][nsharp0_1]overlay=x='%s':y=1044:eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[kfover1]`, slide1),
+		fmt.Sprintf(`[kfover1][nblur0_0]overlay=x='%s':y=1044-80*(between(t\,1.000000\,3.800000)):eval=frame:enable='between(t\,1.000000\,1.080000)':eof_action=pass:shortest=0[kfover2]`, slide1),
+		fmt.Sprintf(`[kfover2][nsharp0_0]overlay=x='%s':y=1044-80*(between(t\,1.000000\,3.800000)):eval=frame:enable='between(t\,1.080000\,3.800000)':eof_action=pass:shortest=0[kfover3]`, slide1),
 		fmt.Sprintf(`[kfover3][kfblur1]overlay=x='%s':y=1044:eval=frame:enable='between(t\,2.000000\,2.080000)':eof_action=pass:shortest=0[kfover4]`, slide2),
 		fmt.Sprintf(`[kfover4][kfsharp1]overlay=x='%s':y=1044:eval=frame:enable='between(t\,2.080000\,4.800000)':eof_action=pass:shortest=0[content]`, slide2),
 		`[content]fps=60,format=yuv420p[v]`,
@@ -483,6 +505,40 @@ func TestBuildFFmpegArgsMixesNoticesAndFrozenCropFallback(t *testing.T) {
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-loop 1 -i n0.png -loop 1 -i n1.png") {
 		t.Fatalf("both notice PNGs must be looped inputs in order: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgsPreservesTopFirstBurstOrder(t *testing.T) {
+	killfeedCrop := CropRect{X: 0.8, Y: 0.05, Width: 0.175, Height: 0.1}
+	clip := ClipRange{
+		ID:              "clip-burst",
+		StartSeconds:    10,
+		EndSeconds:      15,
+		KillfeedSeconds: []float64{11},
+	}
+	plan := DefaultEditPlan()
+	plan.KillfeedCrop = &killfeedCrop
+
+	args, err := BuildFFmpegArgs(FFmpegInputs{
+		SourcePath:          "source.mp4",
+		OutputPath:          "out.mp4",
+		KillfeedNoticePaths: [][]string{{"top.png", "bottom.png"}},
+	}, plan, clip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter := filterComplexArg(t, args)
+	bottomAtBase := "[layout][nblur0_1]overlay=x="
+	topAboveBottom := "[kfover1][nblur0_0]overlay=x="
+	if !strings.Contains(filter, bottomAtBase) ||
+		!strings.Contains(filter, topAboveBottom) ||
+		!strings.Contains(filter, "[nblur0_1]overlay=x='"+killfeedSlideX(1)+"':y=1044:") ||
+		!strings.Contains(filter, "[nblur0_0]overlay=x='"+killfeedSlideX(1)+"':y=1044-80*(between(t\\,1.000000\\,3.800000)):") {
+		t.Fatalf("top-first burst was not composed bottom-to-top: %s", filter)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-loop 1 -i top.png -loop 1 -i bottom.png") {
+		t.Fatalf("durable notice input order changed: %s", joined)
 	}
 }
 
@@ -1133,8 +1189,8 @@ func TestBuildFFmpegArgsLegacyVariantUnchanged(t *testing.T) {
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"-ss 1.500",
-		"-t 2.750",
+		"-ss 1.500000000",
+		"-t 2.750000000",
 		"split=2[facein][gamein]",
 		"scale=1080:520:force_original_aspect_ratio=increase,crop=1080:520[face]",
 		"scale=1080:1400:force_original_aspect_ratio=increase,crop=1080:1400[game]",

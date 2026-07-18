@@ -32,6 +32,87 @@ func TestNewParseDemoTaskRoundtrip(t *testing.T) {
 	}
 }
 
+func TestGenerateStreamCaptionsTaskCarriesGenerationOutsideUniquePayload(t *testing.T) {
+	jobID := uuid.New()
+	firstGeneration := uuid.New()
+	secondGeneration := uuid.New()
+	first, err := NewGenerateStreamCaptionsTask(jobID, firstGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewGenerateStreamCaptionsTask(jobID, secondGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first.Payload()) != string(second.Payload()) {
+		t.Fatalf("payloads differ; asynq Unique must dedupe by job: %s != %s", first.Payload(), second.Payload())
+	}
+	if got, err := StreamCaptionGenerationFromTask(first); err != nil || got != firstGeneration {
+		t.Fatalf("first generation = %s, %v; want %s", got, err, firstGeneration)
+	}
+	if got, err := StreamCaptionGenerationFromTask(second); err != nil || got != secondGeneration {
+		t.Fatalf("second generation = %s, %v; want %s", got, err, secondGeneration)
+	}
+}
+
+func TestGenerateStreamKillfeedTaskCarriesGenerationInPayloadAndHeader(t *testing.T) {
+	jobID := uuid.New()
+	firstGeneration := uuid.New()
+	secondGeneration := uuid.New()
+	first, err := NewGenerateStreamKillfeedTask(jobID, firstGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewGenerateStreamKillfeedTask(jobID, secondGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first.Payload()) == string(second.Payload()) {
+		t.Fatalf("payloads are equal; asynq Unique would suppress a fresh generation: %s", first.Payload())
+	}
+	var payload GenerateStreamKillfeedPayload
+	if err := json.Unmarshal(first.Payload(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.JobID != jobID || payload.GenerationID != firstGeneration {
+		t.Fatalf("payload = %+v, want job %s generation %s", payload, jobID, firstGeneration)
+	}
+	if got, err := StreamKillfeedGenerationFromTask(first); err != nil || got != firstGeneration {
+		t.Fatalf("generation = %s, %v; want %s", got, err, firstGeneration)
+	}
+	if got, err := StreamKillfeedGenerationFromTask(second); err != nil || got != secondGeneration {
+		t.Fatalf("generation = %s, %v; want %s", got, err, secondGeneration)
+	}
+}
+
+func TestBoundStreamRenderTaskKeepsUniquePayloadAndCarriesIntent(t *testing.T) {
+	jobID := uuid.New()
+	plain, err := NewRenderStreamClipTask(jobID, "streamer-40-60")
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := StreamRenderIntent{
+		AttemptID:           uuid.New(),
+		EditPlanFingerprint: strings.Repeat("a", 64),
+		KillfeedGeneration:  uuid.New(),
+		KillfeedFingerprint: strings.Repeat("b", 64),
+	}
+	bound, err := NewBoundRenderStreamClipTask(jobID, "streamer-40-60", intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(bound.Payload()) != string(plain.Payload()) {
+		t.Fatalf("bound payload = %s, want stable unique payload %s", bound.Payload(), plain.Payload())
+	}
+	got, ok, err := StreamRenderIntentFromTask(bound)
+	if err != nil || !ok || got != intent {
+		t.Fatalf("StreamRenderIntentFromTask = (%+v, %v, %v), want (%+v, true, nil)", got, ok, err, intent)
+	}
+	if _, ok, err := StreamRenderIntentFromTask(plain); err != nil || ok {
+		t.Fatalf("plain intent = (_, %v, %v), want (_, false, nil)", ok, err)
+	}
+}
+
 func TestNewScanRosterTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
 	tk, err := NewScanRosterTask(id)

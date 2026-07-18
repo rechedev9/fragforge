@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	xdraw "golang.org/x/image/draw"
 
 	"github.com/rechedev9/fragforge/internal/killfeedvision"
@@ -51,7 +52,19 @@ const (
 	// for several samples. One second bridges those observed gaps while still
 	// separating an expired notice from a later identical notice.
 	killfeedMaxObservationGapSeconds = 1
+	// Detector row crops are small PNGs. A bounded read turns a corrupt or
+	// unexpectedly large artifact into an actionable re-analysis error instead
+	// of letting a manual correction consume unbounded memory.
+	maxKillfeedEventRowBytes = 8 << 20
 )
+
+const (
+	killfeedEventStaleCode         = "killfeed_event_stale"
+	killfeedEventArtifactErrorCode = "killfeed_event_artifact_error"
+	killfeedEventIdentityCode      = "killfeed_event_identity_required"
+)
+
+var errKillfeedEventArtifact = errors.New("killfeed event artifact is unavailable")
 
 // WithFFmpegPath configures the ffmpeg binary used to extract a cue frame for
 // the killfeed-read endpoint. An empty path leaves the endpoint returning 409.
@@ -73,8 +86,10 @@ func WithXAIKey(key string) Option {
 // readKillfeedRequest is the JSON body for POST
 // /api/stream-jobs/{id}/killfeed-read.
 type readKillfeedRequest struct {
-	ClipID     string  `json:"clip_id"`
-	CueSeconds float64 `json:"cue_seconds"`
+	ClipID       string     `json:"clip_id"`
+	CueSeconds   float64    `json:"cue_seconds"`
+	EventID      string     `json:"event_id,omitempty"`
+	GenerationID *uuid.UUID `json:"generation_id,omitempty"`
 }
 
 type readKillfeedEvent struct {
@@ -104,16 +119,23 @@ func (h *Handlers) ReadStreamKillfeed(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireKillfeedFFmpeg(w) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	var req readKillfeedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid killfeed read JSON")
+		return
+	}
+	req.EventID = strings.TrimSpace(req.EventID)
+	hasGeneration := req.GenerationID != nil && *req.GenerationID != uuid.Nil
+	if (req.EventID == "") != !hasGeneration {
+		writeError(w, http.StatusBadRequest, "event_id and generation_id must be provided together")
 		return
 	}
 	if !h.requireKillfeedVision(w) {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
-	var req readKillfeedRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid killfeed read JSON")
+	if req.EventID != "" {
+		h.readAppliedStreamKillfeedEvent(w, r, j, req)
 		return
 	}
 	plan, err := h.currentStreamEditPlan(j)
@@ -134,6 +156,19 @@ func (h *Handlers) ReadStreamKillfeed(w http.ResponseWriter, r *http.Request) {
 	if math.IsNaN(req.CueSeconds) || math.IsInf(req.CueSeconds, 0) ||
 		req.CueSeconds < clip.StartSeconds || req.CueSeconds >= clip.EndSeconds {
 		writeError(w, http.StatusBadRequest, "cue_seconds must satisfy start_seconds <= cue < end_seconds")
+		return
+	}
+	identityRequired, err := h.appliedKillfeedCueRequiresIdentity(r.Context(), j.ID, req.ClipID, req.CueSeconds)
+	if err != nil {
+		internalError(w, "validate killfeed cue identity", err)
+		return
+	}
+	if identityRequired {
+		writeCodedError(w, http.StatusConflict, killfeedEventIdentityCode,
+			"this cue belongs to an exact automatic event; reload its generation identity before reading it")
+		return
+	}
+	if !h.requireKillfeedFFmpeg(w) {
 		return
 	}
 
@@ -179,12 +214,235 @@ func (h *Handlers) ReadStreamKillfeed(w http.ResponseWriter, r *http.Request) {
 	if len(events) == 1 {
 		responseCue = events[0].CueSeconds
 	}
+	identityRequired, err = h.appliedKillfeedCueRequiresIdentity(r.Context(), j.ID, req.ClipID, req.CueSeconds)
+	if err != nil {
+		internalError(w, "revalidate killfeed cue identity", err)
+		return
+	}
+	if identityRequired {
+		writeCodedError(w, http.StatusConflict, killfeedEventIdentityCode,
+			"killfeed analysis changed while this cue was being read; reload its exact generation identity")
+		return
+	}
 	writeJSON(w, http.StatusOK, readKillfeedResponse{
 		Kills:      kills,
 		CueSeconds: responseCue,
 		Aligned:    aligned,
 		Events:     events,
 	})
+}
+
+// appliedKillfeedCueRequiresIdentity prevents an automatic PTS-backed cue from
+// silently entering the legacy low-rate alignment path when a client has not
+// loaded its generation state yet. Manual cues remain eligible for that path.
+func (h *Handlers) appliedKillfeedCueRequiresIdentity(
+	ctx context.Context,
+	jobID uuid.UUID,
+	clipID string,
+	cueSeconds float64,
+) (bool, error) {
+	h.streamPlanMu.Lock()
+	defer h.streamPlanMu.Unlock()
+
+	j, err := h.streamRepo.Get(ctx, jobID)
+	if err != nil {
+		return false, fmt.Errorf("reload stream job: %w", err)
+	}
+	plan, err := h.currentStreamEditPlan(j)
+	if err != nil {
+		return false, err
+	}
+	plan = streamclips.NormalizeEditPlan(plan)
+	state, current, err := h.currentAppliedStreamKillfeedAnalysis(j, plan)
+	if err != nil || !current {
+		return false, err
+	}
+	for _, clip := range state.Clips {
+		if clip.ClipID != clipID {
+			continue
+		}
+		for _, event := range clip.Events {
+			if event.CueSeconds == cueSeconds {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	return false, nil
+}
+
+// readAppliedStreamKillfeedEvent enriches one already-aligned detector event
+// with OCR. Its persisted source PTS remains authoritative: this path never
+// extracts another frame, runs the low-rate aligner, rounds the cue, or falls
+// back to a nearby timestamp.
+func (h *Handlers) readAppliedStreamKillfeedEvent(
+	w http.ResponseWriter,
+	r *http.Request,
+	j streamclips.Job,
+	req readKillfeedRequest,
+) {
+	h.streamPlanMu.Lock()
+	event, current, err := h.currentAppliedKillfeedEvent(r.Context(), j.ID, req)
+	h.streamPlanMu.Unlock()
+	if err != nil {
+		internalError(w, "validate applied killfeed event", err)
+		return
+	}
+	if !current {
+		writeCodedError(w, http.StatusConflict, killfeedEventStaleCode,
+			"killfeed event is stale or does not belong to the applied generation; reload or rerun automatic killfeed analysis")
+		return
+	}
+
+	rowPNGs, err := h.openKillfeedEventRows(j.ID, *req.GenerationID, req.ClipID, event)
+	if err != nil {
+		if errors.Is(err, errKillfeedEventArtifact) {
+			writeCodedError(w, http.StatusConflict, killfeedEventArtifactErrorCode, err.Error())
+			return
+		}
+		internalError(w, "open applied killfeed event rows", err)
+		return
+	}
+
+	client := killfeedvision.Client{APIKey: h.xaiAPIKey, BaseURL: h.killfeedVisionBaseURL}
+	kills := make([]streamclips.KillfeedKill, 0, len(rowPNGs))
+	for _, rowPNG := range rowPNGs {
+		rowKills, err := client.ReadKillfeed(r.Context(), rowPNG)
+		if err != nil {
+			writeCodedError(w, http.StatusBadGateway, xaiRequestFailedCode, err.Error())
+			return
+		}
+		kills = append(kills, rowKills...)
+	}
+
+	// The OCR round trip may be slow. Re-check under the plan lock so a newer
+	// generation, crop, or clip edit cannot accept results from stale pixels.
+	h.streamPlanMu.Lock()
+	validatedEvent, current, err := h.currentAppliedKillfeedEvent(r.Context(), j.ID, req)
+	h.streamPlanMu.Unlock()
+	if err != nil {
+		internalError(w, "revalidate applied killfeed event", err)
+		return
+	}
+	if !current || validatedEvent.EventID != event.EventID ||
+		validatedEvent.SourcePTS != event.SourcePTS || validatedEvent.CueSeconds != event.CueSeconds {
+		writeCodedError(w, http.StatusConflict, killfeedEventStaleCode,
+			"killfeed analysis changed while the event was being read; reload before applying the result")
+		return
+	}
+	if kills == nil {
+		kills = []streamclips.KillfeedKill{}
+	}
+	responseEvent := readKillfeedEvent{CueSeconds: event.CueSeconds, Kills: kills}
+	writeJSON(w, http.StatusOK, readKillfeedResponse{
+		Kills:      kills,
+		CueSeconds: event.CueSeconds,
+		Aligned:    true,
+		Events:     []readKillfeedEvent{responseEvent},
+	})
+}
+
+// currentAppliedKillfeedEvent validates an exact-read reference against both
+// the current plan and the active applied generation. The strict float equality
+// is deliberate: CueSeconds is copied from this same durable event at Apply,
+// so any different value is not the source PTS-backed cue requested here.
+// Callers must hold streamPlanMu.
+func (h *Handlers) currentAppliedKillfeedEvent(
+	ctx context.Context,
+	jobID uuid.UUID,
+	req readKillfeedRequest,
+) (streamclips.KillfeedAnalysisEvent, bool, error) {
+	if req.GenerationID == nil || *req.GenerationID == uuid.Nil || req.EventID == "" {
+		return streamclips.KillfeedAnalysisEvent{}, false, nil
+	}
+	j, err := h.streamRepo.Get(ctx, jobID)
+	if err != nil {
+		return streamclips.KillfeedAnalysisEvent{}, false, fmt.Errorf("reload stream job: %w", err)
+	}
+	plan, err := h.currentStreamEditPlan(j)
+	if err != nil {
+		return streamclips.KillfeedAnalysisEvent{}, false, err
+	}
+	plan = streamclips.NormalizeEditPlan(plan)
+	if plan.KillfeedCrop == nil || plan.KillfeedAnalysis == nil ||
+		plan.KillfeedAnalysis.GenerationID != *req.GenerationID {
+		return streamclips.KillfeedAnalysisEvent{}, false, nil
+	}
+	fingerprint, err := streamclips.KillfeedAnalysisFingerprint(j.SourceSHA256, *plan.KillfeedCrop, plan.Clips)
+	if err != nil {
+		return streamclips.KillfeedAnalysisEvent{}, false, err
+	}
+	if plan.KillfeedAnalysis.Fingerprint != fingerprint {
+		return streamclips.KillfeedAnalysisEvent{}, false, nil
+	}
+	state, exists, err := h.readStreamKillfeedState(j.ID)
+	if err != nil {
+		return streamclips.KillfeedAnalysisEvent{}, false, err
+	}
+	if !exists || state.Status != streamclips.KillfeedAnalysisApplied ||
+		state.GenerationID != *req.GenerationID || state.Fingerprint != fingerprint {
+		return streamclips.KillfeedAnalysisEvent{}, false, nil
+	}
+	planClip, exists := findClip(plan.Clips, req.ClipID)
+	if !exists || math.IsNaN(req.CueSeconds) || math.IsInf(req.CueSeconds, 0) ||
+		req.CueSeconds < planClip.StartSeconds || req.CueSeconds >= planClip.EndSeconds {
+		return streamclips.KillfeedAnalysisEvent{}, false, nil
+	}
+	for _, stateClip := range state.Clips {
+		if stateClip.ClipID != req.ClipID {
+			continue
+		}
+		for _, event := range stateClip.Events {
+			if event.EventID != req.EventID || event.CueSeconds != req.CueSeconds {
+				continue
+			}
+			for _, cue := range planClip.KillfeedSeconds {
+				if cue == event.CueSeconds {
+					return event, true, nil
+				}
+			}
+			return streamclips.KillfeedAnalysisEvent{}, false, nil
+		}
+	}
+	return streamclips.KillfeedAnalysisEvent{}, false, nil
+}
+
+func (h *Handlers) openKillfeedEventRows(
+	jobID, generationID uuid.UUID,
+	clipID string,
+	event streamclips.KillfeedAnalysisEvent,
+) ([][]byte, error) {
+	rows := make([][]byte, 0, len(event.Rows))
+	for rowIndex := range event.Rows {
+		key, err := streamclips.KillfeedEventRowKey(jobID, generationID, clipID, event.EventID, rowIndex)
+		if err != nil {
+			return nil, fmt.Errorf("build killfeed event row key: %w", err)
+		}
+		rc, err := h.storage.Open(key)
+		if err != nil {
+			if storageNotExist(err) {
+				return nil, fmt.Errorf("%w: row %d is missing; rerun automatic killfeed analysis", errKillfeedEventArtifact, rowIndex+1)
+			}
+			return nil, fmt.Errorf("open killfeed event row %d: %w", rowIndex+1, err)
+		}
+		rowPNG, readErr := io.ReadAll(io.LimitReader(rc, maxKillfeedEventRowBytes+1))
+		closeErr := rc.Close()
+		if readErr != nil || closeErr != nil {
+			return nil, fmt.Errorf("read killfeed event row %d: %w", rowIndex+1, errors.Join(readErr, closeErr))
+		}
+		if len(rowPNG) > maxKillfeedEventRowBytes {
+			return nil, fmt.Errorf("%w: row %d exceeds %d bytes; rerun automatic killfeed analysis", errKillfeedEventArtifact, rowIndex+1, maxKillfeedEventRowBytes)
+		}
+		img, err := png.Decode(bytes.NewReader(rowPNG))
+		if err != nil || img.Bounds().Empty() {
+			return nil, fmt.Errorf("%w: row %d is not a valid PNG; rerun automatic killfeed analysis", errKillfeedEventArtifact, rowIndex+1)
+		}
+		rows = append(rows, rowPNG)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("%w: event has no row captures; rerun automatic killfeed analysis", errKillfeedEventArtifact)
+	}
+	return rows, nil
 }
 
 // fallbackKillfeedEventKills converts an unaligned cumulative vision snapshot

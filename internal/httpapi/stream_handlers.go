@@ -349,8 +349,23 @@ func (h *Handlers) currentStreamEditPlan(j streamclips.Job) (streamclips.EditPla
 }
 
 func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
+	// Serialize every edit-plan mutation with caption review, killfeed apply, and
+	// render admission so none can validate plan A and overwrite a newer plan B.
+	releaseJob := h.lockStreamJobRequest(r)
+	defer releaseJob()
+	h.streamPlanMu.Lock()
+	defer h.streamPlanMu.Unlock()
 	j, ok := h.loadStreamJob(w, r)
 	if !ok {
+		return
+	}
+	if j.Status == streamclips.StatusRendering {
+		writeError(w, http.StatusConflict, "stream edit plan cannot change while a render is running")
+		return
+	}
+	previousPlan, err := h.currentStreamEditPlan(j)
+	if err != nil {
+		internalError(w, "load previous stream edit plan", err)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
@@ -364,6 +379,8 @@ func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plan = streamclips.NormalizeEditPlan(plan)
+	invalidateChangedCaptionReviews(previousPlan, &plan)
+	reconcileKillfeedAnalysis(previousPlan, &plan)
 	plan.UpdatedAt = time.Now().UTC()
 	if err := plan.ValidateForSourceDuration(j.Probe.DurationSeconds); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -385,6 +402,11 @@ func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
+	releaseJob := h.lockStreamJobRequest(r)
+	defer releaseJob()
+	h.streamPlanMu.Lock()
+	defer h.streamPlanMu.Unlock()
+
 	j, ok := h.loadStreamJob(w, r)
 	if !ok {
 		return
@@ -414,22 +436,62 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if plan.Variant != variant {
+		writeError(w, http.StatusConflict, fmt.Sprintf(
+			"stream render variant %q does not match edit plan variant %q; save the requested variant before rendering",
+			variant, plan.Variant,
+		))
+		return
+	}
 	if migrationApplied && hadClipsBeforeMigration && len(plan.Clips) == 0 {
 		writeError(w, http.StatusBadRequest, "stream edit plan has no clips after source-duration migration")
 		return
 	}
-	if plan.Captions.Enabled && !h.requireCaptionsEnabled(w) {
+	if j.Probe.AudioCodec != "" && plan.CaptionsNeedBackend() {
+		writeError(w, http.StatusConflict, "captions require review before rendering; generate caption candidates and approve every audible clip")
 		return
 	}
-	task, err := tasks.NewRenderStreamClipTask(j.ID, variant)
+	renderIntent := tasks.StreamRenderIntent{AttemptID: uuid.New()}
+	if plan.KillfeedCrop != nil {
+		analysis, current, err := h.currentAppliedStreamKillfeedAnalysis(j, plan)
+		if err != nil {
+			internalError(w, "validate applied stream killfeed analysis", err)
+			return
+		}
+		if !current {
+			writeError(w, http.StatusConflict, "clean killfeed requires the current temporal analysis generation to be applied before rendering")
+			return
+		}
+		if err := validateRenderableKillfeedCues(plan, analysis); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		renderIntent.KillfeedGeneration = analysis.GenerationID
+		renderIntent.KillfeedFingerprint = analysis.Fingerprint
+	}
+	renderIntent.EditPlanFingerprint, err = streamclips.EditPlanFingerprint(plan)
+	if err != nil {
+		internalError(w, "fingerprint stream edit plan", err)
+		return
+	}
+	task, err := tasks.NewBoundRenderStreamClipTask(j.ID, variant, renderIntent)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	previousState, hadPreviousState, err := h.readStreamRenderState(j.ID, variant)
+	if err != nil {
+		internalError(w, "load previous stream render state", err)
 		return
 	}
 	state, err := streamclips.NewRenderState(j.ID, variant, streamclips.StatusRendering, nil, "", nil)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	state.AttemptID = renderIntent.AttemptID
+	if hadPreviousState {
+		state.PreservePublishedRender(previousState)
 	}
 	_, err = h.queue.EnqueueWithTransition(task, func(decision error) error {
 		switch {
@@ -445,10 +507,10 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		default:
-			failedState, stateErr := streamclips.NewRenderState(j.ID, variant, streamclips.StatusFailed, state.Warnings, "enqueue render: "+decision.Error(), state.Videos)
-			if stateErr != nil {
-				return stateErr
-			}
+			failedState := state
+			failedState.Status = streamclips.StatusFailed
+			failedState.Error = "enqueue render: " + decision.Error()
+			failedState.UpdatedAt = time.Now().UTC()
 			return h.writeStreamRenderState(failedState)
 		}
 	}, asynq.Unique(streamRenderUniqueTTL))
@@ -471,6 +533,65 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		"variant": variant,
 		"status":  state.Status,
 	})
+}
+
+func invalidateChangedCaptionReviews(previous streamclips.EditPlan, current *streamclips.EditPlan) {
+	if current == nil {
+		return
+	}
+	previous = streamclips.NormalizeEditPlan(previous)
+	byID := make(map[string]streamclips.ClipRange, len(previous.Clips))
+	for _, clip := range previous.Clips {
+		byID[clip.ID] = clip
+	}
+	for i := range current.Clips {
+		old, ok := byID[current.Clips[i].ID]
+		if !ok {
+			continue
+		}
+		oldFingerprint, oldErr := streamclips.CaptionClipFingerprint("", old)
+		newFingerprint, newErr := streamclips.CaptionClipFingerprint("", current.Clips[i])
+		if oldErr == nil && newErr == nil && oldFingerprint == newFingerprint {
+			continue
+		}
+		current.Clips[i].CaptionWords = nil
+		current.Clips[i].CaptionReviewed = false
+	}
+}
+
+// reconcileKillfeedAnalysis treats analysis metadata as server-owned. A PUT
+// may omit it (older web/CLI clients do), but cannot forge or alter it. Once an
+// applied generation's crop or ordered clip bounds change, every event it
+// supplied is cleared together so no stale cue survives under fresh metadata.
+func reconcileKillfeedAnalysis(previous streamclips.EditPlan, current *streamclips.EditPlan) {
+	if current == nil {
+		return
+	}
+	previous = streamclips.NormalizeEditPlan(previous)
+	current.KillfeedAnalysis = nil
+	if previous.KillfeedAnalysis == nil {
+		return
+	}
+	inputsMatch := previous.KillfeedCrop != nil && current.KillfeedCrop != nil
+	if inputsMatch {
+		oldFingerprint, oldErr := streamclips.KillfeedAnalysisFingerprint(
+			"edit-plan-source", *previous.KillfeedCrop, previous.Clips,
+		)
+		newFingerprint, newErr := streamclips.KillfeedAnalysisFingerprint(
+			"edit-plan-source", *current.KillfeedCrop, current.Clips,
+		)
+		inputsMatch = oldErr == nil && newErr == nil && oldFingerprint == newFingerprint
+	}
+	if inputsMatch {
+		metadata := *previous.KillfeedAnalysis
+		current.KillfeedAnalysis = &metadata
+		return
+	}
+	for i := range current.Clips {
+		current.Clips[i].KillfeedSeconds = nil
+		current.Clips[i].KillfeedKills = nil
+		current.Clips[i].KillfeedCueProvenance = nil
+	}
 }
 
 func (h *Handlers) GetStreamRender(w http.ResponseWriter, r *http.Request) {
@@ -505,7 +626,32 @@ func (h *Handlers) GetStreamRender(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetStreamGallery(w http.ResponseWriter, r *http.Request) {
-	h.streamStreamRenderArtifact(w, r, "text/html; charset=utf-8", streamclips.RenderGalleryKey)
+	j, ok := h.loadStreamJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	state, exists, err := h.readStreamRenderState(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if exists {
+		if state.HasPublishedRender() && state.GalleryKey != "" {
+			h.streamStorageKey(w, r, "text/html; charset=utf-8", state.GalleryKey)
+			return
+		}
+		writeError(w, http.StatusNotFound, "stream render gallery is not ready")
+		return
+	}
+	// Compatibility for render states produced before revision-scoped
+	// publication made status.json the authoritative pointer.
+	key, err := streamclips.RenderGalleryKey(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.streamStorageKey(w, r, "text/html; charset=utf-8", key)
 }
 
 func (h *Handlers) GetStreamVideo(w http.ResponseWriter, r *http.Request) {
@@ -524,6 +670,23 @@ func (h *Handlers) streamVideoKey(id uuid.UUID, variant, clipID string) (string,
 	fallback, err := streamclips.RenderVideoKey(id, variant, clipID)
 	if err != nil {
 		return "", err
+	}
+	state, exists, err := h.readStreamRenderState(id, variant)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		if !state.HasPublishedRender() {
+			return "", fmt.Errorf("stream render video is not ready")
+		}
+		for _, video := range state.Videos {
+			if video.ClipID == clipID && video.Key != "" {
+				return video.Key, nil
+			}
+		}
+		if len(state.Videos) > 0 {
+			return "", fmt.Errorf("stream render clip %q not found", clipID)
+		}
 	}
 	resultKey, err := streamclips.RenderResultKey(id, variant)
 	if err != nil {
@@ -575,6 +738,17 @@ func (h *Handlers) loadStreamJob(w http.ResponseWriter, r *http.Request) (stream
 	return j, true
 }
 
+// lockStreamJobRequest coordinates the short HTTP validation+persistence
+// critical section with the stream worker's render claim and final commit. A
+// malformed id is handled by loadStreamJob and needs no keyed lock.
+func (h *Handlers) lockStreamJobRequest(r *http.Request) func() {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		return func() {}
+	}
+	return h.streamJobLocks.Lock(id)
+}
+
 func (h *Handlers) streamStreamRenderArtifact(w http.ResponseWriter, r *http.Request, contentType string, keyFn func(uuid.UUID, string) (string, error)) {
 	j, ok := h.loadStreamJob(w, r)
 	if !ok {
@@ -607,6 +781,9 @@ func (h *Handlers) writeStreamEditPlanArtifact(id uuid.UUID, plan streamclips.Ed
 }
 
 func (h *Handlers) writeStreamRenderState(state streamclips.RenderState) error {
+	if err := streamclips.ValidateRenderStateArtifacts(state); err != nil {
+		return fmt.Errorf("validate stream render state artifacts: %w", err)
+	}
 	key, err := streamclips.RenderStateKey(state.JobID, state.Variant)
 	if err != nil {
 		return err
@@ -634,6 +811,12 @@ func (h *Handlers) readStreamRenderState(id uuid.UUID, variant string) (streamcl
 	var state streamclips.RenderState
 	if err := json.NewDecoder(rc).Decode(&state); err != nil {
 		return streamclips.RenderState{}, false, fmt.Errorf("decode stream render state: %w", err)
+	}
+	if state.JobID != id || state.Variant != variant {
+		return streamclips.RenderState{}, false, fmt.Errorf("stream render state identity does not match request")
+	}
+	if err := streamclips.ValidateRenderStateArtifacts(state); err != nil {
+		return streamclips.RenderState{}, false, fmt.Errorf("validate stream render state: %w", err)
 	}
 	return state, true, nil
 }

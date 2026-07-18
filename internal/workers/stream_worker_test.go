@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -34,6 +35,27 @@ func newFakeStreamRepo(jobs ...streamclips.Job) *fakeStreamRepo {
 		f.jobs[j.ID] = j
 	}
 	return f
+}
+
+func renderedStreamStateForTest(
+	t *testing.T,
+	store *fakeStorage,
+	id uuid.UUID,
+	variant string,
+) streamclips.RenderState {
+	t.Helper()
+	key, err := streamclips.RenderStateKey(id, variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state streamclips.RenderState
+	if err := json.Unmarshal(store.files[key], &state); err != nil {
+		t.Fatalf("decode rendered stream state: %v", err)
+	}
+	if state.Status != streamclips.StatusRendered || len(state.Videos) == 0 {
+		t.Fatalf("render state = %+v, want rendered videos", state)
+	}
+	return state
 }
 
 func (f *fakeStreamRepo) Get(_ context.Context, id uuid.UUID) (streamclips.Job, error) {
@@ -239,13 +261,15 @@ func TestStreamRenderWorkerRendersSyntheticKillfeedNotices(t *testing.T) {
 	plan.Clips[0].KillfeedKills = [][]streamclips.KillfeedKill{{
 		{AttackerSide: "CT", AttackerName: "hero", VictimSide: "T", VictimName: "villain", Weapon: weapon, Headshot: true},
 	}}
+	const sourceSHA = "synthetic-killfeed-source"
+	applyKillfeedAnalysisForRenderTest(t, store, id, sourceSHA, &plan)
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := newFakeStreamRepo(streamclips.Job{
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
-		Probe: streamclips.SourceProbe{AudioCodec: "aac"},
+		SourceSHA256: sourceSHA, Probe: streamclips.SourceProbe{AudioCodec: "aac"},
 	})
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		out := args[len(args)-1]
@@ -303,20 +327,24 @@ func TestStreamRenderWorkerRendersSyntheticKillfeedNotices(t *testing.T) {
 	}
 }
 
-func TestStreamRenderWorkerFreezesKillfeedCropWithoutKills(t *testing.T) {
+func TestStreamRenderWorkerRejectsMissingAutomaticRowArtifactWithoutFrozenCrop(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, false)
 	hint := streamclips.CropRect{X: 0.68, Y: 0.04, Width: 0.31, Height: 0.14}
 	plan.KillfeedCrop = &hint
 	plan.Clips[0].KillfeedSeconds = []float64{0.5}
-	// No KillfeedKills: the render must fall back to a frozen crop of the
-	// killfeed region rather than extract or detect anything.
+	// No KillfeedKills and no event artifact: metadata-backed automatic render
+	// must fail instead of sampling the whole crop at cue+0.35, which can include
+	// a later adjacent kill.
+	const sourceSHA = "frozen-killfeed-source"
+	applyKillfeedAnalysisForRenderTest(t, store, id, sourceSHA, &plan)
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := newFakeStreamRepo(streamclips.Job{
 		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		SourceSHA256: sourceSHA,
 	})
 	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		out := args[len(args)-1]
@@ -335,29 +363,25 @@ func TestStreamRenderWorkerFreezesKillfeedCropWithoutKills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
-		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	err = w.HandleRenderStreamClip(context.Background(), task)
+	if err == nil || !strings.Contains(err.Error(), "no exact captured killfeed event") {
+		t.Fatalf("HandleRenderStreamClip error = %v, want missing exact event", err)
 	}
-
-	if got, want := len(runner.calls), 1; got != want {
-		t.Fatalf("runner calls = %d, want %d (render only)", got, want)
-	}
-	renderFilter := argValue(runner.calls[0].args, "-filter_complex")
-	if !strings.Contains(renderFilter, "killfeedin0") || !strings.Contains(renderFilter, "scale=930:-2") {
-		t.Fatalf("frozen-crop fallback filter missing: %s", renderFilter)
-	}
-	for _, a := range runner.calls[0].args {
-		if strings.Contains(filepath.ToSlash(a), "/killfeed/clip-001/cue") {
-			t.Fatalf("frozen-crop fallback unexpectedly rendered a notice PNG: %q", a)
-		}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %d, want zero before any full-crop fallback", len(runner.calls))
 	}
 }
 
-func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) {
+func TestStreamRenderWorkerBurnsReviewedCaptionsAndPublishesCaptionedClip(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, true)
 	plan.Clips[0].StartSeconds = 1.25
 	plan.Clips[0].EndSeconds = 3.25
+	plan.Clips[0].CaptionWords = []streamclips.CaptionWord{
+		{Word: "bien", StartSeconds: 0, EndSeconds: 0.5},
+		{Word: "jugado", StartSeconds: 0.75, EndSeconds: 1},
+	}
+	plan.Clips[0].CaptionReviewed = true
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -385,25 +409,9 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 		XAIAPIKey:  "xai_test",
 	})
 	w.runner = runner
-	var transcriptionPath string
-	w.transcribe = func(_ context.Context, mediaPath, _, language string) ([]captions.WordCue, error) {
-		transcriptionPath = mediaPath
-		if language != captionSourceLanguage {
-			t.Fatalf("source transcription language = %q, want %q", language, captionSourceLanguage)
-		}
-		return []captions.WordCue{
-			{Word: "nice", StartSeconds: 0, EndSeconds: 0.5},
-			{Word: "gg", StartSeconds: 0.75, EndSeconds: 1},
-		}, nil
-	}
-	w.translateToSpanish = func(_ context.Context, source []captions.WordCue) ([]captions.WordCue, error) {
-		if got, want := wordsOf(source), "nice gg"; got != want {
-			t.Fatalf("translation source = %q, want %q", got, want)
-		}
-		return []captions.WordCue{
-			{Word: "bien", StartSeconds: 0, EndSeconds: 0.5},
-			{Word: "jugado", StartSeconds: 0.75, EndSeconds: 1},
-		}, nil
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		t.Fatal("render must not transcribe reviewed captions")
+		return nil, nil
 	}
 
 	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
@@ -414,32 +422,10 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 		t.Fatalf("HandleRenderStreamClip error = %v", err)
 	}
 
-	if len(runner.calls) != 3 {
-		t.Fatalf("runner calls = %d, want 3 (render + source audio extraction + caption burn)", len(runner.calls))
+	if len(runner.calls) != 2 {
+		t.Fatalf("runner calls = %d, want 2 (render + caption burn)", len(runner.calls))
 	}
-	extractArgs := runner.calls[1].args
-	if got, want := argValue(extractArgs, "-ss"), "1.250"; got != want {
-		t.Fatalf("caption audio -ss = %q, want %q", got, want)
-	}
-	if got, want := argValue(extractArgs, "-t"), "2.000"; got != want {
-		t.Fatalf("caption audio -t = %q, want %q", got, want)
-	}
-	if got, want := argValue(extractArgs, "-map"), "0:a:0"; got != want {
-		t.Fatalf("caption audio -map = %q, want %q", got, want)
-	}
-	if got, want := argValue(extractArgs, "-c:a"), "pcm_s16le"; got != want {
-		t.Fatalf("caption audio codec = %q, want %q", got, want)
-	}
-	if got, want := argValue(extractArgs, "-ac"), "1"; got != want {
-		t.Fatalf("caption audio channels = %q, want %q", got, want)
-	}
-	if got, want := argValue(extractArgs, "-ar"), "16000"; got != want {
-		t.Fatalf("caption audio sample rate = %q, want %q", got, want)
-	}
-	if !strings.HasSuffix(transcriptionPath, "clip-001.wav") {
-		t.Fatalf("transcription path = %q, want original-range WAV", transcriptionPath)
-	}
-	burnArgs := runner.calls[2].args
+	burnArgs := runner.calls[1].args
 	if got := argValue(burnArgs, "-vf"); !strings.HasPrefix(got, "ass=") || !strings.Contains(got, ":fontsdir='") {
 		t.Fatalf("caption burn -vf = %q, want an ass= filter with fontsdir", got)
 	}
@@ -447,17 +433,12 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 		t.Fatalf("caption burn output = %q, want a clip-001_captioned.mp4 path", out)
 	}
 
-	wantKey, err := streamclips.RenderVideoKey(id, streamclips.VariantStreamer4060, "clip-001_captioned")
-	if err != nil {
-		t.Fatal(err)
-	}
+	renderState := renderedStreamStateForTest(t, store, id, streamclips.VariantStreamer4060)
+	wantKey := renderState.Videos[0].Key
 	if _, ok := store.files[wantKey]; !ok {
 		t.Fatalf("storage missing captioned video at %s", wantKey)
 	}
-	captionKey, err := streamclips.RenderCaptionKey(id, streamclips.VariantStreamer4060, "clip-001")
-	if err != nil {
-		t.Fatal(err)
-	}
+	captionKey := renderState.ArtifactDir + "/captions/clip-001.ass"
 	ass, ok := store.files[captionKey]
 	if !ok {
 		t.Fatal("storage missing .ass caption artifact")
@@ -483,10 +464,7 @@ func TestStreamRenderWorkerBurnsCaptionsAndPublishesCaptionedClip(t *testing.T) 
 		t.Fatalf("caption artifact does not pin the caption at the 40/60 gameplay band via \\pos(540,1171): %s", ass)
 	}
 
-	resultKey, err := streamclips.RenderResultKey(id, streamclips.VariantStreamer4060)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resultKey := renderState.ResultKey
 	if !strings.Contains(string(store.files[resultKey]), `clip-001_captioned.mp4`) {
 		t.Fatalf("render result does not reference captioned clip: %s", store.files[resultKey])
 	}
@@ -542,16 +520,14 @@ func TestStreamRenderWorkerPublishesUncaptionedWhenSourceHasNoAudio(t *testing.T
 	if !strings.Contains(string(store.files[stateKey]), "source has no audio") {
 		t.Fatalf("render state missing no-audio warning: %s", store.files[stateKey])
 	}
-	wantKey, err := streamclips.RenderVideoKey(id, streamclips.VariantStreamer4060, "clip-001")
-	if err != nil {
-		t.Fatal(err)
-	}
+	renderState := renderedStreamStateForTest(t, store, id, streamclips.VariantStreamer4060)
+	wantKey := renderState.Videos[0].Key
 	if _, ok := store.files[wantKey]; !ok {
 		t.Fatalf("storage missing uncaptioned video at %s", wantKey)
 	}
 }
 
-func TestStreamRenderWorkerRetriesSpeechEnhancedAudioForUneditedClipThenPublishesWarning(t *testing.T) {
+func TestStreamRenderWorkerRejectsUnreviewedCaptionsBeforeFFmpeg(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, true)
 	planJSON, err := json.Marshal(plan)
@@ -585,32 +561,12 @@ func TestStreamRenderWorkerRetriesSpeechEnhancedAudioForUneditedClipThenPublishe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
-		t.Fatalf("HandleRenderStreamClip error = %v", err)
+	err = w.HandleRenderStreamClip(context.Background(), task)
+	if err == nil || !strings.Contains(err.Error(), "without reviewed captions") {
+		t.Fatalf("HandleRenderStreamClip error = %v, want review gate", err)
 	}
-
-	// The render, ordinary extraction, and bounded speech-locator pass ran; no
-	// recovery windows or caption burn pass since the locator found no words.
-	if len(runner.calls) != 3 {
-		t.Fatalf("runner calls = %d, want 3 (render + ordinary and enhanced xAI audio extraction)", len(runner.calls))
-	}
-	if got := argValue(runner.calls[2].args, "-af"); got != captionSpeechEnhanceFilter {
-		t.Fatalf("speech-enhanced -af = %q, want %q", got, captionSpeechEnhanceFilter)
-	}
-	wantKey, err := streamclips.RenderVideoKey(id, streamclips.VariantStreamer4060, "clip-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := store.files[wantKey]; !ok {
-		t.Fatalf("storage missing uncaptioned video at %s", wantKey)
-	}
-
-	stateKey, err := streamclips.RenderStateKey(id, streamclips.VariantStreamer4060)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(store.files[stateKey]), "no words") {
-		t.Fatalf("render state missing zero-cue warning: %s", store.files[stateKey])
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %d, want 0 before caption review", len(runner.calls))
 	}
 }
 
@@ -1020,8 +976,8 @@ func TestStreamRenderWorkerRejectsCaptionsWithNoBackendConfigured(t *testing.T) 
 	if err == nil {
 		t.Fatal("HandleRenderStreamClip returned nil error, want an error")
 	}
-	if !strings.Contains(err.Error(), "neither reviewed caption words") {
-		t.Fatalf("got error %q, want it to mention reviewed caption words", err.Error())
+	if !strings.Contains(err.Error(), "without reviewed captions") {
+		t.Fatalf("got error %q, want it to mention reviewed captions", err.Error())
 	}
 }
 
@@ -1032,6 +988,7 @@ func TestStreamRenderWorkerBurnsReviewedCaptionsWithoutCloudKey(t *testing.T) {
 		{Word: "Buena", StartSeconds: 0, EndSeconds: 0.5},
 		{Word: "jugada", StartSeconds: 0.5, EndSeconds: 1},
 	}
+	plan.Clips[0].CaptionReviewed = true
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -1060,10 +1017,8 @@ func TestStreamRenderWorkerBurnsReviewedCaptionsWithoutCloudKey(t *testing.T) {
 	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
 		t.Fatalf("HandleRenderStreamClip error = %v", err)
 	}
-	captionKey, err := streamclips.RenderCaptionKey(id, streamclips.VariantStreamer4060, "clip-001")
-	if err != nil {
-		t.Fatal(err)
-	}
+	renderState := renderedStreamStateForTest(t, store, id, streamclips.VariantStreamer4060)
+	captionKey := renderState.ArtifactDir + "/captions/clip-001.ass"
 	ass, ok := store.files[captionKey]
 	if !ok || !strings.Contains(string(ass), "Buena") || !strings.Contains(string(ass), "jugada") {
 		t.Fatalf("reviewed ASS caption = %q", ass)
@@ -1147,17 +1102,22 @@ func TestStreamRenderWorkerMigratesAlreadyQueuedLegacyDuration(t *testing.T) {
 	if err := w.HandleRenderStreamClip(context.Background(), task); err != nil {
 		t.Fatalf("HandleRenderStreamClip error = %v", err)
 	}
-	if got, want := argValue(runner.calls[0].args, "-t"), "15.150"; got != want {
+	if got, want := argValue(runner.calls[0].args, "-t"), "15.150000000"; got != want {
 		t.Fatalf("render -t = %q, want migrated duration %q", got, want)
 	}
 }
 
-func TestStreamRenderWorkerScalesCloudCaptionCuesBySpeed(t *testing.T) {
+func TestStreamRenderWorkerScalesReviewedCaptionCuesBySpeed(t *testing.T) {
 	store := newFakeStorage()
 	id, plan := newReadyStreamJobWithCaptions(t, store, true)
 	plan.Clips[0].StartSeconds = 1.25
 	plan.Clips[0].EndSeconds = 3.25
 	plan.Clips[0].Edit = &streamclips.ClipEdit{Speed: 2}
+	plan.Clips[0].CaptionWords = []streamclips.CaptionWord{
+		{Word: "nice", StartSeconds: 0, EndSeconds: 0.5},
+		{Word: "gg", StartSeconds: 0.5, EndSeconds: 1},
+	}
+	plan.Clips[0].CaptionReviewed = true
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -1179,15 +1139,9 @@ func TestStreamRenderWorkerScalesCloudCaptionCuesBySpeed(t *testing.T) {
 		XAIAPIKey:  "xai_test",
 	})
 	w.runner = runner
-	// Cloud cues come back in source-relative seconds over the 2s source range.
 	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
-		return []captions.WordCue{
-			{Word: "nice", StartSeconds: 0, EndSeconds: 0.5},
-			{Word: "gg", StartSeconds: 0.5, EndSeconds: 1},
-		}, nil
-	}
-	w.translateToSpanish = func(_ context.Context, cues []captions.WordCue) ([]captions.WordCue, error) {
-		return cues, nil
+		t.Fatal("render must not transcribe reviewed captions")
+		return nil, nil
 	}
 
 	task, err := tasks.NewRenderStreamClipTask(id, streamclips.VariantStreamer4060)
@@ -1198,10 +1152,8 @@ func TestStreamRenderWorkerScalesCloudCaptionCuesBySpeed(t *testing.T) {
 		t.Fatalf("HandleRenderStreamClip error = %v", err)
 	}
 
-	captionKey, err := streamclips.RenderCaptionKey(id, streamclips.VariantStreamer4060, "clip-001")
-	if err != nil {
-		t.Fatal(err)
-	}
+	renderState := renderedStreamStateForTest(t, store, id, streamclips.VariantStreamer4060)
+	captionKey := renderState.ArtifactDir + "/captions/clip-001.ass"
 	ass, ok := store.files[captionKey]
 	if !ok {
 		t.Fatal("storage missing .ass caption artifact")
@@ -1302,5 +1254,148 @@ func TestStreamRenderWorkerAllowsMutedClipWithoutCaptionBackend(t *testing.T) {
 	}
 	if got, want := len(runner.calls), 1; got != want {
 		t.Fatalf("runner calls = %d, want %d render call", got, want)
+	}
+}
+
+func TestStreamCaptionWorkerPersistsReviewableCandidatesWithoutMutatingPlan(t *testing.T) {
+	store := newFakeStorage()
+	id, plan := newReadyStreamJobWithCaptions(t, store, true)
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeStreamRepo(streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), SourceSHA256: "source-sha", EditPlan: planJSON,
+		Probe: streamclips.SourceProbe{AudioCodec: "aac", DurationSeconds: 5},
+	})
+	generationID := uuid.New()
+	queuedState := streamclips.CaptionCandidateState{
+		JobID: id, GenerationID: generationID, Status: streamclips.CaptionCandidatesQueued,
+		Clips: []streamclips.CaptionCandidateClip{}, UpdatedAt: time.Now().UTC(),
+	}
+	putJSON(t, store, streamclips.CaptionCandidatesKey(id), queuedState)
+	generationKey, err := streamclips.CaptionCandidateGenerationKey(id, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putJSON(t, store, generationKey, queuedState)
+	runner := &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("wav"), 0o600)
+	}}
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{
+		WorkDir: t.TempDir(), FFmpegPath: "ffmpeg", XAIAPIKey: "xai_test",
+	})
+	w.runner = runner
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		return []captions.WordCue{
+			{Word: "hello", StartSeconds: 0.1, EndSeconds: 0.8},
+			{Word: "friend", StartSeconds: 0.9, EndSeconds: 1.7},
+		}, nil
+	}
+	w.translateToSpanish = func(_ context.Context, cues []captions.WordCue) ([]captions.WordCue, error) {
+		if got, want := wordsOf(cues), "hello friend"; got != want {
+			t.Fatalf("source words = %q, want %q", got, want)
+		}
+		return []captions.WordCue{
+			{Word: "hola", StartSeconds: 0.1, EndSeconds: 0.8},
+			{Word: "amigo", StartSeconds: 0.9, EndSeconds: 1.7},
+		}, nil
+	}
+	task, err := tasks.NewGenerateStreamCaptionsTask(id, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleGenerateStreamCaptions(context.Background(), task); err != nil {
+		t.Fatalf("HandleGenerateStreamCaptions error = %v", err)
+	}
+	var state streamclips.CaptionCandidateState
+	if err := json.Unmarshal(store.files[generationKey], &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != streamclips.CaptionCandidatesReviewRequired || len(state.Clips) != 1 {
+		t.Fatalf("caption state = %+v, want one review_required clip", state)
+	}
+	clip := state.Clips[0]
+	if got, want := clip.SourceWords[0].Word, "hello"; got != want {
+		t.Fatalf("source word = %q, want %q", got, want)
+	}
+	if got, want := clip.CandidateWords[0].Word, "hola"; got != want {
+		t.Fatalf("candidate word = %q, want %q", got, want)
+	}
+	if clip.Provider != "xai" || clip.STTModel != "" || clip.STTEndpoint != "/v1/stt" || clip.TranslationModel == "" || clip.Fingerprint == "" {
+		t.Fatalf("candidate provenance/fingerprint missing: %+v", clip)
+	}
+	var saved streamclips.EditPlan
+	if err := json.Unmarshal(repo.jobs[id].EditPlan, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Clips[0].CaptionReviewed || len(saved.Clips[0].CaptionWords) != 0 {
+		t.Fatalf("generation mutated unreviewed edit plan: %+v", saved.Clips[0])
+	}
+}
+
+func TestStreamCaptionWorkerCannotOverwriteNewerGeneration(t *testing.T) {
+	store := newFakeStorage()
+	id := uuid.New()
+	oldGeneration := uuid.New()
+	newGeneration := uuid.New()
+	repo := newFakeStreamRepo(streamclips.Job{ID: id, Status: streamclips.StatusReady})
+	putJSON(t, store, streamclips.CaptionCandidatesKey(id), streamclips.CaptionCandidateState{
+		JobID: id, GenerationID: newGeneration, Status: streamclips.CaptionCandidatesQueued,
+		Clips: []streamclips.CaptionCandidateClip{}, UpdatedAt: time.Now().UTC(),
+	})
+	w := NewStreamRenderWorker(repo, store, StreamRenderWorkerConfig{})
+	w.runner = &fakeRunner{fn: func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("superseded generation must stop before media work")
+		return nil, nil
+	}}
+	task, err := tasks.NewGenerateStreamCaptionsTask(id, oldGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.HandleGenerateStreamCaptions(context.Background(), task); err != nil {
+		t.Fatalf("superseded HandleGenerateStreamCaptions error = %v", err)
+	}
+	var state streamclips.CaptionCandidateState
+	if err := json.Unmarshal(store.files[streamclips.CaptionCandidatesKey(id)], &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.GenerationID != newGeneration || state.Status != streamclips.CaptionCandidatesQueued {
+		t.Fatalf("state overwritten by stale generation: %+v", state)
+	}
+}
+
+func TestStreamCaptionWorkerReturnsNoSpeechAsReviewableDecision(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "source.mp4")
+	if err := os.WriteFile(sourcePath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{
+		WorkDir: dir, FFmpegPath: "ffmpeg", XAIAPIKey: "xai_test",
+	})
+	w.runner = &fakeRunner{fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		out := args[len(args)-1]
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(out, []byte("wav"), 0o600)
+	}}
+	w.transcribe = func(context.Context, string, string, string) ([]captions.WordCue, error) {
+		return nil, fmt.Errorf("xai transcript contains no words: %w", captions.ErrUnusableTranscript)
+	}
+	clip := streamclips.ClipRange{ID: "clip-1", StartSeconds: 0, EndSeconds: 2}
+	got, err := w.generateClipCaptionCandidate(context.Background(), w.cfg.withDefaults(), dir, sourcePath, streamclips.Job{
+		ID: uuid.New(), SourceSHA256: "source-sha", Probe: streamclips.SourceProbe{AudioCodec: "aac"},
+	}, clip)
+	if err != nil {
+		t.Fatalf("generateClipCaptionCandidate error = %v", err)
+	}
+	if got.Status != streamclips.CaptionClipNoSpeech || len(got.CandidateWords) != 0 {
+		t.Fatalf("candidate = %+v, want reviewable no_speech", got)
 	}
 }

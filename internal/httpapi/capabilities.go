@@ -104,14 +104,12 @@ func (h *Handlers) requireYtdlpEnabled(w http.ResponseWriter) bool {
 	return false
 }
 
-// requireCaptionsEnabled reports whether burned-in captions are configured,
-// via xAI. When it is not configured, it writes a 409 naming the setting to
-// use, so starting a render with captions enabled fails fast instead of the
-// worker failing mid-render.
+// requireCaptionsEnabled reports whether xAI candidate generation is
+// configured. Rendering reviewed captions is local and does not use this gate.
 func (h *Handlers) requireCaptionsEnabled(w http.ResponseWriter) bool {
 	if h.capabilities.captionsEnabled() {
 		return true
 	}
-	writeError(w, http.StatusConflict, "captions are enabled in the edit plan but xAI is not configured on this machine; configure an xAI key in FragForge Studio Settings (or set XAI_API_KEY), then restart")
+	writeError(w, http.StatusConflict, "generating caption candidates needs xAI, but it is not configured on this machine; configure an xAI key in FragForge Studio Settings (or set XAI_API_KEY), then restart")
 	return false
 }

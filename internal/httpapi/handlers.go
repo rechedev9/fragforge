@@ -17,6 +17,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -83,6 +84,8 @@ type Enqueuer interface {
 type Handlers struct {
 	repo             JobRepository
 	streamRepo       StreamJobRepository
+	streamPlanMu     sync.Mutex
+	streamJobLocks   *streamclips.JobLocks
 	storage          storage.Storage
 	generateIntents  *generateintent.Store
 	queue            Enqueuer
@@ -150,6 +153,17 @@ func WithStreamRepository(repo StreamJobRepository) Option {
 	}
 }
 
+// WithStreamJobLocks shares per-job render admission/finalization locks with
+// the stream worker. The local orchestrator must pass the same instance to
+// both owners; tests and handler-only deployments receive a private instance.
+func WithStreamJobLocks(locks *streamclips.JobLocks) Option {
+	return func(h *Handlers) {
+		if locks != nil {
+			h.streamJobLocks = locks
+		}
+	}
+}
+
 func WithStreamProber(prober streamclips.Prober) Option {
 	return func(h *Handlers) {
 		h.streamProber = prober
@@ -191,6 +205,7 @@ func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts
 		generateIntents:  generateintent.New(store),
 		queue:            queue,
 		publishAssistant: newPublishAssistantCache(),
+		streamJobLocks:   streamclips.NewJobLocks(),
 	}
 	for _, opt := range opts {
 		opt(h)

@@ -104,6 +104,7 @@ func runStreamKillfeed(args []string, stdout, stderr io.Writer) int {
 
 	confirmedCues := make([]float64, 0, len(document.Cues))
 	confirmedKills := make([][]streamclips.KillfeedKill, 0, len(document.Cues))
+	confirmedProvenance := make([]streamclips.KillfeedCueProvenance, 0, len(document.Cues))
 	killCount := 0
 	rejectedCueCount := 0
 	for i, cue := range document.Cues {
@@ -114,12 +115,27 @@ func runStreamKillfeed(args []string, stdout, stderr io.Writer) int {
 			rejectedCueCount++
 			continue
 		}
-		confirmedCues = append(confirmedCues, cue.AtSeconds)
+		// The reviewed document may round its display timestamp. Keep the
+		// detector's exact PTS-derived cue as the durable render coordinate.
+		exactCue := clip.KillfeedSeconds[i]
+		confirmedCues = append(confirmedCues, exactCue)
 		confirmedKills = append(confirmedKills, append([]streamclips.KillfeedKill(nil), cue.Kills...))
+		provenance, exists := clip.KillfeedProvenanceAt(exactCue)
+		if !exists {
+			// stream killfeed imports review detections. This also upgrades
+			// pre-provenance detected plans without guessing from the new kills.
+			provenance = streamclips.KillfeedCueProvenance{
+				CueSeconds: exactCue,
+				Origin:     streamclips.KillfeedCueAutomatic,
+			}
+		}
+		provenance.CueSeconds = exactCue
+		confirmedProvenance = append(confirmedProvenance, provenance)
 		killCount += len(cue.Kills)
 	}
 	clip.KillfeedSeconds = confirmedCues
 	clip.KillfeedKills = confirmedKills
+	clip.KillfeedCueProvenance = confirmedProvenance
 	plan.UpdatedAt = time.Now().UTC()
 	plan = streamclips.NormalizeEditPlan(plan)
 	if err := plan.Validate(); err != nil {

@@ -64,13 +64,17 @@ func TestReconcileInterruptedWorkPromotesCompletedStreamAfterSQLiteRestart(t *te
 
 	j := createStartupStreamJob(t, streamBefore, streamclips.StatusRendering)
 	variant := streamclips.DefaultVariant().Name
+	videoKey, err := streamclips.RenderVideoKey(j.ID, variant, "clip-1")
+	if err != nil {
+		t.Fatalf("RenderVideoKey: %v", err)
+	}
 	wantState, err := streamclips.NewRenderState(
 		j.ID,
 		variant,
 		streamclips.StatusRendered,
 		[]string{"preserve completed warning"},
 		"",
-		[]streamclips.VideoEntry{{ClipID: "clip-1", Key: "completed/video.mp4"}},
+		[]streamclips.VideoEntry{{ClipID: "clip-1", Key: videoKey}},
 	)
 	if err != nil {
 		t.Fatalf("NewRenderState: %v", err)
@@ -79,6 +83,7 @@ func TestReconcileInterruptedWorkPromotesCompletedStreamAfterSQLiteRestart(t *te
 	if err != nil {
 		t.Fatalf("RenderStateKey: %v", err)
 	}
+	putPublishedStreamRenderArtifacts(t, storeBefore, wantState)
 	putRestartJSON(t, storeBefore, stateKey, wantState)
 	if err := before.Close(); err != nil {
 		t.Fatalf("close SQLite before restart: %v", err)
@@ -181,13 +186,17 @@ func TestReconcileInterruptedWorkPreservesRenderingParentsWhenStateAuditFails(t 
 	rendering := createStartupStreamJob(t, streamRepo, streamclips.StatusRendering)
 	acquiring := createStartupStreamJob(t, streamRepo, streamclips.StatusAcquiring)
 	variant := streamclips.DefaultVariant().Name
+	completedVideoKey, err := streamclips.RenderVideoKey(rendering.ID, variant, "clip-1")
+	if err != nil {
+		t.Fatalf("RenderVideoKey: %v", err)
+	}
 	state, err := streamclips.NewRenderState(
 		rendering.ID,
 		variant,
 		streamclips.StatusRendered,
 		nil,
 		"",
-		[]streamclips.VideoEntry{{ClipID: "clip-1", Key: "completed/video.mp4"}},
+		[]streamclips.VideoEntry{{ClipID: "clip-1", Key: completedVideoKey}},
 	)
 	if err != nil {
 		t.Fatalf("NewRenderState: %v", err)

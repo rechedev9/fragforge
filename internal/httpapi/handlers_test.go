@@ -47,6 +47,22 @@ type fakeStreamRepo struct {
 	jobs map[uuid.UUID]streamclips.Job
 }
 
+type blockingSetStreamRepo struct {
+	*fakeStreamRepo
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingSetStreamRepo) SetEditPlan(ctx context.Context, id uuid.UUID, plan streamclips.EditPlan) error {
+	close(r.entered)
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return r.fakeStreamRepo.SetEditPlan(ctx, id, plan)
+}
+
 func newFakeStreamRepo() *fakeStreamRepo {
 	return &fakeStreamRepo{jobs: map[uuid.UUID]streamclips.Job{}}
 }
@@ -3022,7 +3038,7 @@ func TestStreamJobFlowSavesPlanAndEnqueuesRender(t *testing.T) {
 		t.Fatalf("stream status = %s, want ready", streamRepo.jobs[id].Status)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+created.ID+"/renders/streamer-vertical-stack", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+created.ID+"/renders/"+plan.Variant, nil)
 	rw = httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
 	if rw.Code != http.StatusAccepted {
@@ -3057,6 +3073,73 @@ func TestStreamJobRemovesMultipartTempFiles(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body=%s", rw.Code, rw.Body.String())
 	}
 	assertMultipartTempDirEmpty(t)
+}
+
+func TestPutStreamEditPlanCompletesBeforeWorkerCanClaimSameJob(t *testing.T) {
+	id := uuid.New()
+	baseRepo := newFakeStreamRepo()
+	planA := streamclips.DefaultEditPlan()
+	planA.Clips = []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0, EndSeconds: 2, Title: "plan-a"}}
+	planJSON, err := json.Marshal(planA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRepo.jobs[id] = streamclips.Job{
+		ID: id, Status: streamclips.StatusReady, Probe: streamclips.SourceProbe{DurationSeconds: 10}, EditPlan: planJSON,
+	}
+	repo := &blockingSetStreamRepo{
+		fakeStreamRepo: baseRepo,
+		entered:        make(chan struct{}),
+		release:        make(chan struct{}),
+	}
+	locks := streamclips.NewJobLocks()
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{},
+		WithStreamRepository(repo), WithStreamJobLocks(locks),
+	)
+	r := Routes(h)
+	planB := planA
+	planB.Clips = append([]streamclips.ClipRange(nil), planA.Clips...)
+	planB.Clips[0].Title = "plan-b"
+	body, err := json.Marshal(planB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPut, "/api/stream-jobs/"+id.String()+"/edit-plan", bytes.NewReader(body))
+		rw := httptest.NewRecorder()
+		r.ServeHTTP(rw, req)
+		done <- rw
+	}()
+	<-repo.entered
+
+	claimed := make(chan streamclips.EditPlan, 1)
+	go func() {
+		release := locks.Lock(id)
+		defer release()
+		job, _ := repo.Get(context.Background(), id)
+		var plan streamclips.EditPlan
+		_ = json.Unmarshal(job.EditPlan, &plan)
+		claimed <- plan
+	}()
+	select {
+	case <-claimed:
+		t.Fatal("worker claim passed an HTTP edit-plan persistence in progress")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(repo.release)
+	rw := <-done
+	if rw.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want 200; body=%s", rw.Code, rw.Body.String())
+	}
+	select {
+	case got := <-claimed:
+		if got.Clips[0].Title != "plan-b" {
+			t.Fatalf("claimed plan title = %q, want plan-b", got.Clips[0].Title)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("worker did not claim job after HTTP mutation committed")
+	}
 }
 
 func TestPutStreamEditPlanRejectsLargeJSONBody(t *testing.T) {
@@ -3300,6 +3383,64 @@ func TestStreamVideoServesCaptionedKeyFromRenderResult(t *testing.T) {
 	}
 }
 
+func TestStreamRenderArtifactsResolveAuthoritativeRevisionState(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	revisionID := uuid.New()
+	const variant = streamclips.VariantStreamer4060
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusRendered, SourcePath: streamclips.SourceKey(id)}
+
+	store := newFakeStorage()
+	videoKey, err := streamclips.RenderRevisionVideoKey(id, variant, revisionID, "clip-1_captioned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	galleryKey, err := streamclips.RenderRevisionGalleryKey(id, variant, revisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultKey, err := streamclips.RenderRevisionResultKey(id, variant, revisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(videoKey, strings.NewReader("revision-video")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(galleryKey, strings.NewReader("revision-gallery")); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlers(newFakeRepo(), store, &fakeQueue{}, WithStreamRepository(streamRepo))
+	state, err := streamclips.NewRenderState(id, variant, streamclips.StatusRendered, nil, "", []streamclips.VideoEntry{{ClipID: "clip-1", Key: videoKey}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.ResultKey = resultKey
+	state.GalleryKey = galleryKey
+	state.ArtifactDir, err = streamclips.RenderRevisionPrefix(id, variant, revisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.writeStreamRenderState(state); err != nil {
+		t.Fatal(err)
+	}
+	r := Routes(h)
+
+	for _, test := range []struct {
+		path string
+		want string
+	}{
+		{path: "/api/stream-jobs/" + id.String() + "/renders/" + variant + "/videos/clip-1", want: "revision-video"},
+		{path: "/api/stream-jobs/" + id.String() + "/renders/" + variant + "/gallery", want: "revision-gallery"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, test.path, nil)
+		rw := httptest.NewRecorder()
+		r.ServeHTTP(rw, req)
+		if rw.Code != http.StatusOK || rw.Body.String() != test.want {
+			t.Fatalf("GET %s = %d %q, want 200 %q", test.path, rw.Code, rw.Body.String(), test.want)
+		}
+	}
+}
+
 func TestStreamVideoFallsBackToPlainKeyWithoutRenderResult(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	id := uuid.New()
@@ -3445,7 +3586,16 @@ func TestStartStreamRenderAcceptsRegistryVariantsAndRejectsUnknown(t *testing.T)
 		t.Run(variant, func(t *testing.T) {
 			streamRepo := newFakeStreamRepo()
 			id := uuid.New()
-			streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+			plan := streamclips.DefaultEditPlan()
+			plan.Variant = variant
+			planJSON, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			streamRepo.jobs[id] = streamclips.Job{
+				ID: id, Status: streamclips.StatusReady,
+				SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+			}
 			queue := &fakeQueue{}
 			h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo))
 			r := Routes(h)
@@ -3462,6 +3612,38 @@ func TestStartStreamRenderAcceptsRegistryVariantsAndRejectsUnknown(t *testing.T)
 			}
 		})
 	}
+
+	t.Run("variant must match edit plan", func(t *testing.T) {
+		streamRepo := newFakeStreamRepo()
+		id := uuid.New()
+		plan := streamclips.DefaultEditPlan()
+		planJSON, err := json.Marshal(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		streamRepo.jobs[id] = streamclips.Job{
+			ID: id, Status: streamclips.StatusReady,
+			SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		}
+		queue := &fakeQueue{}
+		h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo))
+		r := Routes(h)
+
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/stream-jobs/"+id.String()+"/renders/"+streamclips.VariantStreamerLandscape16x9,
+			nil,
+		)
+		rw := httptest.NewRecorder()
+		r.ServeHTTP(rw, req)
+
+		if rw.Code != http.StatusConflict || !strings.Contains(rw.Body.String(), "does not match edit plan variant") {
+			t.Fatalf("response = %d %s, want actionable 409", rw.Code, rw.Body.String())
+		}
+		if len(queue.enqueued) != 0 {
+			t.Fatalf("queued mismatched render tasks = %d, want zero", len(queue.enqueued))
+		}
+	})
 
 	t.Run("unknown variant lists valid names", func(t *testing.T) {
 		streamRepo := newFakeStreamRepo()
@@ -3632,18 +3814,19 @@ func TestStartStreamRenderPreservesRenderedStateWhenFinishedTaskIsStillDuplicate
 	}
 }
 
-func TestStartStreamRenderRejectsCaptionsWithoutXAI(t *testing.T) {
+func TestStartStreamRenderRejectsUnreviewedCaptionsEvenWithXAI(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	id := uuid.New()
 	plan := streamclips.DefaultEditPlan()
 	plan.Captions = streamclips.CaptionsPlan{Enabled: true}
+	plan.Clips = []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0, EndSeconds: 2}}
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON}
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: planJSON, Probe: streamclips.SourceProbe{AudioCodec: "aac"}}
 	queue := &fakeQueue{}
-	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo)) // no WithCapabilities -> XAIEnabled false
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo), WithCapabilities(Capabilities{XAIEnabled: true}))
 	r := Routes(h)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+streamclips.DefaultVariant().Name, nil)

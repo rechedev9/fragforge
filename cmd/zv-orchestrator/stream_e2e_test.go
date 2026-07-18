@@ -8,6 +8,7 @@ import (
 	"image/color"
 	_ "image/png"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -134,14 +135,28 @@ func TestStreamRenderE2E(t *testing.T) {
 			GameplayCrop: streamclips.CropRect{X: 0, Y: 0, Width: 1, Height: 1},
 			KillfeedCrop: &streamclips.CropRect{X: 0.74, Y: 0.04, Width: 0.25, Height: 0.15},
 			Clips: []streamclips.ClipRange{{
-				ID:              "clip-1",
-				StartSeconds:    0.5,
-				EndSeconds:      3.5,
-				KillfeedSeconds: []float64{2},
+				ID:           "clip-1",
+				StartSeconds: 0.5,
+				EndSeconds:   3.5,
 			}},
 			Captions: streamclips.CaptionsPlan{Enabled: false},
 		}
 		putStreamEditPlan(t, client, srv.URL, id, plan)
+		analysis, _ := startAndApplyStreamKillfeed(t, client, srv.URL, id)
+		if got, want := len(analysis.Clips), 1; got != want {
+			t.Fatalf("analysis clips = %d, want %d", got, want)
+		}
+		if got, want := len(analysis.Clips[0].Events), 1; got != want {
+			t.Fatalf("analysis events = %d, want one same-frame burst: %+v", got, analysis.Clips[0].Events)
+		}
+		event := analysis.Clips[0].Events[0]
+		if event.Mode != streamclips.KillfeedEventBurst || len(event.Rows) != 2 {
+			t.Fatalf("automatic event = %+v, want a two-row native-frame burst", event)
+		}
+		ptsSeconds := float64(event.SourcePTS) * float64(event.TimeBase.Num) / float64(event.TimeBase.Den)
+		if math.Abs(event.CueSeconds-2) > 1e-9 || math.Abs(event.CueSeconds-ptsSeconds) > 1e-12 {
+			t.Fatalf("automatic cue = %.12f, PTS time = %.12f, want exact source frame at 2s", event.CueSeconds, ptsSeconds)
+		}
 
 		clipID := startAndAwaitStreamRender(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam)
 		outPath := downloadStreamVideo(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam, clipID)
@@ -151,19 +166,17 @@ func TestStreamRenderE2E(t *testing.T) {
 			t.Fatalf("output size = %dx%d, want 1080x1920", probe.Width, probe.Height)
 		}
 
-		// A cue without confirmed kills freezes the FULL killfeed crop rect
-		// as one WYSIWYG strip: crop (947,29)-(1267,137) of the 1280x720
-		// source (320x108), scaled to 930px wide (x2.90625) and overlaid
-		// centered at x=(1080-930)/2=75, y=461 (24% into the gameplay band).
-		// Notice A's lime interior (1024,36)-(1248,72) lands roughly at
-		// (299,481)-(950,586) and notice B's yellow interior (984,82)-(1248,114)
-		// at (183,615)-(950,708). The strip slides in from the right for 0.12s
-		// after the cue, so the "at cue" frame samples after the settle. Region
-		// means over the interiors keep the assertions robust against one-pixel
-		// geometry drift and chroma subsampling.
+		// Automatic rendering consumes the two immutable row PNGs captured from
+		// the event's exact SamplePTS on the detector's 1920x1080 grid. Each row
+		// is centered without re-sampling the full killfeed column: the bottom
+		// yellow row sits at baseY=461 and the top lime row occupies y=381. The
+		// sample at output t=1.8 is 0.3s after the source cue's relative t=1.5,
+		// safely after the 0.12s slide/settle. Region means over each row interior
+		// keep the assertions robust against one-pixel detector geometry drift
+		// and chroma subsampling.
 		const (
-			noticeAX, noticeAY = 600, 525
-			noticeBX, noticeBY = 600, 660
+			noticeAX, noticeAY = 540, 490
+			noticeBX, noticeBY = 540, 410
 		)
 		beforeFrame := extractFramePNG(t, ffmpegPath, outPath, 1.0)
 		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.8)
@@ -175,11 +188,11 @@ func TestStreamRenderE2E(t *testing.T) {
 		if !isPredominantlyBlue(beforeA) || !isPredominantlyBlue(beforeB) {
 			t.Fatalf("notice regions before cue = A %+v B %+v, want blue gameplay background", beforeA, beforeB)
 		}
-		if !isPredominantlyGreen(atCueA) {
-			t.Fatalf("notice A region at cue = %+v, want lime sampled notice", atCueA)
+		if !isPredominantlyYellow(atCueA) {
+			t.Fatalf("bottom notice region at cue = %+v, want yellow sampled notice", atCueA)
 		}
-		if !isPredominantlyYellow(atCueB) {
-			t.Fatalf("notice B region at cue = %+v, want yellow sampled notice", atCueB)
+		if !isPredominantlyGreen(atCueB) {
+			t.Fatalf("top notice region at cue = %+v, want lime sampled notice", atCueB)
 		}
 	})
 
@@ -191,22 +204,31 @@ func TestStreamRenderE2E(t *testing.T) {
 			GameplayCrop: streamclips.CropRect{X: 0, Y: 0, Width: 1, Height: 1},
 			KillfeedCrop: &streamclips.CropRect{X: 0.74, Y: 0.04, Width: 0.25, Height: 0.15},
 			Clips: []streamclips.ClipRange{{
-				ID:              "clip-1",
-				StartSeconds:    0.5,
-				EndSeconds:      3.5,
-				KillfeedSeconds: []float64{2},
-				KillfeedKills: [][]streamclips.KillfeedKill{{{
-					AttackerSide: "CT",
-					AttackerName: "donk",
-					VictimSide:   "T",
-					VictimName:   "s1mple",
-					Weapon:       "ak47",
-					Headshot:     true,
-				}}},
+				ID:           "clip-1",
+				StartSeconds: 0.5,
+				EndSeconds:   3.5,
 			}},
 			Captions: streamclips.CaptionsPlan{Enabled: false},
 		}
 		putStreamEditPlan(t, client, srv.URL, id, plan)
+		_, appliedPlan := startAndApplyStreamKillfeed(t, client, srv.URL, id)
+		if len(appliedPlan.Clips) != 1 || len(appliedPlan.Clips[0].KillfeedSeconds) != 1 {
+			t.Fatalf("applied automatic killfeed = %+v, want one source-frame cue", appliedPlan.Clips)
+		}
+		// Keep the detector event and add a separate reviewed manual correction.
+		// OCR enrichment at the automatic cue must keep rendering its immutable
+		// captured rows, while a cue with no detector event uses this synthetic
+		// notice.
+		appliedPlan.Clips[0].KillfeedSeconds = append(appliedPlan.Clips[0].KillfeedSeconds, 1.0)
+		appliedPlan.Clips[0].KillfeedKills = append(appliedPlan.Clips[0].KillfeedKills, []streamclips.KillfeedKill{{
+			AttackerSide: "CT",
+			AttackerName: "donk",
+			VictimSide:   "T",
+			VictimName:   "s1mple",
+			Weapon:       "ak47",
+			Headshot:     true,
+		}})
+		putStreamEditPlan(t, client, srv.URL, id, appliedPlan)
 
 		clipID := startAndAwaitStreamRender(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam)
 		outPath := downloadStreamVideo(t, client, srv.URL, id, streamclips.VariantStreamerFullframeNoCam, clipID)
@@ -224,8 +246,9 @@ func TestStreamRenderE2E(t *testing.T) {
 			plateX, plateY   = 540, 468
 			borderX, borderY = 540, 461
 		)
-		beforeFrame := extractFramePNG(t, ffmpegPath, outPath, 1.0)
-		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 1.8)
+		// Source cue 1.0 is output t=0.5 because the clip starts at source 0.5.
+		beforeFrame := extractFramePNG(t, ffmpegPath, outPath, 0.2)
+		atCueFrame := extractFramePNG(t, ffmpegPath, outPath, 0.8)
 		beforePlate := readRegionMean(t, beforeFrame, plateX, plateY, 3, 6)
 		atCuePlate := readRegionMean(t, atCueFrame, plateX, plateY, 3, 6)
 		atCueBorder := readRegionMean(t, atCueFrame, borderX, borderY, 8, 0)
@@ -322,15 +345,19 @@ func newStreamE2EServer(t *testing.T, ffmpegPath, ffprobePath string) (*httptest
 
 	jobRepo := newMemoryJobRepository()
 	streamRepo := newMemoryStreamJobRepository()
+	streamJobLocks := streamclips.NewJobLocks()
 
 	streamWorker := workers.NewStreamRenderWorker(streamRepo, store, workers.StreamRenderWorkerConfig{
-		WorkDir:    filepath.Join(dataDir, "work"),
-		FFmpegPath: ffmpegPath,
-		Timeout:    "2m",
+		WorkDir:                        filepath.Join(dataDir, "work"),
+		FFmpegPath:                     ffmpegPath,
+		Timeout:                        "2m",
+		JobLocks:                       streamJobLocks,
+		RequireAppliedKillfeedAnalysis: true,
 	})
 
 	taskHandlers := map[string]taskHandler{
-		tasks.TypeRenderStreamClip: streamWorker.HandleRenderStreamClip,
+		tasks.TypeRenderStreamClip:       streamWorker.HandleRenderStreamClip,
+		tasks.TypeGenerateStreamKillfeed: streamWorker.HandleGenerateStreamKillfeed,
 	}
 	queue := newInlineQueue(taskHandlers, 2)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -339,7 +366,9 @@ func newStreamE2EServer(t *testing.T, ffmpegPath, ffprobePath string) (*httptest
 
 	handlers := httpapi.NewHandlers(jobRepo, store, queue,
 		httpapi.WithStreamRepository(streamRepo),
+		httpapi.WithStreamJobLocks(streamJobLocks),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: ffprobePath}),
+		httpapi.WithFFmpegPath(ffmpegPath),
 	)
 	srv := httptest.NewServer(httpapi.Routes(handlers))
 
@@ -353,7 +382,8 @@ func newStreamE2EServer(t *testing.T, ffmpegPath, ffprobePath string) (*httptest
 // frame with a solid red rectangle over the exact top-left quarter
 // (x=[0,320) y=[0,180)) and two staggered CS2-style highlighted kill notices
 // at the top right, each an interior bar wrapped in a 2px saturated-red
-// highlight ring so the notice-row detector can find it: notice A is lime,
+// highlight ring so the notice-row detector can find it. Both notices appear
+// on the exact source frame at t=2s: notice A is lime,
 // ring (x=[1022,1250) y=[34,74)); notice B is wider, yellow, shifted left and
 // 6px below A like a real staggered killfeed, ring (x=[982,1250) y=[80,118)).
 // A sine wave audio track completes the source.
@@ -367,7 +397,7 @@ func generateSyntheticSource(t *testing.T, ffmpegPath, outPath string) {
 		"-y",
 		"-f", "lavfi", "-i", "color=c=blue:s=1280x720:d=4:r=30",
 		"-f", "lavfi", "-i", "sine=frequency=440:duration=4",
-		"-filter_complex", "[0:v]drawbox=x=0:y=0:w=320:h=180:color=red:t=fill,drawbox=x=1024:y=36:w=224:h=36:color=lime:t=fill,drawbox=x=1022:y=34:w=228:h=40:color=red:t=2,drawbox=x=984:y=82:w=264:h=32:color=yellow:t=fill,drawbox=x=982:y=80:w=268:h=38:color=red:t=2[v]",
+		"-filter_complex", "[0:v]drawbox=x=0:y=0:w=320:h=180:color=red:t=fill,drawbox=x=1024:y=36:w=224:h=36:color=lime:t=fill:enable='gte(t,2)',drawbox=x=1022:y=34:w=228:h=40:color=red:t=2:enable='gte(t,2)',drawbox=x=984:y=82:w=264:h=32:color=yellow:t=fill:enable='gte(t,2)',drawbox=x=982:y=80:w=268:h=38:color=red:t=2:enable='gte(t,2)'[v]",
 		"-map", "[v]",
 		"-map", "1:a",
 		"-c:v", "libx264",
@@ -467,6 +497,79 @@ func putStreamEditPlan(t *testing.T, client *http.Client, baseURL string, id uui
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("put edit plan status = %d, body = %s", resp.StatusCode, body)
 	}
+}
+
+// startAndApplyStreamKillfeed exercises the same durable generation boundary
+// as Studio: enqueue, poll the active generation, then atomically apply its
+// source-PTS events to the edit plan.
+func startAndApplyStreamKillfeed(
+	t *testing.T,
+	client *http.Client,
+	baseURL string,
+	id uuid.UUID,
+) (streamclips.KillfeedAnalysisState, streamclips.EditPlan) {
+	t.Helper()
+	endpoint := baseURL + "/api/stream-jobs/" + id.String() + "/killfeed"
+	startReq, err := http.NewRequest(http.MethodPost, endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startResp, err := client.Do(startReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startBody, _ := io.ReadAll(startResp.Body)
+	startResp.Body.Close()
+	if startResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start killfeed analysis status = %d, body = %s", startResp.StatusCode, startBody)
+	}
+
+	deadline := time.Now().Add(90 * time.Second)
+	var state streamclips.KillfeedAnalysisState
+	for time.Now().Before(deadline) {
+		getResp, err := client.Get(endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		getBody, _ := io.ReadAll(getResp.Body)
+		getResp.Body.Close()
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("get killfeed analysis status = %d, body = %s", getResp.StatusCode, getBody)
+		}
+		if err := json.Unmarshal(getBody, &state); err != nil {
+			t.Fatalf("decode killfeed analysis: %v\nbody = %s", err, getBody)
+		}
+		switch state.Status {
+		case streamclips.KillfeedAnalysisReady:
+			goto apply
+		case streamclips.KillfeedAnalysisReviewRequired, streamclips.KillfeedAnalysisFailed:
+			t.Fatalf("killfeed analysis ended as %s: %s (%+v)", state.Status, state.Error, state.Clips)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("killfeed analysis did not finish within deadline")
+
+apply:
+	applyBody := strings.NewReader(`{"generation_id":"` + state.GenerationID.String() + `"}`)
+	applyReq, err := http.NewRequest(http.MethodPost, endpoint+"/apply", applyBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyReq.Header.Set("Content-Type", "application/json")
+	applyResp, err := client.Do(applyReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(applyResp.Body)
+	applyResp.Body.Close()
+	if applyResp.StatusCode != http.StatusOK {
+		t.Fatalf("apply killfeed analysis status = %d, body = %s", applyResp.StatusCode, body)
+	}
+	var plan streamclips.EditPlan
+	if err := json.Unmarshal(body, &plan); err != nil {
+		t.Fatalf("decode applied killfeed plan: %v\nbody = %s", err, body)
+	}
+	return state, plan
 }
 
 // startAndAwaitStreamRender POSTs the render for variant and polls GET until

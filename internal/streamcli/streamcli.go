@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,7 +32,7 @@ import (
 type streamService interface {
 	Probe(ctx context.Context, input, ffprobe string) (streamclips.SourceProbe, error)
 	ValidateFFmpeg(ctx context.Context, ffmpeg string, requireWhisper bool) error
-	DetectKillfeed(ctx context.Context, input, ffmpeg string, crop streamclips.CropRect, start, end float64) ([]float64, error)
+	DetectKillfeed(ctx context.Context, input, ffmpeg string, probe streamclips.SourceProbe, crop streamclips.CropRect, clip streamclips.ClipRange) ([]float64, error)
 	Transcribe(ctx context.Context, request streamTranscribeRequest) (streamTranscriptReview, error)
 	Render(ctx context.Context, request streamRenderRequest) (streamRenderResult, error)
 }
@@ -278,11 +279,18 @@ func runStreamPlan(args []string, stdout, stderr io.Writer, service streamServic
 		if ffmpegPath == "" {
 			ffmpegPath = recording.FindFFmpeg()
 		}
-		cues, detectErr := service.DetectKillfeed(context.Background(), *input, ffmpegPath, *plan.KillfeedCrop, *clipStart, end)
+		cues, detectErr := service.DetectKillfeed(context.Background(), *input, ffmpegPath, probe, *plan.KillfeedCrop, plan.Clips[0])
 		if detectErr != nil {
 			return writeStreamRuntimeError(args, stdout, stderr, fmt.Errorf("detect stream killfeed: %w", detectErr))
 		}
 		plan.Clips[0].KillfeedSeconds = cues
+		plan.Clips[0].KillfeedCueProvenance = make([]streamclips.KillfeedCueProvenance, len(cues))
+		for i, cue := range cues {
+			plan.Clips[0].KillfeedCueProvenance[i] = streamclips.KillfeedCueProvenance{
+				CueSeconds: cue,
+				Origin:     streamclips.KillfeedCueAutomatic,
+			}
+		}
 	}
 	plan.UpdatedAt = time.Now().UTC()
 	plan = streamclips.NormalizeEditPlan(plan)
@@ -393,8 +401,8 @@ func runStreamRender(args []string, stdout, stderr io.Writer, service streamServ
 	if err := plan.ValidateForSourceDuration(probe.DurationSeconds); err != nil {
 		return writeStreamCommandError(args, stdout, stderr, fmt.Errorf("invalid stream edit plan: %w", err), streamRenderUsage)
 	}
-	if probe.AudioCodec != "" && plan.CaptionsNeedBackend() && strings.TrimSpace(os.Getenv("XAI_API_KEY")) == "" {
-		return writeStreamRuntimeError(args, stdout, stderr, fmt.Errorf("validate stream caption readiness: edit plan has an audible clip with neither reviewed caption words, a reviewed no-speech decision, nor XAI_API_KEY configured (review it with zv stream captions or set XAI_API_KEY)"))
+	if probe.AudioCodec != "" && plan.CaptionsNeedBackend() {
+		return writeStreamRuntimeError(args, stdout, stderr, fmt.Errorf("validate stream caption readiness: edit plan has an audible clip without reviewed Spanish caption words or a reviewed no-speech decision (run zv stream transcribe to create candidates, review every word and timing, then import them with zv stream captions)"))
 	}
 	absInput, _ := filepath.Abs(*input)
 	absPlan, _ := filepath.Abs(*planPath)
@@ -486,11 +494,11 @@ func (localStreamService) Probe(ctx context.Context, input, ffprobe string) (str
 	return (streamclips.FFprobeProber{Path: ffprobe}).Probe(ctx, input)
 }
 
-func (localStreamService) DetectKillfeed(ctx context.Context, input, ffmpeg string, crop streamclips.CropRect, start, end float64) ([]float64, error) {
+func (localStreamService) DetectKillfeed(ctx context.Context, input, ffmpeg string, probe streamclips.SourceProbe, crop streamclips.CropRect, clip streamclips.ClipRange) ([]float64, error) {
 	if ffmpeg == "" {
 		return nil, fmt.Errorf("ffmpeg is not configured")
 	}
-	return detectKillfeedCues(ctx, ffmpeg, input, crop, start, end)
+	return detectKillfeedCues(ctx, ffmpeg, input, probe, crop, clip)
 }
 
 func (localStreamService) Render(ctx context.Context, request streamRenderRequest) (streamRenderResult, error) {
@@ -506,6 +514,18 @@ func (localStreamService) Render(ctx context.Context, request streamRenderReques
 	}
 	planHash := sha256.Sum256(request.PlanJSON)
 	jobID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(sourceHash+hex.EncodeToString(planHash[:])))
+	plan := streamclips.NormalizeEditPlan(request.Plan)
+	requireExactKillfeed := streamPlanNeedsExactKillfeedArtifacts(plan)
+	if !requireExactKillfeed {
+		// Analysis metadata names job-scoped row artifacts. A portable plan whose
+		// cues are all reviewed structured notices needs no source artifacts and
+		// must not retain a Studio generation that is absent from this local run.
+		plan.KillfeedAnalysis = nil
+	}
+	planJSON, err := marshalLocalEditPlan(plan)
+	if err != nil {
+		return streamRenderResult{}, fmt.Errorf("encode stream plan: %w", err)
+	}
 	store, err := storage.NewLocal(request.OutDir)
 	if err != nil {
 		return streamRenderResult{}, err
@@ -521,9 +541,6 @@ func (localStreamService) Render(ctx context.Context, request streamRenderReques
 	if err := source.Close(); err != nil {
 		return streamRenderResult{}, fmt.Errorf("close stream source: %w", err)
 	}
-	if err := store.Put(streamclips.EditPlanKey(jobID), bytes.NewReader(request.PlanJSON)); err != nil {
-		return streamRenderResult{}, fmt.Errorf("stage stream plan: %w", err)
-	}
 	workDir := request.WorkDir
 	if workDir == "" {
 		workDir = filepath.Join(request.OutDir, ".work")
@@ -536,7 +553,7 @@ func (localStreamService) Render(ctx context.Context, request streamRenderReques
 		SourceSHA256: sourceHash,
 		Title:        request.Title,
 		Probe:        request.Probe,
-		EditPlan:     append(json.RawMessage(nil), request.PlanJSON...),
+		EditPlan:     append(json.RawMessage(nil), planJSON...),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -547,19 +564,58 @@ func (localStreamService) Render(ctx context.Context, request streamRenderReques
 		Timeout:    request.Timeout,
 		MusicDir:   request.MusicDir,
 		XAIAPIKey:  os.Getenv("XAI_API_KEY"),
+		// CLI tasks are synchronous and carry no Studio admission header. Exact
+		// automatic plans are still gated by the metadata attached immediately
+		// below; appliedKillfeedAnalysis validates that durable generation.
+		RequireAppliedKillfeedAnalysis: false,
 	})
-	task, err := tasks.NewRenderStreamClipTask(jobID, request.Plan.Variant)
+	if requireExactKillfeed {
+		plan, err = worker.PrepareLocalKillfeedAnalysis(ctx, job, plan)
+		if err != nil {
+			return streamRenderResult{}, fmt.Errorf("prepare exact stream killfeed: %w", err)
+		}
+		planJSON, err = marshalLocalEditPlan(plan)
+		if err != nil {
+			return streamRenderResult{}, fmt.Errorf("encode analyzed stream plan: %w", err)
+		}
+		job.EditPlan = append(json.RawMessage(nil), planJSON...)
+		repo.job = job
+	}
+	request.Plan = plan
+	request.PlanJSON = planJSON
+	if err := store.Put(streamclips.EditPlanKey(jobID), bytes.NewReader(planJSON)); err != nil {
+		return streamRenderResult{}, fmt.Errorf("stage stream plan: %w", err)
+	}
+	task, err := tasks.NewRenderStreamClipTask(jobID, plan.Variant)
 	if err != nil {
 		return streamRenderResult{}, err
 	}
 	if err := worker.HandleRenderStreamClip(ctx, task); err != nil {
 		return streamRenderResult{}, err
 	}
-	resultKey, err := streamclips.RenderResultKey(jobID, request.Plan.Variant)
+	stateKey, err := streamclips.RenderStateKey(jobID, plan.Variant)
 	if err != nil {
 		return streamRenderResult{}, err
 	}
-	reader, err := store.Open(resultKey)
+	stateReader, err := store.Open(stateKey)
+	if err != nil {
+		return streamRenderResult{}, err
+	}
+	var renderState streamclips.RenderState
+	decodeStateErr := json.NewDecoder(stateReader).Decode(&renderState)
+	closeStateErr := stateReader.Close()
+	if decodeStateErr != nil {
+		return streamRenderResult{}, decodeStateErr
+	}
+	if closeStateErr != nil {
+		return streamRenderResult{}, closeStateErr
+	}
+	// The synchronous CLI command must report the attempt it just ran, not a
+	// preserved fallback from an older successful revision.
+	if renderState.Status != streamclips.StatusRendered || renderState.ResultKey == "" {
+		return streamRenderResult{}, fmt.Errorf("stream render did not commit a completed artifact revision")
+	}
+	reader, err := store.Open(renderState.ResultKey)
 	if err != nil {
 		return streamRenderResult{}, err
 	}
@@ -575,7 +631,57 @@ func (localStreamService) Render(ctx context.Context, request streamRenderReques
 	if request.CoverGenerator == nil {
 		request.CoverGenerator = ffmpegStreamCoverGenerator{}
 	}
-	return publishLocalStreamResult(ctx, store, job, request, workerResult)
+	return publishLocalStreamResult(ctx, store, job, request, workerResult, renderState.ArtifactDir)
+}
+
+func streamPlanNeedsExactKillfeedArtifacts(plan streamclips.EditPlan) bool {
+	if plan.Variant == streamclips.VariantStreamerLandscape16x9 {
+		// Landscape preserves the source frame (including its native killfeed)
+		// and does not compose isolated notice inputs.
+		return false
+	}
+	if plan.KillfeedAnalysis != nil {
+		for _, clip := range plan.Clips {
+			if len(clip.KillfeedSeconds) > 0 {
+				// Older Studio plans already carry authoritative automatic
+				// analysis metadata even if their per-cue provenance predates
+				// this field. Never downgrade those cues to synthetic notices.
+				return true
+			}
+		}
+	}
+	for _, clip := range plan.Clips {
+		for cueIndex := range clip.KillfeedSeconds {
+			cue := clip.KillfeedSeconds[cueIndex]
+			if provenance, explicit := clip.KillfeedProvenanceAt(cue); explicit {
+				if provenance.Origin == streamclips.KillfeedCueAutomatic {
+					return true
+				}
+				if cueIndex >= len(clip.KillfeedKills) || len(clip.KillfeedKills[cueIndex]) == 0 {
+					// Manual cues need reviewed structured kills; running exact
+					// preparation makes the failure actionable instead of allowing
+					// the legacy whole-column fallback.
+					return true
+				}
+				continue
+			}
+			// Compatibility for plans written before provenance existed:
+			// reviewed structured cues are manual, while an unresolved cue
+			// still has to prove a source-backed event before render.
+			if cueIndex >= len(clip.KillfeedKills) || len(clip.KillfeedKills[cueIndex]) == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func marshalLocalEditPlan(plan streamclips.EditPlan) ([]byte, error) {
+	body, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(body, '\n'), nil
 }
 
 type directStreamRepository struct {
@@ -599,7 +705,14 @@ func (r *directStreamRepository) UpdateStatus(_ context.Context, id uuid.UUID, s
 	return nil
 }
 
-func publishLocalStreamResult(ctx context.Context, store *storage.Local, job streamclips.Job, request streamRenderRequest, workerResult streamclips.RenderResult) (streamRenderResult, error) {
+func publishLocalStreamResult(
+	ctx context.Context,
+	store *storage.Local,
+	job streamclips.Job,
+	request streamRenderRequest,
+	workerResult streamclips.RenderResult,
+	artifactDirs ...string,
+) (streamRenderResult, error) {
 	const publishKey = "shortslistosparasubir"
 	publishDir, err := store.ResolvePath(publishKey)
 	if err != nil {
@@ -620,6 +733,10 @@ func publishLocalStreamResult(ctx context.Context, store *storage.Local, job str
 		return streamRenderResult{}, err
 	}
 	videos := make([]streamLocalVideo, 0, len(workerResult.Clips))
+	artifactDir := ""
+	if len(artifactDirs) > 0 {
+		artifactDir = artifactDirs[0]
+	}
 	for _, entry := range workerResult.Clips {
 		source, err := store.Open(entry.Key)
 		if err != nil {
@@ -654,9 +771,14 @@ func publishLocalStreamResult(ctx context.Context, store *storage.Local, job str
 		// Video keys gain a _captioned suffix after the burn pass, but
 		// NewVideoEntry deliberately keeps ClipID equal to the original plan
 		// clip. Caption artifacts are keyed by that stable source clip ID.
-		captionKey, err := streamclips.RenderCaptionKey(job.ID, request.Plan.Variant, entry.ClipID)
-		if err != nil {
-			return streamRenderResult{}, err
+		captionKey := ""
+		if artifactDir != "" {
+			captionKey = path.Join(artifactDir, "captions", entry.ClipID+".ass")
+		} else {
+			captionKey, err = streamclips.RenderCaptionKey(job.ID, request.Plan.Variant, entry.ClipID)
+			if err != nil {
+				return streamRenderResult{}, err
+			}
 		}
 		exists, err := store.Exists(captionKey)
 		if err != nil {

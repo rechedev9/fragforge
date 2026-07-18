@@ -389,13 +389,38 @@ func reconcileInterruptedStreamRenderStates(
 				_, statusErr := streamclips.ParseStatus(string(state.Status))
 				statusValid = statusErr == nil
 			}
+			publishedReady := false
+			if identityValid && statusValid && state.HasPublishedRender() {
+				if artifactErr := validatePublishedStreamRenderArtifacts(store, state); artifactErr != nil {
+					readErr = errors.Join(readErr, artifactErr)
+					identityValid = false
+				} else {
+					publishedReady = true
+				}
+			}
 			if identityValid && statusValid {
 				switch state.Status {
 				case streamclips.StatusRendered:
-					result.completedJobs[j.ID] = struct{}{}
+					if publishedReady {
+						result.completedJobs[j.ID] = struct{}{}
+					}
 					continue
 				case streamclips.StatusRendering:
-					// Repaired below.
+					// Close the interrupted attempt below. If it was a rerender,
+					// retain the active completed revision and restore the parent to
+					// Rendered rather than stranding the job in Failed.
+					if publishedReady {
+						result.completedJobs[j.ID] = struct{}{}
+					}
+				case streamclips.StatusFailed:
+					// A worker writes the failed attempt state before restoring a
+					// rerender's parent to Rendered. If the process stops in that
+					// narrow window, the published fallback still proves the parent
+					// is renderable and startup must finish the restoration.
+					if publishedReady {
+						result.completedJobs[j.ID] = struct{}{}
+					}
+					continue
 				default:
 					continue
 				}
@@ -439,15 +464,46 @@ func reconcileInterruptedStreamRenderStates(
 }
 
 func validStreamRenderStateIdentity(state streamclips.RenderState, jobID uuid.UUID, variant string) bool {
-	expected, err := streamclips.NewRenderState(jobID, variant, streamclips.StatusReady, nil, "", nil)
-	if err != nil {
-		return false
-	}
 	return state.JobID == jobID &&
 		state.Variant == variant &&
-		state.ResultKey == expected.ResultKey &&
-		state.GalleryKey == expected.GalleryKey &&
-		state.ArtifactDir == expected.ArtifactDir
+		streamclips.ValidateRenderStateArtifacts(state) == nil
+}
+
+func validatePublishedStreamRenderArtifacts(store storage.Storage, state streamclips.RenderState) error {
+	var result streamclips.RenderResult
+	found, err := readSweepJSON(store, state.ResultKey, &result)
+	if err != nil {
+		return fmt.Errorf("read published stream render result: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("published stream render result is missing")
+	}
+	if result.JobID != state.JobID || result.Variant != state.Variant {
+		return fmt.Errorf("published stream render result identity does not match state")
+	}
+	if len(state.Videos) == 0 || len(result.Clips) != len(state.Videos) {
+		return fmt.Errorf("published stream render result videos do not match state")
+	}
+	for i := range state.Videos {
+		if result.Clips[i].ClipID != state.Videos[i].ClipID || result.Clips[i].Key != state.Videos[i].Key {
+			return fmt.Errorf("published stream render result video %d does not match state", i)
+		}
+	}
+	keys := make([]string, 0, 1+len(state.Videos))
+	keys = append(keys, state.GalleryKey)
+	for _, video := range state.Videos {
+		keys = append(keys, video.Key)
+	}
+	for _, key := range keys {
+		exists, err := store.Exists(key)
+		if err != nil {
+			return fmt.Errorf("check published stream artifact %s: %w", key, err)
+		}
+		if !exists {
+			return fmt.Errorf("published stream artifact %s is missing", key)
+		}
+	}
+	return nil
 }
 
 func recordInterruptedRender(rec *obs.Recorder, source, target, message string) {

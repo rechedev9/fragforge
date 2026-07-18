@@ -6,25 +6,42 @@ import (
 	"errors"
 	"os"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
 var replaceFileW = syscall.NewLazyDLL("kernel32.dll").NewProc("ReplaceFileW")
+
+const (
+	windowsAccessDenied     syscall.Errno = 5
+	windowsSharingViolation syscall.Errno = 32
+)
 
 func openLocalFile(path string) (*os.File, error) {
 	name, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
 	}
-	handle, err := syscall.CreateFile(
-		name,
-		syscall.GENERIC_READ,
-		syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE,
-		nil,
-		syscall.OPEN_EXISTING,
-		syscall.FILE_ATTRIBUTE_NORMAL,
-		0,
-	)
+	var handle syscall.Handle
+	for attempt := 0; attempt < 5; attempt++ {
+		handle, err = syscall.CreateFile(
+			name,
+			syscall.GENERIC_READ,
+			syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE,
+			nil,
+			syscall.OPEN_EXISTING,
+			syscall.FILE_ATTRIBUTE_NORMAL,
+			0,
+		)
+		if err == nil || (!errors.Is(err, windowsSharingViolation) && !errors.Is(err, windowsAccessDenied)) {
+			break
+		}
+		// ReplaceFileW is atomic, but virus scanners and filesystem filters can
+		// briefly deny a new handle while a generation JSON is being replaced.
+		// Polling endpoints should not turn that millisecond-scale window into a
+		// terminal 500 response.
+		time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+	}
 	if err != nil {
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
 	}

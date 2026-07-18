@@ -33,6 +33,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/renderplan"
 	"github.com/rechedev9/fragforge/internal/storage"
 	"github.com/rechedev9/fragforge/internal/streamclips"
+	"github.com/rechedev9/fragforge/internal/streamkillfeed"
 	"github.com/rechedev9/fragforge/internal/tasks"
 )
 
@@ -43,6 +44,10 @@ const defaultMediaWorkerTimeout = "20m"
 // the parent stream job can be promoted. The completion state must survive so
 // startup reconciliation can finish that promotion after a restart.
 var errStreamRenderParentPromotion = errors.New("stream render completed but parent status promotion failed")
+
+// errStreamKillfeedArtifactsStale marks a recoverable exact-evidence failure.
+// The user must be able to rerun analysis, so it must not fail the parent job.
+var errStreamKillfeedArtifactsStale = errors.New("stream render exact killfeed artifacts are stale")
 
 var errStaleGenerateHandoff = errors.New("generate render handoff no longer owns the active run")
 
@@ -217,6 +222,14 @@ type StreamRenderWorkerConfig struct {
 	WorkDir    string
 	FFmpegPath string
 	Timeout    string
+	// JobLocks must be shared with HTTP handlers in Studio so render claims and
+	// final pointer commits serialize with edit-plan mutations for the same job.
+	// CLI and tests may leave it nil to receive a private coordinator.
+	JobLocks *streamclips.JobLocks
+	// RequireAppliedKillfeedAnalysis enables Studio's durable automatic-analysis
+	// gate. CLI rendering leaves this false so explicitly reviewed legacy/manual
+	// plans continue to work; metadata-bearing plans are always validated.
+	RequireAppliedKillfeedAnalysis bool
 	// MusicDir holds catalog tracks named "<key>.<ext>" that an edit plan's
 	// MusicPlan can mix under the clip audio (same directory the songs API and
 	// the reel render worker use).
@@ -227,11 +240,8 @@ type StreamRenderWorkerConfig struct {
 	// WAV, then xAI transcribes it with word-level timestamps (see
 	// NewStreamRenderWorker).
 	XAIAPIKey string
-	//
-	// A render honours EditPlan.Captions.Enabled only when xAI is configured;
-	// the HTTP layer rejects a render start otherwise (see
-	// requireCaptionsEnabled), but the worker still checks defensively since it
-	// may run a redriven task from before the config changed.
+	// Render never calls xAI: it consumes only CaptionReviewed edit-plan cues.
+	// This key is used by the separate candidate-generation task.
 }
 
 // RecordWorker handles the "record:demo" Asynq task.
@@ -786,11 +796,34 @@ func NewRenderWorker(repo StatusRepository, store storage.Storage, cfg RenderWor
 }
 
 // StreamRenderWorker handles "render:stream-clip" tasks.
+type streamKillfeedScanner interface {
+	Scan(
+		ctx context.Context,
+		sourcePath string,
+		probe streamclips.SourceProbe,
+		crop streamclips.CropRect,
+		clip streamclips.ClipRange,
+	) ([]streamkillfeed.Event, error)
+}
+
 type StreamRenderWorker struct {
-	repo    StreamRenderRepository
-	storage storage.Storage
-	cfg     StreamRenderWorkerConfig
-	runner  commandRunner
+	repo     StreamRenderRepository
+	storage  storage.Storage
+	cfg      StreamRenderWorkerConfig
+	runner   commandRunner
+	jobLocks *streamclips.JobLocks
+	// killfeedScanner is the source-PTS detector used by the durable killfeed
+	// analysis task. Tests replace it with deterministic frame evidence.
+	killfeedScanner streamKillfeedScanner
+	// extractKillfeedRows selects one event's exact SamplePTS and returns only
+	// the rows born in that event as PNGs. It is separate from the scanner seam
+	// so tests can prove event isolation without invoking ffmpeg.
+	extractKillfeedRows func(
+		ctx context.Context,
+		sourcePath string,
+		probe streamclips.SourceProbe,
+		event streamkillfeed.Event,
+	) ([][]byte, error)
 	// transcribe runs the xAI captions pass, with a seam for unit tests.
 	transcribe func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error)
 	// translateToSpanish is the sole subtitle-output pass. xAI STT has no
@@ -800,15 +833,29 @@ type StreamRenderWorker struct {
 }
 
 func NewStreamRenderWorker(repo StreamRenderRepository, store storage.Storage, cfg StreamRenderWorkerConfig) *StreamRenderWorker {
-	w := &StreamRenderWorker{
-		repo:    repo,
-		storage: store,
-		cfg:     cfg,
-		runner:  execCommandRunner{},
+	killfeedAnalyzer := streamkillfeed.Analyzer{FFmpegPath: cfg.FFmpegPath}
+	jobLocks := cfg.JobLocks
+	if jobLocks == nil {
+		jobLocks = streamclips.NewJobLocks()
 	}
-	// Stream captions intentionally use xAI only. An unusable xAI transcript
-	// publishes without captions rather than substituting text from another
-	// engine; a transport/auth failure remains a hard render error.
+	w := &StreamRenderWorker{
+		repo:            repo,
+		storage:         store,
+		cfg:             cfg,
+		runner:          execCommandRunner{},
+		jobLocks:        jobLocks,
+		killfeedScanner: killfeedAnalyzer,
+		extractKillfeedRows: func(
+			ctx context.Context,
+			sourcePath string,
+			probe streamclips.SourceProbe,
+			event streamkillfeed.Event,
+		) ([][]byte, error) {
+			return killfeedAnalyzer.ExtractEventRowPNGs(ctx, sourcePath, probe, event)
+		},
+	}
+	// Candidate generation intentionally uses xAI only. No machine transcript
+	// reaches rendering until the review endpoint persists it in the edit plan.
 	w.transcribe = func(ctx context.Context, mediaPath, workDir, language string) ([]captions.WordCue, error) {
 		x := captions.XAITranscriber{APIKey: w.cfg.XAIAPIKey, Language: language}
 		return transcribeCaptionsWithXAI(ctx, mediaPath, workDir, x.Transcribe)
@@ -823,9 +870,8 @@ func singleLine(err error) string {
 }
 
 // transcribeCaptionsWithXAI validates the single supported backend's result.
-// An unusable transcript remains a soft error for burnClipCaptions; a dead
-// context is always hard, even if xAI happened to return unusable cues while
-// cancellation was propagating.
+// A dead context is always hard, even if xAI happened to return unusable cues
+// while cancellation was propagating.
 func transcribeCaptionsWithXAI(ctx context.Context, mediaPath, workDir string, transcribe func(context.Context, string, string) ([]captions.WordCue, error)) ([]captions.WordCue, error) {
 	cues, err := transcribe(ctx, mediaPath, workDir)
 	if err == nil {
@@ -851,32 +897,142 @@ func (w *StreamRenderWorker) HandleRenderStreamClip(ctx context.Context, t *asyn
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
 	}
+	intent, hasIntent, err := tasks.StreamRenderIntentFromTask(t)
+	if err != nil {
+		return fmt.Errorf("decode stream render intent: %w", err)
+	}
 	j, err := w.repo.Get(ctx, payload.JobID)
 	if err != nil {
 		return fmt.Errorf("load stream job %s: %w", payload.JobID, err)
 	}
-	if err := w.render(ctx, j, payload.Variant); err != nil {
+	claim := streamRenderClaim{}
+	if w.cfg.RequireAppliedKillfeedAnalysis && !hasIntent {
+		err = fmt.Errorf("%w: immutable edit-plan intent is missing", errStreamRenderSuperseded)
+	} else {
+		err = w.render(ctx, j, payload.Variant, intent, hasIntent, &claim)
+	}
+	if err != nil {
 		if errors.Is(err, errStreamRenderParentPromotion) {
 			logWorkerError(j.ID, tasks.TypeRenderStreamClip, err)
 			return err
 		}
-		markStreamFailed(w.repo, j.ID, err.Error())
-		if stateErr := w.writeStreamState(j.ID, payload.Variant, streamclips.StatusFailed, nil, err.Error(), nil); stateErr != nil {
-			logWorkerError(j.ID, "write failed stream render state", stateErr)
+		if errors.Is(err, errStreamRenderSuperseded) || errors.Is(err, errStreamKillfeedArtifactsStale) {
+			message := "render cancelled because its admitted edit plan or exact killfeed artifacts are no longer current; rerun killfeed analysis if requested, then render again"
+			release := w.jobLocks.Lock(j.ID)
+			defer release()
+			current, getErr := w.repo.Get(ctx, j.ID)
+			if getErr != nil {
+				return errors.Join(err, fmt.Errorf("reload recoverable stream render parent: %w", getErr))
+			}
+			owned, stateErr := w.writeRecoverableStreamRenderState(
+				j.ID, payload.Variant, intent, hasIntent, err, message,
+			)
+			if !owned && stateErr == nil {
+				// A newer attempt replaced this variant's mutable state. This old
+				// task no longer owns either status or parent repair.
+				return nil
+			}
+			var repairErr error
+			if stateErr != nil {
+				repairErr = fmt.Errorf("write recoverable stream render state: %w", stateErr)
+			}
+			if claim.claimed {
+				if current.Status == streamclips.StatusRendering {
+					if statusErr := updateStreamStatus(w.repo, j.ID, claim.previousStatus, ""); statusErr != nil {
+						repairErr = errors.Join(repairErr, fmt.Errorf("restore recoverable stream render parent status: %w", statusErr))
+					}
+				}
+			}
+			if repairErr != nil {
+				finalErr := errors.Join(err, repairErr)
+				logWorkerError(j.ID, tasks.TypeRenderStreamClip, finalErr)
+				return finalErr
+			}
+			return nil
 		}
-		logWorkerError(j.ID, tasks.TypeRenderStreamClip, err)
-		return err
+		release := w.jobLocks.Lock(j.ID)
+		defer release()
+		current, getErr := w.repo.Get(ctx, j.ID)
+		if getErr != nil {
+			return errors.Join(err, fmt.Errorf("reload failed stream render parent: %w", getErr))
+		}
+		owned, stateErr := w.writeOwnedStreamRenderAttempt(
+			j.ID, payload.Variant, intent, hasIntent,
+			streamclips.StatusFailed, nil, err.Error(), "",
+		)
+		if !owned && stateErr == nil {
+			logWorkerError(j.ID, tasks.TypeRenderStreamClip, err)
+			return nil
+		}
+		var repairErr error
+		if stateErr != nil {
+			repairErr = fmt.Errorf("write failed stream render state: %w", stateErr)
+		}
+		switch {
+		case claim.claimed && current.Status == streamclips.StatusRendering && claim.previousStatus == streamclips.StatusRendered:
+			if statusErr := updateStreamStatus(w.repo, j.ID, streamclips.StatusRendered, ""); statusErr != nil {
+				repairErr = errors.Join(repairErr, fmt.Errorf("restore previously rendered stream parent: %w", statusErr))
+			}
+		case claim.claimed && current.Status == streamclips.StatusRendering:
+			if statusErr := updateStreamStatus(w.repo, j.ID, streamclips.StatusFailed, err.Error()); statusErr != nil {
+				repairErr = errors.Join(repairErr, fmt.Errorf("mark stream render parent failed: %w", statusErr))
+			}
+		case !claim.claimed && current.Status == streamclips.StatusReady:
+			if statusErr := updateStreamStatus(w.repo, j.ID, streamclips.StatusFailed, err.Error()); statusErr != nil {
+				repairErr = errors.Join(repairErr, fmt.Errorf("mark unclaimed stream render parent failed: %w", statusErr))
+			}
+		}
+		finalErr := errors.Join(err, repairErr)
+		logWorkerError(j.ID, tasks.TypeRenderStreamClip, finalErr)
+		return finalErr
 	}
 	return nil
 }
 
-func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, variant string) error {
+type streamRenderClaim struct {
+	previousStatus streamclips.Status
+	claimed        bool
+}
+
+func (w *StreamRenderWorker) render(
+	ctx context.Context,
+	j streamclips.Job,
+	variant string,
+	intent tasks.StreamRenderIntent,
+	hasIntent bool,
+	claim *streamRenderClaim,
+) error {
+	if claim == nil {
+		return fmt.Errorf("stream render claim is required")
+	}
 	if _, ok := streamclips.VariantByName(variant); !ok {
 		return fmt.Errorf("unsupported stream render variant %q (valid variants: %s)", variant, strings.Join(streamclips.VariantNames(), ", "))
 	}
 	cfg := w.cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		return err
+	}
+
+	// Claim the parent under the same per-job lock used by every HTTP plan
+	// mutation. Reloading here makes a queued task validate the current plan,
+	// not the snapshot HandleRenderStreamClip happened to read before locking.
+	releaseClaim := w.jobLocks.Lock(j.ID)
+	claimReleased := false
+	defer func() {
+		if !claimReleased {
+			releaseClaim()
+		}
+	}()
+	current, err := w.repo.Get(ctx, j.ID)
+	if err != nil {
+		return fmt.Errorf("reload stream job %s for render claim: %w", j.ID, err)
+	}
+	j = current
+	if err := w.ensureStreamRenderAttemptCurrent(j.ID, variant, intent, hasIntent); err != nil {
+		return err
+	}
+	if j.Status != streamclips.StatusReady && j.Status != streamclips.StatusRendered {
+		return fmt.Errorf("%w: stream job is not claimable (status=%s)", errStreamRenderSuperseded, j.Status)
 	}
 	if len(j.EditPlan) == 0 {
 		return fmt.Errorf("stream job %s has no edit plan", j.ID)
@@ -892,11 +1048,24 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	if err := plan.ValidateForSourceDuration(j.Probe.DurationSeconds); err != nil {
 		return err
 	}
+	if plan.Variant != variant {
+		return fmt.Errorf(
+			"%w: task variant %q does not match edit plan variant %q",
+			errStreamRenderSuperseded, variant, plan.Variant,
+		)
+	}
 	if len(plan.Clips) == 0 {
 		return fmt.Errorf("edit plan has no clips")
 	}
-	if plan.Captions.Enabled && j.Probe.AudioCodec != "" && !cfg.captionsConfigured() && plan.CaptionsNeedBackend() {
-		return fmt.Errorf("edit plan has an audible clip with neither reviewed caption words, a reviewed no-speech decision, nor xAI configured (review it with zv stream captions, configure an xAI key in FragForge Studio Settings, or set XAI_API_KEY, then restart)")
+	if err := validateStreamRenderIntent(plan, intent, hasIntent); err != nil {
+		return err
+	}
+	appliedKillfeed, err := w.appliedKillfeedAnalysis(j, plan)
+	if err != nil {
+		return err
+	}
+	if j.Probe.AudioCodec != "" && plan.CaptionsNeedBackend() {
+		return fmt.Errorf("edit plan has an audible clip without reviewed captions or a reviewed no-speech decision")
 	}
 	bannerFontPath := ""
 	if plan.StreamerBanner.Nick != "" || plan.HasTextOverlays() {
@@ -906,12 +1075,25 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		}
 	}
 
+	previousStatus := j.Status
 	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendering, ""); err != nil {
 		return fmt.Errorf("mark stream rendering: %w", err)
 	}
-	if err := w.writeStreamState(j.ID, variant, streamclips.StatusRendering, nil, "", nil); err != nil {
-		return err
+	owned, stateErr := w.writeOwnedStreamRenderAttempt(
+		j.ID, variant, intent, hasIntent,
+		streamclips.StatusRendering, nil, "", "",
+	)
+	if stateErr != nil || !owned {
+		rollbackErr := w.repo.UpdateStatus(ctx, j.ID, previousStatus, "")
+		if stateErr == nil {
+			stateErr = fmt.Errorf("%w: render attempt lost ownership during claim", errStreamRenderSuperseded)
+		}
+		return errors.Join(stateErr, rollbackErr)
 	}
+	claim.previousStatus = previousStatus
+	claim.claimed = true
+	releaseClaim()
+	claimReleased = true
 
 	workDir, cleanup, err := prepareStageDir(cfg.WorkDir, j.ID, "stream-render")
 	if err != nil {
@@ -930,7 +1112,26 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 
 	runCtx, cancel := context.WithTimeout(ctx, cfg.timeoutDuration())
 	defer cancel()
+	type publishArtifact struct {
+		key  string
+		path string
+	}
+	revisionID := uuid.New()
+	revisionPrefix, err := streamclips.RenderRevisionPrefix(j.ID, variant, revisionID)
+	if err != nil {
+		return err
+	}
+	revisionCommitted := false
+	defer func() {
+		if revisionCommitted {
+			return
+		}
+		if deleteErr := w.deleteStreamRenderRevision(j.ID, variant, revisionPrefix); deleteErr != nil {
+			logWorkerError(j.ID, "delete uncommitted stream render revision", deleteErr)
+		}
+	}()
 	var videos []streamclips.VideoEntry
+	var publishArtifacts []publishArtifact
 	var warnings []string
 	musicPath := ""
 	if plan.Music.Key != "" {
@@ -942,7 +1143,13 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	for _, clip := range plan.Clips {
 		var noticePaths [][]string
 		if plan.Variant != streamclips.VariantStreamerLandscape16x9 {
-			noticePaths, err = renderClipKillfeedNotices(workDir, clip)
+			if plan.KillfeedAnalysis != nil {
+				noticePaths, err = w.materializeAnalyzedKillfeedNotices(
+					workDir, j.ID, appliedKillfeed, clip,
+				)
+			} else {
+				noticePaths, err = renderClipKillfeedNotices(workDir, clip)
+			}
 			if err != nil {
 				return err
 			}
@@ -980,65 +1187,47 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 				warnings = append(warnings, fmt.Sprintf("clip %s: source has no audio, publishing without captions", clip.ID))
 			case clip.CaptionReviewed && len(clip.CaptionWords) == 0:
 				warnings = append(warnings, fmt.Sprintf("clip %s: reviewed as containing no speech, publishing without captions", clip.ID))
-			case len(clip.CaptionWords) > 0:
+			case clip.CaptionReviewed && len(clip.CaptionWords) > 0:
 				cues := make([]captions.WordCue, len(clip.CaptionWords))
 				for i, word := range clip.CaptionWords {
 					cues[i] = captions.WordCue{Word: word.Word, StartSeconds: word.StartSeconds, EndSeconds: word.EndSeconds}
 				}
-				captionedPath, err := w.burnCaptionCues(runCtx, cfg, workDir, outPath, cues, clip.EffectiveSpeed(), j.ID, variant, clip.ID)
+				captionedPath, err := w.burnCaptionCues(runCtx, cfg, workDir, outPath, cues, clip.EffectiveSpeed(), variant, clip.ID)
 				if err != nil {
 					return err
 				}
 				publishPath = captionedPath
 				videoArtifactID = clip.ID + "_captioned"
-			default:
-				transcriptionPath := outPath
-				var recoverTranscription func() ([]captions.WordCue, error)
-				// Cues transcribed from the rendered clip are already in output
-				// time; cues from the source range must be mapped through the
-				// speed edit before burning onto the sped-up output.
-				cueSpeed := 1.0
-				if cfg.xaiConfigured() {
-					// Both edited and unedited clips use source-range audio. When the
-					// ordinary whole-range transcript is unusable, an enhanced pass is
-					// used only to locate speech regions; short slices from the original
-					// audio are transcribed again so enhancer hallucinations are never
-					// published as captions. Edits only change cueSpeed.
-					transcriptionPath, err = w.extractCaptionSourceAudio(runCtx, cfg, workDir, sourcePath, clip)
-					if err != nil {
-						return err
-					}
-					recoverTranscription = func() ([]captions.WordCue, error) {
-						return w.recoverCaptionTranscript(
-							runCtx, cfg, workDir, sourcePath, transcriptionPath, clip, captionSourceLanguage,
-						)
-					}
-					cueSpeed = clip.EffectiveSpeed()
-				}
-				captionedPath, warning, err := w.burnClipCaptions(runCtx, cfg, workDir, outPath, transcriptionPath, recoverTranscription, clip.EndSeconds-clip.StartSeconds, cueSpeed, j.ID, variant, clip.ID)
+				captionKey, err := streamclips.RenderRevisionCaptionKey(j.ID, variant, revisionID, clip.ID)
 				if err != nil {
 					return err
 				}
-				switch {
-				case captionedPath != "":
-					publishPath = captionedPath
-					videoArtifactID = clip.ID + "_captioned"
-				case warning != "":
-					warnings = append(warnings, warning)
-				}
+				publishArtifacts = append(publishArtifacts, publishArtifact{
+					key:  captionKey,
+					path: filepath.Join(workDir, "captions", clip.ID+".ass"),
+				})
+			default:
+				return fmt.Errorf("clip %s captions were not reviewed", clip.ID)
 			}
 		}
 
-		key, err := streamclips.RenderVideoKey(j.ID, variant, videoArtifactID)
+		key, err := streamclips.RenderRevisionVideoKey(j.ID, variant, revisionID, videoArtifactID)
 		if err != nil {
 			return err
 		}
-		if err := uploadFile(w.storage, key, publishPath); err != nil {
-			return fmt.Errorf("upload stream clip %s: %w", clip.ID, err)
-		}
+		publishArtifacts = append(publishArtifacts, publishArtifact{key: key, path: publishPath})
 		// Only the video artifact filename gains _captioned. NewVideoEntry keeps
 		// the original plan clip ID stable so caption sidecars remain addressable.
 		videos = append(videos, streamclips.NewVideoEntry(clip, key))
+	}
+
+	// Media and sidecars are uploaded into a new immutable revision. Until the
+	// final status.json pointer is replaced, a partial upload is unreachable and
+	// cannot corrupt an older completed render.
+	for _, artifact := range publishArtifacts {
+		if err := uploadFile(w.storage, artifact.key, artifact.path); err != nil {
+			return fmt.Errorf("publish stream render artifact %s: %w", artifact.key, err)
+		}
 	}
 
 	result, err := streamclips.NewRenderResult(j.ID, variant, videos, time.Now())
@@ -1046,24 +1235,68 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 		return err
 	}
 	result.Warnings = warnings
-	resultKey, err := streamclips.RenderResultKey(j.ID, variant)
+	resultKey, err := streamclips.RenderRevisionResultKey(j.ID, variant, revisionID)
 	if err != nil {
 		return err
 	}
 	if err := putJSONToStorage(w.storage, resultKey, result); err != nil {
 		return fmt.Errorf("write stream render result: %w", err)
 	}
-	galleryKey, err := streamclips.RenderGalleryKey(j.ID, variant)
+	galleryKey, err := streamclips.RenderRevisionGalleryKey(j.ID, variant, revisionID)
 	if err != nil {
 		return err
 	}
 	if err := w.storage.Put(galleryKey, strings.NewReader(streamclips.RenderGalleryHTML(j, videos))); err != nil {
 		return fmt.Errorf("write stream gallery: %w", err)
 	}
-	if err := w.writeStreamState(j.ID, variant, streamclips.StatusRendered, warnings, "", videos); err != nil {
+	state, err := streamclips.NewRenderState(j.ID, variant, streamclips.StatusRendered, warnings, "", videos)
+	if err != nil {
 		return err
 	}
+	state.ResultKey = resultKey
+	state.GalleryKey = galleryKey
+	state.ArtifactDir = revisionPrefix
+	if hasIntent {
+		state.AttemptID = intent.AttemptID
+	}
+
+	// The shared job lock turns this revalidation plus atomic status pointer
+	// replacement into one commit relative to every HTTP plan mutation and any
+	// competing variant worker. Immutable artifacts may already exist, but no
+	// client can resolve them until this commit succeeds.
+	releaseCommit := w.jobLocks.Lock(j.ID)
+	commitReleased := false
+	defer func() {
+		if !commitReleased {
+			releaseCommit()
+		}
+	}()
+	if err := w.ensureStreamRenderIntentCurrent(ctx, j.ID, intent, hasIntent); err != nil {
+		return err
+	}
+	previousState, owned, err := w.ownedStreamRenderState(j.ID, variant, intent, hasIntent)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("%w: render attempt no longer owns variant state", errStreamRenderSuperseded)
+	}
+	previousRevision := ""
+	if previousState.HasPublishedRender() {
+		previousRevision = previousState.ArtifactDir
+	}
+	if err := w.writeStreamRenderState(state); err != nil {
+		return err
+	}
+	revisionCommitted = true
+	releaseCommit()
+	commitReleased = true
 	logWorkerArtifacts(j.ID, tasks.TypeRenderStreamClip, []string{resultKey, galleryKey})
+	if previousRevision != "" && previousRevision != revisionPrefix {
+		if err := w.deleteStreamRenderRevision(j.ID, variant, previousRevision); err != nil {
+			logWorkerError(j.ID, "delete superseded stream render revision", err)
+		}
+	}
 	if err := w.repo.UpdateStatus(ctx, j.ID, streamclips.StatusRendered, ""); err != nil {
 		return errors.Join(
 			errStreamRenderParentPromotion,
@@ -1072,6 +1305,61 @@ func (w *StreamRenderWorker) render(ctx context.Context, j streamclips.Job, vari
 	}
 
 	return nil
+}
+
+func validateStreamRenderIntent(plan streamclips.EditPlan, intent tasks.StreamRenderIntent, hasIntent bool) error {
+	if !hasIntent {
+		return nil
+	}
+	fingerprint, err := streamclips.EditPlanFingerprint(plan)
+	if err != nil {
+		return fmt.Errorf("fingerprint stream edit plan: %w", err)
+	}
+	if fingerprint != intent.EditPlanFingerprint {
+		return fmt.Errorf("%w: admitted edit plan revision changed", errStreamRenderSuperseded)
+	}
+	if intent.KillfeedGeneration == uuid.Nil {
+		if plan.KillfeedAnalysis != nil {
+			return fmt.Errorf("%w: killfeed generation was added after admission", errStreamRenderSuperseded)
+		}
+		return nil
+	}
+	if plan.KillfeedAnalysis == nil ||
+		plan.KillfeedAnalysis.GenerationID != intent.KillfeedGeneration ||
+		plan.KillfeedAnalysis.Fingerprint != intent.KillfeedFingerprint {
+		return fmt.Errorf("%w: admitted killfeed generation changed", errStreamRenderSuperseded)
+	}
+	return nil
+}
+
+func (w *StreamRenderWorker) ensureStreamRenderIntentCurrent(
+	ctx context.Context,
+	jobID uuid.UUID,
+	intent tasks.StreamRenderIntent,
+	hasIntent bool,
+) error {
+	if !hasIntent {
+		return nil
+	}
+	current, err := w.repo.Get(ctx, jobID)
+	if err != nil {
+		return fmt.Errorf("reload stream job before publish: %w", err)
+	}
+	if current.Status != streamclips.StatusRendering {
+		return fmt.Errorf("%w: parent render lease is no longer active", errStreamRenderSuperseded)
+	}
+	if len(current.EditPlan) == 0 {
+		return fmt.Errorf("%w: current edit plan is missing", errStreamRenderSuperseded)
+	}
+	var plan streamclips.EditPlan
+	if err := json.Unmarshal(current.EditPlan, &plan); err != nil {
+		return fmt.Errorf("decode current edit plan before publish: %w", err)
+	}
+	plan = streamclips.NormalizeEditPlan(plan)
+	if migrated, changed := streamclips.MigrateLegacySourceDuration(plan, current.Probe.DurationSeconds); changed {
+		plan = migrated
+	}
+	return validateStreamRenderIntent(plan, intent, true)
 }
 
 // writeClipOverlayTexts materializes one text file per overlay so drawtext can
@@ -1530,39 +1818,10 @@ func (w *StreamRenderWorker) transcribeCaptionCues(
 	return recovered, nil
 }
 
-// burnClipCaptions transcribes transcriptionPath with xAI and burns the
-// resulting karaoke captions into a second copy, <clipID>_captioned.mp4, next to
-// clipPath. It returns the captioned file's path on success. If xAI produces an
-// unusable transcript, it returns ("", warning, nil) so the caller
-// publishes the uncaptioned clip instead of failing the render; any other
-// transcription or burn failure is returned as an error since captions were
-// explicitly requested and a transcription backend is configured.
-func (w *StreamRenderWorker) burnClipCaptions(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath, transcriptionPath string, recoverTranscription func() ([]captions.WordCue, error), sourceDuration, cueSpeed float64, id uuid.UUID, variant, clipID string) (captionedPath, warning string, err error) {
-	cues, err := w.transcribeCaptionCues(ctx, transcriptionPath, workDir, captionSourceLanguage, sourceDuration, recoverTranscription)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
-		}
-		if errors.Is(err, captions.ErrUnusableTranscript) {
-			return "", fmt.Sprintf("clip %s: no usable transcript (%s), publishing without captions", clipID, singleLine(err)), nil
-		}
-		return "", "", fmt.Errorf("transcribe clip %s: %w", clipID, err)
-	}
-	cues, err = w.translateToSpanish(ctx, cues)
-	if err != nil {
-		return "", "", fmt.Errorf("translate clip %s subtitles to spanish: %w", clipID, err)
-	}
-	captionedPath, err = w.burnCaptionCues(ctx, cfg, workDir, clipPath, cues, cueSpeed, id, variant, clipID)
-	if err != nil {
-		return "", "", err
-	}
-	return captionedPath, "", nil
-}
-
 // burnCaptionCues burns already-reviewed Spanish cues. It is shared by cloud
-// captions after transcription/translation and by the agent-first caption
-// import path, which deliberately needs no cloud credentials.
-func (w *StreamRenderWorker) burnCaptionCues(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath string, cues []captions.WordCue, cueSpeed float64, id uuid.UUID, variant, clipID string) (string, error) {
+// candidate review and the agent-first caption import path; it deliberately
+// needs no cloud credentials.
+func (w *StreamRenderWorker) burnCaptionCues(ctx context.Context, cfg StreamRenderWorkerConfig, workDir, clipPath string, cues []captions.WordCue, cueSpeed float64, variant, clipID string) (string, error) {
 	if cueSpeed != 1 {
 		for i := range cues {
 			cues[i].StartSeconds /= cueSpeed
@@ -1595,14 +1854,6 @@ func (w *StreamRenderWorker) burnCaptionCues(ctx context.Context, cfg StreamRend
 	if err := os.WriteFile(assPath, []byte(assContent), 0o600); err != nil {
 		return "", fmt.Errorf("write captions for clip %s: %w", clipID, err)
 	}
-	captionKey, err := streamclips.RenderCaptionKey(id, variant, clipID)
-	if err != nil {
-		return "", err
-	}
-	if err := uploadFile(w.storage, captionKey, assPath); err != nil {
-		return "", fmt.Errorf("upload captions for clip %s: %w", clipID, err)
-	}
-
 	out := filepath.Join(filepath.Dir(clipPath), clipID+"_captioned.mp4")
 	args := []string{
 		"-y",
@@ -1625,11 +1876,46 @@ func (w *StreamRenderWorker) writeStreamState(id uuid.UUID, variant string, stat
 	if err != nil {
 		return err
 	}
+	return w.writeStreamRenderState(state)
+}
+
+func (w *StreamRenderWorker) writeStreamRenderState(state streamclips.RenderState) error {
+	if err := streamclips.ValidateRenderStateArtifacts(state); err != nil {
+		return fmt.Errorf("validate stream render state artifacts: %w", err)
+	}
+	id := state.JobID
+	variant := state.Variant
 	key, err := streamclips.RenderStateKey(id, variant)
 	if err != nil {
 		return err
 	}
 	return putJSONToStorage(w.storage, key, state)
+}
+
+// deleteStreamRenderRevision removes only a validated immutable revision
+// namespace. Legacy canonical render prefixes are deliberately retained.
+func (w *StreamRenderWorker) deleteStreamRenderRevision(id uuid.UUID, variant, artifactDir string) error {
+	base, err := streamclips.RenderPrefix(id, variant)
+	if err != nil {
+		return err
+	}
+	revisionText := strings.TrimPrefix(artifactDir, base+"/revisions/")
+	if revisionText == artifactDir || revisionText == "" || strings.Contains(revisionText, "/") {
+		return nil
+	}
+	revisionID, err := uuid.Parse(revisionText)
+	if err != nil || revisionID == uuid.Nil {
+		return nil
+	}
+	want, err := streamclips.RenderRevisionPrefix(id, variant, revisionID)
+	if err != nil || want != artifactDir {
+		return nil
+	}
+	deleter, ok := w.storage.(interface{ DeleteTree(string) error })
+	if !ok {
+		return nil
+	}
+	return deleter.DeleteTree(artifactDir)
 }
 
 func (c StreamRenderWorkerConfig) withDefaults() StreamRenderWorkerConfig {
@@ -1684,11 +1970,15 @@ type streamStatusUpdater interface {
 }
 
 func markStreamFailed(repo streamStatusUpdater, id uuid.UUID, reason string) {
-	ctx, cancel := context.WithTimeout(context.Background(), failureWriteTimeout)
-	defer cancel()
-	if err := repo.UpdateStatus(ctx, id, streamclips.StatusFailed, reason); err != nil {
+	if err := updateStreamStatus(repo, id, streamclips.StatusFailed, reason); err != nil {
 		logWorkerError(id, "mark stream failed", err)
 	}
+}
+
+func updateStreamStatus(repo streamStatusUpdater, id uuid.UUID, status streamclips.Status, reason string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), failureWriteTimeout)
+	defer cancel()
+	return repo.UpdateStatus(ctx, id, status, reason)
 }
 
 func (w *RenderWorker) HandleRenderVariant(ctx context.Context, t *asynq.Task) error {

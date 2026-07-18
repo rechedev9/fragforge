@@ -119,6 +119,23 @@ func putSweepFixture(t *testing.T, store storage.Storage, key string, value any)
 	}
 }
 
+func putPublishedStreamRenderArtifacts(t *testing.T, store storage.Storage, state streamclips.RenderState) {
+	t.Helper()
+	result, err := streamclips.NewRenderResult(state.JobID, state.Variant, state.Videos, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	putSweepFixture(t, store, state.ResultKey, result)
+	if err := store.Put(state.GalleryKey, strings.NewReader("<html>gallery</html>")); err != nil {
+		t.Fatal(err)
+	}
+	for _, video := range state.Videos {
+		if err := store.Put(video.Key, strings.NewReader("video")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func readSweepFixture(t *testing.T, store storage.Storage, key string, dst any) {
 	t.Helper()
 	rc, err := store.Open(key)
@@ -691,13 +708,17 @@ func TestSweepInterruptedStreamRenderStatesPreservesArtifactData(t *testing.T) {
 			fixtures := make([]fixture, 0, len(cases))
 			for i, tc := range cases {
 				j := seedStreamJob(t, repo, tc.parentStatus)
+				videoKey, err := streamclips.RenderVideoKey(j.ID, variant, "clip-1")
+				if err != nil {
+					t.Fatalf("RenderVideoKey: %v", err)
+				}
 				state, err := streamclips.NewRenderState(
 					j.ID,
 					variant,
 					tc.stateStatus,
 					[]string{"keep warning"},
 					"",
-					[]streamclips.VideoEntry{{ClipID: "clip-1", Key: "keep/video.mp4"}},
+					[]streamclips.VideoEntry{{ClipID: "clip-1", Key: videoKey}},
 				)
 				if err != nil {
 					t.Fatalf("NewRenderState: %v", err)
@@ -705,6 +726,9 @@ func TestSweepInterruptedStreamRenderStatesPreservesArtifactData(t *testing.T) {
 				state.UpdatedAt = updatedAt.Add(time.Duration(i) * time.Minute)
 				if tc.stateStatus == streamclips.StatusFailed {
 					state.Error = "existing failure"
+				}
+				if state.HasPublishedRender() {
+					putPublishedStreamRenderArtifacts(t, store, state)
 				}
 				key, err := streamclips.RenderStateKey(j.ID, variant)
 				if err != nil {
@@ -738,6 +762,204 @@ func TestSweepInterruptedStreamRenderStatesPreservesArtifactData(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSweepInterruptedStreamRenderStatesPromotesCompletedRevision(t *testing.T) {
+	repo := newMemoryStreamJobRepository()
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := seedStreamJob(t, repo, streamclips.StatusRendering)
+	variant := streamclips.DefaultVariant().Name
+	revisionID := uuid.New()
+	prefix, err := streamclips.RenderRevisionPrefix(j.ID, variant, revisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultKey, _ := streamclips.RenderRevisionResultKey(j.ID, variant, revisionID)
+	galleryKey, _ := streamclips.RenderRevisionGalleryKey(j.ID, variant, revisionID)
+	videoKey, _ := streamclips.RenderRevisionVideoKey(j.ID, variant, revisionID, "clip-1")
+	state, err := streamclips.NewRenderState(j.ID, variant, streamclips.StatusRendered, nil, "", []streamclips.VideoEntry{{ClipID: "clip-1", Key: videoKey}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.ArtifactDir = prefix
+	state.ResultKey = resultKey
+	state.GalleryKey = galleryKey
+	putPublishedStreamRenderArtifacts(t, store, state)
+	stateKey, _ := streamclips.RenderStateKey(j.ID, variant)
+	putSweepFixture(t, store, stateKey, state)
+
+	swept, err := sweepInterruptedStreamRenderStates(context.Background(), repo, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept != 1 {
+		t.Fatalf("swept = %d, want parent promotion", swept)
+	}
+	got, err := repo.Get(context.Background(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != streamclips.StatusRendered {
+		t.Fatalf("parent status = %s, want rendered", got.Status)
+	}
+	var persisted streamclips.RenderState
+	readSweepFixture(t, store, stateKey, &persisted)
+	if !reflect.DeepEqual(persisted, state) {
+		t.Fatalf("revision state changed: got %+v want %+v", persisted, state)
+	}
+}
+
+func TestSweepInterruptedStreamRenderStatesDoesNotPromoteMissingPublishedArtifacts(t *testing.T) {
+	repo := newMemoryStreamJobRepository()
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := seedStreamJob(t, repo, streamclips.StatusRendering)
+	variant := streamclips.DefaultVariant().Name
+	videoKey, err := streamclips.RenderVideoKey(j.ID, variant, "clip-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := streamclips.NewRenderState(
+		j.ID, variant, streamclips.StatusRendered, nil, "",
+		[]streamclips.VideoEntry{{ClipID: "clip-1", Key: videoKey}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateKey, err := streamclips.RenderStateKey(j.ID, variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putSweepFixture(t, store, stateKey, state)
+
+	if _, err := sweepInterruptedStreamRenderStates(context.Background(), repo, store, nil); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := repo.Get(context.Background(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status == streamclips.StatusRendered {
+		t.Fatal("parent was promoted from a state whose published artifacts are missing")
+	}
+	var persisted streamclips.RenderState
+	readSweepFixture(t, store, stateKey, &persisted)
+	if persisted.Status != streamclips.StatusFailed || persisted.Published {
+		t.Fatalf("persisted state = %+v, want failed without published pointer", persisted)
+	}
+}
+
+func TestSweepInterruptedStreamRenderStatesRestoresPublishedRevisionAfterInterruptedRerender(t *testing.T) {
+	repo := newMemoryStreamJobRepository()
+	store, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := seedStreamJob(t, repo, streamclips.StatusRendering)
+	variant := streamclips.DefaultVariant().Name
+	revisionID := uuid.New()
+	prefix, err := streamclips.RenderRevisionPrefix(j.ID, variant, revisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultKey, err := streamclips.RenderRevisionResultKey(j.ID, variant, revisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	galleryKey, err := streamclips.RenderRevisionGalleryKey(j.ID, variant, revisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	videoKey, err := streamclips.RenderRevisionVideoKey(j.ID, variant, revisionID, "clip-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	videos := []streamclips.VideoEntry{{ClipID: "clip-1", Key: videoKey}}
+	result, err := streamclips.NewRenderResult(j.ID, variant, videos, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	putSweepFixture(t, store, resultKey, result)
+	if err := store.Put(galleryKey, strings.NewReader("published gallery")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(videoKey, strings.NewReader("published video")); err != nil {
+		t.Fatal(err)
+	}
+	state, err := streamclips.NewRenderState(
+		j.ID,
+		variant,
+		streamclips.StatusRendered,
+		nil,
+		"",
+		videos,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.AttemptID = uuid.New()
+	state.Status = streamclips.StatusRendering
+	state.ArtifactDir = prefix
+	state.ResultKey = resultKey
+	state.GalleryKey = galleryKey
+	stateKey, err := streamclips.RenderStateKey(j.ID, variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putPublishedStreamRenderArtifacts(t, store, state)
+	putSweepFixture(t, store, stateKey, state)
+
+	swept, err := sweepInterruptedStreamRenderStates(context.Background(), repo, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept != 2 {
+		t.Fatalf("swept = %d, want interrupted attempt plus parent restoration", swept)
+	}
+	parent, err := repo.Get(context.Background(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != streamclips.StatusRendered || parent.FailureReason != "" {
+		t.Fatalf("parent = status %s reason %q, want rendered without failure", parent.Status, parent.FailureReason)
+	}
+	var persisted streamclips.RenderState
+	readSweepFixture(t, store, stateKey, &persisted)
+	if persisted.Status != streamclips.StatusFailed || persisted.Error != interruptedStreamRender {
+		t.Fatalf("attempt = status %s error %q, want failed interruption", persisted.Status, persisted.Error)
+	}
+	if !persisted.HasPublishedRender() ||
+		persisted.ArtifactDir != prefix ||
+		persisted.ResultKey != resultKey ||
+		persisted.GalleryKey != galleryKey ||
+		len(persisted.Videos) != 1 || persisted.Videos[0].Key != videoKey {
+		t.Fatalf("published revision was not preserved: %+v", persisted)
+	}
+
+	// Simulate a process stop after the worker persisted Failed+Published but
+	// before it restored the parent lease. Startup must finish that repair too.
+	if err := repo.UpdateStatus(context.Background(), j.ID, streamclips.StatusRendering, ""); err != nil {
+		t.Fatal(err)
+	}
+	swept, err = sweepInterruptedStreamRenderStates(context.Background(), repo, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept != 1 {
+		t.Fatalf("failed+published swept = %d, want parent restoration only", swept)
+	}
+	parent, err = repo.Get(context.Background(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != streamclips.StatusRendered {
+		t.Fatalf("failed+published parent status = %s, want rendered", parent.Status)
 	}
 }
 

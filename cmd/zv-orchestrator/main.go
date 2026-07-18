@@ -125,6 +125,10 @@ func run() error {
 			reconciled.StreamRenderStates,
 		)
 	}
+	// HTTP plan mutations and stream render workers share this per-job
+	// coordinator. It closes the Ready->Rendering claim and final pointer-commit
+	// races without serializing unrelated stream jobs.
+	streamJobLocks := streamclips.NewJobLocks()
 
 	taskHandlers := map[string]taskHandler{}
 	parserWorker := workers.NewParserWorker(repo, store)
@@ -167,13 +171,17 @@ func run() error {
 	}
 	if cfg.streamRenderWorkerEnabled() && streamRepo != nil {
 		streamWorker := workers.NewStreamRenderWorker(streamRepo, store, workers.StreamRenderWorkerConfig{
-			WorkDir:    cfg.MediaWorkDir,
-			FFmpegPath: cfg.FFmpegPath,
-			Timeout:    cfg.RenderTimeout,
-			MusicDir:   cfg.MusicDir,
-			XAIAPIKey:  cfg.XAIAPIKey,
+			WorkDir:                        cfg.MediaWorkDir,
+			FFmpegPath:                     cfg.FFmpegPath,
+			Timeout:                        cfg.RenderTimeout,
+			JobLocks:                       streamJobLocks,
+			MusicDir:                       cfg.MusicDir,
+			XAIAPIKey:                      cfg.XAIAPIKey,
+			RequireAppliedKillfeedAnalysis: true,
 		})
 		taskHandlers[tasks.TypeRenderStreamClip] = streamWorker.HandleRenderStreamClip
+		taskHandlers[tasks.TypeGenerateStreamCaptions] = streamWorker.HandleGenerateStreamCaptions
+		taskHandlers[tasks.TypeGenerateStreamKillfeed] = streamWorker.HandleGenerateStreamKillfeed
 		log.Printf("worker: stream render enabled")
 	}
 	if cfg.streamAcquireWorkerEnabled() && streamRepo != nil {
@@ -222,6 +230,7 @@ func run() error {
 		httpapi.WithRequireReadAuth(exposed),
 		httpapi.WithRateLimit(rateLimitRPS, rateLimitBurst),
 		httpapi.WithStreamRepository(streamRepo),
+		httpapi.WithStreamJobLocks(streamJobLocks),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),
 		httpapi.WithFFmpegPath(cfg.FFmpegPath),
 		httpapi.WithXAIKey(cfg.XAIAPIKey),

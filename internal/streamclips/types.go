@@ -28,6 +28,17 @@ const (
 	StatusFailed    Status = "failed"
 )
 
+const (
+	// RenderErrorCodeKillfeedArtifactsStale marks a recoverable render failure:
+	// the exact source-backed row captures are missing or corrupt, so the user
+	// can remain in the editor and regenerate killfeed analysis.
+	RenderErrorCodeKillfeedArtifactsStale = "killfeed_artifacts_stale"
+	// RenderErrorCodeSuperseded marks an admitted render whose immutable plan
+	// or analysis generation changed before it could commit. The job remains
+	// editable and can be rendered again.
+	RenderErrorCodeSuperseded = "render_superseded"
+)
+
 var clipIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // Twitch-compatible streamer names keep the value safe to embed directly in
@@ -64,13 +75,25 @@ type Job struct {
 }
 
 type SourceProbe struct {
-	Width           int      `json:"width,omitempty"`
-	Height          int      `json:"height,omitempty"`
-	DurationSeconds float64  `json:"duration_seconds,omitempty"`
-	VideoCodec      string   `json:"video_codec,omitempty"`
-	AudioCodec      string   `json:"audio_codec,omitempty"`
-	FrameRate       string   `json:"frame_rate,omitempty"`
-	Warnings        []string `json:"warnings,omitempty"`
+	Width           int     `json:"width,omitempty"`
+	Height          int     `json:"height,omitempty"`
+	DurationSeconds float64 `json:"duration_seconds,omitempty"`
+	VideoCodec      string  `json:"video_codec,omitempty"`
+	AudioCodec      string  `json:"audio_codec,omitempty"`
+	FrameRate       string  `json:"frame_rate,omitempty"`
+	// VideoTimeBase is the selected video stream's ffprobe time_base (for
+	// example "1/30000"). StartTimeSeconds is format.start_time: the container
+	// timestamp represented by source/UI time zero. Frame-aware analyzers map a
+	// video PTS to that timeline as PTS*time_base-StartTimeSeconds.
+	//
+	// VideoStartTimeSeconds is the selected video stream's stream.start_time.
+	// It can be later than StartTimeSeconds when, for example, audio begins
+	// before the first video frame; it is retained as source metadata and must
+	// not replace the container timeline origin.
+	VideoTimeBase         string   `json:"video_time_base,omitempty"`
+	StartTimeSeconds      float64  `json:"start_time_seconds,omitempty"`
+	VideoStartTimeSeconds float64  `json:"video_start_time_seconds,omitempty"`
+	Warnings              []string `json:"warnings,omitempty"`
 }
 
 type CropRect struct {
@@ -78,6 +101,26 @@ type CropRect struct {
 	Y      float64 `json:"y"`
 	Width  float64 `json:"width"`
 	Height float64 `json:"height"`
+}
+
+// KillfeedCueOrigin records whether a cue came from source-frame analysis or
+// was authored manually. Rendering uses this durable provenance instead of
+// inferring origin from whether OCR/reviewed kills happen to be present.
+type KillfeedCueOrigin string
+
+const (
+	KillfeedCueAutomatic KillfeedCueOrigin = "automatic"
+	KillfeedCueManual    KillfeedCueOrigin = "manual"
+)
+
+// KillfeedCueProvenance is keyed by CueSeconds rather than slice position so
+// clients can sort, add, or remove cues without silently reassigning origin.
+// EventID is filled once an automatic cue is bound to exact captured evidence;
+// CLI detection may leave it empty until synchronous render analysis runs.
+type KillfeedCueProvenance struct {
+	CueSeconds float64           `json:"cue_seconds"`
+	Origin     KillfeedCueOrigin `json:"origin"`
+	EventID    string            `json:"event_id,omitempty"`
 }
 
 type ClipRange struct {
@@ -88,6 +131,9 @@ type ClipRange struct {
 	// KillfeedKills is index-aligned with KillfeedSeconds. Each inner slice
 	// contains only the notices born at that cue, not a cumulative snapshot.
 	KillfeedKills [][]KillfeedKill `json:"killfeed_kills,omitempty"`
+	// KillfeedCueProvenance independently identifies automatic versus manual
+	// cues. It is intentionally not index-aligned: CueSeconds is the key.
+	KillfeedCueProvenance []KillfeedCueProvenance `json:"killfeed_cue_provenance,omitempty"`
 	// CaptionWords are reviewed Spanish word cues relative to this clip's
 	// source range. When present they are burned directly and no cloud
 	// transcription key is required.
@@ -178,17 +224,18 @@ type CaptionWord struct {
 }
 
 type EditPlan struct {
-	SchemaVersion  string             `json:"schema_version"`
-	Variant        string             `json:"variant"`
-	FaceCrop       CropRect           `json:"face_crop"`
-	GameplayCrop   CropRect           `json:"gameplay_crop"`
-	KillfeedCrop   *CropRect          `json:"killfeed_crop,omitempty"`
-	Clips          []ClipRange        `json:"clips"`
-	StreamerBanner StreamerBannerPlan `json:"streamer_banner,omitzero"`
-	Captions       CaptionsPlan       `json:"captions,omitzero"`
-	Music          MusicPlan          `json:"music,omitzero"`
-	Effects        EffectsPlan        `json:"effects,omitzero"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	SchemaVersion    string                    `json:"schema_version"`
+	Variant          string                    `json:"variant"`
+	FaceCrop         CropRect                  `json:"face_crop"`
+	GameplayCrop     CropRect                  `json:"gameplay_crop"`
+	KillfeedCrop     *CropRect                 `json:"killfeed_crop,omitempty"`
+	KillfeedAnalysis *KillfeedAnalysisMetadata `json:"killfeed_analysis,omitempty"`
+	Clips            []ClipRange               `json:"clips"`
+	StreamerBanner   StreamerBannerPlan        `json:"streamer_banner,omitzero"`
+	Captions         CaptionsPlan              `json:"captions,omitzero"`
+	Music            MusicPlan                 `json:"music,omitzero"`
+	Effects          EffectsPlan               `json:"effects,omitzero"`
+	UpdatedAt        time.Time                 `json:"updated_at"`
 }
 
 const EditPlanSchemaVersion = "1.1"
@@ -237,14 +284,22 @@ type EffectsPlan struct {
 }
 
 type RenderState struct {
-	JobID       uuid.UUID    `json:"job_id"`
-	Variant     string       `json:"variant"`
-	Status      Status       `json:"status"`
+	JobID   uuid.UUID `json:"job_id"`
+	Variant string    `json:"variant"`
+	// AttemptID owns the mutable attempt status. It prevents an older queued
+	// task from completing or failing a newer attempt for the same variant.
+	AttemptID uuid.UUID `json:"attempt_id,omitempty"`
+	Status    Status    `json:"status"`
+	// Published means ResultKey, GalleryKey, ArtifactDir, and Videos identify
+	// the last fully committed render. Those pointers remain valid while a
+	// newer attempt is rendering or has failed.
+	Published   bool         `json:"published,omitempty"`
 	ResultKey   string       `json:"result_key"`
 	GalleryKey  string       `json:"gallery_key"`
 	ArtifactDir string       `json:"artifact_dir"`
 	Warnings    []string     `json:"warnings,omitempty"`
 	Error       string       `json:"error,omitempty"`
+	ErrorCode   string       `json:"error_code,omitempty"`
 	UpdatedAt   time.Time    `json:"updated_at"`
 	Videos      []VideoEntry `json:"videos,omitempty"`
 }
@@ -308,6 +363,7 @@ func NewRenderState(id uuid.UUID, variant string, status Status, warnings []stri
 		JobID:       id,
 		Variant:     variant,
 		Status:      status,
+		Published:   status == StatusRendered,
 		ResultKey:   resultKey,
 		GalleryKey:  galleryKey,
 		ArtifactDir: prefix,
@@ -316,6 +372,27 @@ func NewRenderState(id uuid.UUID, variant string, status Status, warnings []stri
 		Videos:      append([]VideoEntry(nil), videos...),
 		UpdatedAt:   time.Now().UTC(),
 	}, nil
+}
+
+// HasPublishedRender reports whether the state carries an active completed
+// render. StatusRendered is accepted for compatibility with states written
+// before Published was added.
+func (s RenderState) HasPublishedRender() bool {
+	return s.Published || s.Status == StatusRendered
+}
+
+// PreservePublishedRender copies only the immutable active-revision pointer
+// from previous. Attempt status, warnings, and errors stay owned by the new
+// state.
+func (s *RenderState) PreservePublishedRender(previous RenderState) {
+	if s == nil || !previous.HasPublishedRender() {
+		return
+	}
+	s.Published = true
+	s.ResultKey = previous.ResultKey
+	s.GalleryKey = previous.GalleryKey
+	s.ArtifactDir = previous.ArtifactDir
+	s.Videos = append([]VideoEntry(nil), previous.Videos...)
 }
 
 func DefaultEditPlan() EditPlan {
@@ -345,6 +422,14 @@ func (p EditPlan) Validate() error {
 	}
 	if p.KillfeedCrop != nil {
 		if err := p.KillfeedCrop.Validate("killfeed_crop"); err != nil {
+			return err
+		}
+	}
+	if p.KillfeedAnalysis != nil {
+		if p.KillfeedCrop == nil {
+			return fmt.Errorf("killfeed_analysis requires killfeed_crop")
+		}
+		if err := p.KillfeedAnalysis.Validate(); err != nil {
 			return err
 		}
 	}
@@ -519,6 +604,38 @@ func (c ClipRange) Validate() error {
 			if err := kill.validate(c.ID); err != nil {
 				return err
 			}
+		}
+	}
+	seenProvenance := make(map[float64]struct{}, len(c.KillfeedCueProvenance))
+	for _, provenance := range c.KillfeedCueProvenance {
+		if math.IsNaN(provenance.CueSeconds) || math.IsInf(provenance.CueSeconds, 0) {
+			return fmt.Errorf("clip %s killfeed cue provenance must use a finite cue_seconds", c.ID)
+		}
+		if _, duplicate := seenProvenance[provenance.CueSeconds]; duplicate {
+			return fmt.Errorf("clip %s has duplicate killfeed cue provenance at %g", c.ID, provenance.CueSeconds)
+		}
+		seenProvenance[provenance.CueSeconds] = struct{}{}
+		matchedCue := false
+		for _, cue := range c.KillfeedSeconds {
+			if cue == provenance.CueSeconds {
+				matchedCue = true
+				break
+			}
+		}
+		if !matchedCue {
+			return fmt.Errorf(
+				"clip %s killfeed cue provenance %g has no matching killfeed_seconds entry",
+				c.ID, provenance.CueSeconds,
+			)
+		}
+		switch provenance.Origin {
+		case KillfeedCueAutomatic:
+		case KillfeedCueManual:
+			if provenance.EventID != "" {
+				return fmt.Errorf("clip %s manual killfeed cue %g must not identify an automatic event", c.ID, provenance.CueSeconds)
+			}
+		default:
+			return fmt.Errorf("clip %s killfeed cue %g has unknown origin %q", c.ID, provenance.CueSeconds, provenance.Origin)
 		}
 	}
 	lastEnd := 0.0
@@ -704,6 +821,10 @@ func NormalizeEditPlan(plan EditPlan) EditPlan {
 	if len(plan.Clips) > 0 {
 		plan.Clips = append([]ClipRange(nil), plan.Clips...)
 	}
+	if plan.KillfeedAnalysis != nil {
+		metadata := *plan.KillfeedAnalysis
+		plan.KillfeedAnalysis = &metadata
+	}
 	for i := range plan.Clips {
 		plan.Clips[i] = normalizeClipRange(plan.Clips[i])
 		if legacyKillfeedSnapshots {
@@ -755,6 +876,10 @@ func normalizeClipRange(clip ClipRange) ClipRange {
 		clip.KillfeedSeconds,
 		clip.KillfeedKills,
 	)
+	clip.KillfeedCueProvenance = normalizeKillfeedCueProvenance(
+		clip.KillfeedCueProvenance,
+		clip.KillfeedSeconds,
+	)
 	clip.Edit = normalizeClipEdit(clip.Edit)
 	if len(clip.CaptionWords) > 0 {
 		clip.CaptionWords = append([]CaptionWord(nil), clip.CaptionWords...)
@@ -763,6 +888,16 @@ func normalizeClipRange(clip ClipRange) ClipRange {
 		}
 	}
 	return clip
+}
+
+// KillfeedProvenanceAt returns explicit durable provenance for one exact cue.
+func (c ClipRange) KillfeedProvenanceAt(cue float64) (KillfeedCueProvenance, bool) {
+	for _, provenance := range c.KillfeedCueProvenance {
+		if provenance.CueSeconds == cue {
+			return provenance, true
+		}
+	}
+	return KillfeedCueProvenance{}, false
 }
 
 // CaptionsNeedBackend reports whether at least one audible clip still needs
@@ -774,7 +909,7 @@ func (p EditPlan) CaptionsNeedBackend() bool {
 		return false
 	}
 	for _, clip := range p.Clips {
-		if !clip.SourceAudioMuted() && len(clip.CaptionWords) == 0 && !clip.CaptionReviewed {
+		if !clip.SourceAudioMuted() && !clip.CaptionReviewed {
 			return true
 		}
 	}
@@ -899,6 +1034,34 @@ func normalizeKillfeedPlanEntries(cues []float64, kills [][]KillfeedKill) ([]flo
 		normalizedKills[i] = current.kills
 	}
 	return normalizedCues, normalizedKills
+}
+
+func normalizeKillfeedCueProvenance(
+	provenance []KillfeedCueProvenance,
+	cues []float64,
+) []KillfeedCueProvenance {
+	if len(provenance) == 0 || len(cues) == 0 {
+		return nil
+	}
+	wanted := make(map[float64]struct{}, len(cues))
+	for _, cue := range cues {
+		wanted[cue] = struct{}{}
+	}
+	normalized := make([]KillfeedCueProvenance, 0, len(provenance))
+	for _, current := range provenance {
+		if _, keep := wanted[current.CueSeconds]; !keep {
+			continue
+		}
+		current.Origin = KillfeedCueOrigin(strings.ToLower(strings.TrimSpace(string(current.Origin))))
+		current.EventID = strings.TrimSpace(current.EventID)
+		normalized = append(normalized, current)
+	}
+	sort.SliceStable(normalized, func(i, j int) bool {
+		return normalized[i].CueSeconds < normalized[j].CueSeconds
+	})
+	// Do not guess when duplicate metadata disagrees about origin or event
+	// identity. ClipRange.Validate reports the ambiguity before render.
+	return normalized
 }
 
 func mergeKillfeedKills(existing, incoming []KillfeedKill) []KillfeedKill {

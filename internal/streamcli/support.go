@@ -126,8 +126,8 @@ Flags:
 const streamRenderUsage = `usage: zv stream render --input <stream.mp4> --plan <edit-plan.json> --out <run-dir> [flags]
 
 The plan is the source of truth for ranges, crops, killfeed events, captions,
-music, effects, and text. Captions use reviewed Spanish words when imported;
-otherwise they require XAI_API_KEY and are translated to Spanish. A cover JPG
+music, effects, and text. Captions require reviewed Spanish words or a reviewed
+no-speech decision imported before render. A cover JPG
 is selected from the strongest confirmed killfeed event (or a stable fallback
 when there are no confirmed kills). Final videos, covers, ASS captions,
 manifest, and gallery are copied to

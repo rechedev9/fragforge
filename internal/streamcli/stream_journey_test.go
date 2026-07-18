@@ -70,6 +70,15 @@ func TestStreamJourneyChainsStagesMediaFree(t *testing.T) {
 	if killfeed.CueCount != 2 || killfeed.KillCount != 3 {
 		t.Fatalf("killfeed counts = %#v, want 2 cues / 3 kills from the fixture", killfeed)
 	}
+	if !streamPlanNeedsExactKillfeedArtifacts(killfeed.Plan) {
+		t.Fatal("reviewed detected cues lost automatic provenance before render")
+	}
+	for _, cue := range killfeed.Plan.Clips[0].KillfeedSeconds {
+		provenance, ok := killfeed.Plan.Clips[0].KillfeedProvenanceAt(cue)
+		if !ok || provenance.Origin != streamclips.KillfeedCueAutomatic {
+			t.Fatalf("cue %.9f provenance = %#v / %v, want automatic", cue, provenance, ok)
+		}
+	}
 	assertStreamFileExists(t, reviewedPlan)
 
 	// 4. captions import consumes the reviewed plan and persists the Spanish

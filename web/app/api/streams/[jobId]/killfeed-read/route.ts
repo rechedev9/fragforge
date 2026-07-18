@@ -35,8 +35,9 @@ async function forwardKillfeedError(res: Response): Promise<Response> {
 
 /**
  * POST /api/streams/{jobId}/killfeed-read — read the confirmed kills visible at
- * a cue with the xAI vision reader. Forwards {clip_id, cue_seconds} upstream and
- * relays the {kills} JSON. The orchestrator's own 409 (xai_key_missing / ffmpeg
+ * a cue with the xAI vision reader. Automatic cues also carry their immutable
+ * {event_id, generation_id}; manual cues carry only {clip_id, cue_seconds}.
+ * The orchestrator's own 409 (xai_key_missing / ffmpeg
  * unconfigured) passes through with its code and message so the editor can tell
  * a missing xAI key apart from other failures.
  */

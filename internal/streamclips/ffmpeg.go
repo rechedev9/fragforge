@@ -512,7 +512,10 @@ func buildKillfeedFilterGraph(layout LayoutVariant, plan EditPlan, clip ClipRang
 		slideEnd := math.Min(end, start+killfeedSlideInSeconds)
 		suppressed := killfeedEntranceSuppressed(start, end)
 		if hasNotices(i) {
-			for j := range noticePaths[i] {
+			// Paths are durable top-first source order, while stack slots grow
+			// upward from baseY. Compose the bottom row first so each earlier
+			// path remains visually above the rows that followed it in-source.
+			for j := len(noticePaths[i]) - 1; j >= 0; j-- {
 				y := killfeedStackY(baseY, start, end, priorNotices)
 				if suppressed {
 					// Window too short to slide: hold the sharp notice at center
@@ -816,7 +819,10 @@ func cropFilter(c CropRect) string {
 }
 
 func secondsArg(v float64) string {
-	return strconv.FormatFloat(v, 'f', 3, 64)
+	// Keep enough decimal precision to address native media timestamps. Three
+	// decimals can move an NTSC frame boundary by a measurable fraction of a
+	// frame before the exact killfeed cue even reaches the filtergraph.
+	return strconv.FormatFloat(v, 'f', 9, 64)
 }
 
 func floatArg(v float64) string {

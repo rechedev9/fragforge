@@ -70,13 +70,17 @@ func TestSQLiteRestartReconcilesPersistedInlineWork(t *testing.T) {
 	acquiring := createRestartStreamJob(t, streamBefore, streamclips.StatusAcquiring)
 	streamRendering := createRestartStreamJob(t, streamBefore, streamclips.StatusReady)
 	streamVariant := streamclips.DefaultVariant().Name
+	streamVideoKey, err := streamclips.RenderVideoKey(streamRendering.ID, streamVariant, "clip-1")
+	if err != nil {
+		t.Fatalf("RenderVideoKey: %v", err)
+	}
 	streamState, err := streamclips.NewRenderState(
 		streamRendering.ID,
 		streamVariant,
 		streamclips.StatusRendering,
 		[]string{"preserve warning"},
 		"",
-		[]streamclips.VideoEntry{{ClipID: "clip-1", Key: "preserve/video.mp4"}},
+		[]streamclips.VideoEntry{{ClipID: "clip-1", Key: streamVideoKey}},
 	)
 	if err != nil {
 		t.Fatalf("NewRenderState: %v", err)
@@ -160,7 +164,7 @@ func TestSQLiteRestartReconcilesPersistedInlineWork(t *testing.T) {
 	if gotStreamState.Status != streamclips.StatusFailed || gotStreamState.Error != interruptedStreamRender {
 		t.Fatalf("stream render after restart = status %q error %q, want failed/%q", gotStreamState.Status, gotStreamState.Error, interruptedStreamRender)
 	}
-	if len(gotStreamState.Warnings) != 1 || len(gotStreamState.Videos) != 1 || gotStreamState.Videos[0].Key != "preserve/video.mp4" {
+	if len(gotStreamState.Warnings) != 1 || len(gotStreamState.Videos) != 1 || gotStreamState.Videos[0].Key != streamVideoKey {
 		t.Fatalf("stream render artifact data was not preserved: %+v", gotStreamState)
 	}
 }

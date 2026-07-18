@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -121,6 +122,322 @@ func TestReadStreamKillfeedReturnsParsedKills(t *testing.T) {
 	got := body.Kills[0]
 	if got.AttackerName != "hero" || got.VictimName != "villain" || got.Weapon != weapon || !got.Headshot {
 		t.Fatalf("kill = %#v, want the parsed hero/villain notice", got)
+	}
+}
+
+func TestReadStreamKillfeedUsesAppliedEventRowsWithoutChangingSourcePTS(t *testing.T) {
+	weapon := streamclips.WeaponKeys()[0]
+	var visionCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		visionCalls.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer xai_test" {
+			t.Errorf("Authorization = %q, want Bearer xai_test", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{
+				"content": `{"kills":[{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"victim","weapon":"` + weapon + `"}]}`,
+			}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	h, repo, store, _, id, plan := newKillfeedAnalysisHTTPFixture(t)
+	h.xaiAPIKey = "xai_test"
+	h.killfeedVisionBaseURL = srv.URL
+	// Exact reads consume immutable row artifacts and do not need FFmpeg. A
+	// legacy realignment attempt would fail this request.
+	h.ffmpegPath = ""
+	h.killfeedFrame = func(context.Context, string, float64) (image.Image, error) {
+		return nil, errors.New("exact read must not extract a frame")
+	}
+
+	const sourcePTS int64 = 1001
+	const timeBaseDen int64 = 30000
+	cue := float64(sourcePTS) / float64(timeBaseDen)
+	event := testKillfeedAnalysisEvent(cue, nil)
+	event.EventID = "event-exact"
+	event.SourcePTS = sourcePTS
+	event.OnsetStartPTS = sourcePTS - 1
+	event.OnsetEndPTS = sourcePTS
+	event.TimeBase = streamclips.KillfeedTimeBase{Num: 1, Den: timeBaseDen}
+	event.SamplePTS = sourcePTS + 100
+	event.SampleSeconds = float64(event.SamplePTS) / float64(timeBaseDen)
+	nextEvent := event
+	nextEvent.EventID = "event-next-frame"
+	nextEvent.SourcePTS = sourcePTS + 1
+	nextEvent.OnsetStartPTS = sourcePTS
+	nextEvent.OnsetEndPTS = sourcePTS + 1
+	nextEvent.CueSeconds = float64(sourcePTS+1) / float64(timeBaseDen)
+	nextEvent.SamplePTS++
+	nextEvent.SampleSeconds = float64(nextEvent.SamplePTS) / float64(timeBaseDen)
+	nextEvent.Rows = append([]streamclips.KillfeedRowEvidence(nil), event.Rows...)
+	nextEvent.Rows[0].Fingerprint = "row-next-frame"
+	state := readyKillfeedAnalysisState(t, repo.jobs[id], plan, []streamclips.KillfeedAnalysisEvent{event, nextEvent})
+	if err := h.writeStreamKillfeedState(state); err != nil {
+		t.Fatal(err)
+	}
+	if response := applyKillfeedGeneration(t, h, id, state.GenerationID); response.Code != http.StatusOK {
+		t.Fatalf("apply status = %d; body=%s", response.Code, response.Body.String())
+	}
+	putKillfeedEventRowPNG(t, store, id, state.GenerationID, "clip-1", event.EventID, 0)
+
+	body, err := json.Marshal(readKillfeedRequest{
+		ClipID: "clip-1", CueSeconds: cue, EventID: event.EventID, GenerationID: &state.GenerationID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/killfeed-read", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	Routes(h).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	var got readKillfeedResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Aligned || got.CueSeconds != cue || len(got.Events) != 1 || got.Events[0].CueSeconds != cue {
+		t.Fatalf("response = %+v, want bit-identical persisted cue %.17g", got, cue)
+	}
+	if len(got.Kills) != 1 || got.Kills[0].VictimName != "victim" {
+		t.Fatalf("kills = %+v, want exact row OCR result", got.Kills)
+	}
+	if calls := visionCalls.Load(); calls != 1 {
+		t.Fatalf("vision calls = %d, want one per persisted row", calls)
+	}
+	var saved streamclips.EditPlan
+	if err := json.Unmarshal(repo.jobs[id].EditPlan, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Clips[0].KillfeedSeconds) != 2 ||
+		saved.Clips[0].KillfeedSeconds[0] != cue ||
+		saved.Clips[0].KillfeedSeconds[1] != nextEvent.CueSeconds {
+		t.Fatalf("applied cues = %v, want adjacent source PTS cues %.17g and %.17g",
+			saved.Clips[0].KillfeedSeconds, cue, nextEvent.CueSeconds)
+	}
+}
+
+func TestReadStreamKillfeedRejectsIdentitylessAppliedEventInsteadOfLegacyAlignment(t *testing.T) {
+	h, repo, _, _, id, plan := newKillfeedAnalysisHTTPFixture(t)
+	h.xaiAPIKey = "xai_test"
+	// The exact event does not need FFmpeg. An accidental legacy fallback would
+	// report the missing binary instead of the stable identity error below.
+	h.ffmpegPath = ""
+	event := testKillfeedAnalysisEvent(0.5, nil)
+	state := readyKillfeedAnalysisState(t, repo.jobs[id], plan, []streamclips.KillfeedAnalysisEvent{event})
+	if err := h.writeStreamKillfeedState(state); err != nil {
+		t.Fatal(err)
+	}
+	if response := applyKillfeedGeneration(t, h, id, state.GenerationID); response.Code != http.StatusOK {
+		t.Fatalf("apply status = %d; body=%s", response.Code, response.Body.String())
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/stream-jobs/"+id.String()+"/killfeed-read",
+		strings.NewReader(`{"clip_id":"clip-1","cue_seconds":0.5}`),
+	)
+	response := httptest.NewRecorder()
+	Routes(h).ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", response.Code, response.Body.String())
+	}
+	var got struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Code != killfeedEventIdentityCode {
+		t.Fatalf("code = %q, want %q; body=%s", got.Code, killfeedEventIdentityCode, response.Body.String())
+	}
+}
+
+func TestReadStreamKillfeedRejectsForeignOrMissingAppliedEventArtifacts(t *testing.T) {
+	weapon := streamclips.WeaponKeys()[0]
+	srv := fakeXAIKillfeedServer(t, `{"kills":[{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"victim","weapon":"`+weapon+`"}]}`)
+
+	for _, tc := range []struct {
+		name      string
+		mutate    func(readKillfeedRequest) readKillfeedRequest
+		wantCode  string
+		putRowPNG bool
+		corrupt   bool
+	}{
+		{
+			name: "foreign event id",
+			mutate: func(request readKillfeedRequest) readKillfeedRequest {
+				request.EventID = "event-foreign"
+				return request
+			},
+			wantCode: killfeedEventStaleCode, putRowPNG: true,
+		},
+		{
+			name: "stale generation",
+			mutate: func(request readKillfeedRequest) readKillfeedRequest {
+				generationID := uuid.New()
+				request.GenerationID = &generationID
+				return request
+			},
+			wantCode: killfeedEventStaleCode, putRowPNG: true,
+		},
+		{
+			name: "missing exact row",
+			mutate: func(request readKillfeedRequest) readKillfeedRequest {
+				return request
+			},
+			wantCode: killfeedEventArtifactErrorCode,
+		},
+		{
+			name: "corrupt exact row",
+			mutate: func(request readKillfeedRequest) readKillfeedRequest {
+				return request
+			},
+			wantCode: killfeedEventArtifactErrorCode, corrupt: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo, store, _, id, plan := newKillfeedAnalysisHTTPFixture(t)
+			h.xaiAPIKey = "xai_test"
+			h.killfeedVisionBaseURL = srv.URL
+			event := testKillfeedAnalysisEvent(0.5, nil)
+			state := readyKillfeedAnalysisState(t, repo.jobs[id], plan, []streamclips.KillfeedAnalysisEvent{event})
+			if err := h.writeStreamKillfeedState(state); err != nil {
+				t.Fatal(err)
+			}
+			if response := applyKillfeedGeneration(t, h, id, state.GenerationID); response.Code != http.StatusOK {
+				t.Fatalf("apply status = %d; body=%s", response.Code, response.Body.String())
+			}
+			if tc.putRowPNG {
+				putKillfeedEventRowPNG(t, store, id, state.GenerationID, "clip-1", event.EventID, 0)
+			}
+			if tc.corrupt {
+				key, err := streamclips.KillfeedEventRowKey(id, state.GenerationID, "clip-1", event.EventID, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := store.Put(key, strings.NewReader("not a png")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			requestBody := tc.mutate(readKillfeedRequest{
+				ClipID: "clip-1", CueSeconds: event.CueSeconds,
+				EventID: event.EventID, GenerationID: &state.GenerationID,
+			})
+			body, err := json.Marshal(requestBody)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/killfeed-read", bytes.NewReader(body))
+			response := httptest.NewRecorder()
+			Routes(h).ServeHTTP(response, request)
+			if response.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409; body=%s", response.Code, response.Body.String())
+			}
+			var errorBody struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &errorBody); err != nil {
+				t.Fatal(err)
+			}
+			if errorBody.Code != tc.wantCode {
+				t.Fatalf("code = %q, want %q; body=%s", errorBody.Code, tc.wantCode, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestReadStreamKillfeedRejectsEventReplacedDuringVisionRequest(t *testing.T) {
+	h, repo, store, _, id, plan := newKillfeedAnalysisHTTPFixture(t)
+	h.xaiAPIKey = "xai_test"
+	event := testKillfeedAnalysisEvent(0.5, nil)
+	state := readyKillfeedAnalysisState(t, repo.jobs[id], plan, []streamclips.KillfeedAnalysisEvent{event})
+	if err := h.writeStreamKillfeedState(state); err != nil {
+		t.Fatal(err)
+	}
+	if response := applyKillfeedGeneration(t, h, id, state.GenerationID); response.Code != http.StatusOK {
+		t.Fatalf("apply status = %d; body=%s", response.Code, response.Body.String())
+	}
+	putKillfeedEventRowPNG(t, store, id, state.GenerationID, "clip-1", event.EventID, 0)
+
+	replacementEvent := testKillfeedAnalysisEvent(0.75, nil)
+	replacementEvent.EventID = "event-replacement"
+	replacement := readyKillfeedAnalysisState(t, repo.jobs[id], plan, []streamclips.KillfeedAnalysisEvent{replacementEvent})
+	replacement.Status = streamclips.KillfeedAnalysisApplied
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Simulate another analysis being applied while this request is waiting
+		// on xAI. The endpoint must discard the otherwise valid OCR response.
+		h.streamPlanMu.Lock()
+		defer h.streamPlanMu.Unlock()
+		if err := h.writeStreamKillfeedState(replacement); err != nil {
+			t.Errorf("write replacement killfeed state: %v", err)
+		}
+		var nextPlan streamclips.EditPlan
+		if err := json.Unmarshal(repo.jobs[id].EditPlan, &nextPlan); err != nil {
+			t.Errorf("decode replacement plan: %v", err)
+		}
+		nextPlan.Clips[0].KillfeedSeconds = []float64{replacementEvent.CueSeconds}
+		nextPlan.Clips[0].KillfeedKills = [][]streamclips.KillfeedKill{{}}
+		nextPlan.KillfeedAnalysis = &streamclips.KillfeedAnalysisMetadata{
+			GenerationID: replacement.GenerationID,
+			Fingerprint:  replacement.Fingerprint,
+			AppliedAt:    replacement.UpdatedAt,
+		}
+		if err := repo.SetEditPlan(context.Background(), id, nextPlan); err != nil {
+			t.Errorf("save replacement plan: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{
+				"content": `{"kills":[{"attacker_side":"CT","attacker_name":"hero","victim_side":"T","victim_name":"victim","weapon":"awp"}]}`,
+			}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	h.killfeedVisionBaseURL = srv.URL
+
+	body, err := json.Marshal(readKillfeedRequest{
+		ClipID: "clip-1", CueSeconds: event.CueSeconds,
+		EventID: event.EventID, GenerationID: &state.GenerationID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/killfeed-read", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	Routes(h).ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", response.Code, response.Body.String())
+	}
+	var errorBody struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &errorBody); err != nil {
+		t.Fatal(err)
+	}
+	if errorBody.Code != killfeedEventStaleCode {
+		t.Fatalf("code = %q, want %q; body=%s", errorBody.Code, killfeedEventStaleCode, response.Body.String())
+	}
+}
+
+func putKillfeedEventRowPNG(
+	t *testing.T,
+	store *fakeStorage,
+	jobID, generationID uuid.UUID,
+	clipID, eventID string,
+	rowIndex int,
+) {
+	t.Helper()
+	key, err := streamclips.KillfeedEventRowKey(jobID, generationID, clipID, eventID, rowIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 8, 4))); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(key, bytes.NewReader(encoded.Bytes())); err != nil {
+		t.Fatal(err)
 	}
 }
 

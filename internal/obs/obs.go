@@ -42,7 +42,9 @@ const (
 	// StageStreamAcquire labels failures downloading a stream job's source
 	// video by URL (the AcquireWorker), so they are distinguishable from the
 	// rest of the "worker" stage in the journal and metrics.
-	StageStreamAcquire = "stream_acquire"
+	StageStreamAcquire  = "stream_acquire"
+	StageStreamCaptions = "stream_captions"
+	StageStreamKillfeed = "stream_killfeed"
 )
 
 // Metric names. HELP text for each lives in metricHelp.

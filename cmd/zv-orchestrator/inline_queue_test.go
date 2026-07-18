@@ -44,6 +44,8 @@ func TestDefaultInlineTaskPolicy(t *testing.T) {
 		{name: "render variant", taskType: tasktypes.TypeRenderVariant},
 		{name: "codex agent", taskType: tasktypes.TypeCodexAgent},
 		{name: "render stream clip", taskType: tasktypes.TypeRenderStreamClip},
+		{name: "generate stream captions", taskType: tasktypes.TypeGenerateStreamCaptions},
+		{name: "generate stream killfeed", taskType: tasktypes.TypeGenerateStreamKillfeed},
 		{name: "stream acquire", taskType: tasktypes.TypeStreamAcquire},
 		{name: "unknown", taskType: "unknown"},
 	}

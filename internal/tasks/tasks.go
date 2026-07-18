@@ -39,6 +39,14 @@ const (
 	// selected clips from a streamer MP4 upload.
 	TypeRenderStreamClip = "render:stream-clip"
 
+	// TypeGenerateStreamCaptions produces durable subtitle candidates which a
+	// human must review before a stream render may consume them.
+	TypeGenerateStreamCaptions = "stream:captions"
+
+	// TypeGenerateStreamKillfeed produces durable source-PTS event candidates.
+	// Applying a ready generation is a separate, explicit plan mutation.
+	TypeGenerateStreamKillfeed = "stream:killfeed"
+
 	// TypeStreamAcquire is the Asynq task type for downloading a stream job's
 	// source video from a URL (Twitch clip/VOD or any yt-dlp-supported site)
 	// before it can be edited and rendered.
@@ -46,8 +54,12 @@ const (
 )
 
 var renderVariantPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const generateIntentHeader = "fragforge-generate-intent"
+const streamCaptionGenerationHeader = "fragforge-stream-caption-generation"
+const streamKillfeedGenerationHeader = "fragforge-stream-killfeed-generation"
+const streamRenderIntentHeader = "fragforge-stream-render-intent"
 
 // ParseDemoPayload carries the inputs the worker needs to fetch from the DB.
 type ParseDemoPayload struct {
@@ -98,6 +110,43 @@ type CodexAgentPayload struct {
 type RenderStreamClipPayload struct {
 	JobID   uuid.UUID `json:"job_id"`
 	Variant string    `json:"variant"`
+}
+
+// StreamRenderIntent binds a queued Studio render to the exact edit plan and
+// killfeed generation admitted by HTTP. It lives in a task header so Asynq's
+// job+variant payload uniqueness remains stable while an older render is live.
+type StreamRenderIntent struct {
+	AttemptID           uuid.UUID `json:"attempt_id"`
+	EditPlanFingerprint string    `json:"edit_plan_fingerprint"`
+	KillfeedGeneration  uuid.UUID `json:"killfeed_generation_id,omitempty"`
+	KillfeedFingerprint string    `json:"killfeed_fingerprint,omitempty"`
+}
+
+func (i StreamRenderIntent) Validate() error {
+	if i.AttemptID == uuid.Nil {
+		return fmt.Errorf("stream render attempt id is required")
+	}
+	if !sha256HexPattern.MatchString(i.EditPlanFingerprint) {
+		return fmt.Errorf("stream render edit-plan fingerprint must be a sha256 hex digest")
+	}
+	hasGeneration := i.KillfeedGeneration != uuid.Nil
+	hasFingerprint := i.KillfeedFingerprint != ""
+	if hasGeneration != hasFingerprint {
+		return fmt.Errorf("stream render killfeed generation and fingerprint must be provided together")
+	}
+	if hasFingerprint && !sha256HexPattern.MatchString(i.KillfeedFingerprint) {
+		return fmt.Errorf("stream render killfeed fingerprint must be a sha256 hex digest")
+	}
+	return nil
+}
+
+type GenerateStreamCaptionsPayload struct {
+	JobID uuid.UUID `json:"job_id"`
+}
+
+type GenerateStreamKillfeedPayload struct {
+	JobID        uuid.UUID `json:"job_id"`
+	GenerationID uuid.UUID `json:"generation_id"`
 }
 
 // StreamAcquirePayload carries the job id for the acquire-by-URL worker. The
@@ -251,6 +300,112 @@ func NewRenderStreamClipTask(id uuid.UUID, variant string) (*asynq.Task, error) 
 		return nil, err
 	}
 	return asynq.NewTask(TypeRenderStreamClip, payload), nil
+}
+
+// NewBoundRenderStreamClipTask returns the same job+variant payload as the
+// legacy/CLI constructor while carrying Studio's immutable admitted intent in
+// a header. Keeping the payload identical is important: task uniqueness must
+// continue to serialize all render revisions for the same job and variant.
+func NewBoundRenderStreamClipTask(id uuid.UUID, variant string, intent StreamRenderIntent) (*asynq.Task, error) {
+	plain, err := NewRenderStreamClipTask(id, variant)
+	if err != nil {
+		return nil, err
+	}
+	if err := intent.Validate(); err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(intent)
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTaskWithHeaders(TypeRenderStreamClip, plain.Payload(), map[string]string{
+		streamRenderIntentHeader: string(b),
+	}), nil
+}
+
+// StreamRenderIntentFromTask returns the immutable Studio admission intent.
+// Plain CLI tasks intentionally return ok=false for backwards compatibility.
+func StreamRenderIntentFromTask(task *asynq.Task) (intent StreamRenderIntent, ok bool, err error) {
+	if task == nil {
+		return StreamRenderIntent{}, false, fmt.Errorf("stream render task is nil")
+	}
+	raw, ok := task.Headers()[streamRenderIntentHeader]
+	if !ok || raw == "" {
+		return StreamRenderIntent{}, false, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
+		return StreamRenderIntent{}, false, fmt.Errorf("decode stream render intent: %w", err)
+	}
+	if err := intent.Validate(); err != nil {
+		return StreamRenderIntent{}, false, err
+	}
+	return intent, true, nil
+}
+
+func NewGenerateStreamCaptionsTask(id, generationID uuid.UUID) (*asynq.Task, error) {
+	if generationID == uuid.Nil {
+		return nil, fmt.Errorf("caption generation id is required")
+	}
+	payload, err := json.Marshal(GenerateStreamCaptionsPayload{JobID: id})
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTaskWithHeaders(TypeGenerateStreamCaptions, payload, map[string]string{
+		streamCaptionGenerationHeader: generationID.String(),
+	}), nil
+}
+
+func StreamCaptionGenerationFromTask(task *asynq.Task) (uuid.UUID, error) {
+	if task == nil {
+		return uuid.Nil, fmt.Errorf("caption generation task is nil")
+	}
+	raw := task.Headers()[streamCaptionGenerationHeader]
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("invalid caption generation id: %w", err)
+	}
+	return id, nil
+}
+
+// NewGenerateStreamKillfeedTask carries the generation in both payload and
+// header. Unlike captions, killfeed uniqueness must include the generation so
+// a crop/bounds change can enqueue immediately while older work is still live.
+func NewGenerateStreamKillfeedTask(id, generationID uuid.UUID) (*asynq.Task, error) {
+	if id == uuid.Nil {
+		return nil, fmt.Errorf("killfeed analysis job id is required")
+	}
+	if generationID == uuid.Nil {
+		return nil, fmt.Errorf("killfeed analysis generation id is required")
+	}
+	payload, err := json.Marshal(GenerateStreamKillfeedPayload{
+		JobID:        id,
+		GenerationID: generationID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTaskWithHeaders(TypeGenerateStreamKillfeed, payload, map[string]string{
+		streamKillfeedGenerationHeader: generationID.String(),
+	}), nil
+}
+
+func StreamKillfeedGenerationFromTask(task *asynq.Task) (uuid.UUID, error) {
+	if task == nil {
+		return uuid.Nil, fmt.Errorf("killfeed analysis task is nil")
+	}
+	raw := task.Headers()[streamKillfeedGenerationHeader]
+	headerID, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("invalid killfeed analysis generation id: %w", err)
+	}
+	var payload GenerateStreamKillfeedPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return uuid.Nil, fmt.Errorf("decode killfeed analysis payload: %w", err)
+	}
+	if payload.GenerationID != headerID {
+		return uuid.Nil, fmt.Errorf("killfeed analysis generation header does not match payload")
+	}
+	return headerID, nil
 }
 
 // NewStreamAcquireTask returns an Asynq task that downloads a stream job's

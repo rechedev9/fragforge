@@ -5,9 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"image"
-	"image/png"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -19,6 +16,7 @@ import (
 
 	"github.com/rechedev9/fragforge/internal/storage"
 	"github.com/rechedev9/fragforge/internal/streamclips"
+	"github.com/rechedev9/fragforge/internal/streamkillfeed"
 )
 
 type fakeStreamService struct {
@@ -33,6 +31,11 @@ type fakeStreamService struct {
 	transcribeErr      error
 	probeCalls         int
 	detectCalls        int
+	detectInput        string
+	detectFFmpeg       string
+	detectProbe        streamclips.SourceProbe
+	detectCrop         streamclips.CropRect
+	detectClip         streamclips.ClipRange
 	transcribeCalls    int
 	renderCalls        int
 	ffmpegChecks       int
@@ -58,8 +61,13 @@ func (f *fakeStreamService) ValidateFFmpeg(ctx context.Context, _ string, requir
 	return f.ffmpegErr
 }
 
-func (f *fakeStreamService) DetectKillfeed(context.Context, string, string, streamclips.CropRect, float64, float64) ([]float64, error) {
+func (f *fakeStreamService) DetectKillfeed(_ context.Context, input, ffmpeg string, probe streamclips.SourceProbe, crop streamclips.CropRect, clip streamclips.ClipRange) ([]float64, error) {
 	f.detectCalls++
+	f.detectInput = input
+	f.detectFFmpeg = ffmpeg
+	f.detectProbe = probe
+	f.detectCrop = crop
+	f.detectClip = clip
 	return append([]float64(nil), f.detectedCues...), f.detectErr
 }
 
@@ -219,13 +227,18 @@ func TestRunStreamPlanRefusesToOverwriteSourceVideo(t *testing.T) {
 
 func TestRunStreamPlanDetectsKillfeedCuesIntoPlan(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "edit-plan.json")
+	wantProbe := streamclips.SourceProbe{
+		Width: 1920, Height: 1080, DurationSeconds: 15,
+		VideoTimeBase: "1/30000", StartTimeSeconds: 5,
+	}
 	service := &fakeStreamService{
-		probe:        streamclips.SourceProbe{DurationSeconds: 15},
+		probe:        wantProbe,
 		detectedCues: []float64{4.5, 5.75, 10.25},
 	}
 	var stdout, stderr bytes.Buffer
 	code := runStreamWithService([]string{
 		"plan", "--input", "stream.mp4", "--out", out,
+		"--clip-id", "exact-clip", "--clip-start", "1.25", "--clip-end", "12.75",
 		"--killfeed-crop", "0.82,0.05,0.17,0.18", "--detect-killfeed",
 	}, &stdout, &stderr, service)
 	if code != exitSuccess || stderr.Len() != 0 {
@@ -233,6 +246,17 @@ func TestRunStreamPlanDetectsKillfeedCuesIntoPlan(t *testing.T) {
 	}
 	if service.detectCalls != 1 {
 		t.Fatalf("detect calls = %d, want 1", service.detectCalls)
+	}
+	if !reflect.DeepEqual(service.detectProbe, wantProbe) {
+		t.Fatalf("detect probe = %#v, want %#v", service.detectProbe, wantProbe)
+	}
+	wantClip := streamclips.ClipRange{ID: "exact-clip", StartSeconds: 1.25, EndSeconds: 12.75}
+	if !reflect.DeepEqual(service.detectClip, wantClip) {
+		t.Fatalf("detect clip = %#v, want %#v", service.detectClip, wantClip)
+	}
+	wantCrop := streamclips.CropRect{X: 0.82, Y: 0.05, Width: 0.17, Height: 0.18}
+	if service.detectCrop != wantCrop {
+		t.Fatalf("detect crop = %#v, want %#v", service.detectCrop, wantCrop)
 	}
 	body, err := os.ReadFile(out)
 	if err != nil {
@@ -244,6 +268,15 @@ func TestRunStreamPlanDetectsKillfeedCuesIntoPlan(t *testing.T) {
 	}
 	if got, want := len(plan.Clips[0].KillfeedSeconds), 3; got != want {
 		t.Fatalf("killfeed cues = %v, want %d", plan.Clips[0].KillfeedSeconds, want)
+	}
+	if got, want := len(plan.Clips[0].KillfeedCueProvenance), 3; got != want {
+		t.Fatalf("killfeed provenance = %#v, want %d automatic cues", plan.Clips[0].KillfeedCueProvenance, want)
+	}
+	for i, provenance := range plan.Clips[0].KillfeedCueProvenance {
+		if provenance.Origin != streamclips.KillfeedCueAutomatic ||
+			provenance.CueSeconds != plan.Clips[0].KillfeedSeconds[i] {
+			t.Fatalf("killfeed provenance %d = %#v, want automatic exact cue", i, provenance)
+		}
 	}
 }
 
@@ -278,7 +311,9 @@ func TestRunStreamKillfeedImportsReviewedEventsWithoutWritingOnDryRun(t *testing
 		SchemaVersion: killfeedImportSchemaVersion,
 		ClipID:        "clip-001",
 		Cues: []killfeedImportCue{
-			{AtSeconds: 2.75, Kills: []streamclips.KillfeedKill{{AttackerSide: "CT", AttackerName: "ZaCkk", VictimSide: "T", VictimName: "ar4nit", Weapon: "awp", Headshot: true}}},
+			// Reviewed documents may round the displayed cue without owning the
+			// detector's exact PTS-derived render timestamp.
+			{AtSeconds: 2.7509, Kills: []streamclips.KillfeedKill{{AttackerSide: "CT", AttackerName: "ZaCkk", VictimSide: "T", VictimName: "ar4nit", Weapon: "awp", Headshot: true}}},
 			{AtSeconds: 8.625, Kills: []streamclips.KillfeedKill{{AttackerSide: "CT", AttackerName: "ZaCkk", VictimSide: "T", VictimName: "bek657", Weapon: "awp"}}},
 		},
 	})
@@ -303,6 +338,13 @@ func TestRunStreamKillfeedImportsReviewedEventsWithoutWritingOnDryRun(t *testing
 	}
 	if got := result.Plan.Clips[0].KillfeedKills[0][0].VictimName; got != "ar4nit" {
 		t.Fatalf("first victim = %q", got)
+	}
+	if got, want := result.Plan.Clips[0].KillfeedSeconds[0], 2.75; got != want {
+		t.Fatalf("reviewed cue = %.9f, want detector cue %.9f", got, want)
+	}
+	provenance, ok := result.Plan.Clips[0].KillfeedProvenanceAt(2.75)
+	if !ok || provenance.Origin != streamclips.KillfeedCueAutomatic {
+		t.Fatalf("reviewed cue provenance = %#v / %v, want upgraded automatic provenance", provenance, ok)
 	}
 }
 
@@ -497,94 +539,86 @@ func TestRunStreamPlanReportsProbeFailureAsRuntimeError(t *testing.T) {
 	}
 }
 
-func TestStreamNoticeDetectorMergesBurstsAndRejectsTransientDrops(t *testing.T) {
-	var detector streamNoticeDetector
-	first := testStreamFingerprint(1)
-	second := testStreamFingerprint(2)
-	third := testStreamFingerprint(3)
-	observations := []struct {
-		seconds float64
-		rows    []streamNoticeFingerprint
+func TestExactKillfeedCuesPreservesAdjacentNativePTSAndDropsUnresolved(t *testing.T) {
+	timeBase := streamkillfeed.TimeBase{Num: 1, Den: 30000}
+	events := []streamkillfeed.Event{
+		{SourcePTS: 30000, TimeBase: timeBase, CueSeconds: 1, Mode: streamkillfeed.ModeAlignedFrame},
+		{SourcePTS: 30001, TimeBase: timeBase, CueSeconds: timeBase.Seconds(30001), Mode: streamkillfeed.ModeBurst},
+		{SourcePTS: 30002, TimeBase: timeBase, CueSeconds: timeBase.Seconds(30002), Mode: streamkillfeed.ModeUnresolved},
+	}
+
+	got := exactKillfeedCues(events)
+	want := []float64{1, timeBase.Seconds(30001)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("exact cues = %#v, want adjacent PTS cues %#v", got, want)
+	}
+}
+
+func TestStreamPlanNeedsExactKillfeedArtifactsOnlyForCueWithoutReviewedKills(t *testing.T) {
+	kill := streamclips.KillfeedKill{
+		AttackerSide: "CT", AttackerName: "hero", VictimSide: "T",
+		VictimName: "villain", Weapon: "ak47",
+	}
+	tests := []struct {
+		name string
+		clip streamclips.ClipRange
+		want bool
 	}{
-		{0, nil},
-		{0.125, []streamNoticeFingerprint{first}},
-		{0.250, []streamNoticeFingerprint{first, second}},
-		{0.375, []streamNoticeFingerprint{first, second}},
-		{0.500, []streamNoticeFingerprint{first}}, // one compressed frame must not lower the baseline
-		{0.625, []streamNoticeFingerprint{first, second}},
-		{1.000, []streamNoticeFingerprint{first, second, third}},
-		{1.125, []streamNoticeFingerprint{first, second, third}},
+		{name: "automatic cue", clip: streamclips.ClipRange{KillfeedSeconds: []float64{1}}, want: true},
+		{
+			name: "legacy reviewed cue is manual",
+			clip: streamclips.ClipRange{
+				KillfeedSeconds: []float64{1},
+				KillfeedKills:   [][]streamclips.KillfeedKill{{kill}},
+			},
+			want: false,
+		},
+		{
+			name: "reviewed automatic cue still needs capture",
+			clip: streamclips.ClipRange{
+				KillfeedSeconds: []float64{1},
+				KillfeedKills:   [][]streamclips.KillfeedKill{{kill}},
+				KillfeedCueProvenance: []streamclips.KillfeedCueProvenance{{
+					CueSeconds: 1, Origin: streamclips.KillfeedCueAutomatic, EventID: "event-1",
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "reviewed explicit manual cue is synthetic",
+			clip: streamclips.ClipRange{
+				KillfeedSeconds: []float64{1},
+				KillfeedKills:   [][]streamclips.KillfeedKill{{kill}},
+				KillfeedCueProvenance: []streamclips.KillfeedCueProvenance{{
+					CueSeconds: 1, Origin: streamclips.KillfeedCueManual,
+				}},
+			},
+			want: false,
+		},
+		{
+			name: "mixed reviewed and automatic cues",
+			clip: streamclips.ClipRange{
+				KillfeedSeconds: []float64{1, 2},
+				KillfeedKills:   [][]streamclips.KillfeedKill{{kill}, {}},
+			},
+			want: true,
+		},
 	}
-	var cues []float64
-	for _, observation := range observations {
-		if cue, ok := detector.Observe(observation.seconds, 0, observation.rows); ok {
-			cues = append(cues, cue)
-		}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := streamclips.DefaultEditPlan()
+			plan.Clips = []streamclips.ClipRange{tc.clip}
+			if got := streamPlanNeedsExactKillfeedArtifacts(plan); got != tc.want {
+				t.Fatalf("streamPlanNeedsExactKillfeedArtifacts = %v, want %v", got, tc.want)
+			}
+		})
 	}
-	cues = mergeStreamKillfeedCues(cues)
-	if got, want := len(cues), 2; got != want {
-		t.Fatalf("cues = %v, want %d bursts", cues, want)
+	landscape := streamclips.DefaultEditPlan()
+	landscape.Variant = streamclips.VariantStreamerLandscape16x9
+	landscape.Clips = []streamclips.ClipRange{{KillfeedSeconds: []float64{1}}}
+	if streamPlanNeedsExactKillfeedArtifacts(landscape) {
+		t.Fatal("landscape source-preserving render must not require isolated killfeed artifacts")
 	}
-	if got, want := cues[0], 0.0; got != want {
-		t.Fatalf("first cue = %v, want %v", got, want)
-	}
-	if got, want := cues[1], 0.875; got != want {
-		t.Fatalf("second cue = %v, want %v", got, want)
-	}
-}
-
-func TestStreamNoticeDetectorSeedsVisiblePrerollAndFindsSameCountReplacement(t *testing.T) {
-	var detector streamNoticeDetector
-	first := testStreamFingerprint(1)
-	replacement := testStreamFingerprint(2)
-	observations := []struct {
-		seconds float64
-		rows    []streamNoticeFingerprint
-	}{
-		{0, []streamNoticeFingerprint{first}},
-		{1, []streamNoticeFingerprint{first}},
-		{2, []streamNoticeFingerprint{first}},
-		{3, []streamNoticeFingerprint{replacement}},
-		{3.5, []streamNoticeFingerprint{replacement}},
-		{4, []streamNoticeFingerprint{replacement}},
-	}
-	var cues []float64
-	for _, observation := range observations {
-		if cue, ok := detector.Observe(observation.seconds, 2, observation.rows); ok {
-			cues = append(cues, cue)
-		}
-	}
-	if got, want := cues, []float64{2.875}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("cues = %v, want %v", got, want)
-	}
-}
-
-func TestDecodeStreamPNGReadsConcatenatedFrames(t *testing.T) {
-	var stream bytes.Buffer
-	for _, width := range []int{2, 3} {
-		if err := png.Encode(&stream, image.NewRGBA(image.Rect(0, 0, width, 1))); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, wantWidth := range []int{2, 3} {
-		frame, err := decodeStreamPNG(&stream)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := frame.Bounds().Dx(); got != wantWidth {
-			t.Fatalf("width = %d, want %d", got, wantWidth)
-		}
-	}
-	if _, err := decodeStreamPNG(&stream); !errors.Is(err, io.EOF) {
-		t.Fatalf("final error = %v, want EOF", err)
-	}
-}
-
-func testStreamFingerprint(bit uint) streamNoticeFingerprint {
-	var fingerprint streamNoticeFingerprint
-	fingerprint.bits[0] = uint64(1) << bit
-	fingerprint.features = streamFingerprintMinFeatures
-	return fingerprint
 }
 
 func TestRunStreamRenderDryRunDoesNotInvokeRenderer(t *testing.T) {
@@ -664,8 +698,8 @@ func TestRunStreamRenderRejectsSourceInsideReplacedPublishDirectory(t *testing.T
 	}
 }
 
-func TestRunStreamRenderDryRunRejectsCaptionsWithoutWordsOrBackend(t *testing.T) {
-	t.Setenv("XAI_API_KEY", "")
+func TestRunStreamRenderDryRunRejectsUnreviewedCaptionsEvenWithBackend(t *testing.T) {
+	t.Setenv("XAI_API_KEY", "xai_test")
 	dir := t.TempDir()
 	plan := streamclips.DefaultEditPlan()
 	plan.Captions = streamclips.CaptionsPlan{Enabled: true, Language: "es"}
@@ -689,7 +723,7 @@ func TestRunStreamRenderDryRunRejectsCaptionsWithoutWordsOrBackend(t *testing.T)
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.OK || !strings.Contains(result.Error, "neither reviewed caption words") {
+	if result.OK || !strings.Contains(result.Error, "without reviewed Spanish caption words") {
 		t.Fatalf("result = %#v, want caption-readiness error", result)
 	}
 }
@@ -701,7 +735,8 @@ func TestRunStreamRenderDryRunAcceptsReviewedCaptionsWithoutBackend(t *testing.T
 	plan.Captions = streamclips.CaptionsPlan{Enabled: true, Language: "es"}
 	plan.Clips = []streamclips.ClipRange{{
 		ID: "clip-001", StartSeconds: 0, EndSeconds: 10,
-		CaptionWords: []streamclips.CaptionWord{{Word: "Buena", StartSeconds: 0.5, EndSeconds: 0.9}},
+		CaptionWords:    []streamclips.CaptionWord{{Word: "Buena", StartSeconds: 0.5, EndSeconds: 0.9}},
+		CaptionReviewed: true,
 	}}
 	planPath := filepath.Join(dir, "edit-plan.json")
 	writeJSONFile(t, planPath, plan)

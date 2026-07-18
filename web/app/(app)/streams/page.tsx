@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   AlertTriangle,
   Captions,
+  CircleCheck,
   Download,
   Film,
   Link2,
@@ -12,6 +13,7 @@ import {
   Pause,
   Play,
   Plus,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -19,13 +21,20 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import {
+  CAPTION_CLIP_STATUS,
+  CAPTION_GENERATION_STATUS,
+  KILLFEED_ANALYSIS_STATUS,
   streamsApi,
   STREAM_VARIANTS,
   SERVICE_UNAVAILABLE_CODE,
+  type CaptionCandidateClip,
+  type CaptionGenerationState,
   type KillfeedKill,
+  type KillfeedAnalysisState,
   type NormalizedRect,
   type StreamClipEdit,
   type StreamClipRange,
+  type StreamCaptionWord,
   type StreamEditPlan,
   type StreamTextOverlay,
   type StreamJob,
@@ -54,6 +63,28 @@ import {
 } from '@/lib/stream-preview';
 import { addClipCue, applyClipKillfeedRead, fitPlanToSourceDuration, initialStreamClipEnd, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from '@/lib/killfeed-plan';
 import { CLIP_SPEEDS, clipEditIssue, DEFAULT_OVERLAY_FONT_SIZE, MAX_OVERLAY_FONT_SIZE, MAX_TEXT_OVERLAYS, MIN_OVERLAY_FONT_SIZE } from '@/lib/clip-edit';
+import {
+  captionDraftDiffersFromReview,
+  captionInputsFingerprint,
+  captionsNeedReview,
+  captionWordsIssue,
+  clipHasAudibleSource,
+  invalidateCaptionReview,
+  streamHasAudio,
+} from '@/lib/caption-review';
+import {
+  appliedKillfeedEventReference,
+  invalidateKillfeedAnalysis,
+  killfeedAnalysisInputsFingerprint,
+  killfeedAnalysisNeeded,
+  killfeedManualCueIssue,
+  killfeedStateNeedsRefreshForRead,
+} from '@/lib/killfeed-analysis';
+import {
+  canRequestCaptionCandidates,
+  streamRenderCanRetry,
+  streamRenderNeedsKillfeedReanalysis,
+} from '@/lib/stream-recovery';
 
 /** Accent styling shared by every purple range slider in this editor. */
 const ACCENT_SLIDER_CLASS = 'accent-[#9146ff] disabled:opacity-50';
@@ -166,6 +197,10 @@ function planFingerprint(plan: StreamEditPlan): string {
     variant: plan.variant,
     face: rect(plan.face_crop),
     killfeed: rect(plan.killfeed_crop),
+    killfeedAnalysis: [
+      plan.killfeed_analysis?.generation_id ?? '',
+      plan.killfeed_analysis?.fingerprint ?? '',
+    ],
     game: rect(plan.gameplay_crop),
     clips: plan.clips.map((c) => [
       c.id,
@@ -174,6 +209,8 @@ function planFingerprint(plan: StreamEditPlan): string {
       c.title ?? '',
       c.killfeed_seconds ?? [],
       c.killfeed_kills ?? [],
+      (c.caption_words ?? []).map((word) => [word.word, word.start_seconds, word.end_seconds]),
+      c.caption_reviewed ?? false,
       edit(c.edit),
     ]),
     streamerNick: plan.streamer_banner?.nick?.trim() ?? '',
@@ -183,6 +220,23 @@ function planFingerprint(plan: StreamEditPlan): string {
     music: [plan.music?.key ?? '', plan.music?.volume ?? 0],
     grade: plan.effects?.grade ?? false,
   });
+}
+
+function captionGenerationIsPending(state: CaptionGenerationState | null): boolean {
+  return state?.status === CAPTION_GENERATION_STATUS.queued || state?.status === CAPTION_GENERATION_STATUS.generating;
+}
+
+function killfeedAnalysisIsPending(state: KillfeedAnalysisState | null): boolean {
+  return state?.status === KILLFEED_ANALYSIS_STATUS.queued || state?.status === KILLFEED_ANALYSIS_STATUS.analyzing;
+}
+
+function captionDraftsFromState(state: CaptionGenerationState): Record<string, StreamCaptionWord[]> {
+  return Object.fromEntries(
+    (state.clips ?? []).map((clip) => [
+      clip.clip_id,
+      (clip.candidate_words ?? []).map((word) => ({ ...word })),
+    ]),
+  );
 }
 
 /**
@@ -326,7 +380,7 @@ function LocalStreamsPage() {
   );
 
   const pollRender = useCallback(
-    async (jobId: string, variant: StreamVariant) => {
+    async (jobId: string, variant: StreamVariant, attemptedPlan: StreamEditPlan) => {
       const gen = ++pollGen.current;
       for (let attempt = 0; attempt < 300; attempt++) {
         try {
@@ -334,10 +388,29 @@ function LocalStreamsPage() {
           if (pollGen.current !== gen) return;
           setRenderState(state);
           if (state.status === 'rendered') {
+            setRenderedPlan(attemptedPlan);
             setStage('rendered');
             return;
           }
           if (state.status === 'failed') {
+            if (streamRenderNeedsKillfeedReanalysis(state)) {
+              setStage('editing');
+              setError(
+                state.error ||
+                  'Las capturas exactas de la killfeed ya no están disponibles. Reanaliza la killfeed y vuelve a crear los Shorts.',
+              );
+              return;
+            }
+            if (streamRenderCanRetry(state)) {
+              setStage('editing');
+              setError(
+                state.error ||
+                  (state.published
+                    ? 'El nuevo render falló. La última versión publicada sigue disponible; revisa el plan y vuelve a intentarlo.'
+                    : 'El plan cambió antes de publicar el render. Revísalo y vuelve a crear los Shorts.'),
+              );
+              return;
+            }
             setStage('failed');
             setFailureReason(state.error || 'el render falló');
             return;
@@ -357,6 +430,16 @@ function LocalStreamsPage() {
     [reset],
   );
 
+  const clearRecoverableKillfeedRender = useCallback(() => {
+    if (!streamRenderNeedsKillfeedReanalysis(renderState)) return;
+    setRenderState((current) =>
+      current?.published
+        ? { ...current, error: undefined, error_code: undefined }
+        : null,
+    );
+    setError(null);
+  }, [renderState]);
+
   const createShorts = useCallback(async () => {
     if (!job || !plan) return;
     const fittedPlan = fitPlanToSourceDuration(plan, job.probe?.duration_seconds ?? 0);
@@ -373,16 +456,28 @@ function LocalStreamsPage() {
       setError(editIssue);
       return;
     }
+    const sourceHasAudio = streamHasAudio(job.probe);
+    if (captionsNeedReview(fittedPlan, sourceHasAudio)) {
+      setError('Revisa los subtítulos de cada clip con audio antes de crear los Shorts.');
+      return;
+    }
+    if (killfeedAnalysisNeeded(fittedPlan)) {
+      setError('Espera a que termine el análisis automático de la killfeed antes de crear los Shorts.');
+      return;
+    }
     setError(null);
     setSaving(true);
     try {
       const saved = await streamsApi.putEditPlan(job.id, fittedPlan);
       setPlan(saved);
-      setRenderedPlan(saved);
       setStage('rendering');
-      setRenderState({ status: 'queued', videos: [] });
+      setRenderState((previous) =>
+        previous && (previous.published || previous.status === 'rendered')
+          ? { ...previous, published: true, status: 'queued' }
+          : { status: 'queued', videos: [] },
+      );
       await streamsApi.startRender(job.id, saved.variant);
-      void pollRender(job.id, saved.variant);
+      void pollRender(job.id, saved.variant, saved);
     } catch (err) {
       setStage('editing');
       setError(errorMessage(err, 'No se pudo iniciar el render.'));
@@ -454,6 +549,7 @@ function LocalStreamsPage() {
         error={error}
         saving={saving}
         onCreate={() => void createShorts()}
+        onKillfeedAnalysisRecovered={clearRecoverableKillfeedRender}
         onStartOver={() => reset('')}
       />
     );
@@ -610,6 +706,7 @@ function StreamEditor({
   error,
   saving,
   onCreate,
+  onKillfeedAnalysisRecovered,
   onStartOver,
 }: {
   job: StreamJob;
@@ -621,6 +718,7 @@ function StreamEditor({
   error: string | null;
   saving: boolean;
   onCreate: () => void;
+  onKillfeedAnalysisRecovered: () => void;
   onStartOver: () => void;
 }) {
   const videoSrc = streamsApi.sourceUrl(job.id);
@@ -629,7 +727,36 @@ function StreamEditor({
     () => renderedPlan !== null && plan !== null && planFingerprint(renderedPlan) !== planFingerprint(plan),
     [renderedPlan, plan],
   );
-  const busy = stage === 'rendering' || saving;
+  const [captionState, setCaptionState] = useState<CaptionGenerationState | null>(null);
+  const [captionDrafts, setCaptionDrafts] = useState<Record<string, StreamCaptionWord[]>>({});
+  const [captionLoading, setCaptionLoading] = useState(false);
+  const [captionRequestBusy, setCaptionRequestBusy] = useState(false);
+  const [reviewingClipId, setReviewingClipId] = useState<string | null>(null);
+  const [captionError, setCaptionError] = useState<string | null>(null);
+  const captionPollGen = useRef(0);
+  const [killfeedState, setKillfeedState] = useState<KillfeedAnalysisState | null>(null);
+  const [killfeedRequestBusy, setKillfeedRequestBusy] = useState(false);
+  const [killfeedError, setKillfeedError] = useState<string | null>(null);
+  const killfeedPollGen = useRef(0);
+  const killfeedDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const killfeedRunActive = useRef(false);
+  const latestPlan = useRef(plan);
+  latestPlan.current = plan;
+  const [readingCueKey, setReadingCueKey] = useState<string | null>(null);
+  const sourceHasAudio = streamHasAudio(job.probe);
+  const captionReviewBlocked = captionsNeedReview(plan, sourceHasAudio);
+  const captionGenerating = captionGenerationIsPending(captionState);
+  const killfeedAnalyzing = killfeedAnalysisIsPending(killfeedState);
+  const canGenerateCaptions = canRequestCaptionCandidates(captionReviewBlocked, captionState);
+  const busy =
+    stage === 'rendering' ||
+    saving ||
+    captionRequestBusy ||
+    captionGenerating ||
+    killfeedRequestBusy ||
+    killfeedAnalyzing ||
+    reviewingClipId !== null ||
+    readingCueKey !== null;
   const probedDuration = job.probe?.duration_seconds ?? 0;
   const sourceDuration =
     Number.isFinite(probedDuration) && probedDuration > 0
@@ -639,10 +766,194 @@ function StreamEditor({
     representativeFrameTime(sourceDuration),
   );
   const [weapons, setWeapons] = useState<string[]>([]);
-  const [readingCueKey, setReadingCueKey] = useState<string | null>(null);
   const [readErrors, setReadErrors] = useState<Record<string, string>>({});
   const [killfeedReadNotice, setKillfeedReadNotice] = useState<string | null>(null);
   const killfeedEnabled = plan.killfeed_crop !== undefined;
+  const killfeedRenderNeedsReanalysis = streamRenderNeedsKillfeedReanalysis(renderState);
+  const killfeedManualCueError = killfeedManualCueIssue(plan, killfeedState);
+  const killfeedAnalysisBlocked =
+    killfeedEnabled &&
+    (killfeedAnalysisNeeded(plan) ||
+      killfeedState?.status !== KILLFEED_ANALYSIS_STATUS.applied ||
+      killfeedRenderNeedsReanalysis ||
+      killfeedManualCueError !== undefined);
+  const detectedKillfeedEvents = (killfeedState?.clips ?? []).reduce(
+    (total, clip) => total + clip.events.length,
+    0,
+  );
+
+  const pollCaptionState = useCallback(async (initial?: CaptionGenerationState): Promise<CaptionGenerationState> => {
+    const gen = ++captionPollGen.current;
+    let next = initial ?? (await streamsApi.getCaptionGenerationState(job.id));
+    if (captionPollGen.current !== gen) return next;
+    setCaptionState(next);
+    for (let attempt = 0; attempt < 240 && captionGenerationIsPending(next); attempt++) {
+      await sleep(1250);
+      if (captionPollGen.current !== gen) return next;
+      next = await streamsApi.getCaptionGenerationState(job.id);
+      if (captionPollGen.current !== gen) return next;
+      setCaptionState(next);
+    }
+    if (captionPollGen.current === gen && captionGenerationIsPending(next)) {
+      setCaptionState(null);
+      throw new Error('El análisis de subtítulos sigue pendiente. Actualiza el estado o inténtalo de nuevo.');
+    }
+    if (captionPollGen.current === gen && !captionGenerationIsPending(next)) {
+      setCaptionDrafts(captionDraftsFromState(next));
+    }
+    return next;
+  }, [job.id]);
+
+  const pollKillfeedState = useCallback(async (initial?: KillfeedAnalysisState): Promise<KillfeedAnalysisState> => {
+    const gen = ++killfeedPollGen.current;
+    let next = initial ?? (await streamsApi.getKillfeedAnalysisState(job.id));
+    if (killfeedPollGen.current !== gen) return next;
+    setKillfeedState(next);
+    for (let attempt = 0; attempt < 240 && killfeedAnalysisIsPending(next); attempt++) {
+      await sleep(1250);
+      if (killfeedPollGen.current !== gen) return next;
+      next = await streamsApi.getKillfeedAnalysisState(job.id);
+      if (killfeedPollGen.current !== gen) return next;
+      setKillfeedState(next);
+    }
+    if (killfeedPollGen.current !== gen) return next;
+    if (killfeedAnalysisIsPending(next)) {
+      setKillfeedState(null);
+      throw new Error('El análisis de killfeed sigue pendiente. Puedes reintentarlo sin perder el plan.');
+    }
+    if (next.status === KILLFEED_ANALYSIS_STATUS.failed) {
+      throw new Error(next.error || 'El análisis automático de killfeed falló.');
+    }
+    if (next.status === KILLFEED_ANALYSIS_STATUS.reviewRequired) {
+      setKillfeedError('Hay avisos cuyo fotograma de origen no pudo resolverse. Corrígelos o vuelve a analizar.');
+      return next;
+    }
+    if (next.status === KILLFEED_ANALYSIS_STATUS.ready) {
+      const appliedPlan = await streamsApi.applyKillfeedAnalysis(job.id, next.generation_id);
+      if (killfeedPollGen.current !== gen) return next;
+      latestPlan.current = appliedPlan;
+      onPlanChange(appliedPlan);
+      onKillfeedAnalysisRecovered();
+      next = { ...next, status: KILLFEED_ANALYSIS_STATUS.applied };
+      setKillfeedState(next);
+    }
+    return next;
+  }, [job.id, onKillfeedAnalysisRecovered, onPlanChange]);
+
+  const runKillfeedAnalysis = useCallback(async (candidatePlan: StreamEditPlan): Promise<void> => {
+    if (killfeedRunActive.current || !candidatePlan.killfeed_crop || !clipsAreValid(candidatePlan.clips)) return;
+    killfeedRunActive.current = true;
+    setKillfeedRequestBusy(true);
+    setKillfeedError(null);
+    try {
+      const saved = await streamsApi.putEditPlan(job.id, candidatePlan);
+      latestPlan.current = saved;
+      onPlanChange(saved);
+      const started = await streamsApi.startKillfeedAnalysis(job.id);
+      await pollKillfeedState(started);
+    } catch (err) {
+      setKillfeedError(errorMessage(err, 'No se pudo analizar automáticamente la killfeed.'));
+    } finally {
+      killfeedRunActive.current = false;
+      setKillfeedRequestBusy(false);
+    }
+  }, [job.id, onPlanChange, pollKillfeedState]);
+
+  const scheduleKillfeedAnalysis = useCallback((candidatePlan: StreamEditPlan, delay = 750): void => {
+    if (killfeedDebounce.current !== null) clearTimeout(killfeedDebounce.current);
+    const expectedInputs = killfeedAnalysisInputsFingerprint(candidatePlan);
+    latestPlan.current = candidatePlan;
+    killfeedDebounce.current = setTimeout(() => {
+      killfeedDebounce.current = null;
+      const current = latestPlan.current;
+      if (
+        !current.killfeed_crop ||
+        !killfeedAnalysisNeeded(current) ||
+        killfeedAnalysisInputsFingerprint(current) !== expectedInputs
+      ) return;
+      void runKillfeedAnalysis(current);
+    }, delay);
+  }, [runKillfeedAnalysis]);
+
+  useEffect(() => {
+    if (!plan.captions?.enabled) {
+      captionPollGen.current += 1;
+      setCaptionState(null);
+      setCaptionDrafts({});
+      setCaptionLoading(false);
+      setCaptionError(null);
+      return;
+    }
+    let active = true;
+    setCaptionLoading(true);
+    void pollCaptionState()
+      .catch((err: unknown) => {
+        if (active) {
+          setCaptionState(null);
+          setCaptionError(errorMessage(err, 'No se pudo consultar el análisis de subtítulos.'));
+        }
+      })
+      .finally(() => {
+        if (active) setCaptionLoading(false);
+      });
+    return () => {
+      active = false;
+      captionPollGen.current += 1;
+    };
+  }, [job.id, plan.captions?.enabled, pollCaptionState]);
+
+  useEffect(() => {
+    setCaptionDrafts((current) => {
+      const next = { ...current };
+      for (const clip of plan.clips) {
+        if (clip.caption_reviewed && next[clip.id] === undefined) {
+          next[clip.id] = (clip.caption_words ?? []).map((word) => ({ ...word }));
+        }
+      }
+      return next;
+    });
+  }, [plan.clips]);
+
+  useEffect(() => {
+    if (!killfeedEnabled) {
+      killfeedPollGen.current += 1;
+      if (killfeedDebounce.current !== null) {
+        clearTimeout(killfeedDebounce.current);
+        killfeedDebounce.current = null;
+      }
+      setKillfeedState(null);
+      setKillfeedError(null);
+      return;
+    }
+    let active = true;
+    void streamsApi.getKillfeedAnalysisState(job.id)
+      .then(async (state) => {
+        if (!active) return;
+        setKillfeedState(state);
+        if (killfeedAnalysisIsPending(state) || state.status === KILLFEED_ANALYSIS_STATUS.ready) {
+          await pollKillfeedState(state);
+          return;
+        }
+        if (
+          (state.status === KILLFEED_ANALYSIS_STATUS.none ||
+            state.status === KILLFEED_ANALYSIS_STATUS.applied) &&
+          killfeedAnalysisNeeded(latestPlan.current)
+        ) {
+          scheduleKillfeedAnalysis(latestPlan.current);
+        }
+      })
+      .catch((err: unknown) => {
+        if (active) setKillfeedError(errorMessage(err, 'No se pudo consultar el análisis de killfeed.'));
+      });
+    return () => {
+      active = false;
+      killfeedPollGen.current += 1;
+      if (killfeedDebounce.current !== null) {
+        clearTimeout(killfeedDebounce.current);
+        killfeedDebounce.current = null;
+      }
+    };
+  }, [job.id, killfeedEnabled, pollKillfeedState, scheduleKillfeedAnalysis]);
 
   useEffect(() => {
     if (!killfeedEnabled || weapons.length > 0) return;
@@ -673,7 +984,16 @@ function StreamEditor({
       // Persist first so the orchestrator can locate this clip/cue for the job;
       // the read endpoint reads the saved plan, not the in-memory edits.
       const saved = await streamsApi.putEditPlan(job.id, plan);
-      const read = await streamsApi.readKillfeed(job.id, clip.id, cue);
+      let resolvedState = killfeedState;
+      if (killfeedStateNeedsRefreshForRead(saved, resolvedState)) {
+        resolvedState = await streamsApi.getKillfeedAnalysisState(job.id);
+        setKillfeedState(resolvedState);
+      }
+      if (killfeedStateNeedsRefreshForRead(saved, resolvedState)) {
+        throw new Error('La generación exacta de killfeed cambió. Recarga el análisis antes de leer esta marca.');
+      }
+      const eventReference = appliedKillfeedEventReference(saved, resolvedState, clip.id, cue);
+      const read = await streamsApi.readKillfeed(job.id, clip.id, cue, eventReference);
       const clips = saved.clips.map((c) =>
         c.id === clip.id ? applyClipKillfeedRead(c, cue, read.events) : c,
       );
@@ -726,21 +1046,30 @@ function StreamEditor({
   const setFaceCrop = (rect: NormalizedRect) => onPlanChange({ ...plan, face_crop: rect });
   const setKillfeedEnabled = (enabled: boolean) => {
     if (enabled) {
-      onPlanChange({
+      const next = invalidateKillfeedAnalysis({
         ...plan,
         killfeed_crop: plan.killfeed_crop ?? DEFAULT_KILLFEED_CROP,
       });
+      latestPlan.current = next;
+      onPlanChange(next);
+      scheduleKillfeedAnalysis(next);
       return;
     }
-    const clips = plan.clips.map((clip) => {
-      const withoutCues = { ...clip };
-      delete withoutCues.killfeed_seconds;
-      delete withoutCues.killfeed_kills;
-      return withoutCues;
-    });
-    const withoutKillfeed = { ...plan, clips };
+    killfeedPollGen.current += 1;
+    if (killfeedDebounce.current !== null) {
+      clearTimeout(killfeedDebounce.current);
+      killfeedDebounce.current = null;
+    }
+    const withoutKillfeed = invalidateKillfeedAnalysis(plan);
     delete withoutKillfeed.killfeed_crop;
+    latestPlan.current = withoutKillfeed;
     onPlanChange(withoutKillfeed);
+  };
+  const setKillfeedCrop = (rect: NormalizedRect) => {
+    const next = invalidateKillfeedAnalysis({ ...plan, killfeed_crop: rect });
+    latestPlan.current = next;
+    onPlanChange(next);
+    scheduleKillfeedAnalysis(next);
   };
   const addKillfeedCue = () => {
     if (!canAddKillfeedCue) return;
@@ -777,11 +1106,159 @@ function StreamEditor({
     onPlanChange({ ...plan, streamer_banner: { ...plan.streamer_banner, slide_enabled: slideEnabled } });
   const setCaptionsEnabled = (enabled: boolean) =>
     onPlanChange({ ...plan, captions: { enabled, language: 'es' } });
+  const setClips = (clips: StreamClipRange[]) => {
+    const beforeFingerprint = captionInputsFingerprint(plan.clips);
+    const beforeKillfeedFingerprint = killfeedAnalysisInputsFingerprint(plan);
+    const clipsWithValidReviews = clips.map((clip) => {
+      const previous = plan.clips.find((item) => item.id === clip.id);
+      if (!previous || captionInputsFingerprint([previous]) === captionInputsFingerprint([clip])) return clip;
+      return invalidateCaptionReview(clip);
+    });
+    let nextPlan = normalizeKillfeedPlan({ ...plan, clips: clipsWithValidReviews });
+    if (beforeFingerprint !== captionInputsFingerprint(nextPlan.clips)) {
+      captionPollGen.current += 1;
+      setCaptionState(null);
+      setCaptionDrafts({});
+      if (captionsNeedReview(nextPlan, sourceHasAudio)) {
+        setCaptionError('El rango o el audio del clip cambió. Genera candidatos nuevos antes de renderizar.');
+      }
+    }
+    if (killfeedEnabled && beforeKillfeedFingerprint !== killfeedAnalysisInputsFingerprint(nextPlan)) {
+      nextPlan = invalidateKillfeedAnalysis(nextPlan);
+      scheduleKillfeedAnalysis(nextPlan);
+    }
+    latestPlan.current = nextPlan;
+    onPlanChange(nextPlan);
+  };
+  const generateCaptionCandidates = async (): Promise<void> => {
+    if (!clipsAreValid(plan.clips)) {
+      setCaptionError('Corrige los rangos de clip antes de generar subtítulos.');
+      return;
+    }
+    const editIssue = clipEditIssue(plan.clips);
+    if (editIssue !== null) {
+      setCaptionError(editIssue);
+      return;
+    }
+    setCaptionRequestBusy(true);
+    setCaptionError(null);
+    setCaptionDrafts({});
+    try {
+      const saved = await streamsApi.putEditPlan(job.id, plan);
+      onPlanChange(saved);
+      const started = await streamsApi.startCaptionGeneration(job.id);
+      await pollCaptionState(started);
+    } catch (err) {
+      setCaptionState(null);
+      setCaptionError(errorMessage(err, 'No se pudieron generar los candidatos de subtítulos.'));
+    } finally {
+      setCaptionRequestBusy(false);
+    }
+  };
+  const updateCaptionDraft = (clipId: string, words: StreamCaptionWord[]) => {
+    setCaptionDrafts((current) => ({ ...current, [clipId]: words }));
+    const clip = plan.clips.find((item) => item.id === clipId);
+    if (clip && captionDraftDiffersFromReview(clip, words)) {
+      onPlanChange({
+        ...plan,
+        clips: plan.clips.map((item) => item.id === clipId ? invalidateCaptionReview(item) : item),
+      });
+    }
+  };
+  const reviewCaptionClip = async (clip: StreamClipRange, noSpeech: boolean): Promise<void> => {
+    if (!captionState || !captionState.generation_id) {
+      setCaptionError('Genera candidatos actuales antes de guardar la revisión.');
+      return;
+    }
+    const words = noSpeech
+      ? []
+      : (captionDrafts[clip.id] ?? []).map((word) => ({ ...word, word: word.word.trim() }));
+    if (!noSpeech) {
+      const issue = captionWordsIssue(words, clip.end_seconds - clip.start_seconds);
+      if (issue !== null) {
+        setCaptionError(issue);
+        return;
+      }
+    }
+    setReviewingClipId(clip.id);
+    setCaptionError(null);
+    try {
+      const saved = await streamsApi.reviewCaptionCandidates(job.id, captionState.generation_id, [{
+        clip_id: clip.id,
+        words,
+        no_speech: noSpeech || undefined,
+      }]);
+      onPlanChange(saved);
+      setCaptionDrafts((current) => ({ ...current, [clip.id]: words }));
+      try {
+        setCaptionState(await streamsApi.getCaptionGenerationState(job.id));
+      } catch {
+        // The reviewed plan is already durable; a later page load can refresh its candidate state.
+      }
+    } catch (err) {
+      setCaptionError(errorMessage(err, 'No se pudo guardar la revisión de este clip.'));
+    } finally {
+      setReviewingClipId(null);
+    }
+  };
   const setMusicKey = (key: string) =>
     onPlanChange({ ...plan, music: key ? { key, volume: plan.music?.volume } : {} });
   const setMusicVolume = (volume: number) =>
     onPlanChange({ ...plan, music: { key: plan.music?.key, volume } });
   const setGrade = (grade: boolean) => onPlanChange({ ...plan, effects: { grade } });
+
+  let captionGenerationNotice: ReactNode;
+  if (!sourceHasAudio) {
+    captionGenerationNotice = (
+      <p className="flex items-center gap-2 text-xs text-success">
+        <CircleCheck className="size-4" />
+        El archivo no tiene pista de audio; no necesita revisión de subtítulos.
+      </p>
+    );
+  } else if (captionGenerating || captionRequestBusy) {
+    captionGenerationNotice = (
+      <p role="status" className="flex items-center gap-2 text-xs text-stream">
+        <Loader2 className="size-4 animate-spin" />
+        Analizando el audio. Puedes revisar los resultados cuando termine.
+      </p>
+    );
+  } else if (captionLoading) {
+    captionGenerationNotice = (
+      <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        Consultando candidatos guardados…
+      </p>
+    );
+  } else if (!captionReviewBlocked) {
+    captionGenerationNotice = (
+      <p role="status" className="flex items-center gap-2 text-xs text-success">
+        <CircleCheck className="size-4" />
+        Todos los clips con audio están revisados.
+      </p>
+    );
+  } else if (captionState?.status === CAPTION_GENERATION_STATUS.failed) {
+    captionGenerationNotice = (
+      <p role="alert" className="flex items-center gap-2 text-xs text-destructive">
+        <AlertTriangle className="size-4" />
+        {captionState.error || 'Falló la generación de uno o más clips. Puedes corregirlos a mano o generar los pendientes.'}
+      </p>
+    );
+  } else if (
+    captionState?.status === CAPTION_GENERATION_STATUS.reviewRequired ||
+    (captionState?.status === CAPTION_GENERATION_STATUS.ready && captionReviewBlocked)
+  ) {
+    captionGenerationNotice = (
+      <p role="status" className="text-xs text-amber-500">
+        Los candidatos todavía no son subtítulos finales. Aprueba cada clip para desbloquear el render.
+      </p>
+    );
+  } else {
+    captionGenerationNotice = (
+      <p className="text-xs text-muted-foreground">
+        Guarda los rangos actuales y pulsa Generar candidatos para empezar la revisión.
+      </p>
+    );
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
@@ -864,9 +1341,8 @@ function StreamEditor({
                     Killfeed limpia (opcional)
                   </h3>
                   <p id="killfeed-clean-description" className="text-xs leading-relaxed text-muted-foreground">
-                    Marca los momentos de la killfeed dentro de cada clip.
-                    Con kills confirmadas (a mano o leídas con IA) superpone una killfeed sintética nítida;
-                    si dejas una marca sin kills, congela el recorte del MP4 en esa ventana.
+                    FragForge recorre todos los clips, localiza cada nacimiento por PTS del vídeo y coordina
+                    automáticamente su captura. La edición manual queda disponible como corrección.
                   </p>
                 </div>
                 <Button
@@ -894,10 +1370,56 @@ function StreamEditor({
               {killfeedEnabled ? (
                 <div id="killfeed-clean-controls" className="flex flex-col gap-4">
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Ajusta el recorte para que cubra holgadamente el área de la killfeed: es la región que se congela sin kills y la que lee la IA.
-                    Coloca el cursor cerca de una kill visible; FragForge leerá un fotograma posterior y buscará hacia atrás el instante exacto en que apareció cada aviso.
-                    El fotograma elegido también actualiza la preview 9:16.
+                    Ajusta el recorte para que cubra holgadamente el área de la killfeed. Tras dejar de moverlo,
+                    FragForge vuelve a analizar los rangos automáticamente. El cue se guarda con el primer
+                    fotograma fuente verificable; un fotograma posterior se usa solo para leer o congelar el aviso.
                   </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy || !clipsAreValid(plan.clips)}
+                      onClick={() => void runKillfeedAnalysis(plan)}
+                      className="border-stream/60 text-stream hover:border-stream hover:bg-stream/10 focus-visible:ring-stream"
+                    >
+                      {killfeedRequestBusy || killfeedAnalyzing ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-4" />
+                      )}
+                      {plan.killfeed_analysis ? 'REANALIZAR KILLFEED' : 'ANALIZAR KILLFEED'}
+                    </Button>
+                    {killfeedAnalyzing || killfeedRequestBusy ? (
+                      <span role="status" className="text-xs text-stream">Analizando todos los clips por fotograma…</span>
+                    ) : null}
+                    {!killfeedAnalyzing &&
+                    !killfeedRequestBusy &&
+                    plan.killfeed_analysis &&
+                    killfeedState?.status === KILLFEED_ANALYSIS_STATUS.applied ? (
+                      <span role="status" className="text-xs text-success">
+                        {detectedKillfeedEvents} {detectedKillfeedEvents === 1 ? 'evento alineado' : 'eventos alineados'}.
+                      </span>
+                    ) : null}
+                  </div>
+                  {killfeedError ? (
+                    <p role="alert" className="flex items-center gap-2 text-xs text-destructive">
+                      <AlertTriangle className="size-4" />
+                      {killfeedError}
+                    </p>
+                  ) : null}
+                  {killfeedRenderNeedsReanalysis ? (
+                    <p role="alert" className="flex items-center gap-2 text-xs text-destructive">
+                      <AlertTriangle className="size-4" />
+                      Las capturas exactas ya no están disponibles. Pulsa REANALIZAR KILLFEED antes de crear los Shorts otra vez.
+                    </p>
+                  ) : null}
+                  {killfeedState?.warnings?.map((warning) => (
+                    <p key={warning} className="flex items-center gap-2 text-xs text-amber-500">
+                      <AlertTriangle className="size-4" />
+                      {warning}
+                    </p>
+                  ))}
                   {killfeedReadNotice ? (
                     <p role="status" className="text-xs text-stream">
                       {killfeedReadNotice}
@@ -906,7 +1428,7 @@ function StreamEditor({
                   <CropPicker
                     videoSrc={videoSrc}
                     rect={plan.killfeed_crop ?? DEFAULT_KILLFEED_CROP}
-                    onChange={(rect) => onPlanChange({ ...plan, killfeed_crop: rect })}
+                    onChange={setKillfeedCrop}
                     kind="killfeed"
                     frameSeconds={previewSeconds}
                     durationSeconds={sourceDuration}
@@ -929,7 +1451,7 @@ function StreamEditor({
                         className="border-stream/60 text-stream hover:border-stream hover:bg-stream/10 focus-visible:ring-stream"
                       >
                         <Plus className="size-4" aria-hidden />
-                        Añadir aviso en {formatStreamTimestamp(previewSeconds)}
+                        Añadir corrección en {formatStreamTimestamp(previewSeconds)}
                       </Button>
                       <p id="killfeed-cue-status" className="text-xs text-muted-foreground">
                         {killfeedCueStatus}
@@ -1004,7 +1526,7 @@ function StreamEditor({
                             </ul>
                           ) : (
                             <p className="text-xs text-muted-foreground">
-                              Sin marcas de killfeed en este clip.
+                              Aún no se detectaron eventos de killfeed en este clip.
                             </p>
                           )}
                         </section>
@@ -1012,7 +1534,7 @@ function StreamEditor({
                     })}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Las marcas se ordenan automáticamente. Si cambias un rango, se eliminan las que queden fuera.
+                    Los eventos automáticos se ordenan por PTS. Cambiar crop o rangos invalida el análisis anterior y lanza uno nuevo.
                   </p>
                 </div>
               ) : (
@@ -1097,7 +1619,7 @@ function StreamEditor({
         <div className="studio-panel p-5 sm:p-6">
           <ClipEditor
             clips={plan.clips}
-            onChange={(clips) => onPlanChange(normalizeKillfeedPlan({ ...plan, clips }))}
+            onChange={setClips}
             disabled={busy}
           />
         </div>
@@ -1105,7 +1627,7 @@ function StreamEditor({
         <div className="studio-panel p-5 sm:p-6">
           <div className="flex flex-col gap-4">
             <SectionEyebrow label="SUBTÍTULOS" />
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <Button
                 type="button"
                 variant={plan.captions?.enabled ? 'default' : 'outline'}
@@ -1117,13 +1639,72 @@ function StreamEditor({
                 <Captions className="size-4" />
                 {plan.captions?.enabled ? 'Subtítulos incrustados: activados' : 'Subtítulos incrustados: desactivados'}
               </Button>
-              {plan.captions?.enabled ? <span className="studio-chip">Salida: español</span> : null}
+              {plan.captions?.enabled ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="studio-chip">Salida: español</span>
+                  {canGenerateCaptions ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy || captionLoading}
+                      onClick={() => void generateCaptionCandidates()}
+                    >
+                      {captionRequestBusy || captionGenerating ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-4" />
+                      )}
+                      {captionState?.status === CAPTION_GENERATION_STATUS.none || captionState === null
+                        ? 'GENERAR CANDIDATOS'
+                        : 'GENERAR PENDIENTES'}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             {plan.captions?.enabled ? (
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                xAI transcribe la voz y Grok 4.5 conserva el español o traduce cualquier otro idioma al español. No
-                resume ni omite contenido intencionadamente.
-              </p>
+              <div className="flex flex-col gap-4">
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  La IA genera candidatos separados del render. Revisa el texto y los tiempos de cada clip;
+                  FragForge no los incrusta hasta que los apruebes o confirmes que no hay voz.
+                </p>
+
+                {captionGenerationNotice}
+
+                {captionState?.warnings?.map((warning) => (
+                  <p key={warning} className="flex items-center gap-2 text-xs text-amber-500">
+                    <AlertTriangle className="size-4" />
+                    {warning}
+                  </p>
+                ))}
+
+                {captionState && captionState.status !== CAPTION_GENERATION_STATUS.none && !captionGenerating ? (
+                  <div className="flex flex-col gap-3">
+                    {plan.clips.map((clip, index) => (
+                      <CaptionReviewCard
+                        key={clip.id}
+                        clip={clip}
+                        clipNumber={index + 1}
+                        candidate={(captionState.clips ?? []).find((item) => item.clip_id === clip.id)}
+                        words={captionDrafts[clip.id] ?? clip.caption_words ?? []}
+                        disabled={busy}
+                        reviewing={reviewingClipId === clip.id}
+                        onWordsChange={(words) => updateCaptionDraft(clip.id, words)}
+                        onApprove={() => void reviewCaptionClip(clip, false)}
+                        onNoSpeech={() => void reviewCaptionClip(clip, true)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+
+                {captionError ? (
+                  <p role="alert" className="flex items-center gap-2 text-xs text-destructive">
+                    <AlertTriangle className="size-4" />
+                    {captionError}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>
@@ -1147,18 +1728,26 @@ function StreamEditor({
           <button
             type="button"
             onClick={onCreate}
-            disabled={busy}
+            disabled={busy || captionReviewBlocked || killfeedAnalysisBlocked}
             className="neon-glow rounded-md inline-flex items-center gap-1.5 bg-primary px-5 py-2.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
             {stage === 'rendering' ? 'RENDERIZANDO…' : 'CREAR SHORTS'}
           </button>
+          {captionReviewBlocked ? (
+            <span className="text-xs text-amber-500">Revisa los subtítulos pendientes para continuar.</span>
+          ) : null}
+          {killfeedAnalysisBlocked ? (
+            <span className="text-xs text-amber-500">
+              {killfeedManualCueError ?? 'Espera al análisis automático de la killfeed para continuar.'}
+            </span>
+          ) : null}
           <Button variant="ghost" onClick={onStartOver} disabled={busy}>
             Empezar de nuevo
           </Button>
         </div>
 
-        {stage === 'rendered' && renderedPlan ? (
+        {renderedPlan && (stage === 'rendered' || renderState?.published) ? (
           <RenderResults renderState={renderState} job={job} renderedPlan={renderedPlan} stale={stale} />
         ) : null}
       </div>
@@ -1235,6 +1824,172 @@ function pruneClipEdit(edit: StreamClipEdit): StreamClipEdit | undefined {
   if (edit.fade_out_seconds) next.fade_out_seconds = edit.fade_out_seconds;
   if (edit.text_overlays && edit.text_overlays.length > 0) next.text_overlays = edit.text_overlays;
   return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function CaptionReviewCard({
+  clip,
+  clipNumber,
+  candidate,
+  words,
+  disabled,
+  reviewing,
+  onWordsChange,
+  onApprove,
+  onNoSpeech,
+}: {
+  clip: StreamClipRange;
+  clipNumber: number;
+  candidate?: CaptionCandidateClip;
+  words: StreamCaptionWord[];
+  disabled: boolean;
+  reviewing: boolean;
+  onWordsChange: (words: StreamCaptionWord[]) => void;
+  onApprove: () => void;
+  onNoSpeech: () => void;
+}) {
+  const duration = Math.max(0, clip.end_seconds - clip.start_seconds);
+  const audible = clipHasAudibleSource(clip);
+  const reviewed = clip.caption_reviewed === true;
+  const reviewedNoSpeech = reviewed && (clip.caption_words?.length ?? 0) === 0;
+  const issue = captionWordsIssue(words, duration);
+  const updateWord = (index: number, patch: Partial<StreamCaptionWord>) =>
+    onWordsChange(words.map((word, wordIndex) => (wordIndex === index ? { ...word, ...patch } : word)));
+  const removeWord = (index: number) => onWordsChange(words.filter((_word, wordIndex) => wordIndex !== index));
+  const addWord = () => {
+    const start = words[words.length - 1]?.end_seconds ?? 0;
+    const end = Math.min(duration, start + 0.5);
+    if (end <= start) return;
+    onWordsChange([...words, { word: '', start_seconds: start, end_seconds: end }]);
+  };
+
+  let status: string;
+  let statusClass = 'text-amber-500';
+  if (!audible) {
+    status = 'Audio silenciado: este clip no necesita subtítulos.';
+    statusClass = 'text-muted-foreground';
+  } else if (reviewedNoSpeech) {
+    status = 'Revisado: confirmado sin voz.';
+    statusClass = 'text-success';
+  } else if (reviewed) {
+    status = `Revisado: ${clip.caption_words?.length ?? 0} palabras aprobadas.`;
+    statusClass = 'text-success';
+  } else if (candidate?.status === CAPTION_CLIP_STATUS.failed) {
+    status = candidate.error || 'La IA no pudo generar este clip. Corrígelo a mano o confirma que no hay voz.';
+    statusClass = 'text-destructive';
+  } else if (candidate?.status === CAPTION_CLIP_STATUS.noSpeech) {
+    status = 'La IA no detectó voz. Confírmalo antes de renderizar.';
+  } else if (candidate) {
+    status = `${words.length} palabras candidatas pendientes de revisión.`;
+  } else {
+    status = 'Este clip todavía no tiene candidatos actuales.';
+  }
+
+  return (
+    <section className="flex flex-col gap-3 border border-border bg-background/35 p-4" aria-labelledby={`${clip.id}-caption-title`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 id={`${clip.id}-caption-title`} className="text-sm font-medium text-foreground">
+            Clip {clipNumber}{clip.title?.trim() ? ` · ${clip.title.trim()}` : ''}
+          </h3>
+          <p className={cn('mt-1 text-xs', statusClass)}>{status}</p>
+        </div>
+        {candidate?.provider ? (
+          <span className="font-[family-name:var(--font-mono)] text-[10px] text-muted-foreground">
+            {candidate.provider}{candidate.stt_model ? ` · ${candidate.stt_model}` : ''}
+          </span>
+        ) : null}
+      </div>
+
+      {audible && candidate ? (
+        <>
+          <div className="max-h-96 overflow-auto border border-border/60">
+            {words.length === 0 ? (
+              <p className="p-3 text-xs text-muted-foreground">
+                No hay palabras. Puedes añadirlas manualmente o confirmar que el clip no contiene voz.
+              </p>
+            ) : (
+              <div className="flex flex-col divide-y divide-border/60">
+                {words.map((word, index) => (
+                  <div key={index} className="grid grid-cols-[minmax(8rem,1fr)_5.5rem_5.5rem_2.25rem] items-end gap-2 p-2">
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor={`${clip.id}-caption-${index}-word`} className="text-[10px] text-muted-foreground">
+                        Palabra {index + 1}
+                      </Label>
+                      <Input
+                        id={`${clip.id}-caption-${index}-word`}
+                        value={word.word}
+                        maxLength={80}
+                        disabled={disabled}
+                        onChange={(event) => updateWord(index, { word: event.target.value })}
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor={`${clip.id}-caption-${index}-start`} className="text-[10px] text-muted-foreground">
+                        Inicio
+                      </Label>
+                      <Input
+                        id={`${clip.id}-caption-${index}-start`}
+                        type="number"
+                        min={0}
+                        max={duration}
+                        step="0.05"
+                        value={word.start_seconds}
+                        disabled={disabled}
+                        onChange={(event) => updateWord(index, { start_seconds: Number(event.target.value) })}
+                        className="h-8"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor={`${clip.id}-caption-${index}-end`} className="text-[10px] text-muted-foreground">
+                        Fin
+                      </Label>
+                      <Input
+                        id={`${clip.id}-caption-${index}-end`}
+                        type="number"
+                        min={0}
+                        max={duration}
+                        step="0.05"
+                        value={word.end_seconds}
+                        disabled={disabled}
+                        onChange={(event) => updateWord(index, { end_seconds: Number(event.target.value) })}
+                        className="h-8"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={disabled}
+                      onClick={() => removeWord(index)}
+                      aria-label={`Eliminar palabra ${index + 1}`}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={addWord}>
+              <Plus className="size-4" />
+              AÑADIR PALABRA
+            </Button>
+            <Button type="button" size="sm" disabled={disabled || issue !== null} onClick={onApprove}>
+              {reviewing ? <Loader2 className="size-4 animate-spin" /> : <CircleCheck className="size-4" />}
+              {reviewed ? 'GUARDAR REVISIÓN' : 'APROBAR TEXTO'}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={onNoSpeech}>
+              CONFIRMAR SIN VOZ
+            </Button>
+          </div>
+          {issue && words.length > 0 ? <p className="text-xs text-destructive">{issue}</p> : null}
+        </>
+      ) : null}
+    </section>
+  );
 }
 
 function ClipEditor({

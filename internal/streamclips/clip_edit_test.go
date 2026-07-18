@@ -428,13 +428,14 @@ func TestEditPlanReportsWhenCaptionsNeedBackend(t *testing.T) {
 	plan := DefaultEditPlan()
 	plan.Captions = CaptionsPlan{Enabled: true, Language: "es"}
 	plan.Clips = []ClipRange{
-		{ID: "one", StartSeconds: 0, EndSeconds: 2, CaptionWords: []CaptionWord{{Word: "uno", StartSeconds: 0, EndSeconds: 0.5}}},
-		{ID: "two", StartSeconds: 2, EndSeconds: 4, CaptionWords: []CaptionWord{{Word: "dos", StartSeconds: 0, EndSeconds: 0.5}}},
+		{ID: "one", StartSeconds: 0, EndSeconds: 2, CaptionWords: []CaptionWord{{Word: "uno", StartSeconds: 0, EndSeconds: 0.5}}, CaptionReviewed: true},
+		{ID: "two", StartSeconds: 2, EndSeconds: 4, CaptionWords: []CaptionWord{{Word: "dos", StartSeconds: 0, EndSeconds: 0.5}}, CaptionReviewed: true},
 	}
 	if plan.CaptionsNeedBackend() {
 		t.Fatal("CaptionsNeedBackend = true with reviewed words on every clip")
 	}
 	plan.Clips[1].CaptionWords = nil
+	plan.Clips[1].CaptionReviewed = false
 	if !plan.CaptionsNeedBackend() {
 		t.Fatal("CaptionsNeedBackend = false with an audible clip missing words")
 	}
@@ -451,5 +452,17 @@ func TestEditPlanReportsWhenCaptionsNeedBackend(t *testing.T) {
 	plan.Captions.Enabled = false
 	if plan.CaptionsNeedBackend() {
 		t.Fatal("CaptionsNeedBackend = true when captions are disabled")
+	}
+}
+
+func TestEditPlanDoesNotTreatUnreviewedWordsAsRenderReady(t *testing.T) {
+	plan := DefaultEditPlan()
+	plan.Captions = CaptionsPlan{Enabled: true, Language: "es"}
+	plan.Clips = []ClipRange{{
+		ID: "one", StartSeconds: 0, EndSeconds: 2,
+		CaptionWords: []CaptionWord{{Word: "candidato", StartSeconds: 0, EndSeconds: 0.5}},
+	}}
+	if !plan.CaptionsNeedBackend() {
+		t.Fatal("CaptionsNeedBackend = false for unreviewed candidate words")
 	}
 }

@@ -28,10 +28,10 @@ const (
 
 // NoticeRow is the source-pixel crop of one highlighted CS2 kill notice.
 type NoticeRow struct {
-	X      int
-	Y      int
-	Width  int
-	Height int
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // DetectNoticeRows finds the saturated-red top and bottom stroke pair of each

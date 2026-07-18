@@ -1,7 +1,22 @@
 import type { KillfeedKill, KillfeedReadEvent, StreamClipRange, StreamEditPlan } from './api/streams';
 
-const READ_CUE_MERGE_SECONDS = 0.02;
 const EDIT_PLAN_SCHEMA_VERSION = '1.1';
+
+export type KillfeedCueProvenance = {
+  cue_seconds: number;
+  origin: 'automatic' | 'manual';
+  event_id?: string;
+};
+
+type ProvenanceClip = StreamClipRange & {
+  killfeed_cue_provenance?: KillfeedCueProvenance[];
+};
+
+function provenanceAt(clip: StreamClipRange, cue: number): KillfeedCueProvenance | undefined {
+  return (clip as ProvenanceClip).killfeed_cue_provenance?.find(
+    (provenance) => provenance.cue_seconds === cue,
+  );
+}
 
 export function initialStreamClipEnd(durationSeconds: number): number {
   return Number.isFinite(durationSeconds) && durationSeconds > 0
@@ -54,24 +69,33 @@ export function normalizeClipKillfeed(clip: StreamClipRange): StreamClipRange {
   const cues = clip.killfeed_seconds ?? [];
   const kills = clip.killfeed_kills ?? [];
   const pairs = cues
-    .map((cue, index) => ({ cue, kills: kills[index] ?? [] }))
+    .map((cue, index) => ({
+      cue,
+      kills: kills[index] ?? [],
+      provenance: provenanceAt(clip, cue),
+    }))
     .filter(
       ({ cue }) =>
         Number.isFinite(cue) && cue >= clip.start_seconds && cue < clip.end_seconds,
     )
     .sort((left, right) => left.cue - right.cue);
 
-  const deduped: { cue: number; kills: KillfeedKill[] }[] = [];
+  const deduped: {
+    cue: number;
+    kills: KillfeedKill[];
+    provenance?: KillfeedCueProvenance;
+  }[] = [];
   for (const pair of pairs) {
     const previous = deduped[deduped.length - 1];
     if (previous && previous.cue === pair.cue) {
       previous.kills = mergeKills(previous.kills, pair.kills);
+      previous.provenance ??= pair.provenance;
       continue;
     }
-    deduped.push({ cue: pair.cue, kills: pair.kills });
+    deduped.push({ cue: pair.cue, kills: pair.kills, provenance: pair.provenance });
   }
 
-  const next = { ...clip };
+  const next: ProvenanceClip = { ...clip };
   if (deduped.length > 0) {
     next.killfeed_seconds = deduped.map((pair) => pair.cue);
   } else {
@@ -81,6 +105,16 @@ export function normalizeClipKillfeed(clip: StreamClipRange): StreamClipRange {
     next.killfeed_kills = deduped.map((pair) => pair.kills);
   } else {
     delete next.killfeed_kills;
+  }
+  const provenance = deduped.flatMap((pair) =>
+    pair.provenance
+      ? [{ ...pair.provenance, cue_seconds: pair.cue }]
+      : [],
+  );
+  if (provenance.length > 0) {
+    next.killfeed_cue_provenance = provenance;
+  } else {
+    delete next.killfeed_cue_provenance;
   }
   return next;
 }
@@ -97,6 +131,7 @@ export function normalizeKillfeedPlan(plan: StreamEditPlan): StreamEditPlan {
       const withoutKillfeed = { ...clip };
       delete withoutKillfeed.killfeed_seconds;
       delete withoutKillfeed.killfeed_kills;
+      delete (withoutKillfeed as ProvenanceClip).killfeed_cue_provenance;
       return withoutKillfeed;
     }
     const normalized = normalizeClipKillfeed(clip);
@@ -162,7 +197,11 @@ export function addClipCue(clip: StreamClipRange, cue: number): StreamClipRange 
     ...clip,
     killfeed_seconds: [...cues, cue],
     killfeed_kills: kills ? [...kills, []] : undefined,
-  });
+    killfeed_cue_provenance: [
+      ...((clip as ProvenanceClip).killfeed_cue_provenance ?? []),
+      { cue_seconds: cue, origin: 'manual' as const },
+    ],
+  } as ProvenanceClip);
 }
 
 /** Removes a killfeed cue and its aligned kills entry by index. */
@@ -174,7 +213,10 @@ export function removeClipCue(clip: StreamClipRange, cue: number): StreamClipRan
     ...clip,
     killfeed_seconds: cues.filter((_value, i) => i !== index),
     killfeed_kills: (clip.killfeed_kills ?? []).filter((_value, i) => i !== index),
-  });
+    killfeed_cue_provenance: (clip as ProvenanceClip).killfeed_cue_provenance?.filter(
+      (provenance) => provenance.cue_seconds !== cue,
+    ),
+  } as ProvenanceClip);
 }
 
 /** Replaces the kills for the cue at `cue` in `clip`, keeping alignment. */
@@ -193,8 +235,9 @@ export function setClipCueKills(
 /**
  * Replaces one requested snapshot cue with the source events recovered by the
  * server's visual timeline scan. Existing cumulative copies of those same kills
- * inside the scanned interval are removed, then near-identical event times are
- * merged so repeated AI reads remain idempotent.
+ * inside the scanned interval are removed. Event times are only merged when
+ * they are exactly equal: two source frames can be less than 20 ms apart, so a
+ * time tolerance would silently collapse legitimate consecutive kills.
  */
 export function applyClipKillfeedRead(
   clip: StreamClipRange,
@@ -210,11 +253,20 @@ export function applyClipKillfeedRead(
   if (validEvents.length === 0) return clip;
 
   const readIdentities = new Set(validEvents.flatMap((event) => event.kills.map(killIdentity)));
-  const intervalStart = Math.min(requestedCue, ...validEvents.map((event) => event.cue_seconds)) - READ_CUE_MERGE_SECONDS;
-  const intervalEnd = Math.max(requestedCue, ...validEvents.map((event) => event.cue_seconds)) + READ_CUE_MERGE_SECONDS;
+  const intervalStart = Math.min(requestedCue, ...validEvents.map((event) => event.cue_seconds));
+  const intervalEnd = Math.max(requestedCue, ...validEvents.map((event) => event.cue_seconds));
   const cues = clip.killfeed_seconds ?? [];
-  const pairs = cues.flatMap((cue, index) => {
-    const pair = { cue, kills: clip.killfeed_kills?.[index] ?? [] };
+  type ReadPair = {
+    cue: number;
+    kills: KillfeedKill[];
+    provenance?: KillfeedCueProvenance;
+  };
+  const pairs: ReadPair[] = cues.flatMap((cue, index): ReadPair[] => {
+    const pair: ReadPair = {
+      cue,
+      kills: clip.killfeed_kills?.[index] ?? [],
+      provenance: provenanceAt(clip, cue),
+    };
     if (cue < intervalStart || cue > intervalEnd) return [pair];
     const isRequestedCue = Math.abs(cue - requestedCue) <= Number.EPSILON;
     if (isRequestedCue && readIdentities.size === 0) return [];
@@ -226,19 +278,30 @@ export function applyClipKillfeedRead(
   });
 
   for (const event of validEvents) {
-    const existing = pairs.find(
-      (pair) => Math.abs(pair.cue - event.cue_seconds) <= READ_CUE_MERGE_SECONDS,
-    );
+    const existing = pairs.find((pair) => pair.cue === event.cue_seconds);
     if (existing) {
       existing.kills = mergeKills(existing.kills, event.kills);
       continue;
     }
-    pairs.push({ cue: event.cue_seconds, kills: event.kills });
+    pairs.push({
+      cue: event.cue_seconds,
+      kills: event.kills,
+      // An exact automatic read keeps the provenance already attached by
+      // Apply. Legacy visual alignment has no durable row artifact, so a new
+      // OCR-backed cue is explicitly manual/synthetic.
+      provenance: provenanceAt(clip, event.cue_seconds) ?? {
+        cue_seconds: event.cue_seconds,
+        origin: 'manual',
+      },
+    });
   }
 
   return normalizeClipKillfeed({
     ...clip,
     killfeed_seconds: pairs.map((pair) => pair.cue),
     killfeed_kills: pairs.map((pair) => pair.kills),
-  });
+    killfeed_cue_provenance: pairs.flatMap((pair) =>
+      pair.provenance ? [pair.provenance] : [],
+    ),
+  } as ProvenanceClip);
 }
