@@ -130,11 +130,11 @@ export class NodeAppServerTransport implements AppServerTransport {
   }
 
   #emitData(chunk: Buffer | string): void {
-    for (const listener of this.#dataListeners) safelyInvoke(() => listener(chunk), this.#emitError);
+    for (const listener of this.#dataListeners) safelyInvoke(() => listener(chunk), (error) => this.#emitError(error));
   }
 
   #emitDiagnostic(chunk: Buffer | string): void {
-    for (const listener of this.#diagnosticListeners) safelyInvoke(() => listener(chunk), this.#emitError);
+    for (const listener of this.#diagnosticListeners) safelyInvoke(() => listener(chunk), (error) => this.#emitError(error));
   }
 
   #emitError(error: Error): void {
@@ -150,7 +150,7 @@ export class NodeAppServerTransport implements AppServerTransport {
   #emitClose(reason: Error): void {
     if (this.#closed) return;
     this.#closed = true;
-    for (const listener of this.#closeListeners) safelyInvoke(() => listener(reason), this.#emitError);
+    for (const listener of this.#closeListeners) safelyInvoke(() => listener(reason), (error) => this.#emitError(error));
   }
 }
 

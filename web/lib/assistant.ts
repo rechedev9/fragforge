@@ -103,7 +103,18 @@ export interface AssistantSnapshot {
   messages: readonly AssistantMessage[];
   pendingActions: readonly AssistantAction[];
   busy: boolean;
+  revision: number;
   threadId?: string;
+}
+
+export type AssistantCommandResult =
+  | { ok: true; snapshot: AssistantSnapshot }
+  | { error: string; ok: false; snapshot?: AssistantSnapshot };
+
+export interface AssistantCommandState {
+  commandPendingCount: number;
+  controlError?: string;
+  snapshot: AssistantSnapshot;
 }
 
 export interface AssistantSendRequest {
@@ -124,13 +135,13 @@ export type AssistantEvent =
 export type AssistantEventListener = (event: AssistantEvent) => void;
 
 export interface FragforgeAssistantBridge {
-  status(): Promise<AssistantSnapshot>;
-  send(request: AssistantSendRequest): Promise<void>;
-  cancel(): Promise<void>;
-  approve(actionId: string): Promise<void>;
-  reject(actionId: string): Promise<void>;
-  newConversation(): Promise<void>;
-  clearHistory(): Promise<void>;
+  status(): Promise<AssistantCommandResult>;
+  send(request: AssistantSendRequest): Promise<AssistantCommandResult>;
+  cancel(): Promise<AssistantCommandResult>;
+  approve(actionId: string): Promise<AssistantCommandResult>;
+  reject(actionId: string): Promise<AssistantCommandResult>;
+  newConversation(): Promise<AssistantCommandResult>;
+  clearHistory(): Promise<AssistantCommandResult>;
   subscribe(listener: AssistantEventListener): () => void;
 }
 
@@ -141,6 +152,72 @@ export function initialAssistantSnapshot(availability: AssistantAvailability = A
     busy: false,
     messages: [],
     pendingActions: [],
+    revision: -1,
+  };
+}
+
+export function beginAssistantCommand(state: AssistantCommandState): AssistantCommandState {
+  return {
+    commandPendingCount: state.commandPendingCount + 1,
+    snapshot: state.snapshot,
+  };
+}
+
+export function finishAssistantCommand(
+  state: AssistantCommandState,
+  result: AssistantCommandResult,
+): AssistantCommandState {
+  const nextSnapshot = result.snapshot === undefined
+    ? state.snapshot
+    : newerSnapshot(state.snapshot, result.snapshot);
+  return {
+    commandPendingCount: Math.max(0, state.commandPendingCount - 1),
+    ...(result.ok ? {} : { controlError: result.error }),
+    snapshot: nextSnapshot,
+  };
+}
+
+export function parseAssistantCommandResult(value: unknown): AssistantCommandResult {
+  if (!isRecord(value) || typeof value.ok !== 'boolean') throw new Error('invalid assistant command result');
+  if (value.ok) {
+    return { ok: true, snapshot: parseAssistantSnapshot(value.snapshot) };
+  }
+  if (typeof value.error !== 'string' || value.error.trim() === '') throw new Error('invalid assistant command result');
+  return {
+    error: value.error,
+    ok: false,
+    ...(value.snapshot === undefined ? {} : { snapshot: parseAssistantSnapshot(value.snapshot) }),
+  };
+}
+
+export function parseAssistantSnapshotEvent(value: unknown): Extract<AssistantEvent, { type: 'snapshot' }> {
+  if (!isRecord(value) || value.type !== 'snapshot') throw new Error('invalid assistant snapshot event');
+  return { snapshot: parseAssistantSnapshot(value.snapshot), type: 'snapshot' };
+}
+
+function parseAssistantSnapshot(value: unknown): AssistantSnapshot {
+  if (!isRecord(value)
+    || !isAssistantAvailability(value.availability)
+    || typeof value.busy !== 'boolean'
+    || typeof value.revision !== 'number'
+    || !Number.isSafeInteger(value.revision)
+    || value.revision < 0
+    || !Array.isArray(value.messages)
+    || !value.messages.every(isAssistantMessage)
+    || !Array.isArray(value.pendingActions)
+    || !value.pendingActions.every(isAssistantAction)
+    || (value.error !== undefined && typeof value.error !== 'string')
+    || (value.threadId !== undefined && typeof value.threadId !== 'string')) {
+    throw new Error('invalid assistant snapshot');
+  }
+  return {
+    availability: value.availability,
+    busy: value.busy,
+    ...(value.error === undefined ? {} : { error: value.error }),
+    messages: value.messages,
+    pendingActions: value.pendingActions,
+    revision: value.revision,
+    ...(value.threadId === undefined ? {} : { threadId: value.threadId }),
   };
 }
 
@@ -220,7 +297,7 @@ export function assistantContextFromPathname(pathname: string): AssistantContext
 export function applyAssistantEvent(snapshot: AssistantSnapshot, event: AssistantEvent): AssistantSnapshot {
   switch (event.type) {
     case 'snapshot':
-      return event.snapshot;
+      return newerSnapshot(snapshot, event.snapshot);
     case 'availability':
       return { ...snapshot, availability: event.availability, error: event.error };
     case 'busy':
@@ -249,6 +326,10 @@ export function applyAssistantEvent(snapshot: AssistantSnapshot, event: Assistan
         pendingActions: snapshot.pendingActions.filter((action) => action.id !== event.actionId),
       };
   }
+}
+
+function newerSnapshot(current: AssistantSnapshot, candidate: AssistantSnapshot): AssistantSnapshot {
+  return candidate.revision > current.revision ? candidate : current;
 }
 
 function replaceMessage(messages: readonly AssistantMessage[], next: AssistantMessage): readonly AssistantMessage[] {
@@ -297,6 +378,57 @@ function isFragforgeAssistantBridge(value: unknown): value is FragforgeAssistant
     && typeof value.newConversation === 'function'
     && typeof value.clearHistory === 'function'
     && typeof value.subscribe === 'function';
+}
+
+function isAssistantAvailability(value: unknown): value is AssistantAvailability {
+  return value === ASSISTANT_AVAILABILITY.starting
+    || value === ASSISTANT_AVAILABILITY.ready
+    || value === ASSISTANT_AVAILABILITY.unavailable
+    || value === ASSISTANT_AVAILABILITY.error;
+}
+
+function isAssistantMessage(value: unknown): value is AssistantMessage {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.content === 'string'
+    && typeof value.createdAt === 'string'
+    && (value.role === ASSISTANT_MESSAGE_ROLES.assistant
+      || value.role === ASSISTANT_MESSAGE_ROLES.system
+      || value.role === ASSISTANT_MESSAGE_ROLES.user)
+    && (value.streaming === undefined || typeof value.streaming === 'boolean');
+}
+
+function isAssistantAction(value: unknown): value is AssistantAction {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.title === 'string'
+    && typeof value.operation === 'string'
+    && (value.risk === ASSISTANT_ACTION_RISKS.costly
+      || value.risk === ASSISTANT_ACTION_RISKS.destructive
+      || value.risk === ASSISTANT_ACTION_RISKS.read
+      || value.risk === ASSISTANT_ACTION_RISKS.write)
+    && (value.description === undefined || typeof value.description === 'string')
+    && (value.status === undefined || isAssistantActionStatus(value.status))
+    && (value.expiresAt === undefined || typeof value.expiresAt === 'string')
+    && (value.requiresApproval === undefined || typeof value.requiresApproval === 'boolean')
+    && (value.preview === undefined || isAssistantActionPreview(value.preview));
+}
+
+function isAssistantActionPreview(value: unknown): value is AssistantActionPreview {
+  return isRecord(value)
+    && (value.summary === undefined || typeof value.summary === 'string')
+    && (value.fields === undefined || (Array.isArray(value.fields) && value.fields.every((field) => (
+      isRecord(field) && typeof field.label === 'string' && typeof field.value === 'string'
+    ))));
+}
+
+function isAssistantActionStatus(value: unknown): value is AssistantActionStatus {
+  return value === ASSISTANT_ACTION_STATUSES.approved
+    || value === ASSISTANT_ACTION_STATUSES.completed
+    || value === ASSISTANT_ACTION_STATUSES.expired
+    || value === ASSISTANT_ACTION_STATUSES.failed
+    || value === ASSISTANT_ACTION_STATUSES.pending
+    || value === ASSISTANT_ACTION_STATUSES.rejected;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

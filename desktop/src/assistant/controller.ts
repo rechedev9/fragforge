@@ -23,6 +23,7 @@ import {
   type AppServerDynamicToolResult,
   type AppServerStartThreadOptions,
   type AppServerTurnCompletedEvent,
+  type AppServerTurnStartedEvent,
   type CodexAppServer,
   type CodexAppServerClientOptions,
   type CodexAppServerFactory,
@@ -31,6 +32,8 @@ import { AssistantHistoryStore } from './history.ts';
 
 const ACTION_EXPIRY_MS = 15 * 60_000;
 const INITIALIZE_TIMEOUT_MS = 15_000;
+const INTERRUPT_TIMEOUT_MS = 5_000;
+const TURN_TIMEOUT_MS = 5 * 60_000;
 const MAX_ACTION_CARDS = 16;
 const MAX_MESSAGE_CONTENT_LENGTH = 12_000;
 const MAX_MESSAGES = 200;
@@ -148,6 +151,7 @@ interface PendingCreativeBrief {
 }
 
 type PendingAction = PendingMcpAction | PendingCreativeBrief;
+type TurnOutcome = 'cancelled' | 'completed' | 'failed';
 
 interface CreativeBrief {
   cover: CreativeBriefCover;
@@ -199,8 +203,10 @@ export interface AssistantControllerOptions {
   log?: (message: string) => void;
   createAppServer?: CodexAppServerFactory;
   appServerOptions?: Omit<CodexAppServerClientOptions,
-    'clientInfo' | 'cwd' | 'dynamicTools' | 'onAgentMessageDelta' | 'onDiagnostic' | 'onDynamicToolCall' | 'onError' | 'onStatus' | 'onTurnCompleted'>;
+    'clientInfo' | 'cwd' | 'dynamicTools' | 'onAgentMessageDelta' | 'onDiagnostic' | 'onDynamicToolCall' | 'onError' | 'onStatus' | 'onTurnCompleted' | 'onTurnStarted'>;
+  interruptTimeoutMs?: number;
   version?: string;
+  turnTimeoutMs?: number;
 }
 
 /**
@@ -214,10 +220,12 @@ export class AssistantController {
   readonly #cwd: string;
   readonly #gateway: McpOperationGateway;
   readonly #history: AssistantHistoryStore;
+  readonly #interruptTimeoutMs: number;
   readonly #log: ((message: string) => void) | undefined;
   readonly #onEvent: ((event: AssistantEvent) => void) | undefined;
   readonly #orchestratorClient: OrchestratorClient;
   readonly #version: string;
+  readonly #turnTimeoutMs: number;
   readonly #pendingActions = new Map<string, PendingAction>();
   readonly #actionCards: AssistantAction[] = [];
   readonly #approvalControllers = new Set<AbortController>();
@@ -231,9 +239,17 @@ export class AssistantController {
   #historyLoaded = false;
   #initializing: Promise<void> | null = null;
   #messages: AssistantMessage[] = [];
+  #revision = 0;
   #activeMessageID: string | null = null;
+  #activeTurnGeneration: number | null = null;
   #activeTurnID: string | null = null;
+  #appServerGeneration = 0;
+  readonly #completedTurnIDs = new Set<string>();
+  #threadAttached = false;
   #threadID: string | undefined;
+  readonly #turnOutcomes = new Map<number, TurnOutcome>();
+  #turnGeneration = 0;
+  #turnTimeout: NodeJS.Timeout | null = null;
 
   constructor(options: AssistantControllerOptions) {
     this.#appServerOptions = options.appServerOptions;
@@ -241,10 +257,12 @@ export class AssistantController {
     this.#cwd = options.cwd;
     this.#gateway = options.gateway;
     this.#history = options.history;
+    this.#interruptTimeoutMs = positiveDuration(options.interruptTimeoutMs ?? INTERRUPT_TIMEOUT_MS, 'interruptTimeoutMs');
     this.#log = options.log;
     this.#onEvent = options.onEvent;
     this.#orchestratorClient = options.orchestratorClient;
     this.#version = options.version ?? '0.0.0';
+    this.#turnTimeoutMs = positiveDuration(options.turnTimeoutMs ?? TURN_TIMEOUT_MS, 'turnTimeoutMs');
   }
 
   async status(): Promise<AssistantSnapshot> {
@@ -268,6 +286,7 @@ export class AssistantController {
           },
         }),
       })),
+      revision: this.#revision,
       ...(this.#threadID === undefined ? {} : { threadId: this.#threadID }),
     };
   }
@@ -281,9 +300,12 @@ export class AssistantController {
 
     const userMessage = this.#appendMessage({ content: message, role: 'user' });
     const assistantMessage = this.#appendMessage({ content: '', role: 'assistant', streaming: true });
+    const generation = ++this.#turnGeneration;
     this.#activeMessageID = assistantMessage.id;
+    this.#activeTurnGeneration = generation;
     this.#activeTurnID = null;
     this.#busy = true;
+    this.#armTurnTimeout(generation);
     this.#publish();
     void this.#saveHistory();
 
@@ -293,18 +315,49 @@ export class AssistantController {
         clientUserMessageId: userMessage.id,
         cwd: this.#cwd,
       });
-      if (this.#busy) this.#activeTurnID = turn.id;
+      if (this.#busy && this.#activeTurnGeneration === generation) {
+        if (this.#activeTurnID === null) this.#activeTurnID = turn.id;
+        else if (this.#activeTurnID !== turn.id) this.#writeDiagnostic('turn/start response did not match turn/started');
+      }
     } catch (error) {
+      if (this.#activeTurnGeneration !== generation) {
+        const outcome = this.#turnOutcomes.get(generation);
+        if (outcome !== undefined && outcome !== 'failed') return;
+        throw new Error('No se pudo enviar el mensaje a Codex.');
+      }
       this.#finishTurnWithError(error);
       throw new Error('No se pudo enviar el mensaje a Codex.');
     }
   }
 
   async cancel(): Promise<void> {
-    if (!this.#busy || this.#appServer === null || this.#threadID === undefined || this.#activeTurnID === null) return;
+    if (!this.#busy || this.#appServer === null) return;
+    if (this.#threadID === undefined || this.#activeTurnID === null) {
+      const appServer = this.#appServer;
+      this.#appServer = null;
+      this.#appServerGeneration += 1;
+      this.#threadAttached = false;
+      appServer.close();
+      this.#availability = 'starting';
+      this.#finishTurnWithCancellation();
+      await this.#ensureReady();
+      return;
+    }
+    const generation = this.#activeTurnGeneration;
     try {
-      await this.#appServer.interruptTurn(this.#threadID, this.#activeTurnID);
-    } catch {
+      await withTimeout(
+        this.#appServer.interruptTurn(this.#threadID, this.#activeTurnID),
+        this.#interruptTimeoutMs,
+        'Codex no confirmó la cancelación a tiempo.',
+      );
+      if (this.#busy && this.#activeTurnGeneration !== null) {
+        this.#armTurnTimeout(this.#activeTurnGeneration, this.#interruptTimeoutMs);
+      }
+    } catch (error) {
+      if (generation !== null && this.#busy && this.#activeTurnGeneration === generation) {
+        await this.#restartAfterTurnFailure(error);
+        return;
+      }
       throw new Error('No se pudo cancelar el turno de Codex.');
     }
   }
@@ -382,12 +435,17 @@ export class AssistantController {
   async newConversation(): Promise<void> {
     if (this.#busy) throw new Error('wait for the active Codex turn before starting a new conversation');
     this.#threadID = undefined;
+    this.#threadAttached = false;
     this.#messages = [];
     this.#stateNotes.length = 0;
     this.#approvedBriefs.clear();
     this.#clearActions();
     await this.#history.save({ messages: [] });
     this.#publish();
+    if (this.#availability !== 'ready' || this.#appServer === null) {
+      await this.#ensureReady();
+      if (this.#availability !== 'ready' || this.#appServer === null) throw new Error('Codex is not available');
+    }
   }
 
   async clearHistory(): Promise<void> {
@@ -404,6 +462,7 @@ export class AssistantController {
     this.#approvalControllers.clear();
     this.#approvedBriefs.clear();
     this.#clearActions();
+    this.#clearTurnTimeout();
     this.#appServer?.close();
     this.#appServer = null;
   }
@@ -421,6 +480,7 @@ export class AssistantController {
   }
 
   async #start(): Promise<void> {
+    const generation = ++this.#appServerGeneration;
     try {
       await this.#loadHistory();
       const appServer = this.#createAppServer({
@@ -430,23 +490,28 @@ export class AssistantController {
         cwd: this.#cwd,
         dynamicTools: DYNAMIC_TOOLS,
         env: appServerEnvironment(this.#appServerOptions?.env),
-        onAgentMessageDelta: (delta) => this.#handleAgentDelta(delta),
+        onAgentMessageDelta: (delta) => this.#handleAgentDelta(delta, generation),
         onDiagnostic: (message) => this.#writeDiagnostic(message),
-        onDynamicToolCall: (call) => this.#handleDynamicToolCall(call),
-        onError: () => this.#handleAppServerFailure(),
+        onDynamicToolCall: (call, signal) => this.#handleDynamicToolCall(call, generation, signal),
+        onError: () => this.#handleAppServerFailure(generation),
         onStatus: (status) => {
-          if (status === 'failed' || (status === 'closed' && !this.#closed)) this.#handleAppServerFailure();
+          if (status === 'failed' || (status === 'closed' && !this.#closed)) this.#handleAppServerFailure(generation);
         },
-        onTurnCompleted: (event) => this.#handleTurnCompleted(event),
+        onTurnCompleted: (event) => this.#handleTurnCompleted(event, generation),
+        onTurnStarted: (event) => this.#handleTurnStarted(event, generation),
       });
       this.#appServer = appServer;
+      this.#threadAttached = false;
       await withTimeout(appServer.initialize(), INITIALIZE_TIMEOUT_MS, 'Codex tardó demasiado en responder.');
-      if (this.#closed) return;
+      if (this.#closed || generation !== this.#appServerGeneration) {
+        appServer.close();
+        return;
+      }
       this.#availability = 'ready';
       this.#error = undefined;
       this.#publish();
     } catch (error) {
-      if (this.#closed) return;
+      if (this.#closed || generation !== this.#appServerGeneration) return;
       this.#writeDiagnostic(`startup failed: ${errorMessage(error)}`);
       this.#appServer?.close();
       this.#appServer = null;
@@ -475,10 +540,22 @@ export class AssistantController {
       sandbox: 'read-only',
       serviceName: 'fragforge_studio',
     };
+    if (this.#threadID !== undefined && this.#threadAttached) return this.#threadID;
     if (this.#threadID !== undefined) {
       try {
-        await appServer.resumeThread(this.#threadID, options);
-        return this.#threadID;
+        const thread = await appServer.resumeThread(this.#threadID, {
+          approvalPolicy: options.approvalPolicy,
+          baseInstructions: options.baseInstructions,
+          cwd: options.cwd,
+          developerInstructions: options.developerInstructions,
+          excludeTurns: true,
+          model: options.model,
+          personality: options.personality,
+          sandbox: options.sandbox,
+        });
+        this.#threadID = thread.id;
+        this.#threadAttached = true;
+        return thread.id;
       } catch (error) {
         this.#writeDiagnostic(`could not resume stored Codex thread: ${errorMessage(error)}`);
         this.#threadID = undefined;
@@ -487,18 +564,44 @@ export class AssistantController {
     }
     const thread = await appServer.startThread(options);
     this.#threadID = thread.id;
+    this.#threadAttached = true;
     void this.#saveHistory();
     return thread.id;
   }
 
-  async #handleDynamicToolCall(call: AppServerDynamicToolCall): Promise<AppServerDynamicToolResult> {
-    if (this.#closed || call.namespace !== 'fragforge' || call.threadId !== this.#threadID) {
+  async #handleDynamicToolCall(
+    call: AppServerDynamicToolCall,
+    appServerGeneration: number,
+    signal: AbortSignal,
+  ): Promise<AppServerDynamicToolResult> {
+    const turnGeneration = this.#activeTurnGeneration;
+    if (this.#closed
+      || appServerGeneration !== this.#appServerGeneration
+      || turnGeneration === null
+      || this.#completedTurnIDs.has(call.turnId)
+      || call.namespace !== 'fragforge'
+      || call.threadId !== this.#threadID
+      || (this.#activeTurnID !== null && call.turnId !== this.#activeTurnID)) {
       return toolFailure('This FragForge tool call is not valid for the active Studio conversation.');
     }
+    if (this.#activeTurnID === null) this.#activeTurnID = call.turnId;
+    this.#armTurnTimeout(turnGeneration);
+    const isActive = (): boolean => !signal.aborted
+      && appServerGeneration === this.#appServerGeneration
+      && turnGeneration === this.#activeTurnGeneration
+      && this.#busy
+      && call.threadId === this.#threadID
+      && call.turnId === this.#activeTurnID;
     try {
-      if (call.tool === 'search') return await this.#search(call.arguments);
-      if (call.tool === 'read') return await this.#read(call.arguments);
-      if (call.tool === 'preview') return await this.#preview(call.arguments);
+      if (call.tool === 'search') {
+        const result = await this.#search(call.arguments, signal);
+        return isActive() ? result : toolFailure('This FragForge tool call is no longer active.');
+      }
+      if (call.tool === 'read') {
+        const result = await this.#read(call.arguments, signal);
+        return isActive() ? result : toolFailure('This FragForge tool call is no longer active.');
+      }
+      if (call.tool === 'preview') return await this.#preview(call.arguments, signal, isActive);
       if (call.tool === 'creative_brief') return this.#creativeBrief(call.arguments);
       return toolFailure('Unknown FragForge Studio tool.');
     } catch (error) {
@@ -507,13 +610,13 @@ export class AssistantController {
     }
   }
 
-  async #search(value: unknown): Promise<AppServerDynamicToolResult> {
+  async #search(value: unknown, signal: AbortSignal): Promise<AppServerDynamicToolResult> {
     const input = parseSearchInput(value);
     const operation = input.operation;
     if (typeof operation === 'string' && !ASSISTANT_OPERATIONS.has(operation)) {
       return toolFailure('That operation is not available in the embedded assistant. Use the corresponding Studio screen instead.');
     }
-    const result = await searchOperationCatalog(this.#orchestratorClient, parseSearchRequest(input));
+    const result = await searchOperationCatalog(this.#orchestratorClient, parseSearchRequest(input), signal);
     const operations = Array.isArray(result.operations)
       ? result.operations.filter((entry) => isJsonObject(entry) && typeof entry.name === 'string' && ASSISTANT_OPERATIONS.has(entry.name))
       : [];
@@ -525,16 +628,20 @@ export class AssistantController {
     });
   }
 
-  async #read(value: unknown): Promise<AppServerDynamicToolResult> {
+  async #read(value: unknown, signal: AbortSignal): Promise<AppServerDynamicToolResult> {
     const request = parseOperationToolInput(value);
     const definition = allowedOperation(request.operation);
     if (definition.risk !== 'read') return toolFailure('That operation changes Studio. Use preview so Studio can request exact user approval.');
-    const outcome = await this.#gateway.execute(request);
+    const outcome = await this.#gateway.execute(request, { signal });
     if (outcome.kind !== 'executed') return toolFailure('The read operation could not be completed.');
     return toolSuccess(executionForModel(outcome));
   }
 
-  async #preview(value: unknown): Promise<AppServerDynamicToolResult> {
+  async #preview(
+    value: unknown,
+    signal: AbortSignal,
+    isActive: () => boolean,
+  ): Promise<AppServerDynamicToolResult> {
     const request = parseOperationToolInput(value);
     const definition = allowedOperation(request.operation);
     if (definition.risk === 'read') return toolFailure('That operation is read-only. Use read instead.');
@@ -542,8 +649,9 @@ export class AssistantController {
     if (requiredBrief !== null && !this.#hasApprovedBrief(requiredBrief)) {
       return toolFailure('Studio requires a complete creative brief approved by the user for this exact capture or render action. Collect the choices, call creative_brief, wait for its card approval, then preview this operation again.');
     }
-    const outcome = await this.#gateway.execute(request);
+    const outcome = await this.#gateway.execute(request, { signal });
     if (outcome.kind !== 'preview') return toolFailure('The operation did not produce an approval preview.');
+    if (!isActive()) return toolFailure('This FragForge tool call is no longer active.');
     const cardPreview = reviewableActionPreview(outcome.arguments);
     if (cardPreview === null) {
       return toolFailure('Studio cannot show every validated detail of this request in one exact approval card. Use the corresponding Studio screen or reduce the selection before trying again.');
@@ -637,48 +745,118 @@ export class AssistantController {
     return required.format === undefined || approved.format === required.format;
   }
 
-  #handleAgentDelta(delta: AppServerAgentMessageDelta): void {
+  #handleAgentDelta(delta: AppServerAgentMessageDelta, appServerGeneration: number): void {
+    if (appServerGeneration !== this.#appServerGeneration || this.#completedTurnIDs.has(delta.turnId)) return;
     if (!this.#busy || delta.threadId !== this.#threadID || this.#activeMessageID === null) return;
     if (this.#activeTurnID !== null && delta.turnId !== this.#activeTurnID) return;
     const message = this.#messages.find((item) => item.id === this.#activeMessageID);
     if (message === undefined) return;
+    if (this.#activeTurnGeneration !== null) this.#armTurnTimeout(this.#activeTurnGeneration);
     if (message.content.length < MAX_MESSAGE_CONTENT_LENGTH) {
       message.content += delta.delta.slice(0, MAX_MESSAGE_CONTENT_LENGTH - message.content.length);
     }
     this.#publish();
   }
 
-  #handleTurnCompleted(event: AppServerTurnCompletedEvent): void {
+  #handleTurnStarted(event: AppServerTurnStartedEvent, appServerGeneration: number): void {
+    if (appServerGeneration !== this.#appServerGeneration || this.#completedTurnIDs.has(event.turn.id)) return;
+    if (!this.#busy || event.threadId !== this.#threadID) return;
+    if (this.#activeTurnID === null) this.#activeTurnID = event.turn.id;
+  }
+
+  #handleTurnCompleted(event: AppServerTurnCompletedEvent, appServerGeneration: number): void {
+    if (appServerGeneration !== this.#appServerGeneration || this.#completedTurnIDs.has(event.turn.id)) return;
     if (!this.#busy || event.threadId !== this.#threadID) return;
     if (this.#activeTurnID !== null && event.turn.id !== this.#activeTurnID) return;
+    this.#completedTurnIDs.add(event.turn.id);
+    if (this.#completedTurnIDs.size > 100) this.#completedTurnIDs.delete(this.#completedTurnIDs.values().next().value ?? '');
     const message = this.#activeMessageID === null ? undefined : this.#messages.find((item) => item.id === this.#activeMessageID);
     if (message !== undefined) message.streaming = false;
+    this.#markTurnOutcome('completed');
+    this.#clearTurnTimeout();
     this.#busy = false;
     this.#activeMessageID = null;
+    this.#activeTurnGeneration = null;
     this.#activeTurnID = null;
     this.#publish();
     void this.#saveHistory();
   }
 
   #finishTurnWithError(error: unknown): void {
+    this.#clearTurnTimeout();
     this.#writeDiagnostic(`turn failed: ${errorMessage(error)}`);
     const message = this.#activeMessageID === null ? undefined : this.#messages.find((item) => item.id === this.#activeMessageID);
     if (message !== undefined) {
       message.content = message.content || 'Codex no pudo completar esta respuesta.';
       message.streaming = false;
     }
+    this.#markTurnOutcome('failed');
     this.#busy = false;
     this.#activeMessageID = null;
+    this.#activeTurnGeneration = null;
     this.#activeTurnID = null;
     this.#publish();
     void this.#saveHistory();
   }
 
-  #handleAppServerFailure(): void {
-    if (this.#closed) return;
+  #finishTurnWithCancellation(): void {
+    this.#clearTurnTimeout();
+    const message = this.#activeMessageID === null ? undefined : this.#messages.find((item) => item.id === this.#activeMessageID);
+    if (message !== undefined) {
+      message.content = message.content || 'Respuesta cancelada.';
+      message.streaming = false;
+    }
+    this.#markTurnOutcome('cancelled');
+    this.#busy = false;
+    this.#activeMessageID = null;
+    this.#activeTurnGeneration = null;
+    this.#activeTurnID = null;
+    this.#publish();
+    void this.#saveHistory();
+  }
+
+  #handleAppServerFailure(generation: number): void {
+    if (this.#closed || generation !== this.#appServerGeneration) return;
+    const appServer = this.#appServer;
+    this.#appServer = null;
+    this.#appServerGeneration += 1;
+    appServer?.close();
     this.#availability = 'error';
+    this.#threadAttached = false;
     this.#error = 'La conexión local con Codex se cerró. Abre una conversación nueva para volver a intentarlo.';
     this.#finishTurnWithError(new Error('Codex app-server closed'));
+  }
+
+  #armTurnTimeout(generation: number, timeoutMs = this.#turnTimeoutMs): void {
+    this.#clearTurnTimeout();
+    this.#turnTimeout = setTimeout(() => {
+      if (!this.#busy || this.#activeTurnGeneration !== generation) return;
+      void this.#restartAfterTurnFailure(new Error(`turn timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    this.#turnTimeout.unref();
+  }
+
+  #clearTurnTimeout(): void {
+    if (this.#turnTimeout === null) return;
+    clearTimeout(this.#turnTimeout);
+    this.#turnTimeout = null;
+  }
+
+  async #restartAfterTurnFailure(error: unknown): Promise<void> {
+    const appServer = this.#appServer;
+    this.#appServer = null;
+    this.#appServerGeneration += 1;
+    this.#threadAttached = false;
+    this.#availability = 'starting';
+    appServer?.close();
+    this.#finishTurnWithError(error);
+    await this.#ensureReady();
+  }
+
+  #markTurnOutcome(outcome: TurnOutcome): void {
+    if (this.#activeTurnGeneration === null) return;
+    this.#turnOutcomes.set(this.#activeTurnGeneration, outcome);
+    if (this.#turnOutcomes.size > 100) this.#turnOutcomes.delete(this.#turnOutcomes.keys().next().value ?? -1);
   }
 
   #appendMessage(input: Pick<AssistantMessage, 'content' | 'role'> & { streaming?: boolean }): AssistantMessage {
@@ -746,6 +924,7 @@ export class AssistantController {
 
   #publish(): void {
     if (this.#closed) return;
+    this.#revision += 1;
     try {
       this.#onEvent?.({ snapshot: this.snapshot(), type: 'snapshot' });
     } catch {
@@ -1131,4 +1310,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function positiveDuration(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} must be a positive integer`);
+  return value;
 }

@@ -67,6 +67,8 @@ export interface AppServerTurnCompletedEvent {
   turn: AppServerTurn;
 }
 
+export type AppServerTurnStartedEvent = AppServerTurnCompletedEvent;
+
 export interface AppServerDynamicToolCall {
   requestId: AppServerRequestID;
   threadId: string;
@@ -105,7 +107,7 @@ export interface AppServerResumeThreadOptions {
   baseInstructions?: string;
   cwd?: string;
   developerInstructions?: string;
-  dynamicTools?: AppServerDynamicTool[];
+  excludeTurns?: boolean;
   model?: string;
   personality?: string;
   sandbox?: AppServerSandbox;
@@ -124,14 +126,17 @@ export interface CodexAppServerClientOptions extends AppServerLaunchOptions {
   launch?: AppServerTransportLauncher;
   clientInfo?: AppServerClientInfo;
   dynamicTools?: AppServerDynamicTool[];
+  dynamicToolTimeoutMs?: number;
   maxFrameBytes?: number;
   onAgentMessageDelta?: (delta: AppServerAgentMessageDelta) => void;
   onDiagnostic?: (message: string) => void;
-  onDynamicToolCall?: (call: AppServerDynamicToolCall) => Promise<AppServerDynamicToolResult>;
+  onDynamicToolCall?: (call: AppServerDynamicToolCall, signal: AbortSignal) => Promise<AppServerDynamicToolResult>;
   onError?: (error: Error) => void;
   onNotification?: (notification: AppServerNotification) => void;
   onStatus?: (status: AppServerStatus) => void;
   onTurnCompleted?: (event: AppServerTurnCompletedEvent) => void;
+  onTurnStarted?: (event: AppServerTurnStartedEvent) => void;
+  requestTimeoutMs?: number;
 }
 
 /** The controller-facing contract; tests can supply a lightweight fake. */
@@ -151,6 +156,7 @@ export type CodexAppServerFactory = (options: CodexAppServerClientOptions) => Co
 interface PendingRequest {
   reject: (reason: Error) => void;
   resolve: (value: unknown) => void;
+  timeout: NodeJS.Timeout;
 }
 
 interface AppServerErrorObject {
@@ -166,6 +172,8 @@ interface AppServerResponse {
 }
 
 const DEFAULT_MAX_FRAME_BYTES = 1024 * 1024;
+const DEFAULT_DYNAMIC_TOOL_TIMEOUT_MS = 35_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_CLIENT_INFO: AppServerClientInfo = {
   name: 'fragforge_studio',
   title: 'FragForge Studio',
@@ -206,6 +214,21 @@ export class AppServerClosedError extends Error {
   }
 }
 
+/** An app-server RPC did not acknowledge before its bounded deadline. */
+export class AppServerRequestTimeoutError extends Error {
+  constructor(method: string, timeoutMs: number) {
+    super(`${method} timed out after ${timeoutMs}ms`);
+    this.name = 'AppServerRequestTimeoutError';
+  }
+}
+
+class AppServerDynamicToolTimeoutError extends Error {
+  constructor() {
+    super('Dynamic tool call timed out.');
+    this.name = 'AppServerDynamicToolTimeoutError';
+  }
+}
+
 /**
  * A narrow client for the documented `codex app-server` JSONL protocol.
  *
@@ -217,15 +240,19 @@ export class CodexAppServerClient implements CodexAppServer {
   readonly #transport: AppServerTransport;
   readonly #clientInfo: AppServerClientInfo;
   readonly #defaultDynamicTools: AppServerDynamicTool[];
+  readonly #dynamicToolTimeoutMs: number;
   readonly #maxFrameBytes: number;
   readonly #onAgentMessageDelta: ((delta: AppServerAgentMessageDelta) => void) | undefined;
   readonly #onDiagnostic: ((message: string) => void) | undefined;
-  readonly #onDynamicToolCall: ((call: AppServerDynamicToolCall) => Promise<AppServerDynamicToolResult>) | undefined;
+  readonly #onDynamicToolCall: ((call: AppServerDynamicToolCall, signal: AbortSignal) => Promise<AppServerDynamicToolResult>) | undefined;
   readonly #onError: ((error: Error) => void) | undefined;
   readonly #onNotification: ((notification: AppServerNotification) => void) | undefined;
   readonly #onStatus: ((status: AppServerStatus) => void) | undefined;
   readonly #onTurnCompleted: ((event: AppServerTurnCompletedEvent) => void) | undefined;
+  readonly #onTurnStarted: ((event: AppServerTurnStartedEvent) => void) | undefined;
+  readonly #requestTimeoutMs: number;
   readonly #decoder = new StringDecoder('utf8');
+  readonly #dynamicToolControllers = new Set<AbortController>();
   readonly #pending = new Map<AppServerRequestID, PendingRequest>();
   #buffer = '';
   #currentFrameBytes = 0;
@@ -246,6 +273,7 @@ export class CodexAppServerClient implements CodexAppServer {
       });
     this.#clientInfo = { ...DEFAULT_CLIENT_INFO, ...options.clientInfo };
     this.#defaultDynamicTools = options.dynamicTools ?? [];
+    this.#dynamicToolTimeoutMs = positiveInteger(options.dynamicToolTimeoutMs ?? DEFAULT_DYNAMIC_TOOL_TIMEOUT_MS, 'dynamicToolTimeoutMs');
     this.#maxFrameBytes = positiveInteger(options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES, 'maxFrameBytes');
     this.#onAgentMessageDelta = options.onAgentMessageDelta;
     this.#onDiagnostic = options.onDiagnostic;
@@ -254,6 +282,8 @@ export class CodexAppServerClient implements CodexAppServer {
     this.#onNotification = options.onNotification;
     this.#onStatus = options.onStatus;
     this.#onTurnCompleted = options.onTurnCompleted;
+    this.#onTurnStarted = options.onTurnStarted;
+    this.#requestTimeoutMs = positiveInteger(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, 'requestTimeoutMs');
 
     this.#transport.onData((chunk) => this.#handleData(chunk));
     this.#transport.onDiagnostic((chunk) => this.#emitDiagnostic(toText(chunk)));
@@ -288,7 +318,7 @@ export class CodexAppServerClient implements CodexAppServer {
   async resumeThread(threadId: string, options: AppServerResumeThreadOptions = {}): Promise<AppServerThread> {
     await this.initialize();
     if (!isNonEmptyString(threadId)) throw new Error('threadId is required');
-    const result = await this.#request('thread/resume', threadResumeParams(threadId, options, this.#defaultDynamicTools));
+    const result = await this.#request('thread/resume', threadResumeParams(threadId, options));
     return threadFromResult(result, 'thread/resume');
   }
 
@@ -345,12 +375,23 @@ export class CodexAppServerClient implements CodexAppServer {
     const id = this.#nextRequestID;
     this.#nextRequestID += 1;
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, { reject, resolve });
+      const timeout = setTimeout(() => {
+        const pending = this.#pending.get(id);
+        if (pending === undefined) return;
+        this.#pending.delete(id);
+        const failure = new AppServerRequestTimeoutError(method, this.#requestTimeoutMs);
+        pending.reject(failure);
+        this.#fail(failure);
+        this.#transport.close();
+      }, this.#requestTimeoutMs);
+      timeout.unref();
+      this.#pending.set(id, { reject, resolve, timeout });
       const message = params === undefined ? { id, method } : { id, method, params };
       void this.#write(message).catch((error: unknown) => {
         const pending = this.#pending.get(id);
         if (pending === undefined) return;
         this.#pending.delete(id);
+        clearTimeout(pending.timeout);
         const failure = toError(error);
         pending.reject(failure);
         this.#fail(failure);
@@ -438,6 +479,7 @@ export class CodexAppServerClient implements CodexAppServer {
       return;
     }
     this.#pending.delete(response.id);
+    clearTimeout(pending.timeout);
     if (response.error !== undefined) {
       pending.reject(new AppServerResponseError(response.error));
       return;
@@ -460,11 +502,24 @@ export class CodexAppServerClient implements CodexAppServer {
       await this.#sendResult(request.id, toolFailure('FragForge Studio has no handler for dynamic tool calls.'));
       return;
     }
+    const controller = new AbortController();
+    this.#dynamicToolControllers.add(controller);
     try {
-      await this.#sendResult(request.id, await handler(call));
+      await this.#sendResult(request.id, await withTimeout(
+        handler(call, controller.signal),
+        this.#dynamicToolTimeoutMs,
+        () => new AppServerDynamicToolTimeoutError(),
+      ));
     } catch (error) {
+      if (error instanceof AppServerDynamicToolTimeoutError) {
+        controller.abort(error);
+        await this.#sendResult(request.id, toolFailure(error.message));
+        return;
+      }
       this.#emitError(toError(error));
       await this.#sendResult(request.id, toolFailure(`Dynamic tool call failed: ${errorMessage(error)}`));
+    } finally {
+      this.#dynamicToolControllers.delete(controller);
     }
   }
 
@@ -478,6 +533,11 @@ export class CodexAppServerClient implements CodexAppServer {
     if (notification.method === 'turn/completed') {
       const completed = parseTurnCompleted(notification.params);
       if (completed !== null) this.#invoke(() => this.#onTurnCompleted?.(completed));
+      return;
+    }
+    if (notification.method === 'turn/started') {
+      const started = parseTurnCompleted(notification.params);
+      if (started !== null) this.#invoke(() => this.#onTurnStarted?.(started));
     }
   }
 
@@ -509,22 +569,35 @@ export class CodexAppServerClient implements CodexAppServer {
     if (this.#status === 'closed') return;
     this.#buffer = '';
     this.#currentFrameBytes = 0;
-    for (const pending of this.#pending.values()) pending.reject(reason);
+    this.#abortDynamicTools(reason);
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(reason);
+    }
     this.#pending.clear();
     if (transitionToClosed) this.#setStatus('closed');
   }
 
   #fail(error: Error): void {
     if (this.#status === 'failed' || this.#status === 'closed') return;
-    for (const pending of this.#pending.values()) pending.reject(error);
+    this.#abortDynamicTools(error);
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
     this.#pending.clear();
-    this.#emitError(error);
     this.#setStatus('failed');
+    this.#emitError(error);
   }
 
   #protocolFailure(error: Error): void {
     this.#fail(error);
     this.#transport.close();
+  }
+
+  #abortDynamicTools(reason: Error): void {
+    for (const controller of this.#dynamicToolControllers) controller.abort(reason);
+    this.#dynamicToolControllers.clear();
   }
 
   #setStatus(status: AppServerStatus): void {
@@ -591,17 +664,16 @@ function threadStartParams(
 function threadResumeParams(
   threadId: string,
   options: AppServerResumeThreadOptions,
-  defaultDynamicTools: AppServerDynamicTool[],
 ): Record<string, unknown> {
   const params: Record<string, unknown> = { threadId };
   addOptional(params, 'approvalPolicy', options.approvalPolicy ?? 'never');
   addOptional(params, 'baseInstructions', options.baseInstructions);
   addOptional(params, 'cwd', options.cwd);
   addOptional(params, 'developerInstructions', options.developerInstructions);
+  addOptional(params, 'excludeTurns', options.excludeTurns);
   addOptional(params, 'model', options.model);
   addOptional(params, 'personality', options.personality);
   addOptional(params, 'sandbox', options.sandbox ?? 'read-only');
-  addDynamicTools(params, options.dynamicTools ?? defaultDynamicTools);
   return params;
 }
 
@@ -733,4 +805,21 @@ function toError(value: unknown): Error {
 
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutError: () => Error): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(timeoutError()), timeoutMs);
+    timeout.unref();
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }

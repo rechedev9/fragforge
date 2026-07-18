@@ -50,13 +50,12 @@ import {
 } from './xai-settings-ipc';
 import { buildMCPConfigInfo, MCP_CONFIG_CHANNEL, parseMCPConfigRequest } from './mcp-config-ipc';
 import {
-  ASSISTANT_ACTION,
   ASSISTANT_CHANNEL,
   ASSISTANT_EVENT_CHANNEL,
-  parseAssistantRequest,
   type AssistantEvent,
-  type AssistantSnapshot,
+  type AssistantIPCResponse,
 } from './assistant-ipc';
+import { assistantCommandFailure, dispatchAssistantRequest } from './assistant-command';
 import { AssistantController } from './assistant/controller';
 import { AssistantHistoryStore } from './assistant/history';
 import { McpOperationGateway } from './mcp/operation-gateway';
@@ -764,52 +763,10 @@ function registerMCPConfigIPC(): void {
   });
 }
 
-function assistantFailure(error: string): AssistantSnapshot {
-  return {
-    availability: 'error',
-    busy: false,
-    error,
-    messages: [],
-    pendingActions: [],
-  };
-}
-
 function registerAssistantIPC(): void {
-  ipcMain.handle(ASSISTANT_CHANNEL, async (event, value: unknown): Promise<AssistantSnapshot> => {
-    if (!trustedXAISettingsSender(event)) return assistantFailure('Solicitud del asistente rechazada.');
-    let request;
-    try {
-      request = parseAssistantRequest(value);
-    } catch {
-      return assistantFailure('Solicitud del asistente no válida.');
-    }
-    try {
-      const controller = getAssistantController();
-      switch (request.action) {
-        case ASSISTANT_ACTION.status:
-          return await controller.status();
-        case ASSISTANT_ACTION.send:
-          await controller.send(request.message, request.context);
-          return controller.snapshot();
-        case ASSISTANT_ACTION.cancel:
-          await controller.cancel();
-          return controller.snapshot();
-        case ASSISTANT_ACTION.approve:
-          await controller.approve(request.actionId);
-          return controller.snapshot();
-        case ASSISTANT_ACTION.reject:
-          controller.reject(request.actionId);
-          return controller.snapshot();
-        case ASSISTANT_ACTION.newConversation:
-          await controller.newConversation();
-          return controller.snapshot();
-        case ASSISTANT_ACTION.clear:
-          await controller.clearHistory();
-          return controller.snapshot();
-      }
-    } catch {
-      return assistantFailure('No se pudo completar la operación del asistente.');
-    }
+  ipcMain.handle(ASSISTANT_CHANNEL, async (event, value: unknown): Promise<AssistantIPCResponse> => {
+    if (!trustedXAISettingsSender(event)) return assistantCommandFailure('Solicitud del asistente rechazada.');
+    return dispatchAssistantRequest(value, getAssistantController);
   });
 }
 

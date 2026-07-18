@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -26,26 +27,21 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAssistantContext } from '@/components/assistant/assistant-provider';
 import {
-  applyAssistantEvent,
   assistantContextFromPathname,
   ASSISTANT_ACTION_STATUSES,
   ASSISTANT_AVAILABILITY,
   ASSISTANT_MESSAGE_ROLES,
-  getFragforgeAssistantBridge,
-  initialAssistantSnapshot,
   type AssistantAction,
   type AssistantActionRisk,
   type AssistantAvailability,
-  type AssistantEvent,
   type AssistantMessage,
   type AssistantSnapshot,
-  type FragforgeAssistantBridge,
 } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 
 const ASSISTANT_MESSAGE_MAX_LENGTH = 4_000;
-const EMPTY_UNAVAILABLE_ERROR = 'El asistente integrado solo está disponible en FragForge Studio para Windows.';
 const TIME_FORMATTER = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' });
 
 const RISK_COPY: Readonly<Record<AssistantActionRisk, { label: string; className: string }>> = {
@@ -68,132 +64,87 @@ type AssistantPanelProps = {
 export function AssistantPanel({ className }: AssistantPanelProps): ReactElement {
   const pathname = usePathname();
   const context = useMemo(() => assistantContextFromPathname(pathname), [pathname]);
-  const [bridge, setBridge] = useState<FragforgeAssistantBridge | null>(null);
-  const [snapshot, setSnapshot] = useState<AssistantSnapshot>(() => initialAssistantSnapshot());
-  const [draft, setDraft] = useState('');
-  const [controlError, setControlError] = useState<string>();
+  const {
+    bridge,
+    cancelPending,
+    commandPendingCount,
+    controlError,
+    draft,
+    runCommand,
+    setCancelPending,
+    setDraft,
+    snapshot,
+  } = useAssistantContext();
   const [activeActionId, setActiveActionId] = useState<string>();
   const [clearConfirmationVisible, setClearConfirmationVisible] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const nextBridge = getFragforgeAssistantBridge();
-    if (nextBridge === null) {
-      setBridge(null);
-      setSnapshot({
-        ...initialAssistantSnapshot(ASSISTANT_AVAILABILITY.unavailable),
-        error: EMPTY_UNAVAILABLE_ERROR,
-      });
-      return;
-    }
-
-    let mounted = true;
-    setBridge(nextBridge);
-    const receive = (event: AssistantEvent): void => {
-      if (!mounted) return;
-      setSnapshot((previous) => applyAssistantEvent(previous, event));
-    };
-    let unsubscribe = (): void => {};
-
-    try {
-      unsubscribe = nextBridge.subscribe(receive);
-    } catch {
-      if (mounted) {
-        setSnapshot({
-          ...initialAssistantSnapshot(ASSISTANT_AVAILABILITY.error),
-          error: 'No se pudo conectar el panel con Codex.',
-        });
-      }
-    }
-
-    void nextBridge.status()
-      .then((nextSnapshot) => {
-        if (mounted) setSnapshot(nextSnapshot);
-      })
-      .catch(() => {
-        if (mounted) {
-          setSnapshot({
-            ...initialAssistantSnapshot(ASSISTANT_AVAILABILITY.error),
-            error: 'No se pudo iniciar la conversación de Codex.',
-          });
-        }
-      });
-
-    return () => {
-      mounted = false;
-      unsubscribe();
-    };
-  }, []);
+  const composerId = useId();
+  const actionsTitleId = useId();
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: snapshot.busy ? 'smooth' : 'auto', block: 'end' });
   }, [snapshot.busy, snapshot.messages, snapshot.pendingActions]);
 
   const isReady = snapshot.availability === ASSISTANT_AVAILABILITY.ready;
-  const canSend = isReady && !snapshot.busy && bridge !== null && draft.trim().length > 0;
+  const isBusy = snapshot.busy || commandPendingCount > 0;
+  const canSend = isReady && !isBusy && bridge !== null && draft.trim().length > 0;
 
   const sendMessage = useCallback(async (): Promise<void> => {
     const message = draft.trim();
-    if (bridge === null || !isReady || snapshot.busy || message.length === 0) return;
-
-    setControlError(undefined);
-    setSnapshot((previous) => ({ ...previous, busy: true }));
-    try {
-      await bridge.send({ context, message });
-      setDraft('');
-    } catch {
-      setSnapshot((previous) => ({ ...previous, busy: false }));
-      setControlError('No se pudo enviar el mensaje. Inténtalo de nuevo.');
-    }
-  }, [bridge, context, draft, isReady, snapshot.busy]);
+    if (bridge === null || !isReady || isBusy || message.length === 0) return;
+    const accepted = await runCommand(
+      (activeBridge) => activeBridge.send({ context, message }),
+      'No se pudo enviar el mensaje. Inténtalo de nuevo.',
+    );
+    if (accepted) setDraft('');
+  }, [bridge, context, draft, isBusy, isReady, runCommand, setDraft]);
 
   const cancelTurn = useCallback(async (): Promise<void> => {
-    if (bridge === null || !snapshot.busy) return;
-    setControlError(undefined);
+    if (bridge === null || !snapshot.busy || cancelPending) return;
+    setCancelPending(true);
     try {
-      await bridge.cancel();
-    } catch {
-      setControlError('No se pudo cancelar el turno actual.');
+      await runCommand(
+        (activeBridge) => activeBridge.cancel(),
+        'No se pudo cancelar el turno actual.',
+      );
+    } finally {
+      setCancelPending(false);
     }
-  }, [bridge, snapshot.busy]);
+  }, [bridge, cancelPending, runCommand, setCancelPending, snapshot.busy]);
 
   const decideAction = useCallback(async (actionId: string, decision: 'approve' | 'reject'): Promise<void> => {
-    if (bridge === null) return;
+    if (bridge === null || isBusy) return;
     setActiveActionId(actionId);
-    setControlError(undefined);
     try {
-      if (decision === 'approve') {
-        await bridge.approve(actionId);
-      } else {
-        await bridge.reject(actionId);
-      }
-    } catch {
-      setControlError('No se pudo registrar esta decisión. La operación no se ha aplicado.');
+      await runCommand(
+        (activeBridge) => decision === 'approve'
+          ? activeBridge.approve(actionId)
+          : activeBridge.reject(actionId),
+        'No se pudo registrar esta decisión. La operación no se ha aplicado.',
+      );
     } finally {
       setActiveActionId(undefined);
     }
-  }, [bridge]);
+  }, [bridge, isBusy, runCommand]);
 
   const startNewConversation = useCallback(async (): Promise<void> => {
-    if (bridge === null || snapshot.busy) return;
-    setControlError(undefined);
-    try {
-      await bridge.newConversation();
-    } catch {
-      setControlError('No se pudo crear una conversación nueva.');
-    }
-  }, [bridge, snapshot.busy]);
+    if (bridge === null || isBusy) return;
+    await runCommand(
+      (activeBridge) => activeBridge.newConversation(),
+      'No se pudo crear una conversación nueva.',
+    );
+  }, [bridge, isBusy, runCommand]);
 
   const clearHistory = useCallback(async (): Promise<void> => {
-    if (bridge === null) return;
-    setControlError(undefined);
-    try {
-      await bridge.clearHistory();
+    if (bridge === null || isBusy) return;
+    const cleared = await runCommand(
+      (activeBridge) => activeBridge.clearHistory(),
+      'No se pudo borrar el historial mostrado.',
+    );
+    if (cleared) {
       setClearConfirmationVisible(false);
-    } catch {
-      setControlError('No se pudo borrar el historial mostrado.');
     }
-  }, [bridge]);
+  }, [bridge, isBusy, runCommand]);
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -237,7 +188,7 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
               variant="ghost"
               size="icon-xs"
               onClick={() => void startNewConversation()}
-              disabled={bridge === null || snapshot.busy}
+              disabled={bridge === null || isBusy}
               aria-label="Nueva conversación"
               title="Nueva conversación"
             >
@@ -248,7 +199,7 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
               variant={clearConfirmationVisible ? 'destructive' : 'ghost'}
               size="icon-xs"
               onClick={() => setClearConfirmationVisible((visible) => !visible)}
-              disabled={bridge === null}
+              disabled={bridge === null || isBusy}
               aria-label="Borrar historial de Studio"
               title="Borrar historial de Studio"
             >
@@ -276,7 +227,7 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
               <Button type="button" variant="ghost" size="xs" onClick={() => setClearConfirmationVisible(false)}>
                 Cancelar
               </Button>
-              <Button type="button" variant="destructive" size="xs" onClick={() => void clearHistory()}>
+              <Button type="button" variant="destructive" size="xs" onClick={() => void clearHistory()} disabled={isBusy}>
                 Borrar
               </Button>
             </div>
@@ -288,10 +239,10 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
         <ConversationContent snapshot={snapshot} />
 
         {snapshot.pendingActions.length > 0 ? (
-          <section className="mt-5 space-y-2.5" aria-labelledby="assistant-actions-title">
+          <section className="mt-5 space-y-2.5" aria-labelledby={actionsTitleId}>
             <div className="flex items-center gap-2 px-1">
               <ShieldAlert className="size-3.5 text-warning" aria-hidden />
-              <h3 id="assistant-actions-title" className="font-[family-name:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+              <h3 id={actionsTitleId} className="font-[family-name:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                 Acciones para revisar
               </h3>
             </div>
@@ -300,7 +251,7 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
                 key={action.id}
                 action={action}
                 busy={activeActionId === action.id}
-                disabled={bridge === null}
+                disabled={bridge === null || isBusy}
                 onApprove={() => void decideAction(action.id, 'approve')}
                 onReject={() => void decideAction(action.id, 'reject')}
               />
@@ -315,17 +266,17 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
         {snapshot.error ? <p className="mb-2 text-xs leading-4 text-warning" role="status">{snapshot.error}</p> : null}
 
         <form onSubmit={submit}>
-          <label className="sr-only" htmlFor="assistant-composer">Escribe a Codex</label>
+          <label className="sr-only" htmlFor={composerId}>Escribe a Codex</label>
           <div className="relative">
             <textarea
-              id="assistant-composer"
+              id={composerId}
               value={draft}
               onChange={(event) => setDraft(event.currentTarget.value)}
               onKeyDown={onComposerKeyDown}
-              disabled={!isReady || snapshot.busy || bridge === null}
+              disabled={!isReady || isBusy || bridge === null}
               maxLength={ASSISTANT_MESSAGE_MAX_LENGTH}
               rows={3}
-              placeholder={composerPlaceholder(snapshot.availability, snapshot.busy)}
+              placeholder={composerPlaceholder(snapshot.availability, isBusy)}
               className="min-h-22 w-full resize-none border border-input bg-surface/80 px-3 py-2.5 pr-11 text-sm leading-5 text-foreground shadow-xs outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground/75 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
             />
             {snapshot.busy ? (
@@ -335,6 +286,7 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
                 size="icon-xs"
                 className="absolute right-2 bottom-2"
                 onClick={() => void cancelTurn()}
+                disabled={cancelPending}
                 aria-label="Cancelar respuesta"
                 title="Cancelar respuesta"
               >

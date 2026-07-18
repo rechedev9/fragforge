@@ -93,8 +93,15 @@ export interface AssistantSnapshot {
   error?: string;
   messages: readonly AssistantMessage[];
   pendingActions: readonly AssistantAction[];
+  revision: number;
   threadId?: string;
 }
+
+export type AssistantCommandResult =
+  | { ok: true; snapshot: AssistantSnapshot }
+  | { error: string; ok: false; snapshot?: AssistantSnapshot };
+
+export type AssistantIPCResponse = AssistantCommandResult;
 
 export type AssistantEvent =
   | { snapshot: AssistantSnapshot; type: 'snapshot' }

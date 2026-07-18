@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   AppServerClosedError,
+  AppServerRequestTimeoutError,
   CodexAppServerClient,
 } from './app-server-client.ts';
 import type { AppServerTransport } from './app-server-transport.ts';
@@ -160,6 +161,39 @@ test('correlates thread and turn requests and applies safe app-server defaults',
   await interrupted;
 });
 
+test('resumes a persisted thread without resending unsupported dynamic tools or full history', async () => {
+  const transport = new FakeTransport();
+  const client = new CodexAppServerClient({
+    dynamicTools: [{
+      description: 'FragForge tools',
+      inputSchema: { type: 'object' },
+      name: 'fragforge',
+      type: 'function',
+    }],
+    transport,
+  });
+  const ready = client.initialize();
+  await waitForFrames(transport, 1);
+  transport.emit({ id: 1, result: {} });
+  await ready;
+
+  const resume = client.resumeThread('thr-1', { cwd: 'C:\\FragForge', excludeTurns: true });
+  await waitForFrames(transport, 3);
+  assert.deepEqual(written(transport, 2), {
+    id: 2,
+    method: 'thread/resume',
+    params: {
+      approvalPolicy: 'never',
+      cwd: 'C:\\FragForge',
+      excludeTurns: true,
+      sandbox: 'read-only',
+      threadId: 'thr-1',
+    },
+  });
+  transport.emit({ id: 2, result: { thread: { id: 'thr-1', sessionId: 'session-1' } } });
+  await resume;
+});
+
 test('forwards agent deltas and completed turn notifications while preserving generic notifications', async () => {
   const transport = new FakeTransport();
   const deltas: string[] = [];
@@ -257,6 +291,71 @@ test('rejects outstanding requests after the transport closes', async () => {
   await assert.rejects(initializing, AppServerClosedError);
   assert.equal(client.status, 'closed');
   await assert.rejects(client.startThread(), AppServerClosedError);
+});
+
+test('fails the transport when an app-server request exceeds its deadline', async () => {
+  const transport = new FakeTransport();
+  const client = new CodexAppServerClient({ requestTimeoutMs: 10, transport });
+
+  const initializing = client.initialize();
+  await waitForFrames(transport, 1);
+  await assert.rejects(initializing, AppServerRequestTimeoutError);
+  assert.equal(client.status, 'failed');
+  assert.equal(transport.closed, true);
+});
+
+test('answers a dynamic tool request with failure when its handler exceeds its deadline', async () => {
+  const transport = new FakeTransport();
+  let handlerSignal: AbortSignal | undefined;
+  const client = new CodexAppServerClient({
+    dynamicToolTimeoutMs: 10,
+    onDynamicToolCall: async (_call, signal) => {
+      handlerSignal = signal;
+      return new Promise(() => {});
+    },
+    transport,
+  });
+
+  transport.emit({
+    id: 'request-timeout',
+    method: 'item/tool/call',
+    params: {
+      arguments: {},
+      callId: 'call-timeout',
+      namespace: 'fragforge',
+      threadId: 'thr-1',
+      tool: 'read',
+      turnId: 'turn-1',
+    },
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 25));
+
+  assert.deepEqual(written(transport, 0), {
+    id: 'request-timeout',
+    result: {
+      contentItems: [{ text: 'Dynamic tool call timed out.', type: 'inputText' }],
+      success: false,
+    },
+  });
+  assert.equal(client.status, 'starting');
+  assert.equal(handlerSignal?.aborted, true);
+  client.close();
+});
+
+test('forwards the turn started notification before turn start resolves', () => {
+  const transport = new FakeTransport();
+  const started: string[] = [];
+  new CodexAppServerClient({
+    onTurnStarted: ({ turn }) => started.push(turn.id),
+    transport,
+  });
+
+  transport.emit({
+    method: 'turn/started',
+    params: { threadId: 'thr-1', turn: { id: 'turn-1', items: [], status: 'inProgress' } },
+  });
+
+  assert.deepEqual(started, ['turn-1']);
 });
 
 test('handles fragmented CRLF frames without accepting an invalid response id', async () => {
