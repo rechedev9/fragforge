@@ -1,0 +1,8 @@
+/*
+!landing
+landing/.next/
+landing/.vercel/
+landing/node_modules/
+landing/remotion-assets/
+landing/test-results/
+landing/tsconfig.tsbuildinfo
