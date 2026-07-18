@@ -37,6 +37,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/storage"
 	"github.com/rechedev9/fragforge/internal/streamclips"
 	"github.com/rechedev9/fragforge/internal/tasks"
+	"github.com/rechedev9/fragforge/internal/voiceprofile"
 )
 
 const (
@@ -88,6 +89,7 @@ type Handlers struct {
 	streamJobLocks   *streamclips.JobLocks
 	storage          storage.Storage
 	generateIntents  *generateintent.Store
+	voiceProfiles    *voiceprofile.Store
 	queue            Enqueuer
 	mutationToken    string
 	discoverySecret  string
@@ -203,6 +205,7 @@ func NewHandlers(repo JobRepository, store storage.Storage, queue Enqueuer, opts
 		repo:             repo,
 		storage:          store,
 		generateIntents:  generateintent.New(store),
+		voiceProfiles:    voiceprofile.New(store),
 		queue:            queue,
 		publishAssistant: newPublishAssistantCache(),
 		streamJobLocks:   streamclips.NewJobLocks(),

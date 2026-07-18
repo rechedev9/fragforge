@@ -34,7 +34,7 @@ export async function callOrchestrator(url: string, init?: RequestInit): Promise
 export const UPLOAD_BODY_LIMIT_EXCEEDED = 'upload_body_limit_exceeded' as const;
 
 export interface StreamingUploadInit {
-  method: 'POST';
+  method: 'POST' | 'PUT';
   headers: Record<string, string>;
   body: ReadableStream<Uint8Array>;
   duplex: 'half';

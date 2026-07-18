@@ -8,7 +8,7 @@ export default function SettingsPage(): ReactNode {
   return (
     <div className="flex flex-col gap-8">
       <StudioPageHeader
-        number={6}
+        number={7}
         label="AJUSTES"
         title="CONFIGURACIÓN"
         description="Configura las credenciales opcionales de subtítulos y conecta tu asistente por MCP, todo en tu propio equipo."

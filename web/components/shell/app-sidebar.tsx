@@ -7,6 +7,7 @@ import {
   Compass,
   Crosshair,
   Film,
+  Newspaper,
   Settings,
   UploadCloud,
   type LucideIcon,
@@ -39,9 +40,10 @@ const NAV_ITEMS: NavItem[] = [
   { number: '01', label: 'Partidas', href: '/matches', icon: Crosshair },
   { number: '02', label: 'Subir demo', href: '/upload', icon: UploadCloud },
   { number: '03', label: 'Clips de stream', href: '/streams', icon: Clapperboard, stream: true },
-  { number: '04', label: 'Biblioteca', href: '/videos', icon: Film },
-  { number: '05', label: 'Feed', href: '/feed', icon: Compass },
-  { number: '06', label: 'Ajustes', href: '/settings', icon: Settings },
+  { number: '04', label: 'Noticias', href: '/news', icon: Newspaper },
+  { number: '05', label: 'Biblioteca', href: '/videos', icon: Film },
+  { number: '06', label: 'Feed', href: '/feed', icon: Compass },
+  { number: '07', label: 'Ajustes', href: '/settings', icon: Settings },
 ];
 
 /** A nav href is active for its exact page and any nested route under it. */
@@ -79,7 +81,7 @@ export function AppSidebar() {
               return (
                 <SidebarMenuItem
                   key={item.href}
-                  className={cn(index === 3 && 'mt-4 border-t border-sidebar-border pt-4')}
+                  className={cn(index === 4 && 'mt-4 border-t border-sidebar-border pt-4')}
                 >
                   <SidebarMenuButton
                     asChild
