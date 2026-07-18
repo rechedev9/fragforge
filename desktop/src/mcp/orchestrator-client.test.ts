@@ -729,6 +729,50 @@ test('uploads demo and stream video files as multipart with config and auth', as
   assert.match(uploads[1]?.body ?? '', /"title":"Local clip"/);
 });
 
+test('uploads voice profiles with multipart PUT and explicit metadata fields', async (t) => {
+  const uploads: Array<{
+    body: string;
+    contentType: string | undefined;
+    method: string | undefined;
+    token: string | undefined;
+    url: string | undefined;
+  }> = [];
+  const server = await startServer(t, async (request, response) => {
+    const contentType = request.headers['content-type'];
+    const token = request.headers['x-fragforge-token'];
+    uploads.push({
+      body: (await readBody(request)).toString('utf8'),
+      contentType: Array.isArray(contentType) ? contentType.join(',') : contentType,
+      method: request.method,
+      token: Array.isArray(token) ? token.join(',') : token,
+      url: request.url,
+    });
+    sendJson(response, { id: 'raizerinhocs2', name: 'Mi voz' });
+  });
+  const directory = temporaryDirectory(t);
+  const reference = path.join(directory, 'Reference.WAV');
+  fs.writeFileSync(reference, Buffer.from('RIFF-test-wave'));
+  const client = new OrchestratorClient({ baseUrl: server.baseUrl, mutationToken: 'upload-token' });
+
+  assert.deepEqual(await client.uploadVoiceProfile('raizerinhocs2', reference, {
+    channel: 'RaizerinhoCS2',
+    locale: 'es-ES',
+    name: 'Mi voz',
+  }), { id: 'raizerinhocs2', name: 'Mi voz' });
+
+  assert.equal(uploads.length, 1);
+  const upload = uploads[0];
+  assert.equal(upload?.method, 'PUT');
+  assert.equal(upload?.url, '/api/voice-profiles/raizerinhocs2');
+  assert.equal(upload?.token, 'upload-token');
+  assert.match(upload?.contentType ?? '', /^multipart\/form-data; boundary=/);
+  assert.match(upload?.body ?? '', /name="voice"; filename="Reference\.WAV"/);
+  assert.match(upload?.body ?? '', /name="name"\r\n\r\nMi voz/);
+  assert.match(upload?.body ?? '', /name="channel"\r\n\r\nRaizerinhoCS2/);
+  assert.match(upload?.body ?? '', /name="locale"\r\n\r\nes-ES/);
+  assert.doesNotMatch(upload?.body ?? '', /name="config"/);
+});
+
 test('rejects unsafe upload paths, unsupported types, directories, and empty files before HTTP', async (t) => {
   const directory = temporaryDirectory(t);
   const emptyDemo = path.join(directory, 'empty.dem');
@@ -756,6 +800,10 @@ test('rejects unsafe upload paths, unsupported types, directories, and empty fil
   await assert.rejects(client.uploadDemo(emptyDemo, {}), /demo_path must not be empty/);
   await assert.rejects(client.uploadDemo(directoryDemo, {}), /demo_path must point to a file/);
   await assert.rejects(
+    client.uploadVoiceProfile('raizerinhocs2', wrongType, {}),
+    /audio_path must use one of: \.ogg, \.wav/,
+  );
+  await assert.rejects(
     client.uploadStreamVideo(path.join(directory, 'clip.txt'), {}),
     /stream video_path must use one of: .*\.webm/,
   );
@@ -765,12 +813,16 @@ test('rejects uploads above the orchestrator limits before opening an HTTP reque
   const directory = temporaryDirectory(t);
   const oversizedDemo = path.join(directory, 'oversized.dem');
   const oversizedStream = path.join(directory, 'oversized.mp4');
+  const oversizedVoice = path.join(directory, 'oversized.wav');
   fs.writeFileSync(oversizedDemo, Buffer.from([0]));
   fs.writeFileSync(oversizedStream, Buffer.from([0]));
+  fs.writeFileSync(oversizedVoice, Buffer.from([0]));
   fs.truncateSync(oversizedDemo, (500 << 20) + 1);
   fs.truncateSync(oversizedStream, (8 * 2 ** 30) + 1);
+  fs.truncateSync(oversizedVoice, (25 << 20) + 1);
   const client = new OrchestratorClient({ baseUrl: 'http://127.0.0.1:1' });
 
   await assert.rejects(client.uploadDemo(oversizedDemo, {}), /exceeds the 500 MiB limit/);
   await assert.rejects(client.uploadStreamVideo(oversizedStream, {}), /exceeds the 8 GiB limit/);
+  await assert.rejects(client.uploadVoiceProfile('raizerinhocs2', oversizedVoice, {}), /exceeds the 25 MiB limit/);
 });

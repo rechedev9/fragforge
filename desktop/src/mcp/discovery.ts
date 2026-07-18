@@ -151,6 +151,7 @@ const SEARCH_STOP_WORDS = new Set([
 const SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = {
   'artifacts.get_song_url': ['descargar cancion', 'descargar musica', 'download song', 'music download'],
   'artifacts.get_url': ['descargar video', 'bajar video', 'download video', 'obtener video', 'video url'],
+  'artifacts.get_voice_profile_audio_url': ['audio del perfil de voz', 'descargar voz', 'voice profile audio', 'download voice reference'],
   'catalog.songs': ['lista de canciones', 'listar canciones', 'canciones', 'lista de musica', 'list songs', 'music list'],
   'jobs.create': ['subir una demo', 'subir demo', 'cargar demo', 'crear trabajo', 'upload demo', 'create job', 'import demo'],
   'jobs.list': ['ver trabajos recientes', 'trabajos recientes', 'listar trabajos', 'demos recientes', 'recent jobs', 'list jobs'],
@@ -159,6 +160,9 @@ const SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = {
   'studio.status': ['estado del estudio', 'estado estudio', 'salud del estudio', 'studio status', 'studio health'],
   'streams.configure_captions': ['subtitulos con grok', 'configurar subtitulos', 'activar subtitulos', 'configure captions', 'enable subtitles'],
   'streams.edit_clip': ['editar clip', 'velocidad del clip', 'camara lenta', 'silenciar clip', 'quitar audio', 'texto en pantalla', 'fundido', 'edit clip', 'clip speed', 'slow motion', 'mute clip', 'add text overlay', 'fade'],
+  'voices.delete_profile': ['borrar perfil de voz', 'eliminar perfil de voz', 'delete voice profile'],
+  'voices.get_profile': ['perfil de voz', 'ver perfil de voz', 'voice profile'],
+  'voices.save_profile': ['subir voz', 'guardar perfil de voz', 'crear perfil de voz', 'upload voice', 'save voice profile'],
 };
 
 function defaultRank(operation: OperationDefinition): number {

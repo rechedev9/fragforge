@@ -4,7 +4,7 @@ import { OrchestratorClient } from './orchestrator-client.ts';
 export type OperationRisk = 'costly' | 'destructive' | 'read' | 'write';
 
 export interface OperationDefinition {
-  category: 'artifacts' | 'catalog' | 'jobs' | 'renders' | 'streams' | 'studio';
+  category: 'artifacts' | 'catalog' | 'jobs' | 'renders' | 'streams' | 'studio' | 'voices';
   description: string;
   inputSchema: JsonObject;
   keywords: readonly string[];
@@ -41,6 +41,13 @@ const GENERATION_ID_PROPERTY: JsonObject = {
 };
 const SAFE_TOKEN_PROPERTY: JsonObject = {
   pattern: SAFE_TOKEN_PATTERN,
+  type: 'string',
+};
+const VOICE_PROFILE_ID_PROPERTY: JsonObject = {
+  description: 'Stable local voice profile ID using lowercase letters, numbers, and hyphens.',
+  maxLength: 64,
+  minLength: 1,
+  pattern: '^[a-z0-9-]+$',
   type: 'string',
 };
 const VARIANT_PROPERTY: JsonObject = {
@@ -221,7 +228,7 @@ const STREAM_EDIT_PLAN_PROPERTY: JsonObject = {
       },
       type: 'object',
     },
-    schema_version: { enum: ['1.0'], type: 'string' },
+    schema_version: { description: 'Current edit plans use 1.1; persisted 1.0 plans are migrated by the API.', enum: ['1.0', '1.1'], type: 'string' },
     streamer_banner: {
       additionalProperties: false,
       properties: {
@@ -363,12 +370,17 @@ function streamRenderPath(input: JsonObject, suffix = ''): string {
   return streamPath(input, `/renders/${variant}${suffix}`);
 }
 
+function voiceProfilePath(input: JsonObject, suffix = ''): string {
+  return `/api/voice-profiles/${encodeURIComponent(stringInput(input, 'voice_profile_id'))}${suffix}`;
+}
+
 function without(input: JsonObject, ...keys: readonly string[]): JsonObject {
   const excluded = new Set(keys);
   return Object.fromEntries(Object.entries(input).filter(([key]) => !excluded.has(key)));
 }
 
 const JOB_ID_SCHEMA = objectSchema({ job_id: UUID_PROPERTY }, ['job_id']);
+const VOICE_PROFILE_SCHEMA = objectSchema({ voice_profile_id: VOICE_PROFILE_ID_PROPERTY }, ['voice_profile_id']);
 const JOB_VARIANT_SCHEMA = objectSchema(
   {
     job_id: UUID_PROPERTY,
@@ -462,6 +474,53 @@ const operations: readonly OperationDefinition[] = [
     name: 'catalog.stream_variants',
     path: () => '/api/stream-variants',
     title: 'List stream layout variants',
+  }),
+  readOperation({
+    category: 'voices',
+    description: 'Read metadata for one locally stored voice reference without loading its audio into model context.',
+    inputSchema: VOICE_PROFILE_SCHEMA,
+    keywords: ['voice', 'profile', 'reference', 'voz', 'perfil'],
+    name: 'voices.get_profile',
+    path: (input) => voiceProfilePath(input),
+    title: 'Get voice profile',
+  }),
+  {
+    category: 'voices',
+    description: 'Create or replace a local voice profile from a WAV or OGG reference file. The audio stays in FragForge local storage.',
+    inputSchema: objectSchema({
+      audio_path: { description: 'Absolute path to a local WAV or OGG voice reference, up to 25 MiB.', minLength: 1, type: 'string' },
+      channel: { maxLength: 80, type: 'string' },
+      locale: { maxLength: 20, type: 'string' },
+      name: { maxLength: 80, type: 'string' },
+      voice_profile_id: VOICE_PROFILE_ID_PROPERTY,
+    }, ['voice_profile_id', 'audio_path']),
+    keywords: ['voice', 'profile', 'reference', 'upload', 'save', 'voz', 'perfil', 'subir'],
+    name: 'voices.save_profile',
+    preview: (input) => ({
+      fields: without(input, 'voice_profile_id', 'audio_path'),
+      file: stringInput(input, 'audio_path'),
+      method: 'PUT',
+      path: voiceProfilePath(input),
+    }),
+    risk: 'write',
+    run: (client, input, signal) => client.uploadVoiceProfile(
+      stringInput(input, 'voice_profile_id'),
+      stringInput(input, 'audio_path'),
+      without(input, 'voice_profile_id', 'audio_path'),
+      signal,
+    ),
+    title: 'Save voice profile',
+  },
+  mutationOperation({
+    category: 'voices',
+    description: 'Permanently delete one local voice profile and its reference audio.',
+    inputSchema: VOICE_PROFILE_SCHEMA,
+    keywords: ['voice', 'profile', 'delete', 'remove', 'voz', 'perfil', 'borrar', 'eliminar'],
+    method: 'DELETE',
+    name: 'voices.delete_profile',
+    path: (input) => voiceProfilePath(input),
+    risk: 'destructive',
+    title: 'Delete voice profile',
   }),
   readOperation({
     category: 'jobs',
@@ -608,6 +667,17 @@ const operations: readonly OperationDefinition[] = [
     risk: 'read',
     run: async (client, input, signal) => ({ url: await client.artifactUrl(songArtifactPath(input), signal) }),
     title: 'Get music track URL',
+  },
+  {
+    category: 'artifacts',
+    description: 'Return a checked loopback URL for one local voice reference without embedding audio in model context.',
+    inputSchema: VOICE_PROFILE_SCHEMA,
+    keywords: ['voice', 'profile', 'audio', 'reference', 'download', 'voz', 'perfil'],
+    name: 'artifacts.get_voice_profile_audio_url',
+    preview: (input) => ({ method: 'GET', path: voiceProfilePath(input, '/audio') }),
+    risk: 'read',
+    run: async (client, input, signal) => ({ url: await client.artifactUrl(voiceProfilePath(input, '/audio'), signal) }),
+    title: 'Get voice profile audio URL',
   },
   readOperation({
     category: 'streams',

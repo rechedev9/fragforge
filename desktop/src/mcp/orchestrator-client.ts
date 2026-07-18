@@ -13,6 +13,7 @@ const MAX_JSON_RESPONSE_BYTES = 10 << 20;
 const MAX_TEXT_RESPONSE_BYTES = 2 << 20;
 const MAX_DEMO_BYTES = 500 << 20;
 const MAX_STREAM_VIDEO_BYTES = 8 * 2 ** 30;
+const MAX_VOICE_REFERENCE_BYTES = 25 << 20;
 const MIN_SECRET_LENGTH = 8;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
@@ -156,6 +157,17 @@ export class OrchestratorClient {
     return this.#upload('/api/stream-jobs', form, signal);
   }
 
+  async uploadVoiceProfile(id: string, filePath: string, metadata: JsonObject, signal?: AbortSignal): Promise<JsonValue> {
+    await validateUpload(filePath, new Set(['.ogg', '.wav']), 'audio', MAX_VOICE_REFERENCE_BYTES);
+    const form = new FormData();
+    form.append('voice', await openAsBlob(filePath), path.basename(filePath));
+    for (const field of ['name', 'channel', 'locale']) {
+      const value = metadata[field];
+      if (typeof value === 'string') form.append(field, value);
+    }
+    return this.#upload(`/api/voice-profiles/${encodeURIComponent(id)}`, form, signal, 'PUT');
+  }
+
   async artifactUrl(apiPath: string, signal?: AbortSignal): Promise<string> {
     const orchestrator = await this.#resolveOrchestrator();
     const url = new URL(apiPath, `${orchestrator.baseUrl}/`);
@@ -222,7 +234,7 @@ export class OrchestratorClient {
     }
   }
 
-  async #upload(apiPath: string, form: FormData, signal?: AbortSignal): Promise<JsonValue> {
+  async #upload(apiPath: string, form: FormData, signal?: AbortSignal, method: 'POST' | 'PUT' = 'POST'): Promise<JsonValue> {
     const orchestrator = await this.#resolveOrchestrator();
     await this.#ensureVerified(orchestrator, signal);
     const headers = new Headers({ Accept: 'application/json' });
@@ -232,7 +244,7 @@ export class OrchestratorClient {
     return this.#fetchJson(new URL(apiPath, `${orchestrator.baseUrl}/`), {
       body: form,
       headers,
-      method: 'POST',
+      method,
     }, Math.max(this.#requestTimeoutMs, DEFAULT_UPLOAD_TIMEOUT_MS), signal);
   }
 

@@ -41,7 +41,7 @@ const SEARCH_INPUT_SCHEMA: JsonObject = {
       description: 'Partial arguments used to discover dependent live inputs, such as roster players for a job_id.',
       type: 'object',
     },
-    category: { enum: ['artifacts', 'catalog', 'jobs', 'renders', 'streams', 'studio'], type: 'string' },
+    category: { enum: ['artifacts', 'catalog', 'jobs', 'renders', 'streams', 'studio', 'voices'], type: 'string' },
     include_dynamic_inputs: { default: true, type: 'boolean' },
     limit: { default: 8, maximum: 20, minimum: 1, type: 'integer' },
     operation: { description: 'Exact operation name when its schema is already known.', type: 'string' },

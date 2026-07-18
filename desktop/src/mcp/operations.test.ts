@@ -16,15 +16,21 @@ const JOB_ID = '11111111-1111-4111-8111-111111111111';
 const STREAM_JOB_ID = '22222222-2222-4222-8222-222222222222';
 
 interface ClientDoubleState {
+  artifactPaths: string[];
   requests: OrchestratorRequest[];
   uploads: Array<{ config: JsonObject; filePath: string }>;
+  voiceUploads: Array<{ filePath: string; id: string; metadata: JsonObject }>;
 }
 
 type RequestResponder = (request: OrchestratorRequest, index: number) => JsonValue | Promise<JsonValue>;
 
 function clientDouble(responder: RequestResponder): { client: OrchestratorClient; state: ClientDoubleState } {
-  const state: ClientDoubleState = { requests: [], uploads: [] };
+  const state: ClientDoubleState = { artifactPaths: [], requests: [], uploads: [], voiceUploads: [] };
   const client = {
+    artifactUrl: async (apiPath: string): Promise<string> => {
+      state.artifactPaths.push(apiPath);
+      return `http://127.0.0.1:8080${apiPath}`;
+    },
     request: async (request: OrchestratorRequest): Promise<JsonValue> => {
       const index = state.requests.length;
       state.requests.push(request);
@@ -33,6 +39,10 @@ function clientDouble(responder: RequestResponder): { client: OrchestratorClient
     uploadStreamVideo: async (filePath: string, config: JsonObject): Promise<JsonValue> => {
       state.uploads.push({ config, filePath });
       return { id: STREAM_JOB_ID, status: 'uploaded' };
+    },
+    uploadVoiceProfile: async (id: string, filePath: string, metadata: JsonObject): Promise<JsonValue> => {
+      state.voiceUploads.push({ filePath, id, metadata });
+      return { id, name: metadata.name ?? 'Mi voz' };
     },
   };
   // The operation intentionally depends only on this narrow external-client surface.
@@ -332,7 +342,7 @@ test('operation schemas enforce API route and cross-field contracts', () => {
     clips: [killfeedClip],
     gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
     killfeed_crop: { height: 0.14, width: 0.25, x: 0.72, y: 0.04 },
-    schema_version: '1.0',
+    schema_version: '1.1',
     variant: 'streamer-vertical-stack-40-60',
   };
   validateStreamEditPlan(validKillfeedPlan);
@@ -509,6 +519,51 @@ test('stream caption and killfeed analysis operations validate and dispatch exac
   assert.equal(operation('streams.review_caption_candidates').risk, 'write');
   assert.equal(operation('streams.start_killfeed_analysis').risk, 'costly');
   assert.equal(operation('streams.apply_killfeed_analysis').risk, 'write');
+});
+
+test('voice profile operations validate IDs and keep reference audio out of MCP results', async () => {
+  const profileID = 'raizerinhocs2';
+  const input: JsonObject = {
+    audio_path: 'C:\\audio\\reference.wav',
+    channel: 'RaizerinhoCS2',
+    locale: 'es-ES',
+    name: 'Mi voz',
+    voice_profile_id: profileID,
+  };
+  validateOperationInput(operation('voices.save_profile'), input);
+  for (const voiceProfileID of ['', 'UPPERCASE', '../voice', 'a'.repeat(65)]) {
+    assert.throws(
+      () => validateOperationInput(operation('voices.get_profile'), { voice_profile_id: voiceProfileID }),
+      /arguments.voice_profile_id/,
+    );
+  }
+  assert.throws(
+    () => validateOperationInput(operation('voices.save_profile'), { ...input, name: 'a'.repeat(81) }),
+    /arguments.name is too long/,
+  );
+
+  const double = clientDouble((request) => request.method === 'DELETE' ? null : { id: profileID, name: 'Mi voz' });
+  const metadata = await operation('voices.get_profile').run(double.client, { voice_profile_id: profileID });
+  const saved = await operation('voices.save_profile').run(double.client, input);
+  const audio = await operation('artifacts.get_voice_profile_audio_url').run(double.client, { voice_profile_id: profileID });
+  const deleted = await operation('voices.delete_profile').run(double.client, { voice_profile_id: profileID });
+
+  assert.deepEqual(metadata, { id: profileID, name: 'Mi voz' });
+  assert.deepEqual(saved, { id: profileID, name: 'Mi voz' });
+  assert.deepEqual(audio, { url: `http://127.0.0.1:8080/api/voice-profiles/${profileID}/audio` });
+  assert.equal(deleted, null);
+  assert.deepEqual(double.state.voiceUploads, [{
+    filePath: 'C:\\audio\\reference.wav',
+    id: profileID,
+    metadata: { channel: 'RaizerinhoCS2', locale: 'es-ES', name: 'Mi voz' },
+  }]);
+  assert.deepEqual(double.state.artifactPaths, [`/api/voice-profiles/${profileID}/audio`]);
+  assert.deepEqual(double.state.requests.map((request) => [request.method ?? 'GET', request.path]), [
+    ['GET', `/api/voice-profiles/${profileID}`],
+    ['DELETE', `/api/voice-profiles/${profileID}`],
+  ]);
+  assert.equal(operation('voices.save_profile').risk, 'write');
+  assert.equal(operation('voices.delete_profile').risk, 'destructive');
 });
 
 test('JSON schema traversal rejects inherited property-name bypasses', () => {
@@ -754,7 +809,7 @@ test('streams.configure_captions preserves a valid disabled face crop for full-f
     clips: [{ end_seconds: 8, id: 'clip-1', start_seconds: 2 }],
     face_crop: { height: 0, width: 0, x: 0, y: 0 },
     gameplay_crop: { height: 1, width: 1, x: 0, y: 0 },
-    schema_version: '1.0',
+    schema_version: '1.1',
     variant: 'streamer-fullframe-nocam',
   };
   const double = clientDouble((request, index) => {

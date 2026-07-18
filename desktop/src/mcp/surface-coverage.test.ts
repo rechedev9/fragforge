@@ -22,6 +22,7 @@ const RENDER_INPUT: JsonObject = { ...JOB_INPUT, variant: 'viral-60-clean' };
 const RENDER_ARTIFACT_INPUT: JsonObject = { ...RENDER_INPUT, name: 'final' };
 const STREAM_INPUT: JsonObject = { stream_job_id: '22222222-2222-4222-8222-222222222222' };
 const STREAM_RENDER_INPUT: JsonObject = { ...STREAM_INPUT, variant: 'streamer-vertical-stack' };
+const VOICE_INPUT: JsonObject = { voice_profile_id: 'raizerinhocs2' };
 const STREAM_PLAN: JsonObject = {
   face_crop: { height: 0.3, width: 1, x: 0, y: 0 },
   gameplay_crop: { height: 0.7, width: 1, x: 0, y: 0.3 },
@@ -37,6 +38,10 @@ const COVERAGE: readonly CoverageCase[] = [
   { input: {}, method: 'GET', operation: 'catalog.songs', route: '/api/songs' },
   { input: { song_id: 'song-one' }, method: 'GET', operation: 'artifacts.get_song_url', route: '/api/songs/{id}/audio' },
   { input: {}, method: 'GET', operation: 'catalog.stream_variants', route: '/api/stream-variants' },
+  { input: VOICE_INPUT, method: 'GET', operation: 'voices.get_profile', route: '/api/voice-profiles/{id}' },
+  { input: { ...VOICE_INPUT, audio_path: 'C:\\audio\\voice.wav' }, method: 'PUT', operation: 'voices.save_profile', route: '/api/voice-profiles/{id}' },
+  { input: VOICE_INPUT, method: 'DELETE', operation: 'voices.delete_profile', route: '/api/voice-profiles/{id}' },
+  { input: VOICE_INPUT, method: 'GET', operation: 'artifacts.get_voice_profile_audio_url', route: '/api/voice-profiles/{id}/audio' },
   { input: { demo_path: 'C:\\demos\\match.dem' }, method: 'POST', operation: 'jobs.create', route: '/api/jobs' },
   { input: {}, method: 'GET', operation: 'jobs.list', route: '/api/jobs' },
   { input: JOB_INPUT, method: 'GET', operation: 'jobs.get', route: '/api/jobs/{id}' },

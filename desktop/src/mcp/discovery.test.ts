@@ -139,6 +139,8 @@ test('ranks common Spanish and English intents by whole tokens', async () => {
     ['grabar kills', 'jobs.record'],
     ['descargar video', 'artifacts.get_url'],
     ['lista de canciones', 'catalog.songs'],
+    ['subir voz', 'voices.save_profile'],
+    ['borrar perfil de voz', 'voices.delete_profile'],
     ['ver errores', 'studio.metrics'],
     ['download video', 'artifacts.get_url'],
     ['recent jobs', 'jobs.list'],
@@ -171,6 +173,17 @@ test('filters by category and risk and supports exact operation lookup', async (
     }),
   );
   assert.deepEqual(descriptorNames(filtered), ['renders.delete_video']);
+
+  const voices = await searchOperationCatalog(
+    client,
+    parseSearchRequest({
+      category: 'voices',
+      include_dynamic_inputs: false,
+      query: '',
+      risk: 'destructive',
+    }),
+  );
+  assert.deepEqual(descriptorNames(voices), ['voices.delete_profile']);
 
   const exact = await searchOperationCatalog(
     client,

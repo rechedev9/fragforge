@@ -101,7 +101,8 @@ model-generated JavaScript:
 
 Operations cover Studio status and metrics, catalogs, CS2 demo upload/scan/parse,
 record/generate/compose, render state/QA/publishing/artifacts, and stream/VOD
-jobs, exact edit plans, source/video URLs, and subtitle configuration. Binary
+jobs, exact edit plans, source/video URLs, subtitle configuration, and local
+voice profile references. Binary
 media never enters model context; artifact operations return loopback URLs when
 Studio uses its normal loopback read mode.
 
