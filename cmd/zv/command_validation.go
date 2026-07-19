@@ -569,7 +569,7 @@ func commandBoolFlags(commandName string) []string {
 	case `"demo select"`:
 		return []string{"--dry-run"}
 	case `"short"`:
-		return []string{"--dry-run", "--intro", "--outro"}
+		return []string{"--dry-run", "--intro", "--outro", "--cover-first-frame"}
 	case `"compose final"`:
 		return []string{"--dry-run"}
 	case `"record"`:
@@ -577,6 +577,7 @@ func commandBoolFlags(commandName string) []string {
 	case `"shorts render"`:
 		return []string{
 			"--audio-normalize",
+			"--cover-first-frame",
 			"--cover-sheets",
 			"--covers",
 			"--dry-run",

@@ -129,6 +129,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 		AudioNormalize:    audioNormalize,
 		QualityChecks:     qualityChecks,
 		CoverSheets:       coverSheets,
+		CoverFirstFrame:   opts.CoverFirstFrame,
 		TemporalSmoothing: temporalSmoothing,
 		CoversEnabled:     opts.CoversEnabled,
 		Warnings:          warnings,
@@ -192,6 +193,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			AudioNormalize:    audioNormalize,
 			TemporalSmoothing: temporalSmoothing,
 			CoverSheets:       coverSheets,
+			CoverFirstFrame:   opts.CoverFirstFrame,
 			QualityChecks:     qualityChecks,
 		})
 		if err != nil {
@@ -290,6 +292,7 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			AudioNormalize:    audioNormalize,
 			TemporalSmoothing: temporalSmoothing,
 			CaptionPath:       filepath.Join(opts.PublishDir, publishBase+".caption.txt"),
+			CoverFirstFrame:   opts.CoverFirstFrame,
 			DurationSeconds:   duration,
 			Label:             label,
 			Title:             title,
@@ -305,6 +308,10 @@ func buildManifest(result recording.RecordingResult, opts ManifestOptions) (Mani
 			if coverSheets {
 				edit.CoverSheetPath = filepath.Join(opts.PublishDir, publishBase+".sheet.jpg")
 			}
+		}
+		// The first-frame freeze needs the cover timestamp even when JPG
+		// covers are disabled.
+		if opts.CoversEnabled || opts.CoverFirstFrame {
 			edit.CoverTimeSeconds = coverTime
 		}
 		if qualityChecks {
@@ -364,6 +371,7 @@ type compiledShortOptions struct {
 	AudioNormalize    bool
 	TemporalSmoothing bool
 	CoverSheets       bool
+	CoverFirstFrame   bool
 	QualityChecks     bool
 }
 
@@ -472,6 +480,7 @@ func buildCompiledShort(result recording.RecordingResult, opts ManifestOptions, 
 		TemporalSmoothing: c.TemporalSmoothing,
 		CaptionPath:       filepath.Join(opts.PublishDir, publishBase+".caption.txt"),
 		CoverTimeSeconds:  coverTime,
+		CoverFirstFrame:   c.CoverFirstFrame,
 		DurationSeconds:   duration,
 		Label:             shortLabel(c.Player, c.MapName, killCount),
 		Title:             title,

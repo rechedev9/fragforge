@@ -27,9 +27,10 @@ func BuildFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 		"-i", short.Input,
 	}
 	// Killfeed overlays need the source stream twice (program feed + crop
-	// branches), which -vf cannot express; plain renders keep the historical
+	// branches), and the cover first-frame freeze needs the filtered stream
+	// twice, which -vf cannot express; plain renders keep the historical
 	// -vf command.
-	if killfeeds := killfeedEffects(short.Effects); len(killfeeds) > 0 {
+	if killfeeds := killfeedEffects(short.Effects); len(killfeeds) > 0 || short.CoverFirstFrame {
 		command = append(command,
 			"-filter_complex", strings.Join(singleClipVideoClauses(short, killfeeds), ";"),
 			"-map", "[v]",
@@ -73,7 +74,7 @@ func BuildMusicFFmpegCommand(ffmpegPath string, short ShortEdit) []string {
 	}
 	audioOut += "[a]"
 	videoClauses := []string{fmt.Sprintf("[0:v]%s[v]", VideoFilter(short))}
-	if killfeeds := killfeedEffects(short.Effects); len(killfeeds) > 0 {
+	if killfeeds := killfeedEffects(short.Effects); len(killfeeds) > 0 || short.CoverFirstFrame {
 		videoClauses = singleClipVideoClauses(short, killfeeds)
 	}
 	filter := fmt.Sprintf(
@@ -113,18 +114,24 @@ func tailTrimArgs(short ShortEdit) []string {
 }
 
 // singleClipVideoClauses builds the filter_complex video clauses for a
-// single-clip short with killfeed overlays: the source splits into the main
-// program feed plus one branch per overlay, each branch crops and freezes its
-// kill notice, and the frozen badges chain onto the filtered main feed. Same
-// clause shape as the compiled path in CompilationFilter.
+// single-clip short with killfeed overlays and/or the cover first-frame
+// freeze: the source splits into the main program feed plus one branch per
+// killfeed overlay, each branch crops and freezes its kill notice, and the
+// frozen badges chain onto the filtered main feed. Same clause shape as the
+// compiled path in CompilationFilter.
 func singleClipVideoClauses(short ShortEdit, killfeeds []Effect) []string {
-	split := fmt.Sprintf("[0:v]split=%d[main]", len(killfeeds)+1)
-	for i := range killfeeds {
-		split += fmt.Sprintf("[kfsrc%d]", i)
-	}
-	clauses := []string{
-		split,
-		fmt.Sprintf("[main]%s[vbase]", VideoFilter(short)),
+	var clauses []string
+	if len(killfeeds) == 0 {
+		clauses = []string{fmt.Sprintf("[0:v]%s[vbase]", VideoFilter(short))}
+	} else {
+		split := fmt.Sprintf("[0:v]split=%d[main]", len(killfeeds)+1)
+		for i := range killfeeds {
+			split += fmt.Sprintf("[kfsrc%d]", i)
+		}
+		clauses = []string{
+			split,
+			fmt.Sprintf("[main]%s[vbase]", VideoFilter(short)),
+		}
 	}
 	current := "vbase"
 	for i, effect := range killfeeds {
@@ -144,7 +151,43 @@ func singleClipVideoClauses(short ShortEdit, killfeeds []Effect) []string {
 		)
 		current = next
 	}
+	coverClauses, current := coverFirstFrameClauses(short, current)
+	clauses = append(clauses, coverClauses...)
 	return append(clauses, fmt.Sprintf("[%s]format=yuv420p[v]", current))
+}
+
+// coverFirstFrameCount is how many leading frames show the frozen cover frame.
+// Two frames survive YouTube's first-frame heuristics while staying invisible
+// at 60fps playback.
+const coverFirstFrameCount = 2
+
+// coverFirstFrameClauses freezes the fully-composited frame at
+// CoverTimeSeconds over the first frames of the final video, so the visible
+// thumbnail frame matches the extracted cover JPG and YouTube's Shorts frame
+// selector can pick it without a separate upload. Duration and audio are
+// untouched. Same trim+loop freeze pattern as killfeedCropFilter.
+func coverFirstFrameClauses(short ShortEdit, in string) ([]string, string) {
+	if !short.CoverFirstFrame {
+		return nil, in
+	}
+	start := short.CoverTimeSeconds
+	// Back the freeze sample off the very end of the clip so trim always has a
+	// frame to grab.
+	if short.DurationSeconds > 0 && start > short.DurationSeconds-0.1 {
+		start = short.DurationSeconds - 0.1
+	}
+	if start < 0 {
+		start = 0
+	}
+	clauses := []string{
+		fmt.Sprintf("[%s]split=2[cfmain][cfsrc]", in),
+		fmt.Sprintf(
+			"[cfsrc]trim=start=%.3f:duration=0.050,loop=loop=-1:size=1:start=0,setpts=N/%d/TB,trim=end_frame=%d[cffreeze]",
+			start, outputFPS(short), coverFirstFrameCount,
+		),
+		fmt.Sprintf("[cfmain][cffreeze]overlay=eof_action=pass:enable='lt(n,%d)'[cfcover]", coverFirstFrameCount),
+	}
+	return clauses, "cfcover"
 }
 
 func appendAudioEncodeArgs(command []string, short ShortEdit) []string {
@@ -231,7 +274,7 @@ func CompilationFilter(short ShortEdit) string {
 	clauses = append(clauses, fmt.Sprintf("%sconcat=n=%d:v=1:a=1[catv][gamea]", strings.Join(concatLabels, ""), concatCount))
 	images := imageEffects(short.Effects)
 	killfeeds := killfeedEffects(short.Effects)
-	if len(images) == 0 && len(killfeeds) == 0 {
+	if len(images) == 0 && len(killfeeds) == 0 && !short.CoverFirstFrame {
 		clauses = append(clauses, fmt.Sprintf("[catv]%s[v]", VideoFilter(short)))
 	} else {
 		clauses = append(clauses, fmt.Sprintf("[catv]%s[vbase]", VideoFilter(short)))
@@ -264,7 +307,9 @@ func CompilationFilter(short ShortEdit) string {
 			clauses = appendImageOverlayClauses(clauses, current, imageInputStart, images, short, "vimages")
 			current = "vimages"
 		}
-		clauses = append(clauses, fmt.Sprintf("[%s]format=yuv420p[v]", current))
+		coverClauses, coverOut := coverFirstFrameClauses(short, current)
+		clauses = append(clauses, coverClauses...)
+		clauses = append(clauses, fmt.Sprintf("[%s]format=yuv420p[v]", coverOut))
 	}
 	if short.MusicPath != "" {
 		musicInput := len(short.Parts)

@@ -89,6 +89,11 @@ type Config struct {
 	AudioNormalize    bool
 	QualityChecks     bool
 	CoverSheets       bool
+	// CoverFirstFrame freezes the cover frame (the frame at CoverTimeSeconds)
+	// over the first frames of each rendered short, so YouTube's Shorts
+	// thumbnail frame selector can pick the cover without a separate upload.
+	// Duration and audio are untouched.
+	CoverFirstFrame   bool
 	TemporalSmoothing bool
 	FFmpegPath        string
 	FFprobePath       string
@@ -135,6 +140,7 @@ type ManifestOptions struct {
 	AudioNormalize      bool
 	QualityChecks       bool
 	CoverSheets         bool
+	CoverFirstFrame     bool
 	TemporalSmoothing   bool
 	FFmpegPath          string
 	CoversEnabled       bool
@@ -185,6 +191,7 @@ type Manifest struct {
 	AudioNormalize    bool        `json:"audio_normalize,omitempty"`
 	QualityChecks     bool        `json:"quality_checks,omitempty"`
 	CoverSheets       bool        `json:"cover_sheets,omitempty"`
+	CoverFirstFrame   bool        `json:"cover_first_frame,omitempty"`
 	TemporalSmoothing bool        `json:"temporal_smoothing,omitempty"`
 	CoversEnabled     bool        `json:"covers_enabled"`
 	Shorts            []ShortEdit `json:"shorts"`
@@ -234,6 +241,7 @@ type ShortEdit struct {
 	CoverPath         string      `json:"cover_path,omitempty"`
 	CoverSheetPath    string      `json:"cover_sheet_path,omitempty"`
 	CoverTimeSeconds  float64     `json:"cover_time_seconds"`
+	CoverFirstFrame   bool        `json:"cover_first_frame,omitempty"`
 	DurationSeconds   float64     `json:"duration_seconds,omitempty"`
 	Label             string      `json:"label"`
 	Title             string      `json:"title"`
@@ -337,6 +345,7 @@ type Result struct {
 	AudioNormalize    bool          `json:"audio_normalize,omitempty"`
 	QualityChecks     bool          `json:"quality_checks,omitempty"`
 	CoverSheets       bool          `json:"cover_sheets,omitempty"`
+	CoverFirstFrame   bool          `json:"cover_first_frame,omitempty"`
 	TemporalSmoothing bool          `json:"temporal_smoothing,omitempty"`
 	CoversEnabled     bool          `json:"covers_enabled"`
 	DryRun            bool          `json:"dry_run,omitempty"`
@@ -378,6 +387,7 @@ type ShortResult struct {
 	CoverPath          string                      `json:"cover_path,omitempty"`
 	CoverSheetPath     string                      `json:"cover_sheet_path,omitempty"`
 	CoverTimeSeconds   float64                     `json:"cover_time_seconds"`
+	CoverFirstFrame    bool                        `json:"cover_first_frame,omitempty"`
 	DurationSeconds    float64                     `json:"duration_seconds,omitempty"`
 	Title              string                      `json:"title"`
 	Headline           string                      `json:"headline"`
@@ -432,6 +442,7 @@ type PackManifest struct {
 	AudioNormalize    bool          `json:"audio_normalize,omitempty"`
 	QualityChecks     bool          `json:"quality_checks,omitempty"`
 	CoverSheets       bool          `json:"cover_sheets,omitempty"`
+	CoverFirstFrame   bool          `json:"cover_first_frame,omitempty"`
 	TemporalSmoothing bool          `json:"temporal_smoothing,omitempty"`
 	CoversEnabled     bool          `json:"covers_enabled"`
 	Items             []PublishItem `json:"items"`
@@ -468,6 +479,7 @@ type PublishItem struct {
 	CoverPath          string                      `json:"cover_path,omitempty"`
 	CoverSheetPath     string                      `json:"cover_sheet_path,omitempty"`
 	CoverTimeSeconds   float64                     `json:"cover_time_seconds"`
+	CoverFirstFrame    bool                        `json:"cover_first_frame,omitempty"`
 	Title              string                      `json:"title"`
 	Headline           string                      `json:"headline"`
 	Caption            string                      `json:"caption"`

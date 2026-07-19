@@ -56,6 +56,7 @@ func run() error {
 		audioNormalize      = flag.Bool("audio-normalize", false, "normalize audio with FFmpeg loudnorm")
 		qualityChecks       = flag.Bool("quality-checks", false, "run FFmpeg black/freeze/crop detection after rendering")
 		coverSheets         = flag.Bool("cover-sheets", false, "generate tiled cover contact sheets")
+		coverFirstFrame     = flag.Bool("cover-first-frame", false, "freeze the cover frame over the first frames so YouTube's Shorts thumbnail selector can pick it")
 		temporalSmoothing   = flag.Bool("temporal-smoothing", false, "add subtle temporal frame blending for smoother perceived motion")
 		ffmpegPath          = flag.String("ffmpeg", "", "path to ffmpeg.exe; defaults to PATH")
 		ffprobePath         = flag.String("ffprobe", "", "path to ffprobe.exe; defaults to PATH")
@@ -120,6 +121,7 @@ func run() error {
 		AudioNormalize:      *audioNormalize,
 		QualityChecks:       *qualityChecks,
 		CoverSheets:         *coverSheets,
+		CoverFirstFrame:     *coverFirstFrame,
 		TemporalSmoothing:   *temporalSmoothing,
 		FFmpegPath:          *ffmpegPath,
 		FFprobePath:         *ffprobePath,

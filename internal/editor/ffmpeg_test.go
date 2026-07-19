@@ -143,6 +143,115 @@ func TestBuildMusicFFmpegCommandKillfeedAndTailTrim(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegCommandCoverFirstFrameFreezesCoverFrame(t *testing.T) {
+	short := singleClipKillfeedShort()
+	short.Effects = nil
+	short.CoverFirstFrame = true
+	short.CoverTimeSeconds = 4.458
+	command := strings.Join(BuildFFmpegCommand("ffmpeg", short), " ")
+	if strings.Contains(command, "-vf") {
+		t.Fatalf("command = %q, want no -vf with the cover first-frame freeze", command)
+	}
+	for _, want := range []string{
+		"-filter_complex",
+		"split=2[cfmain][cfsrc]",
+		"[cfsrc]trim=start=4.458:duration=0.050,loop=loop=-1:size=1:start=0,setpts=N/60/TB,trim=end_frame=2[cffreeze]",
+		"[cfmain][cffreeze]overlay=eof_action=pass:enable='lt(n,2)'[cfcover]",
+		"[cfcover]format=yuv420p[v]",
+		"-map [v] -map 0:a?",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("command = %q, want it to contain %q", command, want)
+		}
+	}
+}
+
+func TestBuildFFmpegCommandCoverFirstFrameClampsSampleNearClipEnd(t *testing.T) {
+	short := singleClipKillfeedShort()
+	short.Effects = nil
+	short.CoverFirstFrame = true
+	short.CoverTimeSeconds = short.DurationSeconds
+	command := strings.Join(BuildFFmpegCommand("ffmpeg", short), " ")
+	if !strings.Contains(command, "[cfsrc]trim=start=5.978:duration=0.050") {
+		t.Fatalf("command = %q, want the freeze sample clamped 0.1s before the clip end", command)
+	}
+}
+
+func TestBuildFFmpegCommandCoverFirstFrameChainsAfterKillfeed(t *testing.T) {
+	short := singleClipKillfeedShort()
+	short.CoverFirstFrame = true
+	short.CoverTimeSeconds = 4.458
+	command := strings.Join(BuildFFmpegCommand("ffmpeg", short), " ")
+	killfeedAt := strings.Index(command, "[kfsrc0]")
+	coverAt := strings.Index(command, "split=2[cfmain][cfsrc]")
+	if killfeedAt < 0 || coverAt < 0 || coverAt < killfeedAt {
+		t.Fatalf("command = %q, want the cover freeze after the killfeed overlay chain", command)
+	}
+	if !strings.Contains(command, "[vkf0]split=2[cfmain][cfsrc]") {
+		t.Fatalf("command = %q, want the cover freeze fed by the killfeed output", command)
+	}
+}
+
+func TestBuildMusicFFmpegCommandCoverFirstFrame(t *testing.T) {
+	short := singleClipKillfeedShort()
+	short.Effects = nil
+	short.MusicPath = "music.mp3"
+	short.CoverFirstFrame = true
+	short.CoverTimeSeconds = 4.458
+	command := strings.Join(BuildFFmpegCommand("ffmpeg", short), " ")
+	for _, want := range []string{
+		"split=2[cfmain][cfsrc]",
+		"[cfcover]format=yuv420p[v]",
+		"amix=inputs=2:duration=first:dropout_transition=0:normalize=0",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("command = %q, want it to contain %q", command, want)
+		}
+	}
+}
+
+func TestBuildCompilationFFmpegCommandCoverFirstFrame(t *testing.T) {
+	short := ShortEdit{
+		Preset:           PresetViral60Clean,
+		Output:           "out.mp4",
+		DurationSeconds:  11.078,
+		CoverFirstFrame:  true,
+		CoverTimeSeconds: 4.458,
+		Parts: []ShortPart{
+			{SegmentID: "seg-001", Input: "p1.mp4", DurationSeconds: 6.078, Kills: []KillCue{{TimeSeconds: 4.578}}},
+			{SegmentID: "seg-002", Input: "p2.mp4", DurationSeconds: 5},
+		},
+	}
+	command := strings.Join(BuildCompilationFFmpegCommand("ffmpeg", short), " ")
+	for _, want := range []string{
+		"[vbase]split=2[cfmain][cfsrc]",
+		"[cfsrc]trim=start=4.458:duration=0.050",
+		"[cfcover]format=yuv420p[v]",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("command = %q, want it to contain %q", command, want)
+		}
+	}
+	if strings.Contains(command, "[catv]format") {
+		t.Fatalf("command = %q, want the base filter routed through [vbase]", command)
+	}
+}
+
+func TestBuildCompilationFFmpegCommandWithoutCoverFirstFrameUnchanged(t *testing.T) {
+	short := ShortEdit{
+		Preset:          PresetViral60Clean,
+		Output:          "out.mp4",
+		DurationSeconds: 11.078,
+		Parts: []ShortPart{
+			{SegmentID: "seg-001", Input: "p1.mp4", DurationSeconds: 6.078},
+		},
+	}
+	command := strings.Join(BuildCompilationFFmpegCommand("ffmpeg", short), " ")
+	if strings.Contains(command, "cfmain") || strings.Contains(command, "[vbase]") {
+		t.Fatalf("command = %q, want the historical single-clause video path", command)
+	}
+}
+
 func TestBuildCompilationFFmpegCommandTailTrimsPartInputs(t *testing.T) {
 	short := ShortEdit{
 		Preset:          PresetViral60Clean,

@@ -74,6 +74,8 @@ Flags:
   --kill-effect <style>      clean, punch-in, velocity, or freeze-flash
   --transition <style>       cut, flash, whip, or dip
   --intro / --outro          add professional title bookends
+  --cover-first-frame        freeze the cover frame over the first frames so
+                             YouTube's Shorts thumbnail selector can pick it
   --dry-run                  print the resolved plan without launching HLAE/CS2 or FFmpeg
   --format <text|json>       dry-run plan format (default text; JSON requires --dry-run)
 

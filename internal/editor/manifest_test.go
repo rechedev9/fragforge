@@ -81,6 +81,42 @@ func TestBuildManifestUsesSegmentOrderAndKillTimes(t *testing.T) {
 	}
 }
 
+func TestBuildManifestCoverFirstFramePlumbsThroughShorts(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.CoverFirstFrame = true
+	manifest := mustBuildManifest(t, result, opts)
+
+	if !manifest.CoverFirstFrame {
+		t.Fatal("manifest cover first frame = false, want true")
+	}
+	first := manifest.Shorts[0]
+	if !first.CoverFirstFrame {
+		t.Fatal("short cover first frame = false, want true")
+	}
+	if got := strings.Join(first.FFmpegCommand, " "); !strings.Contains(got, "[cfmain][cffreeze]overlay") {
+		t.Fatalf("ffmpeg command = %q, want the cover first-frame freeze clauses", got)
+	}
+}
+
+func TestBuildManifestCoverFirstFrameKeepsCoverTimeWithoutCovers(t *testing.T) {
+	dir := t.TempDir()
+	result := testRecordingResult(dir)
+	opts := testManifestOptions(dir, nil)
+	opts.CoversEnabled = false
+	opts.CoverFirstFrame = true
+	manifest := mustBuildManifest(t, result, opts)
+
+	first := manifest.Shorts[0]
+	if first.CoverPath != "" || len(first.CoverCommand) != 0 {
+		t.Fatalf("cover path = %q, cover command len = %d, want no JPG cover", first.CoverPath, len(first.CoverCommand))
+	}
+	if first.CoverTimeSeconds != 0.88 {
+		t.Fatalf("cover time = %.3f, want 0.880 for the first-frame freeze", first.CoverTimeSeconds)
+	}
+}
+
 func TestBuildManifestSanitizesSegmentIDInOutputPaths(t *testing.T) {
 	dir := t.TempDir()
 	result := testRecordingResult(dir)

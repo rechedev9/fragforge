@@ -31,7 +31,10 @@ type shortOptions struct {
 	Transition    string
 	Intro         bool
 	Outro         bool
-	DryRun        bool
+	// CoverFirstFrame freezes the cover frame over the first frames of the
+	// rendered Short so YouTube's thumbnail frame selector can pick it.
+	CoverFirstFrame bool
+	DryRun          bool
 }
 
 // shortStage is one delegated step of the resolved demo-to-Short plan.
@@ -221,6 +224,7 @@ func parseShortArgs(args []string) (shortOptions, error) {
 	fs.StringVar(&opts.Transition, "transition", editor.TransitionFlash, "cut, flash, whip, or dip")
 	fs.BoolVar(&opts.Intro, "intro", false, "add a professional intro title overlay")
 	fs.BoolVar(&opts.Outro, "outro", false, "add a professional outro title overlay")
+	fs.BoolVar(&opts.CoverFirstFrame, "cover-first-frame", false, "freeze the cover frame over the first frames so YouTube's Shorts thumbnail selector can pick it")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the resolved plan without launching HLAE/CS2 or FFmpeg")
 	if err := fs.Parse(args); err != nil {
 		return shortOptions{}, err
@@ -443,6 +447,9 @@ func shortRenderArgs(opts shortOptions, plan shortPlan, killPlanPath, recordingR
 	}
 	if plan.outro {
 		args = append(args, "--outro")
+	}
+	if opts.CoverFirstFrame {
+		args = append(args, "--cover-first-frame")
 	}
 	if killPlanPath != "" {
 		args = append(args, "--killplan", killPlanPath)
