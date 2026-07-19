@@ -35,6 +35,10 @@ Two ways to run the pipeline:
 - CLI (`zv short`, or the granular stage commands) runs the whole chain in-process on the local machine.
 - Orchestrator (`zv serve`) exposes an HTTP API and runs parser/media work on an in-process inline queue, with job state in SQLite (or in memory for tests).
 
+Studio accepts either one demo or a multi-demo series grouped by a client-minted `series_id`.
+Series flows aggregate the roster across maps so the featured player is chosen once, and HLTV-style `-pN.dem` parts are grouped as one logical map.
+The inline queue keeps normal concurrency for parsing and rendering, but every HLAE/CS2 capture in one orchestrator instance shares a dedicated lane with exactly one worker because all jobs contend for the same `cs2.exe` process.
+
 ## Codex Desktop: CLI-first
 
 When this repository is opened in Codex Desktop, the unified `zv` CLI is the
@@ -85,6 +89,8 @@ credentials; xAI remains the automatic transcription and translation fallback.
 Both journeys support `short-9x16` (1080x1920 TikTok/Shorts) and
 `landscape-16x9` (1920x1080 YouTube); discover stream geometry through
 `zv stream variants --format json`.
+The persisted stream edit plan is the source of truth for clip order and boundaries, crop/framing, source-audio gain or mute, fades, text overlays, captions, killfeed, and music.
+Use its supported API/CLI fields, including `music.volume` and `--music-volume`, instead of introducing ad hoc FFmpeg flags outside the plan.
 
 Before any non-dry-run capture or render for a demo video, stop at the
 creative brief gate. Ask the user only for choices they have not already supplied:
@@ -122,9 +128,18 @@ The unified `short` and `record` commands resolve missing HLAE/CS2 paths through
 the same environment/local autodetection reported by `zv capabilities`; agents
 should not copy detected paths back into argv unless explicitly overriding them.
 
-The orchestrator drives a job state machine: `queued -> parsing -> parsed -> recording -> recorded -> composing -> composed -> done` (or `failed`).
+FragForge Studio also embeds a separate assistant that launches the locally installed Codex CLI through `codex app-server --stdio`.
+The rail is unavailable until Codex is installed, sufficiently current, and signed in.
+It runs only through the Electron preload/IPC bridge, receives a dedicated empty working directory rather than the repository or Studio data, uses a `read-only` Codex sandbox, disables generic shell/browser/web/MCP/plugin/workspace capabilities, and strips `FRAGFORGE_*`, `ZV_*`, and credential-like environment variables.
+The integrated assistant can use only the allowlisted dynamic `fragforge` namespace: it searches live operations first, executes reads directly, and turns writes, costly work, and destructive operations into Studio approval previews.
+Capture and render therefore have two separate gates: approval of the complete creative brief, followed by approval of the exact operation preview.
+This assistant is not the optional external MCP stdio server, whose transport and file-capable operation surface are intended for explicitly configured external clients.
+
+The orchestrator drives a job state machine: `queued -> scanning -> scanned -> parsing -> parsed -> recording -> recorded -> composing -> composed -> done` (or `failed`); jobs with a target already supplied may skip the roster-scan states.
 Each worker is idempotent: it checks whether the durable artifact already exists and skips the external media command if so, which makes manual retries safe.
 Pure stages (parse, compose) retry automatically; recording does not retry automatically because it costs minutes and a GPU, so it is marked `failed` for the user to decide.
+A `demo_incompatible:` recording failure is deterministic and non-retryable: the current CS2 build cannot replay that demo, so keep any already captured segments and do not offer a retry that cannot change the input.
+Deleting a job is a destructive domain operation allowed only after the job is settled; it removes the Studio-managed job tree and uploaded demo copy before deleting the repository row so a partial cleanup remains retryable.
 
 Module boundaries (keep `cmd/` entrypoints thin):
 
@@ -135,8 +150,10 @@ Module boundaries (keep `cmd/` entrypoints thin):
 - `internal/renderplan` - render variants, loadouts, edit documents, QA.
 - `internal/composition` - concat/composition planning and FFmpeg boundaries.
 - `internal/workers` - Asynq parser/media/agent workers.
+- `internal/voiceprofile` - local reusable narration-reference metadata and validated audio storage; API responses expose relative audio URLs, never absolute filesystem paths.
 - `internal/youtubeinsights`, `internal/youtubetrends` - deterministic Europe/Madrid scheduling, factual reel-derived metadata recommendations, and optional bounded Firecrawl trend discovery for the manual publication assistant. Firecrawl results are hints, never fabricated YouTube performance metrics.
-- `web/` - standalone Next.js (App Router) frontend: the no-login `/upload` flow, match/clip/video views, and a typed API client; it reaches the orchestrator only through same-origin `/api/demos/*` proxy routes (see `web/CLAUDE.md`).
+- `web/` - standalone Next.js (App Router) frontend: upload/series, match/clip/video, stream, and news views with a typed API client; it reaches local services only through same-origin proxy routes under `/api/demos/*`, `/api/streams/*`, and `/api/news/*` (see `web/CLAUDE.md`).
+- `desktop/` - Electron Local Studio packaging, process lifecycle, bundled resources, the external MCP stdio server, and the isolated integrated Codex assistant bridge.
 - `data/` - generated/local media artifacts; treat as output unless the task is explicitly about test fixtures or artifact cleanup.
 
 The current foundation runs locally and concatenates segments into `final.mp4`; treat `README.md` as the source of truth for what exists today.
@@ -152,6 +169,9 @@ The editing rationale: hook text in the first 1-2s, punch-ins on kills, slow-mo 
 ## Web frontend (web/)
 
 Frontend guidance (architecture, run commands, proxy-route contract, and TypeScript style) lives in `web/CLAUDE.md`, loaded when working under `web/`.
+All local API route families keep the orchestrator URL and mutation token server-side, validate IDs before constructing upstream URLs, and preserve the shared `503 {code: "service_unavailable"}` response when the local service is unavailable.
+Local browser requests must use a loopback Host with an explicit port and must pass the shared Origin/Sec-Fetch-Site guard, which also prevents DNS rebinding.
+Large uploads bypass body-cloning middleware but apply the same guard in the route before reading the body, stream upstream with an incremental byte limit, and keep control JSON/form bodies explicitly bounded.
 
 ## Deployment
 
@@ -170,13 +190,16 @@ Releasing a desktop version means building the installer, publishing the version
 ### Local Studio (web UI + local HLAE/CS2 capture)
 
 Local Studio runs the whole product from the web UI on the user's own Windows + GPU PC, capture included, without Supabase or a paired agent.
-The web proxies the entire `/api/demos/*` pipeline to a local orchestrator (`zv serve`) on the same machine, so the browser flow (upload -> pick player -> pick kills -> create reel) drives local HLAE/CS2 capture directly.
+Same-origin routes proxy demo, stream, and news operations to local services; the demo browser flow (upload -> pick player -> pick kills -> create reel) drives local HLAE/CS2 capture directly.
+The news workspace currently persists source/title/hook/script drafts in browser storage and reusable voice-reference audio in FragForge's local object store.
+It does not yet provide a completed news narration/render pipeline, and the voice sample is not sent to xAI, YouTube, or a voice provider.
 
 ```powershell
 .\scripts\local-studio.ps1   # starts zv serve (persistent SQLite, capture auto-detected) + the bundled-style web server, opens /upload
 ```
 
 This is a native Windows run, so capture works. Prerequisites: Go toolchain, Node, CS2 + HLAE installed, and the binaries built via `.\scripts\build.ps1`.
+`ZV_MUSIC_DIR` defaults to `<ZV_DATA_DIR>/music`; the source Local Studio launcher provisions missing catalog tracks on a best-effort basis, discards downloads that fail SHA-256 verification, and still starts offline with whatever tracks are already available.
 
 ## Common commands
 
@@ -197,6 +220,7 @@ zv check
 
 `zv short` chains parse -> moments -> HLAE/CS2 recording -> render and interprets the prompt deterministically (Spanish and English): a 17-digit number or `--target-steamid` selects the player, `mejores`/`best`/`highlights` selects top moments (otherwise all kills are compiled), `musica`/`music`/`beat` adds beat analysis (needs `--music`), `16:9`/`horizontal`/`video largo` selects landscape output, and an explicit preset name or `--preset` overrides the default `viral-60-clean`.
 `--dry-run` resolves the plan without running anything, and rerunning a failed stage with `--from-recording <recording-result.json>` skips parse and record.
+`--cover-first-frame` is opt-in for `zv short`, `zv shorts render`, and `zv-editor`; it freezes the fully composed cover frame over the opening frames so a Shorts thumbnail selector can see it, without changing duration or audio synchronization.
 `zv check` sanity-checks the project contract (skills, workflows, docs); `zv presets` lists render presets.
 `zv batch`, `zv metrics`, and `zv errors` are the error-tracking commands (see Observability below).
 
@@ -215,6 +239,30 @@ scripts/go-gate.sh --race --security --build  # full gate for risky changes
 scripts/go-format-changed.sh                # format all changed Go files (or pass explicit paths)
 bash scripts/ci-check.sh                    # validate GitHub Actions with pinned actionlint
 ```
+
+Frontend and desktop gates:
+
+```powershell
+pnpm --dir web run typecheck
+pnpm --dir web run lint
+pnpm --dir web run test:unit
+pnpm --dir desktop run typecheck
+pnpm --dir desktop run lint
+pnpm --dir desktop run test:unit
+pnpm --dir desktop run build
+```
+
+The manual Electron UI E2E uses the same assembled `build-resources` layout as the installer, launches real Electron with isolated `userData`, verifies the web-to-orchestrator path, and can run beside an already open Studio instance:
+
+```powershell
+pnpm --dir desktop run build
+pnpm --dir desktop run assemble
+pnpm --dir desktop run test:e2e:ui
+```
+
+This Electron suite is separate from the removed browser-only `web/` Playwright suite, writes only gitignored E2E artifacts, and is not part of ordinary CI.
+Current CI is Windows/desktop-first: it runs the Go gate on `windows-latest`, runs desktop lint/typecheck/unit/build, and builds the installer only when relevant paths changed.
+Web, landing, optional security tools, and the Electron UI E2E rely on the change-aware local gate or explicit manual commands rather than a general CI job.
 
 Orchestrator (HTTP API + workers) runs fully in-process with `ZV_DATABASE_URL=memory`: it uses an in-memory job repository and an inline queue, no external services needed:
 
@@ -366,7 +414,9 @@ Demo cleanup:
 Local capture path:
 
 - The orchestrator auto-detects the capture tools on startup so the user does not set env vars: `zv-recorder` next to the orchestrator binary, the highest installed HLAE version matching `C:\HLAE-*\HLAE.exe`, and `cs2.exe` via Steam's `libraryfolders.vdf` (`internal/capturetools/detect.go`). Version comparison is numeric, not lexical. Explicit `ZV_RECORDER_PATH`/`ZV_HLAE_PATH`/`ZV_CS2_PATH` still win. `GET /api/capabilities` reports each tool's `source` (`detected`/`env`/`none`) and accessibility, which the web "Capture" card surfaces (and the record/generate handlers 409 with an actionable message when capture is not configured).
-- Always use the latest official HLAE release for capture; never pin a release number in repository instructions or command examples. Before a non-dry-run capture, compare the version reported by `zv capabilities --format json` with the latest official AdvancedFX release and install the newer release when the local copy is stale.
+- For source/CLI capture that uses host autodetection, always use the latest official HLAE release; never pin a release number in repository instructions or command examples. Before a non-dry-run host capture, compare the version reported by `zv capabilities --format json` with the latest official AdvancedFX release and install the newer release when the local copy is stale.
+- Packaged FragForge Studio instead uses the official HLAE archive pinned by `desktop/src/hlae-tool.json` for that build and accepts it only after manifest/SHA-256 verification.
+  Keep packaged builds reproducible: update the manifest deliberately for a release rather than silently substituting whatever newer HLAE happens to be installed on the host.
 - Do not use `C:\HLAE\HLAE.exe`; it is the wrong HLAE install for FragForge capture runs.
 - Always launch CS2 through HLAE in windowed mode for recording runs; the CS2 command line must include `-windowed`, and demos must not be recorded in fullscreen or borderless fullscreen.
 
