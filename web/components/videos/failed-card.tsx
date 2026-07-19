@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
+import { parseFailureReason } from '@/lib/api/failure-reason';
 import { Button } from '@/components/ui/button';
 import { DeleteVideoButton } from '@/components/videos/delete-video-button';
 
@@ -18,6 +19,20 @@ import { DeleteVideoButton } from '@/components/videos/delete-video-button';
 export function FailedCard({ video, onChange }: { video: Video; onChange: () => void }) {
   const [retrying, setRetrying] = useState(false);
   const unrecoverable = video.unrecoverable ?? false;
+  const failure = parseFailureReason(video.failureReason);
+  // A demo-incompatible failure is deterministic in the .dem itself: retry can
+  // never help, so we hide Retry and show the Spanish explanation. Unrecoverable
+  // reels keep their own branch.
+  const demoIncompatible = !unrecoverable && failure.kind === 'demo-incompatible';
+  const canRetry = !unrecoverable && !demoIncompatible;
+
+  function footerHint(): string {
+    if (unrecoverable) return 'Elimina la tarjeta y sube la demo otra vez para forjarla de nuevo.';
+    if (demoIncompatible) {
+      return 'Este fallo es determinista: reintentar no ayudará. Elimina la tarjeta o forja con una demo reciente.';
+    }
+    return 'Reintenta para retomar desde la etapa que falló';
+  }
 
   async function onRetry() {
     if (retrying) return;
@@ -54,20 +69,20 @@ export function FailedCard({ video, onChange }: { video: Video; onChange: () => 
         </p>
         <p className="mt-1 line-clamp-2 text-sm leading-5 text-destructive">
           {/* Unrecoverable reels carry an internal English reason; show the
-              Spanish explanation instead of leaking it into the UI. */}
+              Spanish explanation instead of leaking it into the UI. A
+              demo-incompatible reason is machine-readable, so we surface its
+              parsed Spanish message rather than the raw prefix. */}
           {unrecoverable
             ? 'El orquestador ya no tiene esta captura (puede haberse reiniciado).'
-            : (video.failureReason ?? 'El reel falló en tu equipo.')}
+            : failure.message}
         </p>
         <p className="mt-3 border-t border-destructive/20 pt-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          {unrecoverable
-            ? 'Elimina la tarjeta y sube la demo otra vez para forjarla de nuevo.'
-            : 'Reintenta para retomar desde la etapa que falló'}
+          {footerHint()}
         </p>
       </div>
 
       <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
-        {!unrecoverable && (
+        {canRetry && (
           <Button className="flex-1 sm:flex-none" variant="secondary" size="sm" onClick={onRetry} disabled={retrying}>
             <RotateCcw className="size-4" />
             {retrying ? 'Reintentando…' : 'Reintentar'}
