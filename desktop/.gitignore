@@ -2,5 +2,6 @@ node_modules/
 build-resources/
 dist-installer/
 dist/
+e2e/artifacts/
 .env*
 !.env.example

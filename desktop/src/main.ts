@@ -302,6 +302,10 @@ function createWindow(): BrowserWindow {
     },
   });
   mainWindow = win;
+  // The embedded web UI titles itself "FragForge" (the shared browser
+  // product); the native window keeps the desktop product name instead of
+  // adopting whatever document.title the page sets.
+  win.on('page-title-updated', (event) => event.preventDefault());
   win.removeMenu();
   if (isMaximized) win.maximize();
   win.on('close', saveWindowBounds);

@@ -14,6 +14,7 @@
     "test:unit": "node --no-warnings --test --test-reporter=dot \"src/**/*.test.ts\" \"scripts/**/*.test.mjs\"",
     "test:mcp:e2e": "set \"FRAGFORGE_REQUIRE_REAL_ORCHESTRATOR=1\" && set \"FRAGFORGE_REQUIRE_BUILT_MCP=1\" && node --no-warnings --test \"src/mcp/*.e2e.test.ts\"",
     "test:mcp:packaged": "set \"FRAGFORGE_REQUIRE_PACKAGED_MCP=1\" && node --no-warnings --test \"src/mcp/packaged-launcher.e2e.test.ts\"",
+    "test:e2e:ui": "node --no-warnings --test e2e/studio-ui.e2e.test.mjs",
     "eval:mcp": "node --no-warnings --experimental-strip-types src/mcp/eval.ts",
     "eval:mcp:gate": "go build -o ../bin/zv-orchestrator.exe ../cmd/zv-orchestrator && pnpm run eval:mcp",
     "mcp": "node --no-warnings --experimental-strip-types src/mcp/stdio.ts",
@@ -28,6 +29,7 @@
     "electron-builder": "^26.0.0",
     "oxlint": "^1.72.0",
     "oxlint-tsgolint": "^0.24.0",
+    "playwright-core": "^1.61.1",
     "typescript": "^5.7.0"
   },
   "build": {
