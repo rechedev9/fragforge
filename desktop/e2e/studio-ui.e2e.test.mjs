@@ -4,8 +4,10 @@
 // through Playwright's Electron driver.
 //
 // Prerequisites: `pnpm run build` (dist/main.js) and `pnpm run assemble`
-// (build-resources/). The app allocates its own loopback ports, so a running
-// Local Studio does not conflict.
+// (build-resources/). The app allocates its own loopback ports, and the
+// isolated-userdata.cjs bootstrap gives the suite its own userData (and thus
+// its own single-instance lock), so it runs even while a real FragForge
+// Studio instance is open.
 //
 // Run: pnpm run test:e2e:ui
 
@@ -21,6 +23,9 @@ const { _electron } = require('playwright-core');
 
 const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const artifactsDir = join(desktopRoot, 'e2e', 'artifacts');
+// Bootstrap that isolates userData so the app's single-instance lock does not
+// collide with a running Studio (see isolated-userdata.cjs).
+const bootstrapPath = join(desktopRoot, 'e2e', 'isolated-userdata.cjs');
 
 // First boot provisions runtime tools (HLAE unpack, ffmpeg download) into
 // userData, which can take minutes; a warm profile boots in seconds. The
@@ -38,7 +43,7 @@ before(async () => {
   mkdirSync(artifactsDir, { recursive: true });
   app = await _electron.launch({
     executablePath: require('electron'),
-    args: [desktopRoot],
+    args: [bootstrapPath],
     cwd: desktopRoot,
   });
   page = await app.firstWindow();
