@@ -88,6 +88,11 @@ func pathsEqual(left, right string) bool {
 }
 
 func pathWithin(directory, candidate string) (bool, error) {
+	// A path on a different volume cannot be inside directory, and
+	// filepath.Rel returns a hard error across volumes on Windows.
+	if !strings.EqualFold(filepath.VolumeName(directory), filepath.VolumeName(candidate)) {
+		return false, nil
+	}
 	relative, err := filepath.Rel(directory, candidate)
 	if err != nil {
 		return false, err

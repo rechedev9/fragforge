@@ -3,6 +3,7 @@ package pathguard
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -55,5 +56,18 @@ func TestRejectInputsWithinDirectory(t *testing.T) {
 	}
 	if err := RejectInputsWithinDirectory(publishDir, Input{Flag: "--input", Path: outside}); err != nil {
 		t.Fatalf("outside error = %v", err)
+	}
+}
+
+func TestRejectInputsWithinDirectoryAcrossVolumes(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive-letter volumes only exist on Windows")
+	}
+	// filepath.Rel returns a hard error across volumes on Windows; an input on a
+	// different drive than the output directory is simply not inside it.
+	publishDir := `C:\Users\example\run\shortslistosparasubir`
+	input := `D:\media\clip.mp4`
+	if err := RejectInputsWithinDirectory(publishDir, Input{Flag: "--input", Path: input}); err != nil {
+		t.Fatalf("cross-volume error = %v", err)
 	}
 }
