@@ -1,6 +1,6 @@
 {
   "name": "fragforge-studio",
-  "version": "2.2.8",
+  "version": "2.2.9",
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
