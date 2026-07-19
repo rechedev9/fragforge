@@ -24,27 +24,22 @@ import {
 } from '@/components/ui/sidebar';
 import { BrandMark, Wordmark } from '@/components/brand/wordmark';
 import { CaptureReadiness } from '@/components/shell/capture-readiness';
+import { NAV_SECTIONS, type NavHref } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 
-type NavItem = {
-  /** Mono HUD index rendered before the label ("01".."06"). */
-  number: string;
-  label: string;
-  href: string;
-  icon: LucideIcon;
-  /** Stream remains a category signal, never the global selection colour. */
-  stream?: boolean;
+/** Per-section presentation the shared nav data deliberately leaves out.
+ * `stream` remains a category signal, never the global selection colour. */
+const NAV_META: Record<NavHref, { icon: LucideIcon; stream?: boolean }> = {
+  '/matches': { icon: Crosshair },
+  '/upload': { icon: UploadCloud },
+  '/streams': { icon: Clapperboard, stream: true },
+  '/news': { icon: Newspaper },
+  '/videos': { icon: Film },
+  '/feed': { icon: Compass },
+  '/settings': { icon: Settings },
 };
 
-const NAV_ITEMS: NavItem[] = [
-  { number: '01', label: 'Partidas', href: '/matches', icon: Crosshair },
-  { number: '02', label: 'Subir demo', href: '/upload', icon: UploadCloud },
-  { number: '03', label: 'Clips de stream', href: '/streams', icon: Clapperboard, stream: true },
-  { number: '04', label: 'Noticias', href: '/news', icon: Newspaper },
-  { number: '05', label: 'Biblioteca', href: '/videos', icon: Film },
-  { number: '06', label: 'Feed', href: '/feed', icon: Compass },
-  { number: '07', label: 'Ajustes', href: '/settings', icon: Settings },
-];
+const NAV_ITEMS = NAV_SECTIONS.map((section) => ({ ...section, ...NAV_META[section.href] }));
 
 /** A nav href is active for its exact page and any nested route under it. */
 function isActiveHref(pathname: string, href: string): boolean {
@@ -52,7 +47,7 @@ function isActiveHref(pathname: string, href: string): boolean {
 }
 
 /**
- * The persistent left sidebar shell: brand lockup up top, the numbered 01-06
+ * The persistent left sidebar shell: brand lockup up top, the numbered 01-07
  * nav (active item gets the inset accent bar; the active destination always
  * uses cyan), and a footer with the local CAPTURA readiness card.
  */

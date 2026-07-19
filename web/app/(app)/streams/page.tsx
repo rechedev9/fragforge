@@ -43,6 +43,7 @@ import {
 } from '@/lib/api/streams';
 import { api } from '@/lib/api';
 import type { Song } from '@/lib/api/types';
+import { navSection } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { StudioPageHeader } from '@/components/studio/page-header';
@@ -85,6 +86,8 @@ import {
   streamRenderCanRetry,
   streamRenderNeedsKillfeedReanalysis,
 } from '@/lib/stream-recovery';
+
+const NAV = navSection('/streams');
 
 /** Accent styling shared by every purple range slider in this editor. */
 const ACCENT_SLIDER_CLASS = 'accent-[#9146ff] disabled:opacity-50';
@@ -560,8 +563,8 @@ function LocalStreamsPage() {
   return (
     <div className="flex flex-col gap-8">
       <StudioPageHeader
-        number={3}
-        label="CLIPS DE STREAM"
+        number={Number(NAV.number)}
+        label={NAV.label.toUpperCase()}
         accent="magenta"
         title="DE STREAM A SHORT"
         description={

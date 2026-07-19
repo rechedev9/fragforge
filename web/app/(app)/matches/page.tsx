@@ -16,7 +16,10 @@ import { StudioEmptyState } from '@/components/studio/empty-state';
 import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { seriesTitle } from '@/lib/series-status';
+import { navSection } from '@/lib/nav';
 import { timeAgo } from '@/lib/format';
+
+const NAV = navSection('/matches');
 
 /** True when an API error means the local analysis service is unreachable. */
 function isServiceUnavailable(err: unknown): boolean {
@@ -198,8 +201,8 @@ export default function MatchesPage() {
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
       <StudioPageHeader
-        number={1}
-        label="PARTIDAS"
+        number={Number(NAV.number)}
+        label={NAV.label.toUpperCase()}
         title="TUS PARTIDAS"
         description="Tus últimas partidas de CS2. Elige una y forja sus highlights en un reel."
         actions={

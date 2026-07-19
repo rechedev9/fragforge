@@ -5,12 +5,15 @@ import Link from 'next/link';
 import { Compass, Film, UploadCloud } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { FeedItem } from '@/lib/api/types';
+import { navSection } from '@/lib/nav';
 import { FeedGrid, FeedGridSkeleton } from '@/components/feed/feed-grid';
 import { StudioEmptyState } from '@/components/studio/empty-state';
 import { STUDIO_FILTER_CHIP_CLASS } from '@/components/studio/filter-chip';
 import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+
+const NAV = navSection('/feed');
 
 /** RECIENTES sorts by publish time; TOP SEMANA sorts the last 7 days by likes
  * (falling back to the full list when nothing falls in that window, so a
@@ -55,8 +58,8 @@ export default function FeedPage() {
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
       <StudioPageHeader
-        number={5}
-        label="FEED"
+        number={Number(NAV.number)}
+        label={NAV.label.toUpperCase()}
         title="LA COMUNIDAD FORJA"
         description="Reels forjados en los rigs de la comunidad. Mira uno, deja un like."
         actions={

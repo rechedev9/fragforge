@@ -9,6 +9,7 @@ import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { aggregateSeriesRoster } from '@/lib/api/series-roster';
 import { prettyMapName } from '@/lib/format';
+import { navSection } from '@/lib/nav';
 import { seriesTitle } from '@/lib/series-status';
 import { Wordmark } from '@/components/brand/wordmark';
 import { StudioPageHeader } from '@/components/studio/page-header';
@@ -16,6 +17,8 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { DemoDropzone } from '@/components/upload/demo-dropzone';
 import { PlayerPicker } from '@/components/upload/player-picker';
+
+const NAV = navSection('/upload');
 
 /**
  * The pipeline stage the upload flow is in. `scanning`/`parsing` render either a
@@ -293,7 +296,7 @@ export default function UploadPage() {
 
   // Reachable singular: 2+ demos dropped but only one scan survived.
   const mapCount = scannedRows.length;
-  let headerLabel = 'SUBIR DEMO';
+  let headerLabel = NAV.label.toUpperCase();
   let headerTitle = 'ANALIZA CUALQUIER DEMO';
   let headerDescription: ReactNode = (
     <>Suelta un .dem — o varios, una serie bo3/bo5 completa — y forja las mejores jugadas en un reel. Sin login.</>
@@ -382,7 +385,7 @@ export default function UploadPage() {
         </header>
 
         <div className="flex flex-1 flex-col py-8 sm:py-10">
-          <StudioPageHeader number={2} label={headerLabel} title={headerTitle} description={headerDescription} />
+          <StudioPageHeader number={Number(NAV.number)} label={headerLabel} title={headerTitle} description={headerDescription} />
 
           <div className="mt-7 sm:mt-8">
             {stage === 'idle' ? (

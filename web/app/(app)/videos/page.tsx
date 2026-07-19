@@ -6,6 +6,7 @@ import { Film, Swords } from 'lucide-react';
 import type { Video } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { startPollLoop } from '@/lib/poll-loop';
+import { navSection } from '@/lib/nav';
 import { SectionEyebrow } from '@/components/brand/section-eyebrow';
 import { StudioEmptyState } from '@/components/studio/empty-state';
 import { StudioPageHeader } from '@/components/studio/page-header';
@@ -15,6 +16,8 @@ import { RenderingCard } from '@/components/videos/rendering-card';
 import { ReadyCard } from '@/components/videos/ready-card';
 import { FailedCard } from '@/components/videos/failed-card';
 import { VideoFilters, type VideoFormatFilter } from '@/components/videos/video-filters';
+
+const NAV = navSection('/videos');
 
 // Poll fast while a reel is advancing through the pipeline; once every reel is
 // terminal (ready/failed) there is nothing to drive, so back off to an idle
@@ -96,8 +99,8 @@ export default function VideosPage() {
   return (
     <div className="flex flex-col gap-8">
       <StudioPageHeader
-        number={4}
-        label="BIBLIOTECA"
+        number={Number(NAV.number)}
+        label={NAV.label.toUpperCase()}
         title="TUS REELS"
         description="Sigue cada captura desde la cola hasta el MP4 y publica solo lo que merece salir del rig."
         actions={

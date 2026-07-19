@@ -20,6 +20,7 @@ import {
   type SeriesStatusTone,
 } from '@/lib/series-status';
 import { prettyMapName } from '@/lib/format';
+import { navSection } from '@/lib/nav';
 import { groupSeriesDemos, representativeSeriesStatus, type SeriesGroup } from '@/lib/series-grouping';
 import { startPollLoop } from '@/lib/poll-loop';
 import { StudioEmptyState } from '@/components/studio/empty-state';
@@ -27,6 +28,9 @@ import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+
+// A series detail belongs to the demo-upload journey, so it shares its number.
+const UPLOAD_NAV = navSection('/upload');
 
 /** Fast while any map is still working, relaxed once the series has settled. */
 const FAST_MS = 2500;
@@ -226,7 +230,7 @@ export default function SeriesPage({ params }: { params: Promise<{ id: string }>
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
       <StudioPageHeader
-        number={2}
+        number={Number(UPLOAD_NAV.number)}
         label="SERIE"
         title={seriesTitle(groups.length)}
         description={seriesDescription(groups.map((g) => representativeSeriesStatus(g.demos.map((d) => d.status))))}
