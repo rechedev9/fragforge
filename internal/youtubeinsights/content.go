@@ -72,13 +72,14 @@ func GenerateContentCandidates(metadata VideoMetadata, cfg ContentConfig) ([]Con
 		return nil, err
 	}
 
-	titles := titleAlternatives(metadata)
-	keywords := buildKeywords(metadata, cfg.MaxKeywords)
-	tags := buildTags(metadata, cfg.MaxTags)
+	mapName := prettyMapName(metadata.Map)
+	titles := titleAlternatives(metadata, mapName)
+	keywords := buildKeywords(metadata, mapName, cfg.MaxKeywords)
+	tags := buildTags(metadata, mapName, cfg.MaxTags)
 	candidates := make([]ContentCandidate, 0, cfg.CandidateCount)
 	seen := make(map[string]struct{}, len(titles))
-	for _, title := range titles {
-		title = truncateRunes(title, MaxYouTubeTitleRunes)
+	for _, template := range titles {
+		title := truncateRunes(template.text, MaxYouTubeTitleRunes)
 		key := strings.ToLower(title)
 		if _, exists := seen[key]; exists {
 			continue
@@ -86,7 +87,7 @@ func GenerateContentCandidates(metadata VideoMetadata, cfg ContentConfig) ([]Con
 		seen[key] = struct{}{}
 		candidate := ContentCandidate{
 			Title:       title,
-			Description: buildDescription(title, metadata),
+			Description: buildDescription(title, metadata, mapName, template.spanish),
 			Keywords:    append([]string(nil), keywords...),
 			Tags:        append([]string(nil), tags...),
 		}
@@ -120,11 +121,12 @@ func ScoreContent(candidate ContentCandidate, metadata VideoMetadata) (float64, 
 
 	title := strings.ToLower(candidate.Title)
 	description := strings.ToLower(candidate.Description)
+	mapMentions := mapMentions(metadata)
 	score := 32.0
 	if strings.Contains(title, strings.ToLower(metadata.Player)) {
 		score += 10
 	}
-	if strings.Contains(title, strings.ToLower(metadata.Map)) {
+	if containsAny(title, mapMentions) {
 		score += 10
 	}
 	if strings.Contains(title, strconv.Itoa(metadata.KillCount)) {
@@ -146,7 +148,7 @@ func ScoreContent(candidate ContentCandidate, metadata VideoMetadata) (float64, 
 		score -= 8
 	}
 	if strings.Contains(description, strings.ToLower(metadata.Player)) &&
-		strings.Contains(description, strings.ToLower(metadata.Map)) {
+		containsAny(description, mapMentions) {
 		score += 5
 	}
 	if strings.Contains(description, "#shorts") && strings.Contains(description, "#cs2") {
@@ -361,45 +363,169 @@ func normalizeTextList(values []string) []string {
 	return result
 }
 
-func titleAlternatives(metadata VideoMetadata) []string {
-	primary := fmt.Sprintf("%s: %d kills on %s | CS2", metadata.Player, metadata.KillCount, metadata.Map)
-	hook := fmt.Sprintf("%d kills. One %s game. %s.", metadata.KillCount, metadata.Map, metadata.Player)
-	if metadata.Hook != "" {
-		hook = fmt.Sprintf("%s — %s on %s", metadata.Hook, metadata.Player, metadata.Map)
-	}
-	weapon := fmt.Sprintf("%s's %d-kill highlight on %s", metadata.Player, metadata.KillCount, metadata.Map)
-	if len(metadata.Weapons) > 0 {
-		weapon = fmt.Sprintf("%s highlights: %s's %d kills on %s", metadata.Weapons[0], metadata.Player, metadata.KillCount, metadata.Map)
-	}
-	moment := fmt.Sprintf("%s takes over %s with %d kills", metadata.Player, metadata.Map, metadata.KillCount)
-	if metadata.Moment != "" {
-		moment = fmt.Sprintf("%s | %s on %s (CS2)", metadata.Moment, metadata.Player, metadata.Map)
-	}
-	short := fmt.Sprintf("%d kills on %s — %s CS2 Short", metadata.KillCount, metadata.Map, metadata.Player)
-	return []string{primary, hook, weapon, moment, short}
+// mapDisplayNames maps CS2 engine map identifiers to the human display names
+// creators actually put in titles. Unlisted maps fall back to prettyMapName's
+// prefix/underscore normalization.
+var mapDisplayNames = map[string]string{
+	"de_ancient":  "Ancient",
+	"de_dust2":    "Dust 2",
+	"de_mirage":   "Mirage",
+	"de_inferno":  "Inferno",
+	"de_nuke":     "Nuke",
+	"de_overpass": "Overpass",
+	"de_vertigo":  "Vertigo",
+	"de_anubis":   "Anubis",
+	"de_train":    "Train",
+	"cs_office":   "Office",
+	"cs_italy":    "Italy",
 }
 
-func buildDescription(title string, metadata VideoMetadata) string {
-	weapons := ""
+// prettyMapName converts an engine map name (de_ancient) into a display name
+// (Ancient). Names that are already display names, such as "Mirage" or
+// "Dust II", are returned unchanged.
+func prettyMapName(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return trimmed
+	}
+	if display, ok := mapDisplayNames[strings.ToLower(trimmed)]; ok {
+		return display
+	}
+	name := trimmed
+	lower := strings.ToLower(name)
+	for _, prefix := range []string{"de_", "cs_"} {
+		if strings.HasPrefix(lower, prefix) {
+			name = name[len(prefix):]
+			break
+		}
+	}
+	fields := strings.Fields(strings.ReplaceAll(name, "_", " "))
+	for index, field := range fields {
+		// Only capitalize all-lowercase tokens so "II" or "Dust" survive intact.
+		if field == strings.ToLower(field) {
+			fields[index] = capitalizeFirst(field)
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
+func capitalizeFirst(value string) string {
+	if value == "" {
+		return value
+	}
+	runes := []rune(value)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+// titleTemplate is a candidate title plus the language of its supporting
+// description, so descriptions match the title instead of always being English.
+type titleTemplate struct {
+	text    string
+	spanish bool
+}
+
+// titleAlternatives returns deterministic viral-realistic title candidates that
+// mix Spanish and English. Every fact comes from metadata; mapName is the
+// display map name. With only player, map, and kill count it still yields five
+// distinct titles.
+func titleAlternatives(metadata VideoMetadata, mapName string) []titleTemplate {
+	player := metadata.Player
+	kills := metadata.KillCount
+	templates := make([]titleTemplate, 0, 8)
+
+	// Hook first, then only the facts the hook does not already state.
+	if metadata.Hook != "" {
+		templates = append(templates, titleTemplate{
+			text:    hookLedTitle(metadata, mapName),
+			spanish: true,
+		})
+	}
+	// Weapon-led Spanish punch line.
 	if len(metadata.Weapons) > 0 {
-		weapons = " with " + strings.Join(metadata.Weapons[:min(2, len(metadata.Weapons))], " and ")
+		templates = append(templates, titleTemplate{
+			text:    fmt.Sprintf("¡%d KILLS con la %s en %s! — %s", kills, metadata.Weapons[0], mapName, player),
+			spanish: true,
+		})
 	}
-	context := fmt.Sprintf("%s lands %d kills on %s%s.", metadata.Player, metadata.KillCount, metadata.Map, weapons)
-	if metadata.Moment != "" {
-		context += " " + ensureSentence(metadata.Moment)
+	// Five language-mixed base templates that never depend on optional fields.
+	templates = append(templates,
+		titleTemplate{text: fmt.Sprintf("%s DESTROZA %s: %d kills en CS2", player, mapName, kills), spanish: true},
+		titleTemplate{text: fmt.Sprintf("%s drops %d on %s 🤯 CS2 highlights", player, kills, mapName), spanish: false},
+		titleTemplate{text: fmt.Sprintf("%d kills on %s — %s | CS2 Shorts", kills, mapName, player), spanish: false},
+		titleTemplate{text: fmt.Sprintf("%d BAJAS en %s con %s | Counter-Strike 2", kills, mapName, player), spanish: true},
+		titleTemplate{text: fmt.Sprintf("%s: %d kills en %s | CS2 highlights", player, kills, mapName), spanish: true},
+	)
+	// Weapon-led English variant, offered alongside the Spanish weapon line.
+	if len(metadata.Weapons) > 0 {
+		templates = append(templates, titleTemplate{
+			text:    fmt.Sprintf("%s's %d kills with the %s on %s | CS2", player, kills, metadata.Weapons[0], mapName),
+			spanish: false,
+		})
 	}
+	return templates
+}
+
+// hookLedTitle leads with the supplied hook and appends only the facts the hook
+// does not already state, so a rich hook like "12K con AK-47 en Ancient" is not
+// echoed by a redundant "12 kills en Ancient" tail. "(CS2)" always survives so
+// the game context is present even when the hook already carries every fact.
+func hookLedTitle(metadata VideoMetadata, mapName string) string {
+	hookLower := strings.ToLower(metadata.Hook)
+	var facts []string
+	if !strings.Contains(hookLower, strings.ToLower(metadata.Player)) {
+		facts = append(facts, metadata.Player)
+	}
+	hasKills := strings.Contains(hookLower, strconv.Itoa(metadata.KillCount))
+	hasMap := mapName != "" && strings.Contains(hookLower, strings.ToLower(mapName))
+	switch {
+	case !hasKills && !hasMap:
+		facts = append(facts, fmt.Sprintf("%d kills en %s", metadata.KillCount, mapName))
+	case !hasKills && hasMap:
+		facts = append(facts, fmt.Sprintf("%d kills", metadata.KillCount))
+	case hasKills && !hasMap:
+		facts = append(facts, mapName)
+	}
+	if len(facts) == 0 {
+		return metadata.Hook + " | CS2"
+	}
+	return fmt.Sprintf("%s — %s (CS2)", metadata.Hook, strings.Join(facts, ", "))
+}
+
+func buildDescription(title string, metadata VideoMetadata, mapName string, spanish bool) string {
+	context := descriptionContext(metadata, mapName, spanish)
 	hashtags := []string{"#CS2", "#CounterStrike2", "#Shorts"}
-	if mapHashtag := hashtag(metadata.Map); mapHashtag != "" {
+	if mapHashtag := hashtag(mapName); mapHashtag != "" {
 		hashtags = append(hashtags, mapHashtag)
 	}
 	description := title + "\n\n" + context + "\n\n" + strings.Join(hashtags, " ")
 	return truncateRunes(description, MaxYouTubeDescriptionRunes)
 }
 
-func buildKeywords(metadata VideoMetadata, maximum int) []string {
+func descriptionContext(metadata VideoMetadata, mapName string, spanish bool) string {
+	verb, mapPreposition, weaponJoiner := "lands", "on", " and "
+	if spanish {
+		verb, mapPreposition, weaponJoiner = "consigue", "en", " y "
+	}
+	weapons := ""
+	if len(metadata.Weapons) > 0 {
+		lead := " with "
+		if spanish {
+			lead = " con "
+		}
+		weapons = lead + strings.Join(metadata.Weapons[:min(2, len(metadata.Weapons))], weaponJoiner)
+	}
+	context := fmt.Sprintf("%s %s %d kills %s %s%s.", metadata.Player, verb, metadata.KillCount, mapPreposition, mapName, weapons)
+	if metadata.Moment != "" {
+		context += " " + ensureSentence(metadata.Moment)
+	}
+	return context
+}
+
+func buildKeywords(metadata VideoMetadata, mapName string, maximum int) []string {
 	keywords := []string{
 		"CS2 Shorts",
-		metadata.Map + " CS2",
+		mapName + " CS2",
 		metadata.Player + " highlights",
 	}
 	if len(metadata.Weapons) > 0 {
@@ -412,10 +538,10 @@ func buildKeywords(metadata VideoMetadata, maximum int) []string {
 	return takeUnique(keywords, maximum)
 }
 
-func buildTags(metadata VideoMetadata, maximum int) []string {
+func buildTags(metadata VideoMetadata, mapName string, maximum int) []string {
 	// Tags deliberately contain only identity/context and spelling variants.
 	// SearchTerms are not copied wholesale because tags are not a ranking lever.
-	tags := []string{"CS2", "Counter-Strike 2", metadata.Map, metadata.Player}
+	tags := []string{"CS2", "Counter-Strike 2", mapName, metadata.Player}
 	tags = append(tags, metadata.Weapons[:min(2, len(metadata.Weapons))]...)
 	tags = append(tags, metadata.Misspellings...)
 	tags = takeUnique(tags, maximum)
@@ -423,6 +549,27 @@ func buildTags(metadata VideoMetadata, maximum int) []string {
 		tags = tags[:len(tags)-1]
 	}
 	return tags
+}
+
+// mapMentions returns the lowercased raw engine name and display name, so
+// scoring credits a map reference whether the title uses "de_ancient" or
+// "Ancient".
+func mapMentions(metadata VideoMetadata) []string {
+	raw := strings.ToLower(strings.TrimSpace(metadata.Map))
+	display := strings.ToLower(prettyMapName(metadata.Map))
+	if display == raw || display == "" {
+		return []string{raw}
+	}
+	return []string{raw, display}
+}
+
+func containsAny(haystack string, needles []string) bool {
+	for _, needle := range needles {
+		if needle != "" && strings.Contains(haystack, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func takeUnique(values []string, maximum int) []string {
