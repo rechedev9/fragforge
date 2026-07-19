@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import {
   CheckCircle2,
+  FileAudio,
   FileText,
   ImagePlus,
   Link2,
@@ -56,6 +57,8 @@ export function NewsShortWorkspace(): ReactNode {
   const [hook, setHook] = useState(DEFAULT_HOOK);
   const [script, setScript] = useState(DEFAULT_SCRIPT);
   const [images, setImages] = useState<File[]>([]);
+  const imagesInputRef = useRef<HTMLInputElement>(null);
+  const voiceInputRef = useRef<HTMLInputElement>(null);
   const [draftSavedAt, setDraftSavedAt] = useState('');
   const [draftError, setDraftError] = useState('');
 
@@ -186,7 +189,24 @@ export function NewsShortWorkspace(): ReactNode {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="news-images"><ImagePlus className="size-4" aria-hidden />Capturas y recursos</Label>
-              <Input id="news-images" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={selectImages} />
+              <input
+                ref={imagesInputRef}
+                id="news-images"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                multiple
+                className="sr-only"
+                // Reset so picking the same files again still fires onChange.
+                onClick={(event) => {
+                  event.currentTarget.value = '';
+                }}
+                onChange={selectImages}
+              />
+              <div>
+                <Button type="button" variant="outline" onClick={() => imagesInputRef.current?.click()}>
+                  <ImagePlus aria-hidden />Elegir imágenes
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 {images.length === 0 ? 'Añade el post, la noticia oficial y reacciones.' : `${images.length} recurso(s) seleccionado(s) para esta sesión.`}
               </p>
@@ -253,7 +273,30 @@ export function NewsShortWorkspace(): ReactNode {
 
             <form className="space-y-3" onSubmit={(event) => void uploadVoice(event)}>
               <Label htmlFor="voice-reference">{profile === null ? 'Guardar referencia' : 'Reemplazar referencia'}</Label>
-              <Input id="voice-reference" type="file" accept="audio/ogg,audio/wav,.ogg,.wav" onChange={selectVoice} />
+              <input
+                ref={voiceInputRef}
+                id="voice-reference"
+                type="file"
+                accept="audio/ogg,audio/wav,.ogg,.wav"
+                className="sr-only"
+                // Reset so picking the same file again still fires onChange.
+                onClick={(event) => {
+                  event.currentTarget.value = '';
+                }}
+                onChange={selectVoice}
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <Button type="button" variant="outline" disabled={voiceBusy} onClick={() => voiceInputRef.current?.click()}>
+                  <FileAudio aria-hidden />Elegir audio
+                </Button>
+                {voiceFile !== null ? (
+                  <span className="max-w-52 truncate text-sm text-muted-foreground" title={voiceFile.name}>
+                    {voiceFile.name}
+                  </span>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Ningún audio seleccionado.</span>
+                )}
+              </div>
               <p className="text-xs leading-5 text-muted-foreground">OGG Opus o WAV clásico PCM. Recomendado: entre 10 y 30 segundos, sin música ni ruido. Máximo 25 MB.</p>
               <Button type="submit" variant="secondary" disabled={voiceFile === null || voiceBusy}>
                 {voiceBusy ? <LoaderCircle className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
