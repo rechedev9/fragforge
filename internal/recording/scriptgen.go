@@ -23,6 +23,8 @@ type seekStep struct {
 	Target int `json:"target"`
 }
 
+const minimumDemoSeekGapSeconds = 30
+
 // GenerateHLAEJavaScript renders a self-contained HLAE 2.x mirv-script file.
 func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 	plan.Stream = normalizeStreamConfig(plan.Stream)
@@ -145,9 +147,13 @@ func buildSchedule(plan RecordingPlan) ([]scheduledCommand, []seekStep) {
 			cameraWarmupTick = recordStart - max(2, plan.Tickrate/2)
 		}
 
-		// The seek is driven by the runtime (re-issued until it lands), not a
-		// one-shot scheduled command, so it survives being attempted too early.
-		seeks = append(seeks, seekStep{After: seekTick, Target: seekTarget})
+		// Short demo_gototick jumps can corrupt CS2's demo netchannel. Let nearby
+		// segments advance naturally and reserve seeking for gaps worth skipping.
+		if seekTarget-seekTick >= plan.Tickrate*minimumDemoSeekGapSeconds {
+			// The seek is driven by the runtime (re-issued until it lands), not a
+			// one-shot scheduled command, so it survives being attempted too early.
+			seeks = append(seeks, seekStep{After: seekTick, Target: seekTarget})
+		}
 
 		commands = append(commands,
 			scheduledCommand{Tick: max(seekTarget+1, cameraWarmupTick), Key: "camera-warmup-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},

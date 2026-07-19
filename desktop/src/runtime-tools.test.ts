@@ -40,7 +40,7 @@ test('reuses complete cached installations without download work', async (t) => 
   const toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-tools-'));
   t.after(() => fs.rmSync(toolsDir, { recursive: true, force: true }));
   const paths = {
-    hlae: path.join(toolsDir, 'hlae', '2.191.0', 'HLAE.exe'),
+    hlae: path.join(toolsDir, 'hlae', '2.191.1', 'HLAE.exe'),
     ffmpeg: path.join(
       toolsDir,
       'ffmpeg',
@@ -57,7 +57,7 @@ test('reuses complete cached installations without download work', async (t) => 
   }
   const ffprobe = path.join(path.dirname(paths.ffmpeg), 'ffprobe.exe');
   fs.writeFileSync(ffprobe, 'cached');
-  writeCompleteMarker(path.join(toolsDir, 'hlae', '2.191.0'), 'hlae');
+  writeCompleteMarker(path.join(toolsDir, 'hlae', '2.191.1'), 'hlae');
   writeCompleteMarker(path.join(toolsDir, 'ffmpeg', 'n8.1.2'), 'ffmpeg');
   writeCompleteMarker(path.join(toolsDir, 'ytdlp', '2026.06.09'), 'ytdlp');
   const staleStaging = path.join(toolsDir, 'ytdlp', '2026.06.09.installing');
@@ -79,7 +79,7 @@ test('reuses complete cached installations without download work', async (t) => 
   });
   assert.deepEqual(logs, []);
   assert.deepEqual(statuses, []);
-  assert.equal(fs.existsSync(path.join(toolsDir, 'hlae', '2.191.0', '.fragforge-install.json')), true);
+  assert.equal(fs.existsSync(path.join(toolsDir, 'hlae', '2.191.1', '.fragforge-install.json')), true);
   assert.equal(fs.existsSync(path.join(toolsDir, 'ffmpeg', 'n8.1.2', '.fragforge-install.json')), true);
   assert.equal(fs.existsSync(path.join(toolsDir, 'ytdlp', '2026.06.09', '.fragforge-install.json')), true);
   assert.equal(fs.existsSync(staleStaging), false);
@@ -110,7 +110,7 @@ test('keeps markerless legacy tools only as an offline fallback', async (t) => {
   assert.equal(typeof env.ZV_FFMPEG_PATH, 'string');
   assert.equal(typeof env.ZV_YTDLP_PATH, 'string');
   assert.deepEqual(statuses.sort(), ['ffmpeg', 'hlae', 'ytdlp']);
-  assert.equal(fs.existsSync(path.join(toolsDir, 'hlae', '2.191.0', '.fragforge-install.json')), false);
+  assert.equal(fs.existsSync(path.join(toolsDir, 'hlae', '2.191.1', '.fragforge-install.json')), false);
   assert.equal(fs.existsSync(path.join(toolsDir, 'ffmpeg', 'n8.1.2', '.fragforge-install.json')), false);
   assert.equal(fs.existsSync(path.join(toolsDir, 'ytdlp', '2026.06.09', '.fragforge-install.json')), false);
   assert.equal(logs.filter((line) => line.includes('using markerless legacy install until retry')).length, 3);
@@ -120,7 +120,7 @@ test('installs uncached tools through staging and publishes only complete versio
   const toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fragforge-tools-'));
   t.after(() => fs.rmSync(toolsDir, { recursive: true, force: true }));
   const statuses: string[] = [];
-  const bundledHLAEArchive = path.join(toolsDir, 'bundled', 'hlae_2_191_0.zip');
+  const bundledHLAEArchive = path.join(toolsDir, 'bundled', 'hlae_2_191_1.zip');
   fs.mkdirSync(path.dirname(bundledHLAEArchive), { recursive: true });
   fs.writeFileSync(bundledHLAEArchive, 'bundled official archive fixture');
 
@@ -163,7 +163,7 @@ test('installs uncached tools through staging and publishes only complete versio
     statuses.filter((status) => status.endsWith(':start')).sort(),
     ['ffmpeg:start', 'hlae:start', 'ytdlp:start'],
   );
-  const versions = { hlae: '2.191.0', ffmpeg: 'n8.1.2', ytdlp: '2026.06.09' };
+  const versions = { hlae: '2.191.1', ffmpeg: 'n8.1.2', ytdlp: '2026.06.09' };
   for (const [name, version] of Object.entries(versions)) {
     const installDir = path.join(toolsDir, name, version);
     assert.equal(fs.existsSync(`${installDir}.installing`), false);
@@ -310,7 +310,7 @@ test('caller cancellation aborts work instead of activating legacy fallbacks', a
   controller.abort();
 
   await assert.rejects(provisioning, /runtime tool provisioning aborted/);
-  for (const [name, version] of Object.entries({ hlae: '2.191.0', ffmpeg: 'n8.1.2', ytdlp: '2026.06.09' })) {
+  for (const [name, version] of Object.entries({ hlae: '2.191.1', ffmpeg: 'n8.1.2', ytdlp: '2026.06.09' })) {
     assert.equal(fs.existsSync(path.join(toolsDir, name, `${version}.installing`)), false);
   }
 });
@@ -342,7 +342,7 @@ test('restores an install interrupted during atomic publication', async (t) => {
 
 function digestFor(url: string): string {
   if (url.includes('advancedfx')) {
-    return '78efa377a2bac9522c3771a79c2503fec57e106432fc11d32244fe25b7c5b6cc';
+    return '307ba9170b151a7df9b7e5604b335c2d8b8df5bf5cb8d6700ae3fd01069da514';
   }
   if (url.includes('FFmpeg-Builds')) {
     return 'e0337e822bc66d01747bfa917080561739252aaceef3bccc049bcb299d6f9be0';
@@ -351,14 +351,14 @@ function digestFor(url: string): string {
 }
 
 function seedLegacyHLAE(toolsDir: string): void {
-  const executable = path.join(toolsDir, 'hlae', '2.191.0', 'HLAE.exe');
+  const executable = path.join(toolsDir, 'hlae', '2.191.1', 'HLAE.exe');
   fs.mkdirSync(path.dirname(executable), { recursive: true });
   fs.writeFileSync(executable, 'cached');
 }
 
 function seedCompleteHLAE(toolsDir: string): void {
   seedLegacyHLAE(toolsDir);
-  writeCompleteMarker(path.join(toolsDir, 'hlae', '2.191.0'), 'hlae');
+  writeCompleteMarker(path.join(toolsDir, 'hlae', '2.191.1'), 'hlae');
 }
 
 function seedLegacyFFmpeg(toolsDir: string): void {
@@ -393,8 +393,8 @@ function seedCompleteYtdlp(toolsDir: string): void {
 
 const MARKERS = {
   hlae: {
-    version: '2.191.0',
-    sha256: '78efa377a2bac9522c3771a79c2503fec57e106432fc11d32244fe25b7c5b6cc',
+    version: '2.191.1',
+    sha256: '307ba9170b151a7df9b7e5604b335c2d8b8df5bf5cb8d6700ae3fd01069da514',
   },
   ffmpeg: {
     version: 'n8.1.2',

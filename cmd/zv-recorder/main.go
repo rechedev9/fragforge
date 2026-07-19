@@ -217,12 +217,13 @@ func run() error {
 	if err := launchAndWait(ctx, absHLAEExe, absCS2Exe, plan, scriptPath); err != nil {
 		stopIncrementalMux()
 		result.Error = err.Error()
-		// Best-effort diagnostics: launchAndWait commonly fails because ctx hit
-		// its deadline, so collect artifacts under a fresh, short-lived context
-		// rather than the (likely cancelled) recording context.
-		diagCtx, diagCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		result.Artifacts = recording.CollectArtifacts(diagCtx, plan, ffprobePath)
-		diagCancel()
+		// Preserve completed takes before returning the capture failure. Avoid
+		// probing partial files here: a single stuck ffprobe must not consume the
+		// fresh recovery budget before FFmpeg can publish usable segment clips.
+		result.Artifacts = recording.CollectArtifacts(context.Background(), plan, "")
+		recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		result.Artifacts = append(result.Artifacts, recording.MuxSegmentClips(recoveryCtx, plan, result.Artifacts, ffmpegPath, "")...)
+		recoveryCancel()
 		result.Warnings = recording.ValidateArtifacts(plan, result.Artifacts)
 		_ = writeResult(plan.OutputDir, result)
 		return err
@@ -377,6 +378,11 @@ func launchAndWait(ctx context.Context, hlaeExe, cs2Exe string, plan recording.R
 	if err != nil {
 		return err
 	}
+	consoleLogPath := cs2ConsoleLogPath(cs2Exe)
+	if err := prepareCS2ConsoleLog(consoleLogPath); err != nil {
+		return err
+	}
+	consoleLog := newCS2ConsoleLogMonitor(consoleLogPath)
 	cs2CmdLine := cs2LaunchCommandLine(plan, scriptPath)
 	// #nosec G204 -- HLAE/CS2 paths are explicit local tool paths and args are not shell-interpolated.
 	cmd := exec.CommandContext(ctx, hlaeExe,
@@ -396,7 +402,7 @@ func launchAndWait(ctx context.Context, hlaeExe, cs2Exe string, plan recording.R
 	if runtime.GOOS != "windows" {
 		return nil
 	}
-	return waitForWindowsProcessRunAndExit(ctx, "cs2.exe")
+	return waitForWindowsProcessRunAndExit(ctx, "cs2.exe", consoleLog)
 }
 
 func cs2LaunchCommandLine(plan recording.RecordingPlan, scriptPath string) string {
@@ -517,6 +523,79 @@ func cs2ConsoleLogPath(cs2Exe string) string {
 	return filepath.Join(gameDir, "csgo", "console.log")
 }
 
+const demoParseFailureMarker = "NETWORK_DISCONNECT_MESSAGE_PARSE_ERROR"
+
+type cs2ConsoleLogMonitor struct {
+	path   string
+	offset int64
+	tail   string
+}
+
+func prepareCS2ConsoleLog(path string) error {
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		return fmt.Errorf("reset cs2 console log %q: %w", path, err)
+	}
+	return nil
+}
+
+func newCS2ConsoleLogMonitor(path string) *cs2ConsoleLogMonitor {
+	monitor := &cs2ConsoleLogMonitor{path: path}
+	if info, err := os.Stat(path); err == nil {
+		monitor.offset = info.Size()
+	}
+	return monitor
+}
+
+// failure checks only console output written after this monitor was created.
+// CS2 can truncate console.log at startup, so a smaller file resets the cursor.
+func (m *cs2ConsoleLogMonitor) failure() error {
+	file, err := os.Open(m.path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil
+	}
+	if info.Size() < m.offset {
+		m.offset = 0
+		m.tail = ""
+	}
+	if _, err := file.Seek(m.offset, io.SeekStart); err != nil {
+		return nil
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil
+	}
+	m.offset += int64(len(data))
+	if len(data) == 0 {
+		return nil
+	}
+
+	content := m.tail + string(data)
+	if strings.Contains(content, demoParseFailureMarker) {
+		return &demoParseError{path: m.path}
+	}
+	keep := len(demoParseFailureMarker) - 1
+	if len(content) > keep {
+		m.tail = content[len(content)-keep:]
+	} else {
+		m.tail = content
+	}
+	return nil
+}
+
+type demoParseError struct {
+	path string
+}
+
+func (e *demoParseError) Error() string {
+	return fmt.Sprintf("cs2 demo playback failed with %s; check console log %q", demoParseFailureMarker, e.path)
+}
+
 func validateCaptureResult(result recording.RecordingResult, cs2Exe string) error {
 	if err := recording.ValidateUploadResult(result); err != nil {
 		return fmt.Errorf("%w; check HLAE capture output and CS2 console log %q", err, cs2ConsoleLogPath(cs2Exe))
@@ -558,13 +637,24 @@ func locateHookDLL(hlaeExe string) (string, error) {
 	return "", fmt.Errorf("AfxHookSource2.dll not found next to HLAE.exe or under x64")
 }
 
-func waitForWindowsProcessRunAndExit(ctx context.Context, image string) error {
+func waitForWindowsProcessRunAndExit(ctx context.Context, image string, consoleLog *cs2ConsoleLogMonitor) error {
 	return waitForWindowsProcessRunAndExitWith(
 		ctx,
 		image,
 		60*time.Second,
 		500*time.Millisecond,
-		tasklistWindowTitle,
+		func(image string) (bool, string, error) {
+			running, title, err := tasklistWindowTitle(image)
+			if err != nil {
+				return running, title, err
+			}
+			if consoleLog != nil {
+				if err := consoleLog.failure(); err != nil {
+					return running, title, err
+				}
+			}
+			return running, title, nil
+		},
 		terminateWindowsProcess,
 	)
 }
@@ -589,18 +679,32 @@ func waitForWindowsProcessRunAndExitWith(
 			return stopProcessAfterWaitFailure(image, ctx.Err(), seen, terminate)
 		case <-firstDeadline.C:
 			if !seen {
-				return fmt.Errorf("%s did not appear within %s", image, firstWait)
+				running, title, err := status(image)
+				if running {
+					seen = true
+				}
+				if err != nil {
+					return stopProcessAfterWaitFailure(image, err, shouldTerminateAfterStatusFailure(err, seen), terminate)
+				}
+				if isHookErrorWindowTitle(title) {
+					return stopProcessAfterWaitFailure(image, &hookIncompatibleError{windowTitle: title}, true, terminate)
+				}
+				if !running {
+					return fmt.Errorf("%s did not appear within %s", image, firstWait)
+				}
 			}
 		case <-ticker.C:
 			running, title, err := status(image)
+			if running {
+				seen = true
+			}
 			if err != nil {
-				return stopProcessAfterWaitFailure(image, err, seen, terminate)
+				return stopProcessAfterWaitFailure(image, err, shouldTerminateAfterStatusFailure(err, seen), terminate)
 			}
 			if isHookErrorWindowTitle(title) {
 				return stopProcessAfterWaitFailure(image, &hookIncompatibleError{windowTitle: title}, true, terminate)
 			}
 			if running {
-				seen = true
 				continue
 			}
 			if seen {
@@ -608,6 +712,11 @@ func waitForWindowsProcessRunAndExitWith(
 			}
 		}
 	}
+}
+
+func shouldTerminateAfterStatusFailure(err error, processSeen bool) bool {
+	var parseErr *demoParseError
+	return processSeen || errors.As(err, &parseErr)
 }
 
 func stopProcessAfterWaitFailure(image string, cause error, processMayBeRunning bool, terminate func(string) error) error {

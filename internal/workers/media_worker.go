@@ -1871,14 +1871,6 @@ func (w *StreamRenderWorker) burnCaptionCues(ctx context.Context, cfg StreamRend
 	return out, nil
 }
 
-func (w *StreamRenderWorker) writeStreamState(id uuid.UUID, variant string, status streamclips.Status, warnings []string, errMsg string, videos []streamclips.VideoEntry) error {
-	state, err := streamclips.NewRenderState(id, variant, status, warnings, errMsg, videos)
-	if err != nil {
-		return err
-	}
-	return w.writeStreamRenderState(state)
-}
-
 func (w *StreamRenderWorker) writeStreamRenderState(state streamclips.RenderState) error {
 	if err := streamclips.ValidateRenderStateArtifacts(state); err != nil {
 		return fmt.Errorf("validate stream render state artifacts: %w", err)

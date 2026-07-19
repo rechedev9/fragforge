@@ -310,6 +310,161 @@ func TestWaitForWindowsProcessRunAndExitReportsCleanupFailure(t *testing.T) {
 	}
 }
 
+func TestWaitForWindowsProcessRunAndExitStopsRunningProcessOnStatusFailure(t *testing.T) {
+	wantErr := errors.New("demo playback failed")
+	var stopped string
+	status := func(image string) (bool, string, error) {
+		return true, "Counter-Strike 2", wantErr
+	}
+	terminate := func(image string) error {
+		stopped = image
+		return nil
+	}
+
+	err := waitForWindowsProcessRunAndExitWith(
+		context.Background(),
+		"cs2.exe",
+		time.Second,
+		time.Millisecond,
+		status,
+		terminate,
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if stopped != "cs2.exe" {
+		t.Fatalf("terminated image = %q, want cs2.exe", stopped)
+	}
+}
+
+func TestWaitForWindowsProcessRunAndExitStopsProcessOnDemoParseFailureBeforeSeen(t *testing.T) {
+	var stopped string
+	status := func(image string) (bool, string, error) {
+		return false, "", &demoParseError{path: `C:\game\csgo\console.log`}
+	}
+	terminate := func(image string) error {
+		stopped = image
+		return nil
+	}
+
+	err := waitForWindowsProcessRunAndExitWith(
+		context.Background(),
+		"cs2.exe",
+		time.Second,
+		time.Millisecond,
+		status,
+		terminate,
+	)
+	var parseErr *demoParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("error = %v, want demoParseError", err)
+	}
+	if stopped != "cs2.exe" {
+		t.Fatalf("terminated image = %q, want cs2.exe", stopped)
+	}
+}
+
+func TestWaitForWindowsProcessRunAndExitChecksDemoParseFailureAtFirstDeadline(t *testing.T) {
+	var stopped string
+	status := func(image string) (bool, string, error) {
+		return false, "", &demoParseError{path: `C:\game\csgo\console.log`}
+	}
+	terminate := func(image string) error {
+		stopped = image
+		return nil
+	}
+
+	err := waitForWindowsProcessRunAndExitWith(
+		context.Background(),
+		"cs2.exe",
+		time.Millisecond,
+		time.Hour,
+		status,
+		terminate,
+	)
+	var parseErr *demoParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("error = %v, want demoParseError", err)
+	}
+	if stopped != "cs2.exe" {
+		t.Fatalf("terminated image = %q, want cs2.exe", stopped)
+	}
+}
+
+func TestPrepareCS2ConsoleLogClearsHistoricalOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "console.log")
+	if err := os.WriteFile(path, []byte("old "+demoParseFailureMarker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareCS2ConsoleLog(path); err != nil {
+		t.Fatalf("prepareCS2ConsoleLog error = %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 0 {
+		t.Fatalf("console log = %q, want empty", content)
+	}
+}
+
+func TestCS2ConsoleLogMonitorDetectsNewSplitDemoParseFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "console.log")
+	if err := os.WriteFile(path, []byte("old "+demoParseFailureMarker+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	monitor := newCS2ConsoleLogMonitor(path)
+	if err := monitor.failure(); err != nil {
+		t.Fatalf("failure() detected historical log content: %v", err)
+	}
+
+	split := len(demoParseFailureMarker) / 2
+	appendConsoleLog(t, path, "new "+demoParseFailureMarker[:split])
+	if err := monitor.failure(); err != nil {
+		t.Fatalf("failure() detected an incomplete marker: %v", err)
+	}
+	appendConsoleLog(t, path, demoParseFailureMarker[split:]+"\n")
+	err := monitor.failure()
+	if err == nil {
+		t.Fatal("failure() error = nil, want demo parse failure")
+	}
+	for _, want := range []string{demoParseFailureMarker, strconv.Quote(path)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("failure() error = %q, want %q", err, want)
+		}
+	}
+}
+
+func TestCS2ConsoleLogMonitorHandlesStartupTruncation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "console.log")
+	oldContent := strings.Repeat("old output\n", 100) + demoParseFailureMarker
+	if err := os.WriteFile(path, []byte(oldContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	monitor := newCS2ConsoleLogMonitor(path)
+	if err := os.WriteFile(path, []byte("startup\n"+demoParseFailureMarker+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := monitor.failure(); err == nil {
+		t.Fatal("failure() error = nil after log truncation, want demo parse failure")
+	}
+}
+
+func appendConsoleLog(t *testing.T, path, content string) {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateCaptureResultIncludesConsoleLog(t *testing.T) {
 	cs2 := filepath.FromSlash("C:/Steam/game/bin/win64/cs2.exe")
 	err := validateCaptureResult(recording.RecordingResult{}, cs2)

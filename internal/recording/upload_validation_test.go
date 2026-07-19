@@ -28,10 +28,77 @@ func TestValidateUploadResultAcceptsSegmentClip(t *testing.T) {
 			SegmentID: "seg-001",
 			Type:      "video",
 			Role:      "segment",
+			Path:      "seg-001.mp4",
+			SizeBytes: 1,
 		}},
 	})
 	if err != nil {
 		t.Fatalf("ValidateUploadResult error = %v", err)
+	}
+}
+
+func TestValidateUploadResultAcceptsAllPlannedSegmentClips(t *testing.T) {
+	err := ValidateUploadResult(RecordingResult{
+		Plan: RecordingPlan{Segments: []RecordingSegment{
+			{ID: "seg-001"},
+			{ID: "seg-002"},
+		}},
+		Artifacts: []RecordingArtifact{
+			{SegmentID: "seg-001", Type: "video", Role: "segment", Path: "seg-001.mp4", SizeBytes: 1},
+			{SegmentID: "seg-002", Type: "video", Role: "segment", Path: "seg-002.mp4", SizeBytes: 1},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidateUploadResult error = %v", err)
+	}
+}
+
+func TestValidateUploadResultRejectsMissingPlannedSegmentClips(t *testing.T) {
+	err := ValidateUploadResult(RecordingResult{
+		Plan: RecordingPlan{Segments: []RecordingSegment{
+			{ID: "seg-001"},
+			{ID: "seg-002"},
+			{ID: "seg-003"},
+		}},
+		Artifacts: []RecordingArtifact{
+			{SegmentID: "seg-001", Type: "video", Role: "segment", Path: "seg-001.mp4", SizeBytes: 1},
+		},
+	})
+	if err == nil {
+		t.Fatal("ValidateUploadResult error = nil, want missing planned segments")
+	}
+	if want := "recording result missing segment clips: seg-002, seg-003"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}
+
+func TestValidateUploadResultRejectsFailedSegmentArtifacts(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		artifact RecordingArtifact
+	}{
+		{
+			name:     "mux error",
+			artifact: RecordingArtifact{SegmentID: "seg-001", Type: "video", Role: "segment", Path: "seg-001.mp4", ProbeError: "ffmpeg mux failed"},
+		},
+		{
+			name:     "empty clip",
+			artifact: RecordingArtifact{SegmentID: "seg-001", Type: "video", Role: "segment", Path: "seg-001.mp4"},
+		},
+		{
+			name:     "missing path",
+			artifact: RecordingArtifact{SegmentID: "seg-001", Type: "video", Role: "segment", SizeBytes: 1},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateUploadResult(RecordingResult{
+				Plan:      RecordingPlan{Segments: []RecordingSegment{{ID: "seg-001"}}},
+				Artifacts: []RecordingArtifact{tt.artifact},
+			})
+			if err == nil {
+				t.Fatal("ValidateUploadResult error = nil, want invalid segment clip")
+			}
+		})
 	}
 }
 

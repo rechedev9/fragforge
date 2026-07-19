@@ -22,6 +22,7 @@ func TestNewUploadTargetsDerivesKeysAndPaths(t *testing.T) {
 				Type:      "video",
 				Role:      "segment",
 				Path:      filepath.Join(outDir, "segments", "seg-001.mp4"),
+				SizeBytes: 1,
 			}, {
 				SegmentID: "seg-001",
 				Type:      "audio",
@@ -60,6 +61,31 @@ func TestNewUploadTargetsDerivesKeysAndPaths(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("target[%d] = %#v, want %#v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestNewUploadTargetsSkipsFailedSegmentAndKeepsLaterValidClip(t *testing.T) {
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	got, err := NewUploadTargets(NewUploadTargetsOptions{
+		JobID:      id,
+		OutDir:     "recording",
+		ResultPath: filepath.Join("recording", "recording-result.json"),
+		Result: RecordingResult{
+			Error: "capture failed",
+			Artifacts: []RecordingArtifact{
+				{SegmentID: "seg-001", Type: "video", Role: "segment", Path: "missing.mp4", ProbeError: "ffmpeg mux failed"},
+				{SegmentID: "seg-002", Type: "video", Role: "segment", Path: "seg-002.mp4", SizeBytes: 42},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewUploadTargets error = %v", err)
+	}
+	if gotCount, wantCount := len(got), 3; gotCount != wantCount {
+		t.Fatalf("targets len = %d, want %d: %#v", gotCount, wantCount, got)
+	}
+	if got[2].SegmentID != "seg-002" || got[2].Path != "seg-002.mp4" {
+		t.Fatalf("segment target = %#v, want valid seg-002", got[2])
 	}
 }
 

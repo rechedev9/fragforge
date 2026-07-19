@@ -378,11 +378,6 @@ func (h *Handlers) readStreamKillfeedState(id uuid.UUID) (streamclips.KillfeedAn
 	return state, true, nil
 }
 
-func (h *Handlers) currentAppliedStreamKillfeed(j streamclips.Job, plan streamclips.EditPlan) (bool, error) {
-	_, current, err := h.currentAppliedStreamKillfeedAnalysis(j, plan)
-	return current, err
-}
-
 func (h *Handlers) currentAppliedStreamKillfeedAnalysis(
 	j streamclips.Job,
 	plan streamclips.EditPlan,

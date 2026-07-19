@@ -85,11 +85,6 @@ func fingerprintRow(frame image.Image, row streamclips.NoticeRow) rowFingerprint
 	return fingerprint
 }
 
-func matchingFingerprint(a, b rowFingerprint) bool {
-	distance, overlap, ok := fingerprintSimilarity(a, b)
-	return ok && distance <= fingerprintMaxDistance && overlap >= fingerprintMinOverlap
-}
-
 func fingerprintSimilarity(a, b rowFingerprint) (distance int, overlap int, ok bool) {
 	if a.features < fingerprintMinFeatures || b.features < fingerprintMinFeatures {
 		return 0, 0, false

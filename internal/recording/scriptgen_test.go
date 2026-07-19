@@ -97,6 +97,89 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 	}
 }
 
+func TestBuildScheduleDoesNotSeekAcrossNearbySegments(t *testing.T) {
+	plan := testPlan()
+	plan.Segments = []RecordingSegment{
+		{ID: "seg-001", TickStart: 114075, TickEnd: 114587},
+		{ID: "seg-002", TickStart: 115421, TickEnd: 115933},
+		{ID: "seg-003", TickStart: 117663, TickEnd: 118175},
+		{ID: "seg-004", TickStart: 141619, TickEnd: 142530},
+	}
+
+	_, seeks := buildSchedule(plan)
+	if got, want := len(seeks), 2; got != want {
+		t.Fatalf("seek count = %d, want %d: %+v", got, want, seeks)
+	}
+	if got, want := seeks[0].Target, 113755; got != want {
+		t.Errorf("first seek target = %d, want %d", got, want)
+	}
+	if got, want := seeks[1].Target, 141299; got != want {
+		t.Errorf("second seek target = %d, want %d", got, want)
+	}
+	for _, seek := range seeks {
+		if seek.Target == 117343 {
+			t.Fatalf("nearby segment generated unsafe seek: %+v", seek)
+		}
+	}
+}
+
+func TestBuildScheduleSeekGapThreshold(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		gapTicks  int
+		wantSeeks int
+	}{
+		{name: "one tick below threshold", gapTicks: 30*64 - 1, wantSeeks: 0},
+		{name: "at threshold", gapTicks: 30 * 64, wantSeeks: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := testPlan()
+			seekAfter := 50
+			leadTicks := 5 * plan.Tickrate
+			plan.Segments = []RecordingSegment{{
+				ID:        "seg-001",
+				TickStart: seekAfter + leadTicks + tt.gapTicks,
+				TickEnd:   seekAfter + leadTicks + tt.gapTicks + plan.Tickrate,
+			}}
+
+			_, seeks := buildSchedule(plan)
+			if got := len(seeks); got != tt.wantSeeks {
+				t.Fatalf("seek count = %d, want %d: %+v", got, tt.wantSeeks, seeks)
+			}
+		})
+	}
+}
+
+func TestBuildScheduleLaterSegmentSeekGapThreshold(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		gapTicks  int
+		wantSeeks int
+	}{
+		{name: "one tick below threshold", gapTicks: 30*64 - 1, wantSeeks: 0},
+		{name: "at threshold", gapTicks: 30 * 64, wantSeeks: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := testPlan()
+			seekAfter := 1000 + 32
+			leadTicks := 5 * plan.Tickrate
+			plan.Segments = []RecordingSegment{
+				{ID: "seg-001", TickStart: 370, TickEnd: 1000},
+				{
+					ID:        "seg-002",
+					TickStart: seekAfter + leadTicks + tt.gapTicks,
+					TickEnd:   seekAfter + leadTicks + tt.gapTicks + plan.Tickrate,
+				},
+			}
+
+			_, seeks := buildSchedule(plan)
+			if got := len(seeks); got != tt.wantSeeks {
+				t.Fatalf("seek count = %d, want %d: %+v", got, tt.wantSeeks, seeks)
+			}
+		})
+	}
+}
+
 func TestGenerateHLAEJavaScriptUsesConfiguredCRF(t *testing.T) {
 	p := testPlan()
 	p.Stream.CRF = 16

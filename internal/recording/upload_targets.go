@@ -52,7 +52,7 @@ func NewUploadTargets(opts NewUploadTargetsOptions) ([]UploadTarget, error) {
 	})
 
 	for _, artifact := range opts.Result.Artifacts {
-		if artifact.Role != "segment" || artifact.Type != "video" || artifact.SegmentID == "" {
+		if !isUsableSegmentClip(artifact) {
 			continue
 		}
 		key, err := SegmentClipArtifactKey(opts.JobID, artifact.SegmentID)
