@@ -567,7 +567,7 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 	var result recording.RecordingResult
 	if err := readJSONFile(resultPath, &result); err != nil {
 		if runErr != nil {
-			return runErr
+			return newRecordFailure(runErr, result, requested)
 		}
 		return fmt.Errorf("read recording result: %w", err)
 	}
@@ -608,7 +608,7 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 	}
 
 	if runErr != nil {
-		return runErr
+		return newRecordFailure(runErr, result, requested)
 	}
 	if resultErr != nil {
 		return resultErr
