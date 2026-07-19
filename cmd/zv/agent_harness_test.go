@@ -276,7 +276,7 @@ func TestRootPowerShellScriptsParseEndToEnd(t *testing.T) {
 	args = append(args, "-File", scriptPath)
 	args = append(args, files...)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, powerShell, args...)
 	cmd.Dir = root

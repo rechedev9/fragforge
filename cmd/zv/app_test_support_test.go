@@ -2011,7 +2011,7 @@ func runZVBinarySplitWithEnv(t *testing.T, exe, dir string, env []string, args .
 	t.Helper()
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(os.Environ(), withCaptureToolsEnv(t, env)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -2025,7 +2025,7 @@ func runZVBinarySplitWithEnvAndInput(t *testing.T, exe, dir string, env []string
 	t.Helper()
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(os.Environ(), withCaptureToolsEnv(t, env)...)
 	cmd.Stdin = strings.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -2178,11 +2178,69 @@ func findPowerShell() (string, bool) {
 	return "", false
 }
 
+var (
+	fakeCaptureToolsOnce    sync.Once
+	fakeCaptureToolsEnvVars []string
+	fakeCaptureToolsErr     error
+)
+
+// fakeCaptureToolsEnv points ZV_HLAE_PATH and ZV_CS2_PATH at real placeholder
+// executables in a temp dir. Documented record examples that omit --hlae/--cs2
+// resolve capture tools from these variables, so the built-binary e2e tests run
+// deterministically on machines without a real HLAE/CS2 install (CI runners).
+// The paths are created once and stay stable for the process, so workflow-run
+// and direct invocations append identical --hlae/--cs2 args and still compare
+// equal.
+func fakeCaptureToolsEnv(t *testing.T) []string {
+	t.Helper()
+	fakeCaptureToolsOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "zv-fake-capture-*")
+		if err != nil {
+			fakeCaptureToolsErr = err
+			return
+		}
+		hlae := filepath.Join(dir, executableName("HLAE"))
+		cs2 := filepath.Join(dir, executableName("cs2"))
+		for _, path := range []string{hlae, cs2} {
+			if err := os.WriteFile(path, []byte("fake capture tool"), 0o755); err != nil {
+				fakeCaptureToolsErr = err
+				return
+			}
+		}
+		fakeCaptureToolsEnvVars = []string{"ZV_HLAE_PATH=" + hlae, "ZV_CS2_PATH=" + cs2}
+	})
+	if fakeCaptureToolsErr != nil {
+		t.Fatalf("create fake capture tools: %v", fakeCaptureToolsErr)
+	}
+	return fakeCaptureToolsEnvVars
+}
+
+// withCaptureToolsEnv appends the fake capture tool paths whenever the caller
+// stubs delegation with ZV_FAKE_SUBCOMMAND, so record examples that rely on
+// capture-tool autodetection resolve without a real HLAE/CS2 install. Callers
+// that set ZV_HLAE_PATH or ZV_CS2_PATH themselves keep their explicit values.
+func withCaptureToolsEnv(t *testing.T, env []string) []string {
+	t.Helper()
+	var fakes, hasCapture bool
+	for _, entry := range env {
+		switch {
+		case entry == "ZV_FAKE_SUBCOMMAND=1":
+			fakes = true
+		case strings.HasPrefix(entry, "ZV_HLAE_PATH=") || strings.HasPrefix(entry, "ZV_CS2_PATH="):
+			hasCapture = true
+		}
+	}
+	if !fakes || hasCapture {
+		return env
+	}
+	return append(append([]string(nil), env...), fakeCaptureToolsEnv(t)...)
+}
+
 func runZVBinaryWithEnv(t *testing.T, exe, dir string, env []string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(os.Environ(), withCaptureToolsEnv(t, env)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %s: %v\n%s", exe, strings.Join(args, " "), err, out)
