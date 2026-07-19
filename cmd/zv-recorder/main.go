@@ -37,6 +37,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(exitHookIncompatible)
 	}
+	var demoErr *demoParseError
+	if errors.As(err, &demoErr) {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(exitDemoIncompatible)
+	}
 	fmt.Fprintf(os.Stderr, "error: %v\n", err)
 	os.Exit(1)
 }
@@ -593,7 +598,7 @@ type demoParseError struct {
 }
 
 func (e *demoParseError) Error() string {
-	return fmt.Sprintf("cs2 demo playback failed with %s; check console log %q", demoParseFailureMarker, e.path)
+	return fmt.Sprintf("demo incompatible with current cs2 build: playback disconnected with %s (demo likely recorded on an older game version); check console log %q", demoParseFailureMarker, e.path)
 }
 
 func validateCaptureResult(result recording.RecordingResult, cs2Exe string) error {
@@ -768,6 +773,14 @@ func processRunning(image string) (bool, error) {
 // shortStageClass, which maps this code to the "capture_incompatible"
 // observability class.
 const exitHookIncompatible = 6
+
+// exitDemoIncompatible is the process exit code used when CS2 cannot replay the
+// demo — playback disconnects with NETWORK_DISCONNECT_MESSAGE_PARSE_ERROR,
+// which almost always means the demo was recorded on an older game build.
+// Keep this in sync with the zv-recorder case in cmd/zv/obs_record.go's
+// shortStageClass, which maps this code to the "demo_incompatible"
+// observability class.
+const exitDemoIncompatible = 7
 
 // hookErrorWindowTitlePattern matches the native MessageBox titles
 // advancedfx's hook modules (AfxHookSource2, AfxHookSource, ...) use when a

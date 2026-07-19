@@ -391,6 +391,36 @@ func TestWaitForWindowsProcessRunAndExitChecksDemoParseFailureAtFirstDeadline(t 
 	}
 }
 
+func TestDemoParseErrorMessage(t *testing.T) {
+	path := `C:\game\csgo\console.log`
+	err := &demoParseError{path: path}
+	for _, want := range []string{
+		demoParseFailureMarker,
+		"demo incompatible with current cs2 build",
+		"older game version",
+		strconv.Quote(path),
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Error() = %q, want substring %q", err.Error(), want)
+		}
+	}
+}
+
+func TestCS2ConsoleLogMonitorReturnsDemoParseError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "console.log")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	monitor := newCS2ConsoleLogMonitor(path)
+	appendConsoleLog(t, path, "disconnect: "+demoParseFailureMarker+"\n")
+
+	err := monitor.failure()
+	var parseErr *demoParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("failure() error = %v, want *demoParseError", err)
+	}
+}
+
 func TestPrepareCS2ConsoleLogClearsHistoricalOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "console.log")
 	if err := os.WriteFile(path, []byte("old "+demoParseFailureMarker), 0o600); err != nil {
