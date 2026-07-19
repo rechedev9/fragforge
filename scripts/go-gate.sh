@@ -19,8 +19,8 @@ Options:
   --build     run go build ./cmd/...
   --no-format skip formatting changed Go files
   --no-staticcheck
-              skip staticcheck (useful for the Windows fidelity gate after
-              the platform-independent Ubuntu gate has already run it)
+              skip staticcheck (useful when staticcheck is not installed or
+              already ran locally)
 USAGE
 }
 
