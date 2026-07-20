@@ -4,6 +4,7 @@ import type { AssistantSnapshot } from './assistant-ipc.ts';
 import { dispatchAssistantRequest } from './assistant-command.ts';
 
 const snapshot: AssistantSnapshot = {
+  account: { planType: 'plus', status: 'signed-in' },
   availability: 'ready',
   busy: false,
   messages: [],
@@ -38,6 +39,8 @@ test('returns the current snapshot when a controller command fails', async () =>
     approve: async () => {},
     cancel: async () => {},
     clearHistory: async () => {},
+    login: async () => {},
+    logout: async () => {},
     newConversation: async () => {},
     reject: () => {},
     send: async () => {
@@ -59,6 +62,8 @@ test('wraps status in the same terminal command result as every mutation', async
     approve: async () => {},
     cancel: async () => {},
     clearHistory: async () => {},
+    login: async () => {},
+    logout: async () => {},
     newConversation: async () => {},
     reject: () => {},
     send: async () => {},
@@ -78,6 +83,8 @@ test('still returns a terminal failure when taking the fallback snapshot also fa
     approve: async () => {},
     cancel: async () => {},
     clearHistory: async () => {},
+    login: async () => {},
+    logout: async () => {},
     newConversation: async () => {},
     reject: () => {},
     send: async () => {

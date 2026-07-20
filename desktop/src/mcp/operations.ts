@@ -767,9 +767,10 @@ const operations: readonly OperationDefinition[] = [
     description: 'Acquire a supported Twitch/VOD source URL using the configured local yt-dlp.',
     inputSchema: objectSchema({
       source_url: {
-        description: 'Public http(s) Twitch/VOD source URL.',
+        description: 'Public HTTPS Twitch clip or VOD URL.',
         format: 'uri',
-        pattern: '^[Hh][Tt][Tt][Pp][Ss]?://',
+        maxLength: 2_048,
+        pattern: '^[Hh][Tt][Tt][Pp][Ss]://(?:(?:[Ww]{3}\\.)?[Tt][Ww][Ii][Tt][Cc][Hh]\\.[Tt][Vv]/(?:videos/[0-9]+|[A-Za-z0-9_]+/clip/[A-Za-z0-9_-]+)|[Cc][Ll][Ii][Pp][Ss]\\.[Tt][Ww][Ii][Tt][Cc][Hh]\\.[Tt][Vv]/[A-Za-z0-9_-]+)(?:[?#].*)?$',
         type: 'string',
       },
       title: { type: 'string' },

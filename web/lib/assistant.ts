@@ -1,7 +1,7 @@
 /**
- * Renderer-side contract for the narrowly scoped Codex bridge exposed by the
- * FragForge Studio Electron preload. The browser intentionally has no network
- * fallback: Codex, its local session, and approved actions all stay inside the
+ * Renderer-side contract for the narrowly scoped FragForge agent bridge exposed by the
+ * Studio Electron preload. The browser intentionally has no network fallback:
+ * Codex OAuth, its local session, and approved actions all stay inside the
  * desktop process.
  */
 
@@ -13,6 +13,22 @@ export const ASSISTANT_AVAILABILITY = {
 } as const;
 
 export type AssistantAvailability = typeof ASSISTANT_AVAILABILITY[keyof typeof ASSISTANT_AVAILABILITY];
+
+export const ASSISTANT_ACCOUNT_STATUSES = {
+  checking: 'checking',
+  error: 'error',
+  signedIn: 'signed-in',
+  signedOut: 'signed-out',
+  signingIn: 'signing-in',
+  unsupported: 'unsupported',
+} as const;
+
+export type AssistantAccountStatus = typeof ASSISTANT_ACCOUNT_STATUSES[keyof typeof ASSISTANT_ACCOUNT_STATUSES];
+
+export interface AssistantAccount {
+  planType?: string;
+  status: AssistantAccountStatus;
+}
 
 export const ASSISTANT_MESSAGE_ROLES = {
   assistant: 'assistant',
@@ -98,6 +114,7 @@ export interface AssistantAction {
 }
 
 export interface AssistantSnapshot {
+  account: AssistantAccount;
   availability: AssistantAvailability;
   error?: string;
   messages: readonly AssistantMessage[];
@@ -142,12 +159,15 @@ export interface FragforgeAssistantBridge {
   reject(actionId: string): Promise<AssistantCommandResult>;
   newConversation(): Promise<AssistantCommandResult>;
   clearHistory(): Promise<AssistantCommandResult>;
+  login(): Promise<AssistantCommandResult>;
+  logout(): Promise<AssistantCommandResult>;
   subscribe(listener: AssistantEventListener): () => void;
 }
 
 /** Creates the renderer's deterministic first state while the bridge loads. */
 export function initialAssistantSnapshot(availability: AssistantAvailability = ASSISTANT_AVAILABILITY.starting): AssistantSnapshot {
   return {
+    account: { status: ASSISTANT_ACCOUNT_STATUSES.checking },
     availability,
     busy: false,
     messages: [],
@@ -197,6 +217,7 @@ export function parseAssistantSnapshotEvent(value: unknown): Extract<AssistantEv
 
 function parseAssistantSnapshot(value: unknown): AssistantSnapshot {
   if (!isRecord(value)
+    || !isAssistantAccount(value.account)
     || !isAssistantAvailability(value.availability)
     || typeof value.busy !== 'boolean'
     || typeof value.revision !== 'number'
@@ -211,6 +232,7 @@ function parseAssistantSnapshot(value: unknown): AssistantSnapshot {
     throw new Error('invalid assistant snapshot');
   }
   return {
+    account: value.account,
     availability: value.availability,
     busy: value.busy,
     ...(value.error === undefined ? {} : { error: value.error }),
@@ -277,6 +299,7 @@ export function assistantContextFromPathname(pathname: string): AssistantContext
   if (root === 'videos') {
     return { kind: ASSISTANT_CONTEXT_KINDS.none, label: 'Biblioteca', pathname };
   }
+
 
   if (root === 'series' && identifier !== undefined) {
     return { kind: ASSISTANT_CONTEXT_KINDS.demo, jobId: identifier, label: 'Serie actual', pathname };
@@ -377,7 +400,20 @@ function isFragforgeAssistantBridge(value: unknown): value is FragforgeAssistant
     && typeof value.reject === 'function'
     && typeof value.newConversation === 'function'
     && typeof value.clearHistory === 'function'
+    && typeof value.login === 'function'
+    && typeof value.logout === 'function'
     && typeof value.subscribe === 'function';
+}
+
+function isAssistantAccount(value: unknown): value is AssistantAccount {
+  return isRecord(value)
+    && (value.planType === undefined || typeof value.planType === 'string')
+    && (value.status === ASSISTANT_ACCOUNT_STATUSES.checking
+      || value.status === ASSISTANT_ACCOUNT_STATUSES.error
+      || value.status === ASSISTANT_ACCOUNT_STATUSES.signedIn
+      || value.status === ASSISTANT_ACCOUNT_STATUSES.signedOut
+      || value.status === ASSISTANT_ACCOUNT_STATUSES.signingIn
+      || value.status === ASSISTANT_ACCOUNT_STATUSES.unsupported);
 }
 
 function isAssistantAvailability(value: unknown): value is AssistantAvailability {

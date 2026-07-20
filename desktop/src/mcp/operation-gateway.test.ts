@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type ServerResponse } from 'node:http';
 import test from 'node:test';
-import { McpOperationGateway } from './operation-gateway.ts';
+import { OperationGateway } from '../studio-operations/operation-gateway.ts';
 import { OrchestratorClient } from './orchestrator-client.ts';
 
 const JOB_ID = '11111111-1111-4111-8111-111111111111';
@@ -21,7 +21,7 @@ test('runs reads but previews mutations until explicitly privileged', async (t) 
   await listen(server);
   t.after(() => server.close());
 
-  const gateway = new McpOperationGateway({ client: new OrchestratorClient({ baseUrl: serverUrl(server) }) });
+  const gateway = new OperationGateway({ client: new OrchestratorClient({ baseUrl: serverUrl(server) }) });
   const preview = await gateway.execute({
     arguments: { job_id: JOB_ID, target_steamid: '76561198000000000' },
     operation: 'jobs.parse',
@@ -62,7 +62,7 @@ test('keeps mutation previews offline and validates live inputs before privilege
   await listen(server);
   t.after(() => server.close());
 
-  const gateway = new McpOperationGateway({ client: new OrchestratorClient({ baseUrl: serverUrl(server) }) });
+  const gateway = new OperationGateway({ client: new OrchestratorClient({ baseUrl: serverUrl(server) }) });
   const request = { arguments: { job_id: JOB_ID, variant: 'invented-variant' }, operation: 'renders.start' };
   const preview = await gateway.execute(request);
   assert.equal(preview.kind, 'preview');

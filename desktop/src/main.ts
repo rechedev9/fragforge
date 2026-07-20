@@ -58,7 +58,7 @@ import {
 import { assistantCommandFailure, dispatchAssistantRequest } from './assistant-command';
 import { AssistantController } from './assistant/controller';
 import { AssistantHistoryStore } from './assistant/history';
-import { McpOperationGateway } from './mcp/operation-gateway';
+import { OperationGateway } from './studio-operations/operation-gateway';
 import { OrchestratorClient } from './mcp/orchestrator-client';
 
 // Every loopback server and health check binds/targets this host; named once so
@@ -200,10 +200,11 @@ function getAssistantController(): AssistantController {
   const client = new OrchestratorClient({ portsFile });
   assistantController = new AssistantController({
     cwd: assistantWorkspace,
-    gateway: new McpOperationGateway({ client }),
+    gateway: new OperationGateway({ client }),
     history: new AssistantHistoryStore(assistantHistoryFile),
     log: logLine,
     onEvent: sendAssistantEvent,
+    openAuthURL: async (url) => shell.openExternal(url),
     orchestratorClient: client,
     version: app.getVersion(),
   });
@@ -727,6 +728,14 @@ function registerXAISettingsIPC(): void {
       return settingsFailure('Solicitud de Ajustes no válida.');
     }
     try {
+      if (request.action === XAI_SETTINGS_ACTION.appInfo) {
+        return {
+          version: app.getVersion(),
+          build: app.isPackaged ? 'production' : 'development',
+          electronVersion: process.versions.electron,
+          chromiumVersion: process.versions.chrome,
+        };
+      }
       return await xaiSettingsController.handle(request);
     } catch {
       if (request.action === XAI_SETTINGS_ACTION.status) {

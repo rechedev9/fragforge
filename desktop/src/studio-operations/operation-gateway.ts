@@ -1,12 +1,12 @@
-import { isJsonObject, type JsonObject, type JsonValue } from './json.ts';
+import { isJsonObject, type JsonObject, type JsonValue } from '../mcp/json.ts';
 import {
   operationNamed,
   validateLiveOperationInput,
   validateOperationInput,
   type OperationDefinition,
   type OperationRisk,
-} from './operations.ts';
-import { OrchestratorClient } from './orchestrator-client.ts';
+} from '../mcp/operations.ts';
+import { OrchestratorClient } from '../mcp/orchestrator-client.ts';
 
 type MutationRisk = Exclude<OperationRisk, 'read'>;
 
@@ -16,24 +16,24 @@ type MutationRisk = Exclude<OperationRisk, 'read'>;
  * MCP uses this to elicit primitive values. Other callers can omit it and
  * provide a complete argument object themselves.
  */
-export type McpOperationInputCompleter = (
+export type OperationInputCompleter = (
   operation: OperationDefinition,
   input: JsonObject,
   signal?: AbortSignal,
 ) => Promise<JsonObject>;
 
-export interface McpOperationGatewayOptions {
+export interface OperationGatewayOptions {
   client: OrchestratorClient;
 }
 
-export interface McpOperationRequest {
+export interface OperationRequest {
   arguments?: JsonObject;
   operation: string;
 }
 
-export interface McpOperationExecutionOptions {
+export interface OperationExecutionOptions {
   /** Optional caller-owned input completion, such as MCP form elicitation. */
-  completeInput?: McpOperationInputCompleter;
+  completeInput?: OperationInputCompleter;
   /**
    * Explicit authority to run a non-read operation. Omit this (the default)
    * for a non-mutating preview, including when a caller supplied mutation-like
@@ -43,20 +43,20 @@ export interface McpOperationExecutionOptions {
   signal?: AbortSignal;
 }
 
-interface McpOperationGatewayOutcomeBase {
+interface OperationGatewayOutcomeBase {
   /** Fully completed and schema-validated arguments used for this decision. */
   arguments: JsonObject;
   operation: string;
 }
 
-export interface McpOperationPreview extends McpOperationGatewayOutcomeBase {
+export interface OperationPreview extends OperationGatewayOutcomeBase {
   kind: 'preview';
   preview: JsonObject;
   requiresConfirmation: true;
   risk: MutationRisk;
 }
 
-export interface McpOperationExecuted extends McpOperationGatewayOutcomeBase {
+export interface OperationExecuted extends OperationGatewayOutcomeBase {
   /** True only when a cancelled operation created a durable partial result. */
   partialFailure: boolean;
   result: JsonValue;
@@ -65,26 +65,26 @@ export interface McpOperationExecuted extends McpOperationGatewayOutcomeBase {
   error?: string;
 }
 
-export type McpOperationGatewayOutcome = McpOperationPreview | McpOperationExecuted;
+export type OperationGatewayOutcome = OperationPreview | OperationExecuted;
 
 /**
- * One safe execution boundary for the allowlisted FragForge MCP operations.
+ * One safe execution boundary for the allowlisted FragForge Studio operations.
  *
  * Reads always run after validation. Every other risk class remains a local
  * preview unless the caller opts in with `privileged: true`; that call still
  * validates live inputs immediately before the operation is dispatched.
  */
-export class McpOperationGateway {
+export class OperationGateway {
   readonly #client: OrchestratorClient;
 
-  constructor(options: McpOperationGatewayOptions) {
+  constructor(options: OperationGatewayOptions) {
     this.#client = options.client;
   }
 
   async execute(
-    request: McpOperationRequest,
-    options: McpOperationExecutionOptions = {},
-  ): Promise<McpOperationGatewayOutcome> {
+    request: OperationRequest,
+    options: OperationExecutionOptions = {},
+  ): Promise<OperationGatewayOutcome> {
     const operation = resolveOperation(request.operation);
     const suppliedArguments = request.arguments ?? {};
     if (!isJsonObject(suppliedArguments)) throw new Error('arguments must be an object');

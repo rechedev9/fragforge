@@ -68,7 +68,7 @@ export function AssistantProvider({ children }: { children: ReactNode }): ReactE
         } catch {
           setState((previous) => ({
             ...previous,
-            controlError: 'Studio recibió un estado de Codex no válido.',
+            controlError: 'Studio recibió un estado del agente no válido.',
           }));
         }
       });
@@ -78,7 +78,7 @@ export function AssistantProvider({ children }: { children: ReactNode }): ReactE
         commandPendingCount: 0,
         snapshot: {
           ...initialAssistantSnapshot(ASSISTANT_AVAILABILITY.error),
-          error: 'No se pudo conectar el panel con Codex.',
+          error: 'No se pudo conectar el panel con el agente.',
         },
       });
       return;
@@ -120,11 +120,11 @@ export function AssistantProvider({ children }: { children: ReactNode }): ReactE
         setBridge(null);
         setState((previous) => ({
           ...previous,
-          controlError: 'No se pudo iniciar la conversación de Codex.',
+          controlError: 'No se pudo iniciar la conversación del agente.',
           snapshot: {
             ...previous.snapshot,
             availability: ASSISTANT_AVAILABILITY.error,
-            error: 'No se pudo iniciar la conversación de Codex.',
+            error: 'No se pudo iniciar la conversación del agente.',
           },
         }));
       });

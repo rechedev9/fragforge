@@ -89,6 +89,65 @@ test('initializes with experimental API and sends the initialized notification w
   assert.equal(client.status, 'ready');
 });
 
+test('uses only Codex-managed ChatGPT OAuth account endpoints', async () => {
+  const transport = new FakeTransport();
+  const client = new CodexAppServerClient({ transport });
+  const ready = client.initialize();
+  await waitForFrames(transport, 1);
+  transport.emit({ id: 1, result: {} });
+  await ready;
+
+  const account = client.readAccount();
+  await waitForFrames(transport, 3);
+  assert.deepEqual(written(transport, 2), {
+    id: 2,
+    method: 'account/read',
+    params: { refreshToken: false },
+  });
+  transport.emit({
+    id: 2,
+    result: {
+      account: { email: 'creator@example.com', planType: 'plus', type: 'chatgpt' },
+      requiresOpenaiAuth: true,
+    },
+  });
+  assert.deepEqual(await account, {
+    account: { email: 'creator@example.com', planType: 'plus', type: 'chatgpt' },
+    requiresOpenaiAuth: true,
+  });
+
+  const login = client.loginChatGPT();
+  await waitForFrames(transport, 4);
+  assert.deepEqual(written(transport, 3), {
+    id: 3,
+    method: 'account/login/start',
+    params: {
+      appBrand: 'codex',
+      type: 'chatgpt',
+      useHostedLoginSuccessPage: true,
+    },
+  });
+  transport.emit({
+    id: 3,
+    result: {
+      authUrl: 'https://chatgpt.com/auth/login?redirect_uri=http%3A%2F%2Flocalhost%3A1234',
+      loginId: 'login-1',
+      type: 'chatgpt',
+    },
+  });
+  assert.deepEqual(await login, {
+    authUrl: 'https://chatgpt.com/auth/login?redirect_uri=http%3A%2F%2Flocalhost%3A1234',
+    loginId: 'login-1',
+    type: 'chatgpt',
+  });
+
+  const logout = client.logoutAccount();
+  await waitForFrames(transport, 5);
+  assert.deepEqual(written(transport, 4), { id: 4, method: 'account/logout' });
+  transport.emit({ id: 4, result: {} });
+  await logout;
+});
+
 test('correlates thread and turn requests and applies safe app-server defaults', async () => {
   const transport = new FakeTransport();
   const client = new CodexAppServerClient({

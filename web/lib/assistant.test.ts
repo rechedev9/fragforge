@@ -20,6 +20,8 @@ function bridge(): FragforgeAssistantBridge {
     approve: command,
     cancel: command,
     clearHistory: command,
+    login: command,
+    logout: command,
     newConversation: command,
     reject: command,
     send: command,

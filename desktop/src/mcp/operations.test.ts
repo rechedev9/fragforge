@@ -245,8 +245,17 @@ test('operation schemas enforce API route and cross-field contracts', () => {
   );
 
   validateOperationInput(operation('streams.create_from_url'), { source_url: 'HTTPS://clips.twitch.tv/SomeSlug' });
+  validateOperationInput(operation('streams.create_from_url'), { source_url: 'https://www.twitch.tv/videos/123456' });
   assert.throws(
     () => validateOperationInput(operation('streams.create_from_url'), { source_url: 'file:///C:/captures/stream.mp4' }),
+    /arguments.source_url has an invalid format/,
+  );
+  assert.throws(
+    () => validateOperationInput(operation('streams.create_from_url'), { source_url: 'https://example.com/video' }),
+    /arguments.source_url has an invalid format/,
+  );
+  assert.throws(
+    () => validateOperationInput(operation('streams.create_from_url'), { source_url: 'https://www.twitch.tv/directory' }),
     /arguments.source_url has an invalid format/,
   );
 

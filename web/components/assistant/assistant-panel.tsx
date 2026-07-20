@@ -17,6 +17,8 @@ import {
   CircleCheck,
   Clock3,
   LoaderCircle,
+  LogIn,
+  LogOut,
   MessageCircle,
   Plus,
   Send,
@@ -30,10 +32,12 @@ import { Button } from '@/components/ui/button';
 import { useAssistantContext } from '@/components/assistant/assistant-provider';
 import {
   assistantContextFromPathname,
+  ASSISTANT_ACCOUNT_STATUSES,
   ASSISTANT_ACTION_STATUSES,
   ASSISTANT_AVAILABILITY,
   ASSISTANT_MESSAGE_ROLES,
   type AssistantAction,
+  type AssistantAccount,
   type AssistantActionRisk,
   type AssistantAvailability,
   type AssistantMessage,
@@ -57,7 +61,7 @@ type AssistantPanelProps = {
 };
 
 /**
- * Persistent-looking global Codex conversation surface. It deliberately owns
+ * Persistent-looking global FragForge agent surface. It deliberately owns
  * no filesystem, network, or tool access: every operation goes through the
  * narrow Electron preload bridge and pending actions stay server-created.
  */
@@ -85,7 +89,9 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
     endRef.current?.scrollIntoView({ behavior: snapshot.busy ? 'smooth' : 'auto', block: 'end' });
   }, [snapshot.busy, snapshot.messages, snapshot.pendingActions]);
 
-  const isReady = snapshot.availability === ASSISTANT_AVAILABILITY.ready;
+  const accountConnected = snapshot.account.status === ASSISTANT_ACCOUNT_STATUSES.signedIn;
+  const accountCanDisconnect = accountConnected || snapshot.account.status === ASSISTANT_ACCOUNT_STATUSES.signingIn;
+  const isReady = snapshot.availability === ASSISTANT_AVAILABILITY.ready && accountConnected;
   const isBusy = snapshot.busy || commandPendingCount > 0;
   const canSend = isReady && !isBusy && bridge !== null && draft.trim().length > 0;
 
@@ -146,6 +152,22 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
     }
   }, [bridge, isBusy, runCommand]);
 
+  const login = useCallback(async (): Promise<void> => {
+    if (bridge === null || isBusy || accountConnected) return;
+    await runCommand(
+      (activeBridge) => activeBridge.login(),
+      'No se pudo abrir el inicio de sesión de Codex.',
+    );
+  }, [accountConnected, bridge, isBusy, runCommand]);
+
+  const logout = useCallback(async (): Promise<void> => {
+    if (bridge === null || isBusy || !accountCanDisconnect) return;
+    await runCommand(
+      (activeBridge) => activeBridge.logout(),
+      'No se pudo desconectar la cuenta de Codex.',
+    );
+  }, [accountCanDisconnect, bridge, isBusy, runCommand]);
+
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     void sendMessage();
@@ -159,7 +181,7 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
 
   return (
     <aside
-      aria-label="Asistente de Codex"
+      aria-label="Agente de FragForge"
       className={cn(
         'studio-panel neon-brackets flex min-h-[34rem] w-full min-w-0 flex-col overflow-hidden bg-surface/95',
         className,
@@ -174,12 +196,12 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
                 <MessageCircle className="size-4" aria-hidden />
               </span>
               <h2 className="truncate font-[family-name:var(--font-display)] text-base font-semibold uppercase tracking-[0.05em] text-foreground">
-                Asistente
+                Agente FragForge
               </h2>
             </div>
             <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground" aria-live="polite">
-              <AvailabilityDot availability={snapshot.availability} />
-              {availabilityLabel(snapshot.availability)}
+              <AvailabilityDot account={snapshot.account} availability={snapshot.availability} />
+              {availabilityLabel(snapshot.availability, snapshot.account)}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -219,6 +241,13 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
             <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] text-muted-foreground/65">HILO ACTIVO</span>
           ) : null}
         </div>
+
+        <AccountConnection
+          account={snapshot.account}
+          disabled={bridge === null || isBusy || snapshot.availability !== ASSISTANT_AVAILABILITY.ready}
+          onLogin={() => void login()}
+          onLogout={() => void logout()}
+        />
 
         {clearConfirmationVisible ? (
           <div className="mt-3 flex items-center justify-between gap-2 border border-destructive/35 bg-destructive/[0.06] p-2.5">
@@ -266,7 +295,7 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
         {snapshot.error ? <p className="mb-2 text-xs leading-4 text-warning" role="status">{snapshot.error}</p> : null}
 
         <form onSubmit={submit}>
-          <label className="sr-only" htmlFor={composerId}>Escribe a Codex</label>
+          <label className="sr-only" htmlFor={composerId}>Escribe al agente de FragForge</label>
           <div className="relative">
             <textarea
               id={composerId}
@@ -276,7 +305,7 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
               disabled={!isReady || isBusy || bridge === null}
               maxLength={ASSISTANT_MESSAGE_MAX_LENGTH}
               rows={3}
-              placeholder={composerPlaceholder(snapshot.availability, isBusy)}
+              placeholder={composerPlaceholder(snapshot.availability, snapshot.account, isBusy)}
               className="min-h-22 w-full resize-none border border-input bg-surface/80 px-3 py-2.5 pr-11 text-sm leading-5 text-foreground shadow-xs outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground/75 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
             />
             {snapshot.busy ? (
@@ -325,10 +354,10 @@ function ConversationContent({ snapshot }: { snapshot: AssistantSnapshot }): Rea
           <MessageCircle className="size-6 text-primary/75" aria-hidden />
         )}
         <p className="mt-3 text-sm font-medium text-foreground">
-          {snapshot.busy ? 'Codex está preparando la respuesta…' : '¿En qué trabajamos?'}
+          {snapshot.busy ? 'El agente está preparando la respuesta…' : 'Soy tu agente de FragForge'}
         </p>
         <p className="mt-1 max-w-64 text-xs leading-5 text-muted-foreground">
-          El contexto visible de Studio se adjunta a cada mensaje; los cambios siempre se revisan antes de aplicarse.
+          Puedo consultar y utilizar todas las operaciones de Studio para preparar demos, clips, renders, QA y entregas. Las acciones sensibles siempre se revisan antes de ejecutarse.
         </p>
       </div>
     );
@@ -452,40 +481,95 @@ function ActionMeta({ action, status }: { action: AssistantAction; status: strin
   return <span className="text-[11px] text-muted-foreground">Requiere tu aprobación exacta.</span>;
 }
 
-function AvailabilityDot({ availability }: { availability: AssistantAvailability }): ReactElement {
-  if (availability === ASSISTANT_AVAILABILITY.ready) {
+function AccountConnection({
+  account,
+  disabled,
+  onLogin,
+  onLogout,
+}: {
+  account: AssistantAccount;
+  disabled: boolean;
+  onLogin(): void;
+  onLogout(): void;
+}): ReactElement {
+  if (account.status === ASSISTANT_ACCOUNT_STATUSES.signedIn) {
+    return (
+      <div className="mt-3 flex items-center justify-between gap-2 border border-success/30 bg-success/[0.06] px-2.5 py-2">
+        <p className="min-w-0 text-xs leading-4 text-foreground">
+          Cuenta personal de Codex conectada{account.planType ? ` · ${planLabel(account.planType)}` : ''}
+        </p>
+        <Button type="button" variant="ghost" size="xs" onClick={onLogout} disabled={disabled}>
+          <LogOut aria-hidden /> Desconectar
+        </Button>
+      </div>
+    );
+  }
+  const signingIn = account.status === ASSISTANT_ACCOUNT_STATUSES.signingIn;
+  return (
+    <div className="mt-3 border border-primary/30 bg-primary/[0.06] p-2.5">
+      <p className="text-xs font-medium text-foreground">
+        {signingIn ? 'Completa el acceso en tu navegador' : 'Conecta tu cuenta personal de Codex'}
+      </p>
+      <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+        Studio utiliza el OAuth gestionado por Codex. No solicita ni almacena claves API de OpenAI.
+      </p>
+      <Button type="button" size="xs" className="mt-2" onClick={signingIn ? onLogout : onLogin} disabled={disabled}>
+        {signingIn ? <LogOut aria-hidden /> : <LogIn aria-hidden />}
+        {signingIn ? 'Cancelar autenticación' : 'Conectar con Codex'}
+      </Button>
+    </div>
+  );
+}
+
+function AvailabilityDot({ account, availability }: { account: AssistantAccount; availability: AssistantAvailability }): ReactElement {
+  if (availability === ASSISTANT_AVAILABILITY.ready && account.status === ASSISTANT_ACCOUNT_STATUSES.signedIn) {
     return <CircleCheck className="size-3.5 text-success" aria-hidden />;
   }
-  if (availability === ASSISTANT_AVAILABILITY.starting) {
+  if (availability === ASSISTANT_AVAILABILITY.starting || account.status === ASSISTANT_ACCOUNT_STATUSES.signingIn) {
     return <LoaderCircle className="size-3.5 animate-spin text-primary" aria-hidden />;
   }
   return <TriangleAlert className="size-3.5 text-warning" aria-hidden />;
 }
 
-function availabilityLabel(availability: AssistantAvailability): string {
+function availabilityLabel(availability: AssistantAvailability, account: AssistantAccount): string {
+  if (availability === ASSISTANT_AVAILABILITY.ready) {
+    if (account.status === ASSISTANT_ACCOUNT_STATUSES.signedIn) return 'Agente listo';
+    if (account.status === ASSISTANT_ACCOUNT_STATUSES.signingIn) return 'Autenticando cuenta';
+    if (account.status === ASSISTANT_ACCOUNT_STATUSES.unsupported) return 'Conecta una cuenta personal de Codex';
+    return 'Cuenta de Codex necesaria';
+  }
   switch (availability) {
-    case ASSISTANT_AVAILABILITY.ready:
-      return 'Codex conectado';
     case ASSISTANT_AVAILABILITY.starting:
-      return 'Conectando con Codex';
+      return 'Preparando agente';
     case ASSISTANT_AVAILABILITY.unavailable:
       return 'No disponible en el navegador';
     case ASSISTANT_AVAILABILITY.error:
-      return 'Codex necesita atención';
+      return 'El agente necesita atención';
   }
 }
 
-function composerPlaceholder(availability: AssistantAvailability, busy: boolean): string {
-  if (busy) return 'Codex está respondiendo…';
-  if (availability === ASSISTANT_AVAILABILITY.ready) return 'Pregunta sobre este contexto…';
-  if (availability === ASSISTANT_AVAILABILITY.starting) return 'Conectando con Codex…';
+function composerPlaceholder(availability: AssistantAvailability, account: AssistantAccount, busy: boolean): string {
+  if (busy) return 'El agente está respondiendo…';
+  if (account.status !== ASSISTANT_ACCOUNT_STATUSES.signedIn) return 'Conecta tu cuenta de Codex para empezar.';
+  if (availability === ASSISTANT_AVAILABILITY.ready) return 'Dile al agente qué quieres crear…';
+  if (availability === ASSISTANT_AVAILABILITY.starting) return 'Preparando agente…';
   return 'El asistente no está disponible.';
 }
 
 function messageRoleLabel(role: AssistantMessage['role']): string {
   if (role === ASSISTANT_MESSAGE_ROLES.user) return 'Tú';
   if (role === ASSISTANT_MESSAGE_ROLES.system) return 'Studio';
-  return 'Codex';
+  return 'Agente';
+}
+
+function planLabel(planType: string): string {
+  if (planType === 'plus') return 'ChatGPT Plus';
+  if (planType === 'pro') return 'ChatGPT Pro';
+  if (planType === 'team' || planType === 'business' || planType === 'self_serve_business_usage_based') return 'ChatGPT Business';
+  if (planType === 'enterprise' || planType === 'enterprise_cbp_usage_based') return 'ChatGPT Enterprise';
+  if (planType === 'edu') return 'ChatGPT Edu';
+  if (planType === 'free') return 'ChatGPT Free';
+  return 'ChatGPT';
 }
 
 function actionStatusLabel(status: string): string {

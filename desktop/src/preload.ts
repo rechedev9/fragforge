@@ -16,6 +16,7 @@ function invokeKeyAction(action: 'save' | 'test', apiKey: string): Promise<unkno
 }
 
 contextBridge.exposeInMainWorld('fragforgeSettings', {
+  getAppInfo: (): Promise<unknown> => ipcRenderer.invoke(XAI_SETTINGS_CHANNEL, { action: 'app-info' }),
   getXAIStatus: (): Promise<unknown> => ipcRenderer.invoke(XAI_SETTINGS_CHANNEL, { action: 'status' }),
   saveXAIKey: (apiKey: string): Promise<unknown> => invokeKeyAction('save', apiKey),
   removeXAIKey: (): Promise<unknown> => ipcRenderer.invoke(XAI_SETTINGS_CHANNEL, { action: 'remove' }),
@@ -25,7 +26,7 @@ contextBridge.exposeInMainWorld('fragforgeSettings', {
 });
 
 /**
- * The embedded Codex rail gets this one narrow bridge, never generic IPC or
+ * The embedded FragForge agent gets this one narrow bridge, never generic IPC or
  * Electron APIs. Main process validation remains the security boundary.
  */
 contextBridge.exposeInMainWorld('fragforgeAssistant', {
@@ -46,6 +47,8 @@ contextBridge.exposeInMainWorld('fragforgeAssistant', {
   reject: (actionId: unknown): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'reject', actionId }),
   newConversation: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'new' }),
   clearHistory: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'clear' }),
+  login: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'login' }),
+  logout: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'logout' }),
   subscribe: (listener: unknown): (() => void) => {
     if (typeof listener !== 'function') throw new Error('assistant listener must be a function');
     const receive = (_event: Electron.IpcRendererEvent, payload: unknown): void => {

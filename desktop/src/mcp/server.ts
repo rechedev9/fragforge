@@ -15,7 +15,7 @@ import {
   validateOperationInput,
   type OperationDefinition,
 } from './operations.ts';
-import { McpOperationGateway } from './operation-gateway.ts';
+import { OperationGateway } from '../studio-operations/operation-gateway.ts';
 import { OrchestratorClient } from './orchestrator-client.ts';
 
 const LATEST_PROTOCOL_VERSION = '2025-11-25';
@@ -106,7 +106,7 @@ export class FragForgeMcpServer {
   readonly #diagnostics: Writable | undefined;
   readonly #elicitationTimeoutMs: number;
   readonly #maxConcurrentRequests: number;
-  readonly #operationGateway: McpOperationGateway;
+  readonly #operationGateway: OperationGateway;
   readonly #serverVersion: string;
   readonly #activeRequests = new Map<JsonRpcId, AbortController>();
   readonly #inFlightRequestIds = new Set<JsonRpcId>();
@@ -116,7 +116,7 @@ export class FragForgeMcpServer {
 
   constructor(options: FragForgeMcpServerOptions) {
     this.#client = options.client;
-    this.#operationGateway = new McpOperationGateway({ client: options.client });
+    this.#operationGateway = new OperationGateway({ client: options.client });
     this.#diagnostics = options.diagnostics;
     this.#elicitationTimeoutMs = boundedInteger(
       options.elicitationTimeoutMs ?? DEFAULT_ELICITATION_TIMEOUT_MS,

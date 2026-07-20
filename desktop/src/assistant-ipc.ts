@@ -16,6 +16,8 @@ export const ASSISTANT_ACTION = {
   approve: 'approve',
   cancel: 'cancel',
   clear: 'clear',
+  login: 'login',
+  logout: 'logout',
   newConversation: 'new',
   reject: 'reject',
   send: 'send',
@@ -46,12 +48,15 @@ export type AssistantRequest =
   | { action: typeof ASSISTANT_ACTION.status }
   | { action: typeof ASSISTANT_ACTION.cancel }
   | { action: typeof ASSISTANT_ACTION.clear }
+  | { action: typeof ASSISTANT_ACTION.login }
+  | { action: typeof ASSISTANT_ACTION.logout }
   | { action: typeof ASSISTANT_ACTION.newConversation }
   | { action: typeof ASSISTANT_ACTION.approve; actionId: string }
   | { action: typeof ASSISTANT_ACTION.reject; actionId: string }
   | AssistantSendRequest;
 
 export type AssistantAvailability = 'starting' | 'ready' | 'unavailable' | 'error';
+export type AssistantAccountStatus = 'checking' | 'signed-out' | 'signing-in' | 'signed-in' | 'unsupported' | 'error';
 export type AssistantMessageRole = 'assistant' | 'system' | 'user';
 export type AssistantOperationRisk = 'costly' | 'destructive' | 'read' | 'write';
 export type AssistantActionStatus = 'approved' | 'completed' | 'expired' | 'failed' | 'pending' | 'rejected';
@@ -62,6 +67,11 @@ export interface AssistantMessage {
   id: string;
   role: AssistantMessageRole;
   streaming?: boolean;
+}
+
+export interface AssistantAccount {
+  planType?: string;
+  status: AssistantAccountStatus;
 }
 
 /** A preview only. The exact operation and arguments stay main-process-only until approval. */
@@ -88,6 +98,7 @@ export interface AssistantAction {
 }
 
 export interface AssistantSnapshot {
+  account: AssistantAccount;
   availability: AssistantAvailability;
   busy: boolean;
   error?: string;
@@ -122,6 +133,8 @@ export function parseAssistantRequest(value: unknown): AssistantRequest {
   if (action === ASSISTANT_ACTION.status
     || action === ASSISTANT_ACTION.cancel
     || action === ASSISTANT_ACTION.clear
+    || action === ASSISTANT_ACTION.login
+    || action === ASSISTANT_ACTION.logout
     || action === ASSISTANT_ACTION.newConversation) {
     requireExactKeys(value, ['action']);
     return { action };
@@ -199,10 +212,28 @@ function isSafeOpaqueID(value: unknown, maximumLength: number): value is string 
 }
 
 function containsSensitiveUserContent(value: string): boolean {
-  return /\b(?:https?|file):\/\//i.test(value)
+  const URLs = value.match(/\b(?:https?|file):\/\/[^\s"'<>()[\]]+/gi) ?? [];
+  return URLs.some((URL) => !isAllowedPublicTwitchURL(URL))
     || /(?:^|[\s"'(])[A-Za-z]:[\\/]/i.test(value)
     || /(?:^|[\s"'(])\\\\[^\\/\s]/.test(value)
     || /(?:api[_-]?key|authorization|bearer|credential|password|secret|token)\s*[:=]/i.test(value);
+}
+
+function isAllowedPublicTwitchURL(value: string): boolean {
+  try {
+    const URLValue = new URL(value);
+    const hostname = URLValue.hostname.toLowerCase();
+    if (URLValue.protocol !== 'https:' || URLValue.username !== '' || URLValue.password !== '') return false;
+    const parts = URLValue.pathname.split('/').filter(Boolean);
+    if (hostname === 'clips.twitch.tv') {
+      return parts.length === 1 && /^[A-Za-z0-9_-]+$/.test(parts[0]);
+    }
+    if (hostname !== 'twitch.tv' && hostname !== 'www.twitch.tv') return false;
+    return (parts.length === 2 && parts[0] === 'videos' && /^[0-9]+$/.test(parts[1]))
+      || (parts.length === 3 && /^[A-Za-z0-9_]+$/.test(parts[0]) && parts[1] === 'clip' && /^[A-Za-z0-9_-]+$/.test(parts[2]));
+  } catch {
+    return false;
+  }
 }
 
 function requireExactKeys(value: Record<string, unknown>, expected: string[]): void {

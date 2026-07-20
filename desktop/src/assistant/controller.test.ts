@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { McpOperationGateway } from '../mcp/operation-gateway.ts';
+import { OperationGateway } from '../studio-operations/operation-gateway.ts';
 import { OrchestratorClient } from '../mcp/orchestrator-client.ts';
 import {
   type AppServerAgentMessageDelta,
@@ -19,6 +19,10 @@ import { AssistantController } from './controller.ts';
 import { AssistantHistoryStore } from './history.ts';
 
 class FakeAppServer implements CodexAppServer {
+  account: Awaited<ReturnType<CodexAppServer['readAccount']>> = {
+    account: { email: 'creator@example.com', planType: 'plus', type: 'chatgpt' },
+    requiresOpenaiAuth: true,
+  };
   closed = false;
   readonly status = 'ready' as const;
   resumeThreadCalls = 0;
@@ -33,10 +37,24 @@ class FakeAppServer implements CodexAppServer {
     this.closed = true;
   }
 
+  async cancelLogin(): Promise<void> {}
+
   async initialize(): Promise<void> {}
 
   async interruptTurn(): Promise<void> {
     await this.interruptTurnImplementation?.();
+  }
+
+  async loginChatGPT(): Promise<Awaited<ReturnType<CodexAppServer['loginChatGPT']>>> {
+    return { authUrl: 'https://chatgpt.com/auth/login', loginId: 'login-1', type: 'chatgpt' };
+  }
+
+  async logoutAccount(): Promise<void> {
+    this.account = { account: null, requiresOpenaiAuth: true };
+  }
+
+  async readAccount(): Promise<Awaited<ReturnType<CodexAppServer['readAccount']>>> {
+    return this.account;
   }
 
   async resumeThread(threadId: string): Promise<AppServerThread> {
@@ -66,6 +84,7 @@ async function controllerFixture(
   appServers: FakeAppServer[];
   calls: Array<{ arguments?: unknown; privileged?: boolean }>;
   controller: AssistantController;
+  openedAuthURLs: string[];
   options(): CodexAppServerClientOptions;
   setExecuteImplementation(
     implementation: ((request: { arguments?: unknown; operation?: string }, options: { privileged?: boolean }) => Promise<unknown>) | undefined,
@@ -78,6 +97,7 @@ async function controllerFixture(
   let captured: CodexAppServerClientOptions | undefined;
   let executeImplementation: ((request: { arguments?: unknown; operation?: string }, options: { privileged?: boolean }) => Promise<unknown>) | undefined;
   const calls: Array<{ arguments?: unknown; privileged?: boolean }> = [];
+  const openedAuthURLs: string[] = [];
   const gateway = {
     execute: async (request: { arguments?: unknown; operation?: string }, options: { privileged?: boolean } = {}) => {
       calls.push({ arguments: request.arguments, privileged: options.privileged });
@@ -115,7 +135,7 @@ async function controllerFixture(
         risk: 'costly' as const,
       };
     },
-  } as unknown as McpOperationGateway;
+  } as unknown as OperationGateway;
   const controller = new AssistantController({
     createAppServer: (options) => {
       captured = options;
@@ -127,6 +147,9 @@ async function controllerFixture(
     gateway,
     history: new AssistantHistoryStore(path.join(directory, 'history.json')),
     interruptTimeoutMs: controllerOptions.interruptTimeoutMs,
+    openAuthURL: async (url) => {
+      openedAuthURLs.push(url);
+    },
     orchestratorClient: new OrchestratorClient({ baseUrl: 'http://127.0.0.1:1' }),
     turnTimeoutMs: controllerOptions.turnTimeoutMs,
   });
@@ -135,6 +158,7 @@ async function controllerFixture(
     appServers,
     calls,
     controller,
+    openedAuthURLs,
     options: () => {
       const options = captured;
       if (options === undefined) throw new Error('expected app-server options');
@@ -226,6 +250,32 @@ test('starts Codex in the isolated safe profile and streams its reply', async (t
   assert.equal(snapshot.busy, false);
   assert.equal(snapshot.messages.at(-1)?.content, 'Hola desde Codex.');
   assert.equal(snapshot.messages.at(-1)?.streaming, false);
+});
+
+test('requires and manages a personal Codex OAuth account before agent turns', async (t) => {
+  const fixture = await controllerFixture(t);
+  fixture.appServer.account = { account: null, requiresOpenaiAuth: true };
+
+  const signedOut = await fixture.controller.status();
+  assert.equal(signedOut.availability, 'ready');
+  assert.deepEqual(signedOut.account, { status: 'signed-out' });
+  await assert.rejects(
+    fixture.controller.send('Haz el reel.', { kind: 'none', label: 'Studio', pathname: '/' }),
+    /not connected/,
+  );
+
+  await fixture.controller.login();
+  assert.deepEqual(fixture.openedAuthURLs, ['https://chatgpt.com/auth/login']);
+  assert.deepEqual(fixture.controller.snapshot().account, { status: 'signing-in' });
+
+  fixture.options().onNotification?.({
+    method: 'account/updated',
+    params: { authMode: 'chatgpt', planType: 'pro' },
+  });
+  assert.deepEqual(fixture.controller.snapshot().account, { planType: 'pro', status: 'signed-in' });
+
+  await fixture.controller.logout();
+  assert.deepEqual(fixture.controller.snapshot().account, { status: 'signed-out' });
 });
 
 test('keeps a live thread attached across consecutive turns', async (t) => {
@@ -489,6 +539,36 @@ test('requires an approved structured creative brief before exact costly executi
   assert.deepEqual(fixture.calls.map((call) => call.privileged), [undefined, true]);
   assert.deepEqual(fixture.calls.at(-1)?.arguments, { job_id: 'job-123', segment_ids: [] });
   await assert.rejects(fixture.controller.approve(action?.id as string), /no longer available/);
+});
+
+test('exposes every typed operation except local file-picker intake', async (t) => {
+  const fixture = await controllerFixture(t);
+  await fixture.controller.status();
+  await fixture.controller.send('Busca operaciones del agente.', {
+    kind: 'none', label: 'Studio', pathname: '/settings',
+  });
+  const options = fixture.options();
+
+  const captions = await options.onDynamicToolCall?.(dynamicCall('search', {
+    include_dynamic_inputs: false,
+    operation: 'streams.start_caption_candidates',
+  }), new AbortController().signal);
+  assert.equal(captions?.success, true);
+  assert.match(captions?.contentItems[0]?.text ?? '', /streams\.start_caption_candidates/);
+
+  const Twitch = await options.onDynamicToolCall?.(dynamicCall('search', {
+    include_dynamic_inputs: false,
+    operation: 'streams.create_from_url',
+  }), new AbortController().signal);
+  assert.equal(Twitch?.success, true);
+  assert.match(Twitch?.contentItems[0]?.text ?? '', /streams\.create_from_url/);
+
+  const localFile = await options.onDynamicToolCall?.(dynamicCall('search', {
+    include_dynamic_inputs: false,
+    operation: 'jobs.create',
+  }), new AbortController().signal);
+  assert.equal(localFile?.success, false);
+  completeTurn(options);
 });
 
 test('redacts raw path, URL, and error details before a read reaches Codex', async (t) => {

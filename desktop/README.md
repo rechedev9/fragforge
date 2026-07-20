@@ -48,6 +48,25 @@ visibility, and scheduling choices. No Google credentials are required by the
 installer. Optional public trend hints remain available when
 `FIRECRAWL_API_KEY` is inherited by the desktop process.
 
+## FragForge Agent
+
+Studio includes a global FragForge Agent rail backed only by the locally
+installed `codex app-server`. The connection card opens the official ChatGPT
+OAuth flow for the user's personal Codex account. Codex owns and refreshes the
+session; FragForge never asks for, stores, or bills an OpenAI API key.
+
+After connecting, the agent can inspect and use Studio's typed operations for
+demos, stream clips, renders, captions, killfeed review, QA, publishing assets,
+and cleanup. Reads execute directly. Writes, costly work, and destructive work
+become exact approval cards, while capture and render also require an approved
+creative brief. Public Twitch clip/VOD URLs can be supplied in chat. Local demo,
+video, and voice files stay behind Studio's file pickers so their paths and raw
+media never enter model context.
+
+The embedded agent uses Codex app-server dynamic tools directly. It is separate
+from the optional external MCP server described below and does not require MCP
+registration.
+
 ## xAI subtitle credentials
 
 Every installer remains credential-free. In the installed app, each

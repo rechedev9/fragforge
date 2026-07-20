@@ -50,6 +50,26 @@ export interface AppServerTurn {
   [key: string]: unknown;
 }
 
+export type AppServerPlanType = 'free' | 'go' | 'plus' | 'pro' | 'prolite' | 'team'
+  | 'self_serve_business_usage_based' | 'business' | 'enterprise_cbp_usage_based'
+  | 'enterprise' | 'edu' | 'unknown';
+
+export type AppServerAccount =
+  | { type: 'apiKey' }
+  | { email: string | null; planType: AppServerPlanType; type: 'chatgpt' }
+  | { type: 'amazonBedrock' };
+
+export interface AppServerAccountSnapshot {
+  account: AppServerAccount | null;
+  requiresOpenaiAuth: boolean;
+}
+
+export interface AppServerChatGPTLogin {
+  authUrl: string;
+  loginId: string;
+  type: 'chatgpt';
+}
+
 export interface AppServerNotification {
   method: string;
   params: unknown;
@@ -144,8 +164,12 @@ export interface CodexAppServer {
   readonly closed: boolean;
   readonly status: AppServerStatus;
   close(): void;
+  cancelLogin(loginId: string): Promise<void>;
   initialize(): Promise<void>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
+  loginChatGPT(): Promise<AppServerChatGPTLogin>;
+  logoutAccount(): Promise<void>;
+  readAccount(refreshToken?: boolean): Promise<AppServerAccountSnapshot>;
   resumeThread(threadId: string, options?: AppServerResumeThreadOptions): Promise<AppServerThread>;
   startThread(options?: AppServerStartThreadOptions): Promise<AppServerThread>;
   startTurn(threadId: string, text: string, options?: AppServerStartTurnOptions): Promise<AppServerTurn>;
@@ -313,6 +337,33 @@ export class CodexAppServerClient implements CodexAppServer {
     await this.initialize();
     const result = await this.#request('thread/start', threadStartParams(options, this.#defaultDynamicTools));
     return threadFromResult(result, 'thread/start');
+  }
+
+  async readAccount(refreshToken = false): Promise<AppServerAccountSnapshot> {
+    await this.initialize();
+    const result = await this.#request('account/read', { refreshToken });
+    return accountSnapshotFromResult(result);
+  }
+
+  async loginChatGPT(): Promise<AppServerChatGPTLogin> {
+    await this.initialize();
+    const result = await this.#request('account/login/start', {
+      appBrand: 'codex',
+      type: 'chatgpt',
+      useHostedLoginSuccessPage: true,
+    });
+    return chatGPTLoginFromResult(result);
+  }
+
+  async cancelLogin(loginId: string): Promise<void> {
+    await this.initialize();
+    if (!isNonEmptyString(loginId)) throw new Error('loginId is required');
+    await this.#request('account/login/cancel', { loginId });
+  }
+
+  async logoutAccount(): Promise<void> {
+    await this.initialize();
+    await this.#request('account/logout');
   }
 
   async resumeThread(threadId: string, options: AppServerResumeThreadOptions = {}): Promise<AppServerThread> {
@@ -692,6 +743,28 @@ function threadFromResult(result: unknown, method: string): AppServerThread {
   return result.thread;
 }
 
+function accountSnapshotFromResult(result: unknown): AppServerAccountSnapshot {
+  if (!isRecord(result)
+    || typeof result.requiresOpenaiAuth !== 'boolean'
+    || !isAccount(result.account)) {
+    throw new AppServerProtocolError('account/read response is invalid');
+  }
+  return {
+    account: result.account,
+    requiresOpenaiAuth: result.requiresOpenaiAuth,
+  };
+}
+
+function chatGPTLoginFromResult(result: unknown): AppServerChatGPTLogin {
+  if (!isRecord(result)
+    || result.type !== 'chatgpt'
+    || !isNonEmptyString(result.loginId)
+    || !isSafeAuthURL(result.authUrl)) {
+    throw new AppServerProtocolError('account/login/start response is invalid');
+  }
+  return { authUrl: result.authUrl, loginId: result.loginId, type: 'chatgpt' };
+}
+
 function parseAgentMessageDelta(value: unknown): AppServerAgentMessageDelta | null {
   if (!isRecord(value)
     || !isNonEmptyString(value.threadId)
@@ -766,6 +839,36 @@ function isThread(value: unknown): value is AppServerThread {
 
 function isTurn(value: unknown): value is AppServerTurn {
   return isRecord(value) && isNonEmptyString(value.id) && typeof value.status === 'string';
+}
+
+function isAccount(value: unknown): value is AppServerAccount | null {
+  if (value === null) return true;
+  if (!isRecord(value)) return false;
+  if (value.type === 'apiKey' || value.type === 'amazonBedrock') return true;
+  return value.type === 'chatgpt'
+    && (value.email === null || typeof value.email === 'string')
+    && isPlanType(value.planType);
+}
+
+function isPlanType(value: unknown): value is AppServerPlanType {
+  return value === 'free' || value === 'go' || value === 'plus' || value === 'pro'
+    || value === 'prolite' || value === 'team' || value === 'self_serve_business_usage_based'
+    || value === 'business' || value === 'enterprise_cbp_usage_based'
+    || value === 'enterprise' || value === 'edu' || value === 'unknown';
+}
+
+function isSafeAuthURL(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:'
+      && url.username === ''
+      && url.password === ''
+      && (url.hostname === 'chatgpt.com' || url.hostname.endsWith('.chatgpt.com')
+        || url.hostname === 'openai.com' || url.hostname.endsWith('.openai.com'));
+  } catch {
+    return false;
+  }
 }
 
 function isJsonValue(value: unknown): value is AppServerJsonValue {

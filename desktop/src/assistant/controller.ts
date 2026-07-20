@@ -10,10 +10,10 @@ import {
 import { searchOperationCatalog, parseSearchRequest } from '../mcp/discovery.ts';
 import { isJsonObject, type JsonObject, type JsonValue } from '../mcp/json.ts';
 import {
-  McpOperationGateway,
-  type McpOperationGatewayOutcome,
-} from '../mcp/operation-gateway.ts';
-import { operationNamed } from '../mcp/operations.ts';
+  OperationGateway,
+  type OperationGatewayOutcome,
+} from '../studio-operations/operation-gateway.ts';
+import { listOperations, operationNamed } from '../mcp/operations.ts';
 import { OrchestratorClient } from '../mcp/orchestrator-client.ts';
 import {
   createCodexAppServer,
@@ -21,6 +21,7 @@ import {
   type AppServerDynamicTool,
   type AppServerDynamicToolCall,
   type AppServerDynamicToolResult,
+  type AppServerNotification,
   type AppServerStartThreadOptions,
   type AppServerTurnCompletedEvent,
   type AppServerTurnStartedEvent,
@@ -44,44 +45,19 @@ const MAX_REVIEWABLE_ACTION_ARRAY_ITEMS = 32;
 const MAX_REVIEWABLE_ACTION_FIELDS = 48;
 const MAX_REVIEWABLE_ACTION_STRING_LENGTH = 240;
 
-const ASSISTANT_OPERATIONS = new Set([
-  'studio.status',
-  'studio.metrics',
-  'catalog.presets',
-  'catalog.loadouts',
-  'catalog.songs',
-  'catalog.stream_variants',
-  'jobs.list',
-  'jobs.get',
-  'jobs.roster',
-  'jobs.parse',
-  'jobs.plan',
-  'jobs.moments',
-  'jobs.record',
-  'jobs.generate',
-  'jobs.compose',
-  'jobs.delete',
-  'renders.get',
-  'renders.start',
-  'renders.publish',
-  'renders.quality',
-  'renders.start_caption_agent',
-  'renders.caption_candidates',
-  'renders.publish_assistant',
-  'renders.delete_video',
-  'streams.list',
-  'streams.get',
-  'streams.get_edit_plan',
-  'streams.resume_initialization',
-  'streams.update_edit_plan',
-  'streams.configure_captions',
-  'streams.edit_clip',
-  'streams.start_render',
-  'streams.get_render',
-  'streams.list_killfeed_weapons',
-  'streams.read_killfeed',
-  'streams.preview_killfeed_notice',
+// File pickers remain in Studio so local paths never enter model context. Every
+// other typed Studio operation is available to the agent, including Twitch URL
+// intake, and mutations still require an exact approval card.
+const STUDIO_FILE_PICKER_OPERATIONS = new Set([
+  'jobs.create',
+  'streams.create_from_file',
+  'voices.save_profile',
 ]);
+const ASSISTANT_OPERATIONS = new Set(
+  listOperations()
+    .map((operation) => operation.name)
+    .filter((name) => !STUDIO_FILE_PICKER_OPERATIONS.has(name)),
+);
 
 const DYNAMIC_TOOLS: AppServerDynamicTool[] = [{
   description: 'Allowed local FragForge Studio operations. Search first. Read operations are safe; every change is only prepared as a preview and must be approved in Studio.',
@@ -93,7 +69,7 @@ const DYNAMIC_TOOLS: AppServerDynamicTool[] = [{
         additionalProperties: false,
         properties: {
           arguments: { additionalProperties: true, type: 'object' },
-          category: { enum: ['artifacts', 'catalog', 'jobs', 'renders', 'streams', 'studio'], type: 'string' },
+          category: { enum: ['artifacts', 'catalog', 'jobs', 'renders', 'streams', 'studio', 'voices'], type: 'string' },
           include_dynamic_inputs: { type: 'boolean' },
           limit: { maximum: 20, minimum: 1, type: 'integer' },
           operation: { type: 'string' },
@@ -127,7 +103,7 @@ const DYNAMIC_TOOLS: AppServerDynamicTool[] = [{
   type: 'namespace',
 }];
 
-const DEVELOPER_INSTRUCTIONS = `You are the integrated FragForge Studio assistant. You may use only the fragforge dynamic tools for Studio data and actions. They are not shell, filesystem, browser, URL, or generic MCP tools. Never request, inspect, or repeat local file paths, raw media, URLs, credentials, tokens, or secrets; direct media intake to Studio's existing upload flow.
+const DEVELOPER_INSTRUCTIONS = `You are the integrated FragForge Studio agent. You may use only the fragforge dynamic tools for Studio data and actions. They are not shell, filesystem, browser, or generic MCP tools. Never request, inspect, or repeat local file paths, raw media, credentials, tokens, or secrets; direct local media intake to Studio's existing file pickers. A public Twitch URL supplied by the user may only be used with streams.create_from_url.
 
 Always search the catalog before choosing an exact operation and use only IDs/options returned by the tool. Use read only for read-only operations. Preview only prepares a change for an exact Studio approval card; it never executes it. Never claim that a change ran unless Studio later reports completion. Never attempt a tool or workaround outside fragforge.
 
@@ -135,11 +111,11 @@ Before previewing any capture or render action (including jobs.record, jobs.gene
 
 Be concise, answer in the user's language, and explain unavailable capabilities honestly.`;
 
-interface PendingMcpAction {
+interface PendingOperationAction {
   arguments: JsonObject;
   card: AssistantAction;
   expiryTimer: NodeJS.Timeout;
-  kind: 'mcp';
+  kind: 'operation';
   operation: string;
 }
 
@@ -150,7 +126,7 @@ interface PendingCreativeBrief {
   kind: 'creative-brief';
 }
 
-type PendingAction = PendingMcpAction | PendingCreativeBrief;
+type PendingAction = PendingOperationAction | PendingCreativeBrief;
 type TurnOutcome = 'cancelled' | 'completed' | 'failed';
 
 interface CreativeBrief {
@@ -195,15 +171,17 @@ type CreativeBriefCover = 'generated-gameplay-candidates' | 'no-cover';
 export interface AssistantControllerOptions {
   /** A dedicated empty directory; Codex never receives the Studio repository or user-data directory as its cwd. */
   cwd: string;
-  gateway: McpOperationGateway;
+  gateway: OperationGateway;
   history: AssistantHistoryStore;
   onEvent?: (event: AssistantEvent) => void;
+  /** Opens the Codex-owned ChatGPT OAuth URL in the user's system browser. */
+  openAuthURL?: (url: string) => Promise<void>;
   orchestratorClient: OrchestratorClient;
   /** Non-sensitive diagnostic sink (usually the desktop studio log). */
   log?: (message: string) => void;
   createAppServer?: CodexAppServerFactory;
   appServerOptions?: Omit<CodexAppServerClientOptions,
-    'clientInfo' | 'cwd' | 'dynamicTools' | 'onAgentMessageDelta' | 'onDiagnostic' | 'onDynamicToolCall' | 'onError' | 'onStatus' | 'onTurnCompleted' | 'onTurnStarted'>;
+    'clientInfo' | 'cwd' | 'dynamicTools' | 'onAgentMessageDelta' | 'onDiagnostic' | 'onDynamicToolCall' | 'onError' | 'onNotification' | 'onStatus' | 'onTurnCompleted' | 'onTurnStarted'>;
   interruptTimeoutMs?: number;
   version?: string;
   turnTimeoutMs?: number;
@@ -211,18 +189,19 @@ export interface AssistantControllerOptions {
 
 /**
  * Owns a single local Codex app-server thread and the narrow bridge between
- * it and Studio's allowlisted MCP operation gateway. Renderer input never
+ * it and Studio's typed operation gateway. Renderer input never
  * becomes app-server JSON-RPC or a child-process command.
  */
 export class AssistantController {
   readonly #appServerOptions: AssistantControllerOptions['appServerOptions'];
   readonly #createAppServer: CodexAppServerFactory;
   readonly #cwd: string;
-  readonly #gateway: McpOperationGateway;
+  readonly #gateway: OperationGateway;
   readonly #history: AssistantHistoryStore;
   readonly #interruptTimeoutMs: number;
   readonly #log: ((message: string) => void) | undefined;
   readonly #onEvent: ((event: AssistantEvent) => void) | undefined;
+  readonly #openAuthURL: (url: string) => Promise<void>;
   readonly #orchestratorClient: OrchestratorClient;
   readonly #version: string;
   readonly #turnTimeoutMs: number;
@@ -232,12 +211,14 @@ export class AssistantController {
   readonly #approvedBriefs = new Map<string, ApprovedCreativeBrief>();
   readonly #stateNotes: string[] = [];
   #appServer: CodexAppServer | null = null;
+  #account: AssistantSnapshot['account'] = { status: 'checking' };
   #availability: AssistantSnapshot['availability'] = 'starting';
   #busy = false;
   #closed = false;
   #error: string | undefined;
   #historyLoaded = false;
   #initializing: Promise<void> | null = null;
+  #loginID: string | null = null;
   #messages: AssistantMessage[] = [];
   #revision = 0;
   #activeMessageID: string | null = null;
@@ -260,6 +241,7 @@ export class AssistantController {
     this.#interruptTimeoutMs = positiveDuration(options.interruptTimeoutMs ?? INTERRUPT_TIMEOUT_MS, 'interruptTimeoutMs');
     this.#log = options.log;
     this.#onEvent = options.onEvent;
+    this.#openAuthURL = options.openAuthURL ?? (() => Promise.reject(new Error('OAuth browser opener is unavailable')));
     this.#orchestratorClient = options.orchestratorClient;
     this.#version = options.version ?? '0.0.0';
     this.#turnTimeoutMs = positiveDuration(options.turnTimeoutMs ?? TURN_TIMEOUT_MS, 'turnTimeoutMs');
@@ -273,6 +255,7 @@ export class AssistantController {
   snapshot(): AssistantSnapshot {
     this.#expireActions();
     return {
+      account: { ...this.#account },
       availability: this.#availability,
       busy: this.#busy,
       ...(this.#error === undefined ? {} : { error: this.#error }),
@@ -294,9 +277,10 @@ export class AssistantController {
   async send(message: string, context: AssistantContext): Promise<void> {
     await this.#ensureReady();
     if (this.#availability !== 'ready' || this.#appServer === null) {
-      throw new Error('Codex is not available');
+      throw new Error('FragForge Agent is not available');
     }
-    if (this.#busy) throw new Error('a Codex turn is already running');
+    if (this.#account.status !== 'signed-in') throw new Error('the personal Codex account is not connected');
+    if (this.#busy) throw new Error('an agent turn is already running');
 
     const userMessage = this.#appendMessage({ content: message, role: 'user' });
     const assistantMessage = this.#appendMessage({ content: '', role: 'assistant', streaming: true });
@@ -323,10 +307,10 @@ export class AssistantController {
       if (this.#activeTurnGeneration !== generation) {
         const outcome = this.#turnOutcomes.get(generation);
         if (outcome !== undefined && outcome !== 'failed') return;
-        throw new Error('No se pudo enviar el mensaje a Codex.');
+        throw new Error('No se pudo enviar el mensaje al agente.');
       }
       this.#finishTurnWithError(error);
-      throw new Error('No se pudo enviar el mensaje a Codex.');
+      throw new Error('No se pudo enviar el mensaje al agente.');
     }
   }
 
@@ -348,7 +332,7 @@ export class AssistantController {
       await withTimeout(
         this.#appServer.interruptTurn(this.#threadID, this.#activeTurnID),
         this.#interruptTimeoutMs,
-        'Codex no confirmó la cancelación a tiempo.',
+        'El agente no confirmó la cancelación a tiempo.',
       );
       if (this.#busy && this.#activeTurnGeneration !== null) {
         this.#armTurnTimeout(this.#activeTurnGeneration, this.#interruptTimeoutMs);
@@ -358,13 +342,13 @@ export class AssistantController {
         await this.#restartAfterTurnFailure(error);
         return;
       }
-      throw new Error('No se pudo cancelar el turno de Codex.');
+      throw new Error('No se pudo cancelar el turno del agente.');
     }
   }
 
   async approve(actionID: string): Promise<void> {
     this.#expireActions();
-    if (this.#busy) throw new Error('wait for the active Codex turn before approving an action');
+    if (this.#busy) throw new Error('wait for the active agent turn before approving an action');
     const pending = this.#pendingActions.get(actionID);
     if (pending === undefined) throw new Error('this action is no longer available for approval');
 
@@ -433,7 +417,7 @@ export class AssistantController {
   }
 
   async newConversation(): Promise<void> {
-    if (this.#busy) throw new Error('wait for the active Codex turn before starting a new conversation');
+    if (this.#busy) throw new Error('wait for the active agent turn before starting a new conversation');
     this.#threadID = undefined;
     this.#threadAttached = false;
     this.#messages = [];
@@ -444,14 +428,67 @@ export class AssistantController {
     this.#publish();
     if (this.#availability !== 'ready' || this.#appServer === null) {
       await this.#ensureReady();
-      if (this.#availability !== 'ready' || this.#appServer === null) throw new Error('Codex is not available');
+      if (this.#availability !== 'ready' || this.#appServer === null) throw new Error('FragForge Agent is not available');
     }
   }
 
   async clearHistory(): Promise<void> {
-    if (this.#busy) throw new Error('wait for the active Codex turn before clearing history');
+    if (this.#busy) throw new Error('wait for the active agent turn before clearing history');
     this.#messages = [];
     await this.#history.clear();
+    this.#publish();
+  }
+
+  async login(): Promise<void> {
+    if (this.#busy) throw new Error('wait for the active agent turn before signing in');
+    await this.#ensureReady();
+    const appServer = this.#appServer;
+    if (this.#availability !== 'ready' || appServer === null) throw new Error('FragForge Agent is not available');
+    if (this.#account.status === 'signed-in' || this.#account.status === 'signing-in') return;
+
+    if (this.#account.status === 'unsupported') await appServer.logoutAccount();
+    this.#detachThread();
+    this.#account = { status: 'signing-in' };
+    this.#error = undefined;
+    this.#publish();
+    try {
+      const login = await appServer.loginChatGPT();
+      this.#loginID = login.loginId;
+      await this.#openAuthURL(login.authUrl);
+    } catch {
+      const loginID = this.#loginID;
+      this.#loginID = null;
+      if (loginID !== null) {
+        try {
+          await appServer.cancelLogin(loginID);
+        } catch {
+          // The login may already have completed or the app-server may be closing.
+        }
+      }
+      this.#account = { status: 'error' };
+      this.#error = 'No se pudo abrir el inicio de sesión de Codex.';
+      this.#publish();
+      throw new Error('No se pudo iniciar sesión con Codex.');
+    }
+  }
+
+  async logout(): Promise<void> {
+    if (this.#busy) throw new Error('wait for the active agent turn before signing out');
+    const appServer = this.#appServer;
+    if (appServer === null) return;
+    const loginID = this.#loginID;
+    this.#loginID = null;
+    if (loginID !== null) {
+      try {
+        await appServer.cancelLogin(loginID);
+      } catch {
+        // A completed login may race with an explicit disconnect.
+      }
+    }
+    await appServer.logoutAccount();
+    this.#detachThread();
+    this.#account = { status: 'signed-out' };
+    this.#error = undefined;
     this.#publish();
   }
 
@@ -494,6 +531,7 @@ export class AssistantController {
         onDiagnostic: (message) => this.#writeDiagnostic(message),
         onDynamicToolCall: (call, signal) => this.#handleDynamicToolCall(call, generation, signal),
         onError: () => this.#handleAppServerFailure(generation),
+        onNotification: (notification) => this.#handleAppServerNotification(notification, generation),
         onStatus: (status) => {
           if (status === 'failed' || (status === 'closed' && !this.#closed)) this.#handleAppServerFailure(generation);
         },
@@ -507,6 +545,7 @@ export class AssistantController {
         appServer.close();
         return;
       }
+      this.#setAccountFromSnapshot(await appServer.readAccount(false));
       this.#availability = 'ready';
       this.#error = undefined;
       this.#publish();
@@ -516,7 +555,8 @@ export class AssistantController {
       this.#appServer?.close();
       this.#appServer = null;
       this.#availability = 'unavailable';
-      this.#error = 'No se pudo iniciar Codex local. Comprueba que Codex esté instalado, actualizado e iniciado sesión.';
+      this.#account = { status: 'error' };
+      this.#error = 'No se pudo iniciar el agente local. Comprueba que Codex esté instalado y actualizado.';
       this.#publish();
     }
   }
@@ -527,6 +567,64 @@ export class AssistantController {
     this.#messages = history.messages.map((message) => ({ ...message, streaming: false }));
     this.#threadID = history.threadId;
     this.#historyLoaded = true;
+  }
+
+  #detachThread(): void {
+    this.#threadID = undefined;
+    this.#threadAttached = false;
+    void this.#saveHistory();
+  }
+
+  #setAccountFromSnapshot(snapshot: Awaited<ReturnType<CodexAppServer['readAccount']>>): void {
+    if (snapshot.account?.type === 'chatgpt') {
+      this.#account = { planType: snapshot.account.planType, status: 'signed-in' };
+      return;
+    }
+    this.#account = snapshot.account === null ? { status: 'signed-out' } : { status: 'unsupported' };
+  }
+
+  #handleAppServerNotification(notification: AppServerNotification, appServerGeneration: number): void {
+    if (this.#closed || appServerGeneration !== this.#appServerGeneration) return;
+    if (notification.method === 'account/updated' && isJsonObject(notification.params)) {
+      const authMode = notification.params.authMode;
+      const planType = notification.params.planType;
+      this.#loginID = null;
+      if (authMode === 'chatgpt') {
+        this.#account = {
+          ...(typeof planType === 'string' ? { planType } : {}),
+          status: 'signed-in',
+        };
+        this.#error = undefined;
+      } else if (authMode === null) {
+        this.#account = { status: 'signed-out' };
+      } else if (typeof authMode === 'string') {
+        this.#account = { status: 'unsupported' };
+      }
+      this.#publish();
+      return;
+    }
+    if (notification.method !== 'account/login/completed' || !isJsonObject(notification.params)) return;
+    if (notification.params.loginId !== null && notification.params.loginId !== this.#loginID) return;
+    this.#loginID = null;
+    if (notification.params.success !== true) {
+      this.#account = { status: 'error' };
+      this.#error = 'No se pudo completar el inicio de sesión con Codex.';
+      this.#publish();
+      return;
+    }
+    const appServer = this.#appServer;
+    if (appServer === null) return;
+    void appServer.readAccount(true).then((snapshot) => {
+      if (this.#closed || appServerGeneration !== this.#appServerGeneration) return;
+      this.#setAccountFromSnapshot(snapshot);
+      this.#error = undefined;
+      this.#publish();
+    }).catch(() => {
+      if (this.#closed || appServerGeneration !== this.#appServerGeneration) return;
+      this.#account = { status: 'error' };
+      this.#error = 'Codex inició sesión, pero Studio no pudo verificar la cuenta.';
+      this.#publish();
+    });
   }
 
   async #ensureThread(): Promise<string> {
@@ -559,7 +657,7 @@ export class AssistantController {
       } catch (error) {
         this.#writeDiagnostic(`could not resume stored Codex thread: ${errorMessage(error)}`);
         this.#threadID = undefined;
-        this.#appendMessage({ content: 'Studio no pudo reanudar el hilo anterior de Codex; se creó una conversación nueva.', role: 'system' });
+        this.#appendMessage({ content: 'Studio no pudo reanudar el hilo anterior del agente; se creó una conversación nueva.', role: 'system' });
       }
     }
     const thread = await appServer.startThread(options);
@@ -624,7 +722,7 @@ export class AssistantController {
       ...result,
       count: operations.length,
       operations,
-      instructions: 'Choose only one listed operation. The embedded assistant never accepts local files, raw media, URLs, or arbitrary shell commands.',
+      instructions: 'Choose only one listed operation. The agent never accepts local files, raw media, credentials, or arbitrary shell commands. It accepts only public Twitch URLs for streams.create_from_url.',
     });
   }
 
@@ -661,7 +759,7 @@ export class AssistantController {
       arguments: cloneJsonObject(outcome.arguments),
       card,
       expiryTimer: setTimeout(() => this.#expireAction(card.id), ACTION_EXPIRY_MS),
-      kind: 'mcp',
+      kind: 'operation',
       operation: outcome.operation,
     };
     pending.expiryTimer.unref();
@@ -716,7 +814,7 @@ export class AssistantController {
   }
 
   #createActionCard(
-    outcome: Extract<McpOperationGatewayOutcome, { kind: 'preview' }>,
+    outcome: Extract<OperationGatewayOutcome, { kind: 'preview' }>,
     title: string,
     description: string,
     preview: AssistantActionPreview,
@@ -787,7 +885,7 @@ export class AssistantController {
     this.#writeDiagnostic(`turn failed: ${errorMessage(error)}`);
     const message = this.#activeMessageID === null ? undefined : this.#messages.find((item) => item.id === this.#activeMessageID);
     if (message !== undefined) {
-      message.content = message.content || 'Codex no pudo completar esta respuesta.';
+      message.content = message.content || 'El agente no pudo completar esta respuesta.';
       message.streaming = false;
     }
     this.#markTurnOutcome('failed');
@@ -823,7 +921,7 @@ export class AssistantController {
     appServer?.close();
     this.#availability = 'error';
     this.#threadAttached = false;
-    this.#error = 'La conexión local con Codex se cerró. Abre una conversación nueva para volver a intentarlo.';
+    this.#error = 'La conexión local con el agente se cerró. Abre una conversación nueva para volver a intentarlo.';
     this.#finishTurnWithError(new Error('Codex app-server closed'));
   }
 
@@ -1171,7 +1269,7 @@ function allowedOperation(name: string) {
   return definition;
 }
 
-function executionForModel(outcome: Extract<McpOperationGatewayOutcome, { kind: 'executed' }>): JsonObject {
+function executionForModel(outcome: Extract<OperationGatewayOutcome, { kind: 'executed' }>): JsonObject {
   return {
     operation: outcome.operation,
     result: modelSafeValue(outcome.result),

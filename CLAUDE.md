@@ -128,12 +128,12 @@ The unified `short` and `record` commands resolve missing HLAE/CS2 paths through
 the same environment/local autodetection reported by `zv capabilities`; agents
 should not copy detected paths back into argv unless explicitly overriding them.
 
-FragForge Studio also embeds a separate assistant that launches the locally installed Codex CLI through `codex app-server --stdio`.
-The rail is unavailable until Codex is installed, sufficiently current, and signed in.
+FragForge Studio also embeds FragForge Agent, backed exclusively by the locally installed Codex CLI through `codex app-server --stdio`.
+The rail requires a sufficiently current Codex installation. Its connection card starts the official ChatGPT OAuth flow for the user's personal Codex account; Codex owns, stores, and refreshes that session, while Studio stores neither OAuth tokens nor API keys.
 It runs only through the Electron preload/IPC bridge, receives a dedicated empty working directory rather than the repository or Studio data, uses a `read-only` Codex sandbox, disables generic shell/browser/web/MCP/plugin/workspace capabilities, and strips `FRAGFORGE_*`, `ZV_*`, and credential-like environment variables.
-The integrated assistant can use only the allowlisted dynamic `fragforge` namespace: it searches live operations first, executes reads directly, and turns writes, costly work, and destructive operations into Studio approval previews.
+The integrated agent can use only the dynamic `fragforge` namespace backed by Studio's typed operation gateway: it searches live operations first, executes reads directly, and turns writes, costly work, and destructive operations into Studio approval previews. It can use all non-file-picker operations, including importing a public Twitch URL; local demos, recordings, and voice files remain in Studio's native pickers so local paths never enter model context.
 Capture and render therefore have two separate gates: approval of the complete creative brief, followed by approval of the exact operation preview.
-This assistant is not the optional external MCP stdio server, whose transport and file-capable operation surface are intended for explicitly configured external clients.
+FragForge Agent is not an MCP client or the optional external MCP stdio server. That separate transport and its file-capable operation surface remain available only to explicitly configured external clients.
 
 The orchestrator drives a job state machine: `queued -> scanning -> scanned -> parsing -> parsed -> recording -> recorded -> composing -> composed -> done` (or `failed`); jobs with a target already supplied may skip the roster-scan states.
 Each worker is idempotent: it checks whether the durable artifact already exists and skips the external media command if so, which makes manual retries safe.
@@ -153,7 +153,7 @@ Module boundaries (keep `cmd/` entrypoints thin):
 - `internal/voiceprofile` - local reusable narration-reference metadata and validated audio storage; API responses expose relative audio URLs, never absolute filesystem paths.
 - `internal/youtubeinsights`, `internal/youtubetrends` - deterministic Europe/Madrid scheduling, factual reel-derived metadata recommendations, and optional bounded Firecrawl trend discovery for the manual publication assistant. Firecrawl results are hints, never fabricated YouTube performance metrics.
 - `web/` - standalone Next.js (App Router) frontend: upload/series, match/clip/video, stream, and news views with a typed API client; it reaches local services only through same-origin proxy routes under `/api/demos/*`, `/api/streams/*`, and `/api/news/*` (see `web/CLAUDE.md`).
-- `desktop/` - Electron Local Studio packaging, process lifecycle, bundled resources, the external MCP stdio server, and the isolated integrated Codex assistant bridge.
+- `desktop/` - Electron Local Studio packaging, process lifecycle, bundled resources, the external MCP stdio server, the shared typed Studio operation gateway, and the isolated FragForge Agent bridge to Codex app-server.
 - `data/` - generated/local media artifacts; treat as output unless the task is explicitly about test fixtures or artifact cleanup.
 
 The current foundation runs locally and concatenates segments into `final.mp4`; treat `README.md` as the source of truth for what exists today.

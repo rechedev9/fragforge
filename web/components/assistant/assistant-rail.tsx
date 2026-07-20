@@ -46,8 +46,8 @@ export function AssistantRail(): ReactElement {
         </SheetTrigger>
         <SheetContent side="right" className="w-[min(100vw,27rem)] max-w-none gap-0 p-0 sm:max-w-none">
           <SheetHeader className="sr-only">
-            <SheetTitle>Asistente de Codex</SheetTitle>
-            <SheetDescription>Chat integrado de FragForge Studio.</SheetDescription>
+            <SheetTitle>Agente de FragForge</SheetTitle>
+            <SheetDescription>Agente integrado capaz de operar los flujos de FragForge Studio.</SheetDescription>
           </SheetHeader>
           <AssistantPanel className="h-full min-h-0 border-0" />
         </SheetContent>

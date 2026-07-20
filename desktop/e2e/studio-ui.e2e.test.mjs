@@ -88,6 +88,19 @@ test('renders real shell content', async () => {
   );
 });
 
+test('shows the branded agent, OAuth connection surface, and operation promise', async () => {
+  const openAgent = page.getByRole('button', { name: 'Abrir asistente' });
+  await openAgent.click();
+  const dialog = page.getByRole('dialog', { name: 'Agente de FragForge' });
+  await dialog.waitFor({ state: 'visible' });
+  assert.equal(await dialog.getByText('Agente FragForge', { exact: true }).isVisible(), true);
+  assert.equal(await dialog.getByText('Soy tu agente de FragForge', { exact: true }).isVisible(), true);
+  assert.equal(await dialog.getByText(/todas las operaciones de Studio/).isVisible(), true);
+  assert.equal(await dialog.getByText(/cuenta personal de Codex/i).isVisible(), true);
+  assert.equal(await dialog.getByRole('button', { name: /Conectar con Codex|Desconectar/ }).isVisible(), true);
+  await dialog.getByRole('button', { name: 'Cerrar' }).click();
+});
+
 test('web -> orchestrator proxy answers from inside the app', async () => {
   const status = await page.evaluate(async () => {
     const res = await fetch('/api/demos/jobs');

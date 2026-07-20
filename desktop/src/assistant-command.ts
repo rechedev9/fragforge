@@ -10,6 +10,8 @@ export interface AssistantCommandController {
   approve(actionID: string): Promise<void>;
   cancel(): Promise<void>;
   clearHistory(): Promise<void>;
+  login(): Promise<void>;
+  logout(): Promise<void>;
   newConversation(): Promise<void>;
   reject(actionID: string): void;
   send(message: string, context: AssistantContext): Promise<void>;
@@ -61,6 +63,12 @@ export async function dispatchAssistantRequest(
         break;
       case ASSISTANT_ACTION.clear:
         await controller.clearHistory();
+        break;
+      case ASSISTANT_ACTION.login:
+        await controller.login();
+        break;
+      case ASSISTANT_ACTION.logout:
+        await controller.logout();
         break;
     }
     return { ok: true, snapshot: controller.snapshot() };
