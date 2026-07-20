@@ -77,11 +77,16 @@ function partNumberOf(fileName: string | undefined): number {
  * it ascending (stably); otherwise their first-appearance order is preserved, so
  * a series without reliable map numbers keeps the server's order.
  */
-export function groupSeriesDemos<T extends { fileName?: string }>(demos: readonly T[]): Array<SeriesGroup<T>> {
+export function groupSeriesDemos<T extends { fileName?: string; jobId?: string }>(demos: readonly T[]): Array<SeriesGroup<T>> {
   const groups: Array<SeriesGroup<T>> = [];
   const partGroupByBase = new Map<string, SeriesGroup<T>>();
+  const seenJobs = new Set<string>();
 
   demos.forEach((demo, index) => {
+    if (demo.jobId !== undefined) {
+      if (seenJobs.has(demo.jobId)) return;
+      seenJobs.add(demo.jobId);
+    }
     const parsed = demo.fileName !== undefined ? parseSeriesFileName(demo.fileName) : null;
     if (parsed !== null && parsed.part !== null) {
       const key = parsed.base.toLowerCase();

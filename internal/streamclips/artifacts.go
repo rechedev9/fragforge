@@ -16,6 +16,12 @@ func SourceKey(id uuid.UUID) string {
 	return path.Join(JobPrefix(id), "source.mp4")
 }
 
+// SourceMetadataKey stores provider metadata obtained with source.mp4 so an
+// idempotent acquire retry can still populate the editable source title.
+func SourceMetadataKey(id uuid.UUID) string {
+	return path.Join(JobPrefix(id), "source-metadata.json")
+}
+
 func EditPlanKey(id uuid.UUID) string {
 	return path.Join(JobPrefix(id), "edit-plan.json")
 }
@@ -175,6 +181,17 @@ func RenderRevisionCaptionKey(id uuid.UUID, variant string, revisionID uuid.UUID
 	return path.Join(prefix, "captions", clipID+".ass"), nil
 }
 
+func RenderRevisionDeliveryKey(id uuid.UUID, variant string, revisionID uuid.UUID, name string) (string, error) {
+	prefix, err := RenderRevisionPrefix(id, variant, revisionID)
+	if err != nil {
+		return "", err
+	}
+	if name == "" || path.Base(name) != name || strings.ContainsAny(name, `\\/`) {
+		return "", fmt.Errorf("invalid delivery artifact name %q", name)
+	}
+	return path.Join(prefix, "shortslistosparasubir", name), nil
+}
+
 // ValidateRenderStateArtifacts ensures every key exposed by the mutable render
 // state points either at the legacy canonical namespace or at one exact
 // immutable revision owned by the same job and variant.
@@ -231,6 +248,13 @@ func ValidateRenderStateArtifacts(state RenderState) error {
 		if video.Key == "" || path.Clean(video.Key) != video.Key || path.Dir(video.Key) != videoDir ||
 			path.Ext(video.Key) != ".mp4" || !clipIDPattern.MatchString(videoName) {
 			return fmt.Errorf("render video key %q is outside artifact dir", video.Key)
+		}
+	}
+	deliveryDir := path.Join(artifactDir, "shortslistosparasubir")
+	for _, artifact := range state.Delivery {
+		if artifact.Name == "" || artifact.Key == "" || path.Base(artifact.Name) != artifact.Name ||
+			path.Dir(artifact.Key) != deliveryDir || path.Base(artifact.Key) != artifact.Name {
+			return fmt.Errorf("delivery artifact key %q is outside artifact dir", artifact.Key)
 		}
 	}
 	return nil

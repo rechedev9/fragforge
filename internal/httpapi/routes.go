@@ -81,6 +81,7 @@ func Routes(h *Handlers) chi.Router {
 	r.Get("/api/stream-jobs/{id}/renders/{variant}", h.GetStreamRender)
 	r.Get("/api/stream-jobs/{id}/renders/{variant}/gallery", h.GetStreamGallery)
 	r.Get("/api/stream-jobs/{id}/renders/{variant}/videos/{clip_id}", h.GetStreamVideo)
+	r.Get("/api/stream-jobs/{id}/renders/{variant}/delivery/{name}", h.GetStreamDeliveryArtifact)
 	return r
 }
 

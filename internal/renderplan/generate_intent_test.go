@@ -12,10 +12,11 @@ func TestGenerateIntentNormalizeDefaultsEdit(t *testing.T) {
 	want := GenerateIntent{
 		Variant: editor.PresetViral60Clean,
 		Edit: EditRequest{
-			Format:     FormatShort9x16,
-			KillEffect: KillEffectPunchIn,
-			Transition: TransitionFlash,
-			Intro:      true,
+			Format:        FormatShort9x16,
+			KillEffect:    KillEffectPunchIn,
+			Transition:    TransitionFlash,
+			Intro:         true,
+			CoverStrategy: CoverStrategyGenerated,
 		},
 	}
 	if got != want {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  advanceMontagePlayback,
   STREAMER_BANNER_MAX_POSITION,
   activeTextOverlays,
   STREAMER_BANNER_MIN_POSITION,
@@ -15,6 +16,7 @@ import {
   resolveActiveKillfeedCue,
   representativeFrameTime,
   resolveStreamerBannerPosition,
+  startMontagePlayback,
 } from './stream-preview.ts';
 import type { KillfeedKill } from './api/streams.ts';
 
@@ -368,4 +370,34 @@ test('active text overlays follow the owning clip and their source-time window',
   assert.deepEqual(activeTextOverlays(clips, 25), []);
   assert.deepEqual(activeTextOverlays(clips, 35), []);
   assert.deepEqual(activeTextOverlays(clips, Number.NaN), []);
+});
+
+test('montage playback skips excluded source gaps and applies each clip speed', () => {
+  const clips = [
+    { id: 'clip-1', start_seconds: 10, end_seconds: 15, edit: { speed: 0.5 } },
+    { id: 'invalid', start_seconds: 20, end_seconds: 20 },
+    { id: 'clip-2', start_seconds: 40, end_seconds: 45, edit: { speed: 2 } },
+  ];
+
+  assert.deepEqual(startMontagePlayback(clips, 12), {
+    clipIndex: 0,
+    sourceSeconds: 12,
+    playbackRate: 0.5,
+  });
+  assert.deepEqual(startMontagePlayback(clips, 25), {
+    clipIndex: 0,
+    sourceSeconds: 10,
+    playbackRate: 0.5,
+  });
+  assert.deepEqual(advanceMontagePlayback(clips, 0, 14.9), {
+    clipIndex: 0,
+    sourceSeconds: 14.9,
+    playbackRate: 0.5,
+  });
+  assert.deepEqual(advanceMontagePlayback(clips, 0, 15), {
+    clipIndex: 2,
+    sourceSeconds: 40,
+    playbackRate: 2,
+  });
+  assert.equal(advanceMontagePlayback(clips, 2, 45), null);
 });

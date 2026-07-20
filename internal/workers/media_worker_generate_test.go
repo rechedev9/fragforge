@@ -167,10 +167,11 @@ func TestRecordWorkerChainsRenderFromGenerateIntent(t *testing.T) {
 	store := newFakeStorage()
 	repo, id := parsedRecordJob(store)
 	edit := renderplan.EditRequest{
-		Format:     renderplan.FormatShort9x16,
-		KillEffect: renderplan.KillEffectVelocity,
-		Transition: renderplan.TransitionWhip,
-		Intro:      true,
+		Format:        renderplan.FormatShort9x16,
+		KillEffect:    renderplan.KillEffectVelocity,
+		Transition:    renderplan.TransitionWhip,
+		Intro:         true,
+		CoverStrategy: renderplan.CoverStrategyGenerated,
 	}
 	intent := renderplan.GenerateIntent{
 		Variant:     editor.PresetCleanPOV60,

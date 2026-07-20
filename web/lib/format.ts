@@ -1,4 +1,4 @@
-import type { Play, VideoStatus } from './api/types';
+import type { Match, Play, VideoStatus } from './api/types';
 
 export function formatKd(n: number): string {
   return n.toFixed(2);
@@ -43,6 +43,18 @@ export function timeAgo(value: string | number): string {
   if (hours < 24) return `hace ${hours} h`;
   const days = Math.floor(hours / 24);
   return `hace ${days} d`;
+}
+
+/** Imported demos expose their import timestamp, not a fabricated play time. */
+export function matchDateLabel(match: Pick<Match, 'playedAt' | 'source'>): string {
+  if (match.source !== 'upload') return timeAgo(match.playedAt);
+  const date = new Date(match.playedAt);
+  if (Number.isNaN(date.getTime())) return 'demo importada';
+  return `importada el ${new Intl.DateTimeFormat('es-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)}`;
 }
 
 /** Remaining-availability countdown: "14h" or "13h 59m" or "12m". */

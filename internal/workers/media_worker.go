@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1131,8 +1132,10 @@ func (w *StreamRenderWorker) render(
 		}
 	}()
 	var videos []streamclips.VideoEntry
+	var delivery []streamclips.DeliveryEntry
 	var publishArtifacts []publishArtifact
 	var warnings []string
+	firstRenderedVideo := ""
 	musicPath := ""
 	if plan.Music.Key != "" {
 		if musicPath = resolveMusicFile(cfg.MusicDir, plan.Music.Key); musicPath == "" {
@@ -1216,10 +1219,86 @@ func (w *StreamRenderWorker) render(
 			return err
 		}
 		publishArtifacts = append(publishArtifacts, publishArtifact{key: key, path: publishPath})
+		deliveryName := clip.ID + ".mp4"
+		deliveryKey, err := streamclips.RenderRevisionDeliveryKey(j.ID, variant, revisionID, deliveryName)
+		if err != nil {
+			return err
+		}
+		publishArtifacts = append(publishArtifacts, publishArtifact{key: deliveryKey, path: publishPath})
+		if firstRenderedVideo == "" {
+			firstRenderedVideo = publishPath
+		}
+		delivery = append(delivery, streamclips.DeliveryEntry{Name: deliveryName, Kind: "video", Key: deliveryKey})
+		if plan.Captions.Enabled && clip.CaptionReviewed && len(clip.CaptionWords) > 0 {
+			captionName := clip.ID + ".ass"
+			captionDeliveryKey, err := streamclips.RenderRevisionDeliveryKey(j.ID, variant, revisionID, captionName)
+			if err != nil {
+				return err
+			}
+			publishArtifacts = append(publishArtifacts, publishArtifact{key: captionDeliveryKey, path: filepath.Join(workDir, "captions", clip.ID+".ass")})
+			delivery = append(delivery, streamclips.DeliveryEntry{Name: captionName, Kind: "captions", Key: captionDeliveryKey})
+		}
 		// Only the video artifact filename gains _captioned. NewVideoEntry keeps
 		// the original plan clip ID stable so caption sidecars remain addressable.
 		videos = append(videos, streamclips.NewVideoEntry(clip, key))
 	}
+
+	if len(videos) > 0 {
+		coverPath := filepath.Join(outDir, "cover.jpg")
+		if err := w.writeStreamCover(runCtx, cfg.FFmpegPath, firstRenderedVideo, coverPath); err != nil {
+			return fmt.Errorf("generate stream cover: %w", err)
+		}
+		coverKey, err := streamclips.RenderRevisionDeliveryKey(j.ID, variant, revisionID, "cover.jpg")
+		if err != nil {
+			return err
+		}
+		publishArtifacts = append(publishArtifacts, publishArtifact{key: coverKey, path: coverPath})
+		delivery = append(delivery, streamclips.DeliveryEntry{Name: "cover.jpg", Kind: "cover", Key: coverKey})
+	}
+	planPath := filepath.Join(outDir, "edit-plan.json")
+	planBytes, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(planPath, append(planBytes, '\n'), 0o600); err != nil {
+		return err
+	}
+	planKey, err := streamclips.RenderRevisionDeliveryKey(j.ID, variant, revisionID, "edit-plan.json")
+	if err != nil {
+		return err
+	}
+	publishArtifacts = append(publishArtifacts, publishArtifact{key: planKey, path: planPath})
+	delivery = append(delivery, streamclips.DeliveryEntry{Name: "edit-plan.json", Kind: "plan", Key: planKey})
+	metadataPath := filepath.Join(outDir, "metadata.txt")
+	metadata := fmt.Sprintf("Título: %s\nOrigen: %s\nFormato: %s\nClips: %d\n", strings.TrimSpace(j.Title), publicSourceURL(j.SourceURL), variant, len(videos))
+	if err := os.WriteFile(metadataPath, []byte(metadata), 0o600); err != nil {
+		return err
+	}
+	metadataKey, err := streamclips.RenderRevisionDeliveryKey(j.ID, variant, revisionID, "metadata.txt")
+	if err != nil {
+		return err
+	}
+	publishArtifacts = append(publishArtifacts, publishArtifact{key: metadataKey, path: metadataPath})
+	delivery = append(delivery, streamclips.DeliveryEntry{Name: "metadata.txt", Kind: "metadata", Key: metadataKey})
+	manifestPath := filepath.Join(outDir, "manifest.json")
+	manifestBytes, err := json.MarshalIndent(struct {
+		Folder    string                      `json:"folder"`
+		JobID     uuid.UUID                   `json:"job_id"`
+		Variant   string                      `json:"variant"`
+		Artifacts []streamclips.DeliveryEntry `json:"artifacts"`
+	}{Folder: "shortslistosparasubir", JobID: j.ID, Variant: variant, Artifacts: delivery}, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(manifestPath, append(manifestBytes, '\n'), 0o600); err != nil {
+		return err
+	}
+	manifestKey, err := streamclips.RenderRevisionDeliveryKey(j.ID, variant, revisionID, "manifest.json")
+	if err != nil {
+		return err
+	}
+	publishArtifacts = append(publishArtifacts, publishArtifact{key: manifestKey, path: manifestPath})
+	delivery = append(delivery, streamclips.DeliveryEntry{Name: "manifest.json", Kind: "manifest", Key: manifestKey})
 
 	// Media and sidecars are uploaded into a new immutable revision. Until the
 	// final status.json pointer is replaced, a partial upload is unreachable and
@@ -1256,6 +1335,7 @@ func (w *StreamRenderWorker) render(
 	state.ResultKey = resultKey
 	state.GalleryKey = galleryKey
 	state.ArtifactDir = revisionPrefix
+	state.Delivery = delivery
 	if hasIntent {
 		state.AttemptID = intent.AttemptID
 	}
@@ -1305,6 +1385,50 @@ func (w *StreamRenderWorker) render(
 	}
 
 	return nil
+}
+
+func (w *StreamRenderWorker) writeStreamCover(ctx context.Context, ffmpegPath, videoPath, filename string) error {
+	if strings.TrimSpace(videoPath) == "" {
+		return errors.New("rendered video is required for cover generation")
+	}
+	_, err := w.runner.Run(ctx, ffmpegPath,
+		"-hide_banner", "-loglevel", "error", "-y",
+		"-i", videoPath,
+		"-frames:v", "1", "-vf", "scale=720:-2", "-q:v", "2", filename,
+	)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(filename)
+	if err != nil {
+		return fmt.Errorf("verify cover output: %w", err)
+	}
+	if info.Size() == 0 {
+		return errors.New("cover output is empty")
+	}
+	return nil
+}
+
+func publicSourceURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return ""
+	}
+	parsed.User = nil
+	query := parsed.Query()
+	publicQuery := url.Values{}
+	host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
+	if host == "youtube.com" || strings.HasSuffix(host, ".youtube.com") {
+		for _, key := range []string{"v", "list", "index", "t", "start"} {
+			for _, value := range query[key] {
+				publicQuery.Add(key, value)
+			}
+		}
+	}
+	parsed.RawQuery = publicQuery.Encode()
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func validateStreamRenderIntent(plan streamclips.EditPlan, intent tasks.StreamRenderIntent, hasIntent bool) error {
@@ -2126,6 +2250,7 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 	if edit.OutroText != "" {
 		args = append(args, "--outro-text", edit.OutroText)
 	}
+	args = appendCoverStrategyArg(args, edit)
 	if cfg.FFmpegPath != "" {
 		args = append(args, "--ffmpeg", cfg.FFmpegPath)
 	}
@@ -2189,6 +2314,13 @@ func (w *RenderWorker) render(ctx context.Context, j job.Job, variant, musicKey 
 		return fmt.Errorf("write ready render state: %w", err)
 	}
 	return nil
+}
+
+func appendCoverStrategyArg(args []string, edit renderplan.EditRequest) []string {
+	if edit.CoverStrategy == renderplan.CoverStrategyNone {
+		return append(args, "--no-covers")
+	}
+	return args
 }
 
 func (w *RenderWorker) writeEditDocument(outDir string, id uuid.UUID, loadout renderplan.Loadout, result recording.RecordingResult, edit renderplan.EditRequest) error {

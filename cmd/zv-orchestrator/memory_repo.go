@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -386,7 +387,7 @@ func (r *memoryStreamJobRepository) SetEditPlan(ctx context.Context, id uuid.UUI
 	return nil
 }
 
-func (r *memoryStreamJobRepository) SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error {
+func (r *memoryStreamJobRepository) SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256, discoveredTitle string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -398,6 +399,9 @@ func (r *memoryStreamJobRepository) SetAcquired(ctx context.Context, id uuid.UUI
 	}
 	j.Probe = probe
 	j.SourceSHA256 = sha256
+	if strings.TrimSpace(j.Title) == "" {
+		j.Title = strings.TrimSpace(discoveredTitle)
+	}
 	j.Status = streamclips.StatusReady
 	j.FailureReason = ""
 	j.UpdatedAt = time.Now().UTC()

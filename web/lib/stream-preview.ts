@@ -9,6 +9,65 @@ export type CropCoverGeometry = {
   topPercent: number;
 };
 
+export type MontagePlaybackCursor = {
+  clipIndex: number;
+  sourceSeconds: number;
+  playbackRate: number;
+};
+
+function playableClip(clip: StreamClipRange): boolean {
+  return Number.isFinite(clip.start_seconds) &&
+    Number.isFinite(clip.end_seconds) &&
+    clip.start_seconds >= 0 &&
+    clip.end_seconds > clip.start_seconds;
+}
+
+function clipPlaybackRate(clip: StreamClipRange): number {
+  const speed = clip.edit?.speed ?? 1;
+  return Number.isFinite(speed) && speed > 0 ? speed : 1;
+}
+
+/** Starts montage playback at the selected clip, never in an excluded source gap. */
+export function startMontagePlayback(
+  clips: StreamClipRange[],
+  sourceSeconds: number,
+): MontagePlaybackCursor | null {
+  const firstIndex = clips.findIndex(playableClip);
+  if (firstIndex < 0) return null;
+  const selectedIndex = clips.findIndex((clip) =>
+    playableClip(clip) && sourceSeconds >= clip.start_seconds && sourceSeconds < clip.end_seconds,
+  );
+  const clipIndex = selectedIndex >= 0 ? selectedIndex : firstIndex;
+  const clip = clips[clipIndex];
+  return {
+    clipIndex,
+    sourceSeconds: selectedIndex >= 0 ? sourceSeconds : clip.start_seconds,
+    playbackRate: clipPlaybackRate(clip),
+  };
+}
+
+/** Advances within one clip or jumps to the next edited range; null means montage end. */
+export function advanceMontagePlayback(
+  clips: StreamClipRange[],
+  clipIndex: number,
+  sourceSeconds: number,
+): MontagePlaybackCursor | null {
+  const clip = clips[clipIndex];
+  if (clip && playableClip(clip) && sourceSeconds < clip.end_seconds) {
+    return { clipIndex, sourceSeconds, playbackRate: clipPlaybackRate(clip) };
+  }
+  for (let index = clipIndex + 1; index < clips.length; index++) {
+    const next = clips[index];
+    if (!playableClip(next)) continue;
+    return {
+      clipIndex: index,
+      sourceSeconds: next.start_seconds,
+      playbackRate: clipPlaybackRate(next),
+    };
+  }
+  return null;
+}
+
 export const STREAMER_BANNER_MIN_POSITION = 0.025;
 export const STREAMER_BANNER_MAX_POSITION = 0.975;
 

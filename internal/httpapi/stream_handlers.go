@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -412,7 +413,8 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	variant := chi.URLParam(r, "variant")
-	if _, ok := streamclips.VariantByName(variant); !ok {
+	layout, ok := streamclips.VariantByName(variant)
+	if !ok {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("unsupported stream render variant %q (valid variants: %s)", variant, strings.Join(streamclips.VariantNames(), ", ")))
 		return
 	}
@@ -445,6 +447,10 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 	}
 	if migrationApplied && hadClipsBeforeMigration && len(plan.Clips) == 0 {
 		writeError(w, http.StatusBadRequest, "stream edit plan has no clips after source-duration migration")
+		return
+	}
+	if !layout.FullFrame && !plan.FaceCropReviewed {
+		writeError(w, http.StatusConflict, "facecam crop requires explicit review before rendering")
 		return
 	}
 	if j.Probe.AudioCodec != "" && plan.CaptionsNeedBackend() {
@@ -659,6 +665,43 @@ func (h *Handlers) GetStreamVideo(w http.ResponseWriter, r *http.Request) {
 	h.streamStreamRenderArtifact(w, r, "video/mp4", func(id uuid.UUID, variant string) (string, error) {
 		return h.streamVideoKey(id, variant, clipID)
 	})
+}
+
+func (h *Handlers) GetStreamDeliveryArtifact(w http.ResponseWriter, r *http.Request) {
+	j, ok := h.loadStreamJob(w, r)
+	if !ok {
+		return
+	}
+	variant := chi.URLParam(r, "variant")
+	name := chi.URLParam(r, "name")
+	state, exists, err := h.readStreamRenderState(j.ID, variant)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !exists || !state.HasPublishedRender() {
+		writeError(w, http.StatusNotFound, "stream delivery pack is not ready")
+		return
+	}
+	for _, artifact := range state.Delivery {
+		if artifact.Name != name {
+			continue
+		}
+		contentType := "application/octet-stream"
+		switch path.Ext(name) {
+		case ".mp4":
+			contentType = "video/mp4"
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+		case ".json":
+			contentType = "application/json"
+		case ".txt", ".ass":
+			contentType = "text/plain; charset=utf-8"
+		}
+		h.streamStorageKey(w, r, contentType, artifact.Key)
+		return
+	}
+	writeError(w, http.StatusNotFound, "stream delivery artifact not found")
 }
 
 // streamVideoKey resolves the storage key for a rendered clip. The render

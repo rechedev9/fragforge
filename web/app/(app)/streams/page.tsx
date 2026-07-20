@@ -58,12 +58,14 @@ import { KillfeedKillsEditor } from '@/components/streams/killfeed-kills-editor'
 import {
   STREAMER_BANNER_MAX_POSITION,
   STREAMER_BANNER_MIN_POSITION,
+  advanceMontagePlayback,
   clampStreamerBannerPosition,
   resolveStreamerBannerPosition,
   representativeFrameTime,
+  startMontagePlayback,
 } from '@/lib/stream-preview';
 import { addClipCue, applyClipKillfeedRead, fitPlanToSourceDuration, initialStreamClipEnd, normalizeKillfeedPlan, removeClipCue, setClipCueKills } from '@/lib/killfeed-plan';
-import { CLIP_SPEEDS, clipEditIssue, DEFAULT_OVERLAY_FONT_SIZE, MAX_OVERLAY_FONT_SIZE, MAX_TEXT_OVERLAYS, MIN_OVERLAY_FONT_SIZE } from '@/lib/clip-edit';
+import { CLIP_SPEEDS, clipEditIssue, DEFAULT_OVERLAY_FONT_SIZE, MAX_OVERLAY_FONT_SIZE, MAX_TEXT_OVERLAYS, MIN_OVERLAY_FONT_SIZE, streamRangeIssue, streamRangesIssue } from '@/lib/clip-edit';
 import {
   captionDraftDiffersFromReview,
   captionInputsFingerprint,
@@ -86,6 +88,8 @@ import {
   streamRenderCanRetry,
   streamRenderNeedsKillfeedReanalysis,
 } from '@/lib/stream-recovery';
+import { loadStreamDraft, reconcileStreamDraftAfterSave, recoverableStreamJobs, saveStreamDraft, selectStreamDraftPlan, streamEditPlanFingerprint } from '@/lib/stream-draft';
+import { isCurrentStreamEditorLoad, nextStreamEditorLoad, type StreamEditorLoad } from '@/lib/stream-editor-load';
 
 const NAV = navSection('/streams');
 
@@ -135,12 +139,32 @@ function errorMessage(err: unknown, fallback: string): string {
 const NON_VIDEO_EXT_RE =
   /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|heic|avif|pdf|txt|md|csv|json|xml|html?|zip|rar|7z|gz|tar|mp3|wav|flac|ogg|m4a|docx?|xlsx?)$/i;
 
+function isStreamURLValidationError(message: string | null): message is string {
+  return message?.startsWith('Pega una URL') === true || message?.startsWith('Esa URL') === true;
+}
+
 /** The extension (without the dot, lowercased) if `raw` clearly points to a
  * non-video file, else null. Unparseable input is left for the server. */
 function nonVideoExtension(raw: string): string | null {
   try {
     const match = new URL(raw).pathname.match(NON_VIDEO_EXT_RE);
     return match ? match[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+function streamSourceLabel(sourceUrl?: string): string | null {
+  if (!sourceUrl) return null;
+  try {
+    const url = new URL(sourceUrl);
+    if (url.hostname.endsWith('twitch.tv')) {
+      const parts = url.pathname.split('/').filter(Boolean);
+      const channel = parts.length === 3 && parts[1] === 'clip' ? parts[0] : null;
+      return channel ? `Twitch · ${channel}` : 'Twitch';
+    }
+    if (url.hostname.endsWith('youtube.com') || url.hostname === 'youtu.be') return 'YouTube';
+    return url.hostname;
   } catch {
     return null;
   }
@@ -161,6 +185,7 @@ function blankPlan(
     schema_version: '1.1',
     variant,
     face_crop: DEFAULT_FACE_CROP,
+    face_crop_reviewed: false,
     gameplay_crop: FULL_FRAME,
     clips: [{ id: nextClipId(), start_seconds: 0, end_seconds: clipEnd, title: '' }],
     captions: { enabled: false, language: 'es' },
@@ -199,6 +224,7 @@ function planFingerprint(plan: StreamEditPlan): string {
   return JSON.stringify({
     variant: plan.variant,
     face: rect(plan.face_crop),
+    faceReviewed: plan.face_crop_reviewed ?? false,
     killfeed: rect(plan.killfeed_crop),
     killfeedAnalysis: [
       plan.killfeed_analysis?.generation_id ?? '',
@@ -242,6 +268,22 @@ function captionDraftsFromState(state: CaptionGenerationState): Record<string, S
   );
 }
 
+function AnalysisProgress({ label, onCancel }: { label: string; onCancel: () => void }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-2 text-xs text-stream">
+      <Loader2 className="size-4 animate-spin" />
+      <span>{label} · {elapsed}s transcurridos · tiempo restante ajustándose</span>
+      <Button type="button" variant="ghost" size="sm" onClick={onCancel}>CANCELAR ESPERA</Button>
+    </div>
+  );
+}
+
 /**
  * Stream Clips (/streams) — paste a Twitch clip/VOD URL or upload an MP4, then
  * lay out the facecam over gameplay and cut clip ranges before rendering
@@ -265,11 +307,20 @@ function LocalStreamsPage() {
   const [error, setError] = useState<string | null>(null);
   const [failureReason, setFailureReason] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [recoverableJobs, setRecoverableJobs] = useState<StreamJob[]>([]);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveGeneration = useRef(0);
+  const autosaveChain = useRef<Promise<void>>(Promise.resolve());
+  const serverPlanFingerprint = useRef<{ jobId: string; fingerprint: string } | null>(null);
+  const draftSessionId = useRef('');
+  const draftRevision = useRef(0);
+  const editorLoad = useRef<StreamEditorLoad>({ generation: 0, jobId: '' });
 
   const pollGen = useRef(0);
 
   const reset = useCallback((message: string) => {
     pollGen.current += 1;
+    editorLoad.current = nextStreamEditorLoad(editorLoad.current, '');
     setError(message);
     setStage('idle');
     setJob(null);
@@ -277,16 +328,28 @@ function LocalStreamsPage() {
     setRenderState(null);
     setRenderedPlan(null);
     setFailureReason(null);
+    serverPlanFingerprint.current = null;
   }, []);
 
   const loadEditor = useCallback(async (j: StreamJob) => {
+    const requestedLoad = nextStreamEditorLoad(editorLoad.current, j.id);
+    editorLoad.current = requestedLoad;
+    draftSessionId.current = window.crypto.randomUUID();
+    draftRevision.current = 0;
     setJob(j);
     const duration = j.probe?.duration_seconds ?? 0;
     try {
+      const browserDraft = typeof window === 'undefined' ? null : loadStreamDraft(window.localStorage, j.id);
+      const serverPlan = j.edit_plan ?? (await streamsApi.getEditPlan(j.id));
+      if (!isCurrentStreamEditorLoad(requestedLoad, editorLoad.current)) return;
+      serverPlanFingerprint.current = { jobId: j.id, fingerprint: streamEditPlanFingerprint(serverPlan) };
       const loadedPlan = fitPlanToSourceDuration(
-        normalizeKillfeedPlan(j.edit_plan ?? (await streamsApi.getEditPlan(j.id))),
+        normalizeKillfeedPlan(selectStreamDraftPlan(browserDraft, serverPlan) ?? serverPlan),
         duration,
       );
+      if (j.title?.trim() && loadedPlan.clips[0] && !loadedPlan.clips[0].title?.trim()) {
+        loadedPlan.clips[0] = { ...loadedPlan.clips[0], title: j.title.trim() };
+      }
       setPlan(
         loadedPlan.clips.length > 0
           ? loadedPlan
@@ -296,8 +359,10 @@ function LocalStreamsPage() {
             },
       );
     } catch {
+      if (!isCurrentStreamEditorLoad(requestedLoad, editorLoad.current)) return;
       setPlan(blankPlan(duration));
     }
+    if (!isCurrentStreamEditorLoad(requestedLoad, editorLoad.current)) return;
     setStage('editing');
   }, []);
 
@@ -336,9 +401,23 @@ function LocalStreamsPage() {
     [loadEditor, reset],
   );
 
+  const resumeJob = useCallback((candidate: StreamJob) => {
+    setError(null);
+    setJob(candidate);
+    if (candidate.status === 'acquiring') {
+      setStage('acquiring');
+      void pollAcquiring(candidate.id);
+      return;
+    }
+    void loadEditor(candidate);
+  }, [loadEditor, pollAcquiring]);
+
   const submitUrl = useCallback(async () => {
     const trimmed = sourceUrl.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setError('Pega una URL de clip o VOD de Twitch o YouTube. Para un archivo local, usa un MP4.');
+      return;
+    }
     const badExt = nonVideoExtension(trimmed);
     if (badExt) {
       setError(
@@ -446,8 +525,14 @@ function LocalStreamsPage() {
   const createShorts = useCallback(async () => {
     if (!job || !plan) return;
     const fittedPlan = fitPlanToSourceDuration(plan, job.probe?.duration_seconds ?? 0);
-    if (!clipsAreValid(fittedPlan.clips)) {
-      setError('Cada clip necesita un fin posterior a su inicio.');
+    const rangeIssue = streamRangesIssue(fittedPlan.clips, job.probe?.duration_seconds ?? 0);
+    if (rangeIssue !== null) {
+      setError(rangeIssue);
+      return;
+    }
+    const needsFaceCrop = STREAM_VARIANTS.find((variant) => variant.value === fittedPlan.variant)?.needsFaceCrop ?? false;
+    if (needsFaceCrop && fittedPlan.face_crop_reviewed !== true) {
+      setError('Confirma manualmente el recorte de facecam antes de renderizar; no asumimos que el recorte automático contenga una cara.');
       return;
     }
     if (!STREAMER_NICK_RE.test(fittedPlan.streamer_banner?.nick?.trim() ?? '')) {
@@ -471,7 +556,16 @@ function LocalStreamsPage() {
     setError(null);
     setSaving(true);
     try {
+      autosaveGeneration.current += 1;
+      if (autosaveTimer.current !== null) {
+        clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = null;
+      }
+      await autosaveChain.current.catch(() => undefined);
+      const submittedRevision = { editorSessionId: draftSessionId.current, revision: draftRevision.current };
       const saved = await streamsApi.putEditPlan(job.id, fittedPlan);
+      if (typeof window !== 'undefined') reconcileStreamDraftAfterSave(window.localStorage, job.id, fittedPlan, saved, submittedRevision);
+      serverPlanFingerprint.current = { jobId: job.id, fingerprint: streamEditPlanFingerprint(saved) };
       setPlan(saved);
       setStage('rendering');
       setRenderState((previous) =>
@@ -490,6 +584,61 @@ function LocalStreamsPage() {
   }, [job, plan, pollRender]);
 
   useEffect(() => {
+    let active = true;
+    void streamsApi.listJobs()
+      .then((jobs) => {
+        if (active) setRecoverableJobs(recoverableStreamJobs(jobs).slice(0, 5));
+      })
+      .catch(() => {
+        // Source creation remains available if the recent-job read fails.
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!job || !plan || (stage !== 'editing' && stage !== 'rendered')) return;
+    const revision = ++draftRevision.current;
+    const submittedRevision = { editorSessionId: draftSessionId.current, revision };
+    const requestedLoad = editorLoad.current;
+    if (typeof window !== 'undefined') {
+      saveStreamDraft(
+        window.localStorage,
+        job.id,
+        plan,
+        undefined,
+        serverPlanFingerprint.current?.jobId === job.id
+          ? serverPlanFingerprint.current.fingerprint
+          : streamEditPlanFingerprint(plan),
+        submittedRevision,
+      );
+    }
+    const generation = ++autosaveGeneration.current;
+    if (autosaveTimer.current !== null) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      autosaveChain.current = autosaveChain.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (autosaveGeneration.current !== generation) return;
+          const saved = await streamsApi.putEditPlan(job.id, plan);
+          if (typeof window !== 'undefined') reconcileStreamDraftAfterSave(window.localStorage, job.id, plan, saved, submittedRevision);
+          if (isCurrentStreamEditorLoad(requestedLoad, editorLoad.current)) {
+            serverPlanFingerprint.current = { jobId: job.id, fingerprint: streamEditPlanFingerprint(saved) };
+          }
+        });
+      void autosaveChain.current.catch(() => {
+        // The synchronous local draft still protects navigation/restart recovery.
+      });
+    }, 500);
+    return () => {
+      if (autosaveTimer.current !== null) {
+        clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = null;
+      }
+    };
+  }, [job, plan, stage]);
+
+  useEffect(() => {
     return () => {
       pollGen.current += 1; // stop any in-flight poll loop on unmount
     };
@@ -503,10 +652,15 @@ function LocalStreamsPage() {
         title={title}
         submitting={stage === 'submitting'}
         error={error}
-        onSourceUrlChange={setSourceUrl}
+        recoverableJobs={recoverableJobs}
+        onSourceUrlChange={(value) => {
+          setSourceUrl(value);
+          if (isStreamURLValidationError(error)) setError(null);
+        }}
         onTitleChange={setTitle}
         onSubmitUrl={() => void submitUrl()}
         onSubmitFile={(f) => void submitFile(f)}
+        onResume={resumeJob}
       />
     );
   } else if (stage === 'acquiring') {
@@ -584,21 +738,26 @@ function SourceCard({
   title,
   submitting,
   error,
+  recoverableJobs,
   onSourceUrlChange,
   onTitleChange,
   onSubmitUrl,
   onSubmitFile,
+  onResume,
 }: {
   sourceUrl: string;
   title: string;
   submitting: boolean;
   error: string | null;
+  recoverableJobs: StreamJob[];
   onSourceUrlChange: (v: string) => void;
   onTitleChange: (v: string) => void;
   onSubmitUrl: () => void;
   onSubmitFile: (file: File) => void;
+  onResume: (job: StreamJob) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const urlError = isStreamURLValidationError(error) ? error : null;
 
   return (
     <div className="studio-panel studio-panel-raised relative max-w-5xl p-5 sm:p-7">
@@ -631,6 +790,8 @@ function SourceCard({
                     placeholder="https://clips.twitch.tv/…"
                     value={sourceUrl}
                     disabled={submitting}
+                    aria-invalid={urlError !== null || undefined}
+                    aria-describedby={urlError ? 'stream-url-error' : undefined}
                     onChange={(e) => onSourceUrlChange(e.target.value)}
                     className="pl-10"
                   />
@@ -645,6 +806,7 @@ function SourceCard({
                   TRAER CLIP
                 </Button>
               </div>
+              {urlError ? <p id="stream-url-error" role="alert" className="text-sm leading-6 text-destructive">{urlError}</p> : null}
             </div>
 
             <div className="flex items-center gap-3.5 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.18em] text-muted-foreground">
@@ -675,7 +837,25 @@ function SourceCard({
               }}
             />
 
-            {error ? <p role="alert" className="text-sm leading-6 text-destructive">{error}</p> : null}
+            {error && !urlError ? <p role="alert" className="text-sm leading-6 text-destructive">{error}</p> : null}
+
+            {recoverableJobs.length > 0 ? (
+              <section className="flex flex-col gap-2 border-t border-border pt-5" aria-labelledby="stream-drafts-title">
+                <h3 id="stream-drafts-title" className="text-sm font-medium text-foreground">Borradores recientes</h3>
+                {recoverableJobs.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => onResume(candidate)}
+                    className="flex items-center justify-between gap-3 border border-border px-3 py-2 text-left hover:border-stream/60 hover:bg-stream/5 disabled:opacity-50"
+                  >
+                    <span className="min-w-0 truncate text-sm">{candidate.title?.trim() || 'Clip sin título'}</span>
+                    <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] text-stream">CONTINUAR BORRADOR</span>
+                  </button>
+                ))}
+              </section>
+            ) : null}
           </div>
         </div>
 
@@ -725,6 +905,7 @@ function StreamEditor({
   onStartOver: () => void;
 }) {
   const videoSrc = streamsApi.sourceUrl(job.id);
+  const sourceLabel = streamSourceLabel(job.source_url);
   const variantMeta = STREAM_VARIANTS.find((v) => v.value === plan.variant) ?? STREAM_VARIANTS[0];
   const stale = useMemo(
     () => renderedPlan !== null && plan !== null && planFingerprint(renderedPlan) !== planFingerprint(plan),
@@ -768,6 +949,12 @@ function StreamEditor({
   const [previewSeconds, setPreviewSeconds] = useState(() =>
     representativeFrameTime(sourceDuration),
   );
+  const previewSecondsRef = useRef(previewSeconds);
+  previewSecondsRef.current = previewSeconds;
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const previewAudioRef = useRef<HTMLAudioElement>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewReload, setPreviewReload] = useState(0);
   const [weapons, setWeapons] = useState<string[]>([]);
   const [readErrors, setReadErrors] = useState<Record<string, string>>({});
   const [killfeedReadNotice, setKillfeedReadNotice] = useState<string | null>(null);
@@ -784,6 +971,54 @@ function StreamEditor({
     (total, clip) => total + clip.events.length,
     0,
   );
+
+  useEffect(() => {
+    if (!previewPlaying || sourceDuration <= 0) return;
+    const audio = previewAudioRef.current;
+    let cursor = startMontagePlayback(plan.clips, previewSecondsRef.current);
+    if (!cursor) {
+      setPreviewPlaying(false);
+      return;
+    }
+    const playCursor = (next: typeof cursor): void => {
+      if (!next) return;
+      cursor = next;
+      setPreviewSeconds(next.sourceSeconds);
+      if (audio) {
+        audio.currentTime = next.sourceSeconds;
+        audio.playbackRate = next.playbackRate;
+        audio.volume = Math.min(1, Math.max(0, plan.clips[next.clipIndex]?.edit?.source_volume ?? 1));
+        void audio.play().catch(() => {
+          setPreviewPlaying(false);
+          setPreviewError('El navegador no pudo iniciar el audio de la preview. Pulsa reintentar y vuelve a reproducir.');
+        });
+      }
+    };
+    playCursor(cursor);
+    const timer = setInterval(() => {
+      if (!cursor) return;
+      const sourceSeconds = audio && !audio.paused
+        ? audio.currentTime
+        : previewSecondsRef.current + 0.1 * cursor.playbackRate;
+      const next = advanceMontagePlayback(plan.clips, cursor.clipIndex, sourceSeconds);
+      if (!next) {
+        const restart = startMontagePlayback(plan.clips, Number.NaN);
+        if (restart) setPreviewSeconds(restart.sourceSeconds);
+        setPreviewPlaying(false);
+        return;
+      }
+      if (next.clipIndex !== cursor.clipIndex) {
+        playCursor(next);
+        return;
+      }
+      cursor = next;
+      setPreviewSeconds(next.sourceSeconds);
+    }, 100);
+    return () => {
+      clearInterval(timer);
+      audio?.pause();
+    };
+  }, [plan.clips, previewPlaying, sourceDuration]);
 
   const pollCaptionState = useCallback(async (initial?: CaptionGenerationState): Promise<CaptionGenerationState> => {
     const gen = ++captionPollGen.current;
@@ -1001,14 +1236,17 @@ function StreamEditor({
         c.id === clip.id ? applyClipKillfeedRead(c, cue, read.events) : c,
       );
       onPlanChange({ ...saved, clips });
+      const reviewNote = read.review_required
+        ? ` ${read.warnings?.join(' ') || 'Revisa manualmente el resultado antes de renderizar.'}`
+        : '';
       if (read.aligned && read.events.length > 0) {
         const newest = read.events[read.events.length - 1];
         setPreviewSeconds(newest.cue_seconds);
         setKillfeedReadNotice(
-          `IA ajustó ${read.events.length === 1 ? 'la marca' : `${read.events.length} marcas`} al instante real de ${read.events.length === 1 ? 'la kill' : 'las kills'}.`,
+          `IA ajustó ${read.events.length === 1 ? 'la marca' : `${read.events.length} marcas`} al instante real de ${read.events.length === 1 ? 'la kill' : 'las kills'}.${reviewNote}`,
         );
       } else {
-        setKillfeedReadNotice('No se pudo detectar el borde temporal; se conservó la marca elegida.');
+        setKillfeedReadNotice(`No se pudo detectar el borde temporal; se conservó la marca elegida.${reviewNote}`);
       }
     } catch (err) {
       const message =
@@ -1046,7 +1284,8 @@ function StreamEditor({
   }
 
   const setVariant = (variant: StreamVariant) => onPlanChange({ ...plan, variant });
-  const setFaceCrop = (rect: NormalizedRect) => onPlanChange({ ...plan, face_crop: rect });
+  const setFaceCrop = (rect: NormalizedRect) => onPlanChange({ ...plan, face_crop: rect, face_crop_reviewed: false });
+  const confirmFaceCrop = () => onPlanChange({ ...plan, face_crop_reviewed: true });
   const setKillfeedEnabled = (enabled: boolean) => {
     if (enabled) {
       const next = invalidateKillfeedAnalysis({
@@ -1220,10 +1459,15 @@ function StreamEditor({
     );
   } else if (captionGenerating || captionRequestBusy) {
     captionGenerationNotice = (
-      <p role="status" className="flex items-center gap-2 text-xs text-stream">
-        <Loader2 className="size-4 animate-spin" />
-        Analizando el audio. Puedes revisar los resultados cuando termine.
-      </p>
+      <AnalysisProgress
+        label="Analizando audio por clip"
+        onCancel={() => {
+          captionPollGen.current += 1;
+          setCaptionRequestBusy(false);
+          setCaptionState(null);
+          setCaptionError('Espera cancelada. El análisis puede continuar en segundo plano; vuelve a consultar cuando quieras.');
+        }}
+      />
     );
   } else if (captionLoading) {
     captionGenerationNotice = (
@@ -1266,6 +1510,17 @@ function StreamEditor({
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
       <div className="flex flex-col gap-[18px]">
+        <div className="studio-panel flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-foreground">{job.title?.trim() || 'Clip de stream'}</p>
+            <p className="text-xs text-muted-foreground">El título se ha copiado al primer rango y puedes editarlo allí.</p>
+          </div>
+          {job.source_url && sourceLabel ? (
+            <a href={job.source_url} target="_blank" rel="noreferrer" className="text-xs text-stream underline-offset-4 hover:underline">
+              {sourceLabel} · ver origen
+            </a>
+          ) : null}
+        </div>
         <div className="studio-panel p-5 sm:p-6">
           <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1327,6 +1582,23 @@ function StreamEditor({
                   frameSeconds={previewSeconds}
                   disabled={busy}
                 />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={plan.face_crop_reviewed ? 'outline' : 'default'}
+                    disabled={busy}
+                    onClick={confirmFaceCrop}
+                  >
+                    <CircleCheck className="size-4" />
+                    {plan.face_crop_reviewed ? 'RECORTE CONFIRMADO' : 'CONFIRMAR RECORTE DE FACECAM'}
+                  </Button>
+                  {!plan.face_crop_reviewed ? (
+                    <p role="alert" className="text-xs text-amber-500">
+                      Verifica que el marco contiene una cara. El recorte inicial es solo una guía y podría coincidir con el radar.
+                    </p>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
@@ -1394,7 +1666,15 @@ function StreamEditor({
                       {plan.killfeed_analysis ? 'REANALIZAR KILLFEED' : 'ANALIZAR KILLFEED'}
                     </Button>
                     {killfeedAnalyzing || killfeedRequestBusy ? (
-                      <span role="status" className="text-xs text-stream">Analizando todos los clips por fotograma…</span>
+                      <AnalysisProgress
+                        label="Analizando clips por fotograma"
+                        onCancel={() => {
+                          killfeedPollGen.current += 1;
+                          setKillfeedRequestBusy(false);
+                          setKillfeedState(null);
+                          setKillfeedError('Espera cancelada. El análisis puede continuar en segundo plano; puedes retomarlo después.');
+                        }}
+                      />
                     ) : null}
                     {!killfeedAnalyzing &&
                     !killfeedRequestBusy &&
@@ -1622,6 +1902,7 @@ function StreamEditor({
         <div className="studio-panel p-5 sm:p-6">
           <ClipEditor
             clips={plan.clips}
+            sourceDuration={sourceDuration}
             onChange={setClips}
             disabled={busy}
           />
@@ -1687,6 +1968,7 @@ function StreamEditor({
                     {plan.clips.map((clip, index) => (
                       <CaptionReviewCard
                         key={clip.id}
+                        videoSrc={videoSrc}
                         clip={clip}
                         clipNumber={index + 1}
                         candidate={(captionState.clips ?? []).find((item) => item.clip_id === clip.id)}
@@ -1760,6 +2042,7 @@ function StreamEditor({
           PREVIEW · 9:16
         </span>
         <StreamPreview
+          key={previewReload}
           videoSrc={videoSrc}
           variant={plan.variant}
           faceCrop={plan.face_crop}
@@ -1772,7 +2055,44 @@ function StreamEditor({
           streamerSlideEnabled={plan.streamer_banner?.slide_enabled}
           onStreamerPositionChange={setStreamerPosition}
           disabled={busy}
+          onMediaError={() => {
+            setPreviewPlaying(false);
+            setPreviewError('No se pudo decodificar o leer el MP4 de origen. Comprueba que el archivo siga disponible y reintenta la vista previa.');
+          }}
         />
+        <audio key={previewReload} ref={previewAudioRef} src={videoSrc} preload="metadata" onError={() => {
+          setPreviewPlaying(false);
+          setPreviewError('No se pudo decodificar la pista de audio de la preview. Revisa el MP4 y reintenta.');
+        }} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={sourceDuration <= 0 || startMontagePlayback(plan.clips, previewSeconds) === null}
+            onClick={() => {
+              setPreviewError(null);
+              setPreviewPlaying((current) => !current);
+            }}
+          >
+            {previewPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
+            {previewPlaying ? 'PAUSAR PREVIEW' : 'REPRODUCIR MONTAJE'}
+          </Button>
+          <span className="font-[family-name:var(--font-mono)] text-[10px] text-muted-foreground">
+            {formatStreamTimestamp(previewSeconds)} / {formatStreamTimestamp(sourceDuration)}
+          </span>
+        </div>
+        {previewError ? (
+          <div role="alert" className="flex flex-col gap-2 text-xs text-destructive">
+            <span>{previewError}</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => {
+              setPreviewError(null);
+              setPreviewReload((current) => current + 1);
+            }}>
+              REINTENTAR VISTA PREVIA
+            </Button>
+          </div>
+        ) : null}
         <p className="text-[11.5px] leading-relaxed text-muted-foreground/80">
           La preview replica el encuadre vertical. En cada marca: con kills confirmadas superpone la killfeed sintética nítida; sin kills congela el recorte del MP4.
         </p>
@@ -1830,6 +2150,7 @@ function pruneClipEdit(edit: StreamClipEdit): StreamClipEdit | undefined {
 }
 
 function CaptionReviewCard({
+  videoSrc,
   clip,
   clipNumber,
   candidate,
@@ -1840,6 +2161,7 @@ function CaptionReviewCard({
   onApprove,
   onNoSpeech,
 }: {
+  videoSrc: string;
   clip: StreamClipRange;
   clipNumber: number;
   candidate?: CaptionCandidateClip;
@@ -1850,6 +2172,7 @@ function CaptionReviewCard({
   onApprove: () => void;
   onNoSpeech: () => void;
 }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
   const duration = Math.max(0, clip.end_seconds - clip.start_seconds);
   const audible = clipHasAudibleSource(clip);
   const reviewed = clip.caption_reviewed === true;
@@ -1877,10 +2200,10 @@ function CaptionReviewCard({
     status = `Revisado: ${clip.caption_words?.length ?? 0} palabras aprobadas.`;
     statusClass = 'text-success';
   } else if (candidate?.status === CAPTION_CLIP_STATUS.failed) {
-    status = candidate.error || 'La IA no pudo generar este clip. Corrígelo a mano o confirma que no hay voz.';
+    status = candidate.error || 'El proveedor de transcripción falló. Escucha el tramo y vuelve a generar o corrígelo a mano.';
     statusClass = 'text-destructive';
   } else if (candidate?.status === CAPTION_CLIP_STATUS.noSpeech) {
-    status = 'La IA no detectó voz. Confírmalo antes de renderizar.';
+    status = 'El proveedor analizó el audio pero no detectó voz. Escucha el tramo; si sí hay voz, vuelve a generar.';
   } else if (candidate) {
     status = `${words.length} palabras candidatas pendientes de revisión.`;
   } else {
@@ -1905,6 +2228,27 @@ function CaptionReviewCard({
 
       {audible && candidate ? (
         <>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={`${clip.id}-audio-review`} className="text-[10px] text-muted-foreground">
+              Escuchar tramo original ({formatStreamTimestamp(clip.start_seconds)}–{formatStreamTimestamp(clip.end_seconds)})
+            </Label>
+            <audio
+              id={`${clip.id}-audio-review`}
+              ref={audioRef}
+              src={videoSrc}
+              controls
+              preload="metadata"
+              onPlay={(event) => {
+                if (event.currentTarget.currentTime < clip.start_seconds || event.currentTarget.currentTime >= clip.end_seconds) {
+                  event.currentTarget.currentTime = clip.start_seconds;
+                }
+              }}
+              onTimeUpdate={(event) => {
+                if (event.currentTarget.currentTime >= clip.end_seconds) event.currentTarget.pause();
+              }}
+              className="h-10 w-full"
+            />
+          </div>
           <div className="max-h-96 overflow-auto border border-border/60">
             {words.length === 0 ? (
               <p className="p-3 text-xs text-muted-foreground">
@@ -1997,17 +2341,19 @@ function CaptionReviewCard({
 
 function ClipEditor({
   clips,
+  sourceDuration,
   onChange,
   disabled,
 }: {
   clips: StreamClipRange[];
+  sourceDuration: number;
   onChange: (clips: StreamClipRange[]) => void;
   disabled: boolean;
 }) {
   const updateClip = (id: string, patch: Partial<StreamClipRange>) =>
     onChange(clips.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const removeClip = (id: string) => onChange(clips.filter((c) => c.id !== id));
-  const addClip = () => onChange([...clips, { id: nextClipId(), start_seconds: 0, end_seconds: 20, title: '' }]);
+  const addClip = () => onChange([...clips, { id: nextClipId(), start_seconds: 0, end_seconds: initialStreamClipEnd(sourceDuration), title: '' }]);
   const updateEdit = (id: string, patch: Partial<StreamClipEdit>) =>
     onChange(clips.map((c) => (c.id === id ? { ...c, edit: pruneClipEdit({ ...c.edit, ...patch }) } : c)));
 
@@ -2028,7 +2374,8 @@ function ClipEditor({
 
       <div className="flex flex-col gap-3">
         {clips.map((clip, i) => {
-          const invalid = !(clip.end_seconds > clip.start_seconds);
+          const rangeIssue = streamRangeIssue(clip, sourceDuration, i);
+          const invalid = rangeIssue !== null;
           return (
             <div key={clip.id} className="flex flex-col gap-2 border border-border bg-background/30 p-4">
               <div className="flex flex-wrap items-end gap-2">
@@ -2043,6 +2390,7 @@ function ClipEditor({
                     step="0.1"
                     value={clip.start_seconds}
                     disabled={disabled}
+                    aria-invalid={invalid}
                     onChange={(e) => updateClip(clip.id, { start_seconds: Number(e.target.value) })}
                     className="w-24"
                   />
@@ -2085,7 +2433,7 @@ function ClipEditor({
                   <Trash2 className="size-4" />
                 </Button>
               </div>
-              {invalid ? <p className="text-xs text-destructive">El fin debe ser posterior al inicio.</p> : null}
+              {rangeIssue ? <p role="alert" className="text-xs text-destructive">{rangeIssue}</p> : null}
               <ClipEditControls
                 clip={clip}
                 disabled={disabled}
@@ -2403,6 +2751,27 @@ function RenderResults({
             })}
           </div>
         )}
+        {renderState.delivery && renderState.delivery.length > 0 ? (
+          <section className="flex flex-col gap-2 border-t border-border pt-4" aria-labelledby="delivery-pack-title">
+            <h3 id="delivery-pack-title" className="text-sm font-medium text-foreground">Paquete shortslistosparasubir</h3>
+            <p className="text-xs text-muted-foreground">Incluye MP4, portada, plan, manifest, subtítulos revisados y metadata.</p>
+            <div className="flex flex-wrap gap-2">
+              {renderState.delivery.map((artifact) => (
+                stale ? (
+                  <Button key={artifact.name} variant="outline" size="sm" disabled aria-label={`${artifact.name} (desactualizado)`}>
+                    <Download className="size-4" />{artifact.name}
+                  </Button>
+                ) : (
+                  <Button key={artifact.name} asChild variant="outline" size="sm">
+                    <a href={streamsApi.deliveryUrl(job.id, renderedPlan.variant, artifact.name)} download={artifact.name}>
+                      <Download className="size-4" />{artifact.name}
+                    </a>
+                  </Button>
+                )
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
     </div>
   );

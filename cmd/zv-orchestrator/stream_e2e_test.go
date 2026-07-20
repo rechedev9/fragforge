@@ -55,11 +55,12 @@ func TestStreamRenderE2E(t *testing.T) {
 		id := uploadStreamSource(t, client, srv.URL, sourcePath)
 
 		plan := streamclips.EditPlan{
-			Variant:      streamclips.VariantStreamer4060,
-			FaceCrop:     streamclips.CropRect{X: 0, Y: 0, Width: 0.25, Height: 0.25},
-			GameplayCrop: streamclips.CropRect{X: 0.25, Y: 0.25, Width: 0.75, Height: 0.75},
-			Clips:        []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0.5, EndSeconds: 3.5}},
-			Captions:     streamclips.CaptionsPlan{Enabled: false},
+			Variant:          streamclips.VariantStreamer4060,
+			FaceCrop:         streamclips.CropRect{X: 0, Y: 0, Width: 0.25, Height: 0.25},
+			FaceCropReviewed: true,
+			GameplayCrop:     streamclips.CropRect{X: 0.25, Y: 0.25, Width: 0.75, Height: 0.75},
+			Clips:            []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0.5, EndSeconds: 3.5}},
+			Captions:         streamclips.CaptionsPlan{Enabled: false},
 		}
 		putStreamEditPlan(t, client, srv.URL, id, plan)
 
@@ -272,10 +273,11 @@ func TestStreamRenderE2E(t *testing.T) {
 		id := uploadStreamSource(t, client, srv.URL, sourcePath)
 		positionY := 0.7
 		plan := streamclips.EditPlan{
-			Variant:      streamclips.VariantStreamer4060,
-			FaceCrop:     streamclips.CropRect{X: 0, Y: 0, Width: 0.25, Height: 0.25},
-			GameplayCrop: streamclips.CropRect{X: 0.25, Y: 0.25, Width: 0.75, Height: 0.75},
-			Clips:        []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0.5, EndSeconds: 3.5}},
+			Variant:          streamclips.VariantStreamer4060,
+			FaceCrop:         streamclips.CropRect{X: 0, Y: 0, Width: 0.25, Height: 0.25},
+			FaceCropReviewed: true,
+			GameplayCrop:     streamclips.CropRect{X: 0.25, Y: 0.25, Width: 0.75, Height: 0.75},
+			Clips:            []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0.5, EndSeconds: 3.5}},
 			StreamerBanner: streamclips.StreamerBannerPlan{
 				Nick:         "zacketizorcs2",
 				PositionY:    &positionY,

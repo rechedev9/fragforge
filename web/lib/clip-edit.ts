@@ -14,6 +14,30 @@ export const MAX_CLIP_FADE_SECONDS = 5;
 /** Playback rates the render's chained atempo filters reproduce faithfully. */
 export const CLIP_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
+/** Immediate, localized range validation shared by editing and submission. */
+export function streamRangeIssue(clip: StreamClipRange, durationSeconds: number, index: number): string | null {
+  const label = clip.title?.trim() || `Clip ${index + 1}`;
+  if (!Number.isFinite(clip.start_seconds) || clip.start_seconds < 0) {
+    return `${label}: el inicio debe ser un número igual o mayor que 0.`;
+  }
+  if (!Number.isFinite(clip.end_seconds) || clip.end_seconds <= clip.start_seconds) {
+    return `${label}: el fin debe ser posterior al inicio.`;
+  }
+  if (durationSeconds > 0 && clip.end_seconds > durationSeconds) {
+    return `${label}: el fin supera la duración del vídeo (${durationSeconds.toFixed(2)} s).`;
+  }
+  return null;
+}
+
+export function streamRangesIssue(clips: StreamClipRange[], durationSeconds: number): string | null {
+  if (clips.length === 0) return 'Añade al menos un rango de clip.';
+  for (const [index, clip] of clips.entries()) {
+    const issue = streamRangeIssue(clip, durationSeconds, index);
+    if (issue !== null) return issue;
+  }
+  return null;
+}
+
 /**
  * First clip-edit problem the Go validator would reject the plan for, as a
  * Spanish message pointing at the offending clip; null when everything fits.

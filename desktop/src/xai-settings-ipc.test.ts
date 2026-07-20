@@ -7,6 +7,7 @@ import {
 } from './xai-settings-ipc.ts';
 
 test('parses only the narrow xAI settings action shapes', () => {
+  assert.deepEqual(parseXAISettingsRequest({ action: 'app-info' }), { action: 'app-info' });
   assert.deepEqual(parseXAISettingsRequest({ action: 'status' }), { action: 'status' });
   assert.deepEqual(parseXAISettingsRequest({ action: 'save', apiKey: 'secret' }), {
     action: 'save',
@@ -27,7 +28,8 @@ test('parses only the narrow xAI settings action shapes', () => {
     null,
     {},
     { action: 'read-key' },
-    { action: 'status', extra: true },
+		{ action: 'status', extra: true },
+    { action: 'app-info', extra: true },
     { action: 'save' },
     { action: 'save', apiKey: 42 },
     { action: 'save', apiKey: 'x'.repeat(4097) },

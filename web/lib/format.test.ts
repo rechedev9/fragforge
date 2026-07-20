@@ -2,7 +2,7 @@
 // (Spanish NEON HUD skin). Run: node --test "lib/**/*.test.ts"
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { timeAgo, playsSelectionLabel, formatKd, ratingBarClass, ratingBarPct, prettyMapName } from './format.ts';
+import { timeAgo, matchDateLabel, playsSelectionLabel, formatKd, ratingBarClass, ratingBarPct, prettyMapName } from './format.ts';
 import type { Play } from './api/types.ts';
 
 function play(overrides: Partial<Play>): Play {
@@ -31,6 +31,12 @@ test('timeAgo: hours read "hace N h"', () => {
 
 test('timeAgo: days read "hace N d"', () => {
   assert.equal(timeAgo(Date.now() - 3 * 86_400_000), 'hace 3 d');
+});
+
+test('uploaded demos show an import date instead of a fabricated recent play time', () => {
+  const label = matchDateLabel({ playedAt: '2020-01-02T00:00:00Z', source: 'upload' });
+  assert.match(label, /^importada el /);
+  assert.doesNotMatch(label, /ahora mismo/);
 });
 
 test('playsSelectionLabel: empty selection is null', () => {

@@ -105,10 +105,12 @@ type timedKillfeedRows struct {
 }
 
 type readKillfeedResponse struct {
-	Kills      []streamclips.KillfeedKill `json:"kills"`
-	CueSeconds float64                    `json:"cue_seconds"`
-	Aligned    bool                       `json:"aligned"`
-	Events     []readKillfeedEvent        `json:"events"`
+	Kills          []streamclips.KillfeedKill `json:"kills"`
+	CueSeconds     float64                    `json:"cue_seconds"`
+	Aligned        bool                       `json:"aligned"`
+	Events         []readKillfeedEvent        `json:"events"`
+	Warnings       []string                   `json:"warnings,omitempty"`
+	ReviewRequired bool                       `json:"review_required,omitempty"`
 }
 
 // ReadStreamKillfeed extracts the cue frame from the stream source, crops it to
@@ -225,10 +227,12 @@ func (h *Handlers) ReadStreamKillfeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, readKillfeedResponse{
-		Kills:      kills,
-		CueSeconds: responseCue,
-		Aligned:    aligned,
-		Events:     events,
+		Kills:          kills,
+		CueSeconds:     responseCue,
+		Aligned:        aligned,
+		Events:         events,
+		Warnings:       []string{"La lectura OCR es orientativa; revisa nombres, equipos y arma antes de renderizar."},
+		ReviewRequired: true,
 	})
 }
 
@@ -306,13 +310,18 @@ func (h *Handlers) readAppliedStreamKillfeedEvent(
 
 	client := killfeedvision.Client{APIKey: h.xaiAPIKey, BaseURL: h.killfeedVisionBaseURL}
 	kills := make([]streamclips.KillfeedKill, 0, len(rowPNGs))
-	for _, rowPNG := range rowPNGs {
+	warnings := make([]string, 0)
+	for rowIndex, rowPNG := range rowPNGs {
 		rowKills, err := client.ReadKillfeed(r.Context(), rowPNG)
 		if err != nil {
 			writeCodedError(w, http.StatusBadGateway, xaiRequestFailedCode, err.Error())
 			return
 		}
-		kills = append(kills, rowKills...)
+		if len(rowKills) != 1 {
+			warnings = append(warnings, fmt.Sprintf("La fila %d no produjo una lectura única y se dejó pendiente de revisión manual.", rowIndex+1))
+			continue
+		}
+		kills = append(kills, rowKills[0])
 	}
 
 	// The OCR round trip may be slow. Re-check under the plan lock so a newer
@@ -335,10 +344,12 @@ func (h *Handlers) readAppliedStreamKillfeedEvent(
 	}
 	responseEvent := readKillfeedEvent{CueSeconds: event.CueSeconds, Kills: kills}
 	writeJSON(w, http.StatusOK, readKillfeedResponse{
-		Kills:      kills,
-		CueSeconds: event.CueSeconds,
-		Aligned:    true,
-		Events:     []readKillfeedEvent{responseEvent},
+		Kills:          kills,
+		CueSeconds:     event.CueSeconds,
+		Aligned:        true,
+		Events:         []readKillfeedEvent{responseEvent},
+		Warnings:       append(warnings, "La lectura OCR es orientativa; revisa nombres, equipos y arma antes de renderizar."),
+		ReviewRequired: true,
 	})
 }
 

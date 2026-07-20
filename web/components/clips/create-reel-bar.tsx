@@ -2,6 +2,7 @@
 
 import { Loader2 } from 'lucide-react';
 import type { RenderFormat } from '@/lib/api/types';
+import { canForgeReel, type CreativeBriefItem } from '@/lib/reel-brief';
 import { cn } from '@/lib/utils';
 
 export type CreateReelBarProps = {
@@ -20,6 +21,9 @@ export type CreateReelBarProps = {
   onFormatChange: (format: RenderFormat) => void;
   /** Whether a render is in flight (spinner + disabled). */
   creating: boolean;
+  briefItems: CreativeBriefItem[];
+  briefApproved: boolean;
+  onBriefApprovedChange: (approved: boolean) => void;
   onCreate: () => void;
 };
 
@@ -42,9 +46,18 @@ export function CreateReelBar({
   format,
   onFormatChange,
   creating,
+  briefItems,
+  briefApproved,
+  onBriefApprovedChange,
   onCreate,
 }: CreateReelBarProps) {
-  const ready = selectionLabel != null && presetLabel != null;
+  const configured = selectionLabel != null && presetLabel != null;
+  const ready = canForgeReel({
+    briefApproved,
+    creating,
+    hasPreset: presetLabel !== null,
+    selectionCount: selectionLabel === null ? 0 : 1,
+  });
 
   return (
     <div className="sticky bottom-0 z-20 -mx-4 mt-2 border-t border-primary/20 bg-background/90 px-4 py-3 backdrop-blur md:-mx-8 md:px-8">
@@ -53,7 +66,7 @@ export function CreateReelBar({
           <p className="font-[family-name:var(--font-mono)] text-[9.5px] tracking-[0.2em] text-muted-foreground/70">
             REEL
           </p>
-          {ready ? (
+          {configured ? (
             <p className="truncate font-[family-name:var(--font-mono)] text-[15px] uppercase text-foreground">
               {selectionLabel}
               <span className="text-muted-foreground/70"> · </span>
@@ -70,6 +83,30 @@ export function CreateReelBar({
             </p>
           )}
         </div>
+
+        <section className="basis-full border border-primary/25 bg-background/70 p-3" aria-labelledby="creative-brief-title">
+          <p id="creative-brief-title" className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-primary">
+            Brief creativo exacto
+          </p>
+          <dl className="mt-2 grid gap-x-5 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
+            {briefItems.map((item) => (
+              <div key={item.label} className="flex min-w-0 gap-1.5">
+                <dt className="shrink-0 text-muted-foreground">{item.label}:</dt>
+                <dd className="truncate text-foreground" title={item.value}>{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <label className="mt-3 flex items-start gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={briefApproved}
+              disabled={!configured || creating}
+              onChange={(event) => onBriefApprovedChange(event.target.checked)}
+              className="mt-0.5 accent-primary"
+            />
+            Apruebo todas estas decisiones antes de iniciar la captura o el render.
+          </label>
+        </section>
 
         <div className="flex font-[family-name:var(--font-mono)] text-[11px] tracking-[0.12em]">
           {FORMAT_ITEMS.map((item) => (

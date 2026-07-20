@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ScoreBar } from '@/components/brand/score-bar';
 import { StatMono } from '@/components/brand/stat-mono';
 import { DeleteMatchButton } from '@/components/matches/delete-match-button';
-import { formatKd, timeAgo } from '@/lib/format';
+import { formatKd, matchDateLabel } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Match } from '@/lib/api/types';
 import { isWin, parseScore } from './match-score';
@@ -34,7 +34,7 @@ export function MatchRow({ match, featured = false, onDelete, onDeleted }: Match
   // dropping it cleanly (no stray separator) when it is absent.
   const meta = [
     match.player,
-    timeAgo(match.playedAt),
+    matchDateLabel(match),
     match.decentPlays > 0 ? `${match.decentPlays} ${match.decentPlays === 1 ? 'jugada' : 'jugadas'}` : null,
   ]
     .filter(Boolean)

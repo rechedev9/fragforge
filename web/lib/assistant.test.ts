@@ -65,6 +65,16 @@ test('derives opaque render and demo context from Studio routes', () => {
     label: 'Ajustes',
     pathname: '/settings',
   });
+  assert.deepEqual(assistantContextFromPathname('/news'), {
+    kind: 'none',
+    label: 'Noticias',
+    pathname: '/news',
+  });
+  assert.deepEqual(assistantContextFromPathname('/feed'), {
+    kind: 'none',
+    label: 'Feed',
+    pathname: '/feed',
+  });
 });
 
 test('merges streaming deltas and action updates without mutating the prior snapshot', () => {

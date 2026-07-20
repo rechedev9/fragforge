@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,50 @@ import (
 	"github.com/rechedev9/fragforge/internal/tasks"
 	"github.com/rechedev9/fragforge/internal/vodfetch"
 )
+
+func TestWriteStreamCoverExtractsRenderedFrame(t *testing.T) {
+	runner := &fakeRunner{recordCoverCalls: true, fn: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		return nil, os.WriteFile(args[len(args)-1], []byte("jpeg"), 0o600)
+	}}
+	w := NewStreamRenderWorker(newFakeStreamRepo(), newFakeStorage(), StreamRenderWorkerConfig{})
+	w.runner = runner
+	filename := filepath.Join(t.TempDir(), "cover.jpg")
+	if err := w.writeStreamCover(context.Background(), "ffmpeg", "rendered.mp4", filename); err != nil {
+		t.Fatal(err)
+	}
+	if got := runner.calls[0].args; !slices.Contains(got, "rendered.mp4") || !slices.Contains(got, "scale=720:-2") {
+		t.Fatalf("cover args = %v, want rendered video and thumbnail scale", got)
+	}
+	if slices.Contains(runner.calls[0].args, "-ss") {
+		t.Fatalf("cover args seek past the first frame: %v", runner.calls[0].args)
+	}
+}
+
+func TestPublicSourceURLRemovesPrivateURLParts(t *testing.T) {
+	got := publicSourceURL("https://www.twitch.tv/videos/123?utm_source=test#chapter")
+	want := "https://www.twitch.tv/videos/123"
+	if got != want {
+		t.Fatalf("publicSourceURL() = %q, want %q", got, want)
+	}
+	if got := publicSourceURL("not a URL"); got != "" {
+		t.Fatalf("publicSourceURL(invalid) = %q, want empty", got)
+	}
+	got = publicSourceURL("https://www.youtube.com/watch?v=abc123&list=PL456&utm_source=test#chapter")
+	want = "https://www.youtube.com/watch?list=PL456&v=abc123"
+	if got != want {
+		t.Fatalf("publicSourceURL(youtube) = %q, want %q", got, want)
+	}
+	got = publicSourceURL("https://m.youtube.com/watch?v=mobile123&utm_source=test#chapter")
+	want = "https://m.youtube.com/watch?v=mobile123"
+	if got != want {
+		t.Fatalf("publicSourceURL(mobile youtube) = %q, want %q", got, want)
+	}
+	got = publicSourceURL("https://youtube.com.evil.example/watch?v=secret&utm_source=test")
+	want = "https://youtube.com.evil.example/watch"
+	if got != want {
+		t.Fatalf("publicSourceURL(non-youtube suffix) = %q, want %q", got, want)
+	}
+}
 
 // fakeStreamRepo implements StreamRenderRepository and StreamAcquireRepository
 // for tests.
@@ -77,13 +122,16 @@ func (f *fakeStreamRepo) UpdateStatus(_ context.Context, id uuid.UUID, s streamc
 	return nil
 }
 
-func (f *fakeStreamRepo) SetAcquired(_ context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error {
+func (f *fakeStreamRepo) SetAcquired(_ context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256, discoveredTitle string) error {
 	j, ok := f.jobs[id]
 	if !ok {
 		return streamclips.ErrNotFound
 	}
 	j.Probe = probe
 	j.SourceSHA256 = sha256
+	if j.Title == "" {
+		j.Title = discoveredTitle
+	}
 	j.Status = streamclips.StatusReady
 	j.FailureReason = ""
 	f.jobs[id] = j
@@ -95,6 +143,7 @@ func (f *fakeStreamRepo) SetAcquired(_ context.Context, id uuid.UUID, probe stre
 // real yt-dlp binary.
 type fakeVodfetchRunner struct {
 	content string
+	stdout  string
 	stderr  string
 	err     error
 }
@@ -110,7 +159,7 @@ func (f *fakeVodfetchRunner) Run(_ context.Context, _, _ string, args ...string)
 	if err := os.WriteFile(dest, []byte(f.content), 0o600); err != nil {
 		return "", "", err
 	}
-	return "", "", nil
+	return f.stdout, "", nil
 }
 
 type fakeProber struct {
@@ -137,7 +186,7 @@ func TestAcquireWorkerDownloadsProbesAndMarksReady(t *testing.T) {
 	store := newFakeStorage()
 
 	w := NewAcquireWorker(repo, store, AcquireWorkerConfig{WorkDir: t.TempDir()})
-	w.fetcher = vodfetch.Fetcher{Runner: &fakeVodfetchRunner{content: "fake-mp4-bytes"}}
+	w.fetcher = vodfetch.Fetcher{Runner: &fakeVodfetchRunner{content: "fake-mp4-bytes", stdout: "vaya saco..\n"}}
 	w.prober = fakeProber{probe: streamclips.SourceProbe{Width: 1920, Height: 1080, DurationSeconds: 12.5}}
 
 	if err := w.HandleStreamAcquire(context.Background(), streamAcquireTask(t, id)); err != nil {
@@ -156,6 +205,12 @@ func TestAcquireWorkerDownloadsProbesAndMarksReady(t *testing.T) {
 	}
 	if _, ok := store.files[streamclips.SourceKey(id)]; !ok {
 		t.Fatal("storage missing uploaded source")
+	}
+	if got.Title != "vaya saco.." {
+		t.Fatalf("title = %q, want provider title", got.Title)
+	}
+	if _, ok := store.files[streamclips.SourceMetadataKey(id)]; !ok {
+		t.Fatal("storage missing provider metadata sidecar")
 	}
 	if _, ok := store.files[streamclips.EditPlanKey(id)]; !ok {
 		t.Fatal("storage missing default edit plan artifact")
@@ -221,6 +276,9 @@ func TestAcquireWorkerIsIdempotentWhenSourceAlreadyExists(t *testing.T) {
 	repo := newFakeStreamRepo(streamclips.Job{ID: id, Status: streamclips.StatusAcquiring, SourceURL: "https://clips.twitch.tv/SomeSlug"})
 	store := newFakeStorage()
 	_ = store.Put(streamclips.SourceKey(id), strings.NewReader("already-downloaded"))
+	if err := putJSONToStorage(store, streamclips.SourceMetadataKey(id), acquiredSourceMetadata{Title: "Título recuperado"}); err != nil {
+		t.Fatal(err)
+	}
 
 	runner := &fakeVodfetchRunner{content: "should-not-be-used"}
 	w := NewAcquireWorker(repo, store, AcquireWorkerConfig{WorkDir: t.TempDir()})
@@ -236,6 +294,9 @@ func TestAcquireWorkerIsIdempotentWhenSourceAlreadyExists(t *testing.T) {
 	}
 	if repo.jobs[id].Status != streamclips.StatusReady {
 		t.Fatalf("status = %s, want ready", repo.jobs[id].Status)
+	}
+	if got := repo.jobs[id].Title; got != "Título recuperado" {
+		t.Fatalf("title = %q, want recovered provider title", got)
 	}
 }
 

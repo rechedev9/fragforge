@@ -118,6 +118,18 @@ func TestDownload_Success(t *testing.T) {
 	}
 }
 
+func TestDownload_CapturesProviderTitle(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "clip.mp4")
+	runner := &fakeRunner{fileContent: []byte("video"), stdout: "Clutch imposible en Mirage\n"}
+	got, err := (Fetcher{Runner: runner}).Download(context.Background(), "https://clips.twitch.tv/SomeClipSlug", dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Clutch imposible en Mirage" {
+		t.Fatalf("Title = %q, want provider title", got.Title)
+	}
+}
+
 func TestDownload_RejectsOversizedResultAndRemovesTemp(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "clip.mp4")
@@ -355,6 +367,7 @@ func TestDownload_ArgsShape(t *testing.T) {
 		"--merge-output-format", "mp4",
 		"--no-playlist",
 		"--no-progress",
+		"--print", "after_move:%(title)s",
 		"--max-filesize", "8589934592",
 	}
 	got := runner.gotArgs

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -32,12 +33,16 @@ type runnerCall struct {
 }
 
 type fakeRunner struct {
-	mu    sync.Mutex
-	calls []runnerCall
-	fn    func(context.Context, string, ...string) ([]byte, error)
+	mu               sync.Mutex
+	calls            []runnerCall
+	fn               func(context.Context, string, ...string) ([]byte, error)
+	recordCoverCalls bool
 }
 
 func (f *fakeRunner) Run(ctx context.Context, exe string, args ...string) ([]byte, error) {
+	if !f.recordCoverCalls && argValue(args, "-vf") == "scale=720:-2" {
+		return nil, os.WriteFile(args[len(args)-1], []byte("jpeg"), 0o600)
+	}
 	// The render worker probes shorts concurrently, so guard the call log.
 	f.mu.Lock()
 	f.calls = append(f.calls, runnerCall{exe: exe, args: append([]string(nil), args...)})
@@ -553,6 +558,26 @@ func TestRenderWorkerLocalizesSegmentsAndStoresVariantOutputs(t *testing.T) {
 	}
 	if storedResult.InputFingerprint == "" {
 		t.Fatal("stored render result is missing input fingerprint")
+	}
+}
+
+func TestAppendCoverStrategyArg(t *testing.T) {
+	tests := []struct {
+		name string
+		edit renderplan.EditRequest
+		want bool
+	}{
+		{name: "generated gameplay candidates", edit: renderplan.EditRequest{CoverStrategy: renderplan.CoverStrategyGenerated}},
+		{name: "no cover", edit: renderplan.EditRequest{CoverStrategy: renderplan.CoverStrategyNone}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := appendCoverStrategyArg([]string{"--preset", editor.PresetViral60Clean}, tt.edit)
+			got := slices.Contains(args, "--no-covers")
+			if got != tt.want {
+				t.Fatalf("--no-covers present = %v, want %v; args = %#v", got, tt.want, args)
+			}
+		})
 	}
 }
 

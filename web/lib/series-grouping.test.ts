@@ -129,6 +129,13 @@ test('treats a demo without a file name as its own singleton group', () => {
   );
 });
 
+test('drops repeated rows for the same persisted demo job', () => {
+  const demo = { jobId: 'same-job', fileName: 'match-m1-inferno-p1.dem' };
+  const groups = groupSeriesDemos([demo, { ...demo }]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].demos.length, 1);
+});
+
 test('representativeSeriesStatus prefers forgeable, then pending, then failed', () => {
   // A map with one forgeable part reads as ready even while a sibling parses.
   assert.equal(representativeSeriesStatus(['parsing', 'parsed']), 'parsed');

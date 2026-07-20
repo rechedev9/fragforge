@@ -53,6 +53,7 @@ export const DEFAULT_EDIT_CONFIG: EditConfig = {
   outro: false,
   hookText: false,
   killCounter: false,
+  coverStrategy: 'generated-gameplay',
   introText: '',
   outroText: '',
 };
@@ -132,6 +133,7 @@ export function coerceEditConfig(value: unknown): EditConfig {
     outro: raw.outro === true,
     hookText: raw.hookText === true,
     killCounter: raw.killCounter === true,
+    coverStrategy: raw.coverStrategy === 'no-cover' ? 'no-cover' : DEFAULT_EDIT_CONFIG.coverStrategy,
     introText: coerceBookendText(raw.introText),
     outroText: coerceBookendText(raw.outroText),
   };

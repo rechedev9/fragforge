@@ -452,6 +452,7 @@ func newKillfeedAnalysisHTTPFixture(t *testing.T) (*Handlers, *fakeStreamRepo, *
 	queue := &fakeQueue{}
 	id := uuid.New()
 	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
 	plan.KillfeedCrop = &streamclips.CropRect{X: 0.7, Y: 0.05, Width: 0.25, Height: 0.2}
 	plan.Clips = []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0, EndSeconds: 2}}
 	planJSON, err := json.Marshal(plan)

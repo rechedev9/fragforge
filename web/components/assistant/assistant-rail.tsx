@@ -37,7 +37,7 @@ export function AssistantRail(): ReactElement {
           <Button
             type="button"
             size="icon"
-            className="fixed right-4 bottom-4 z-40 shadow-lg"
+            className="fixed right-4 bottom-20 z-40 shadow-lg"
             aria-label="Abrir asistente"
             title="Abrir asistente"
           >

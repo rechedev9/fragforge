@@ -16,6 +16,8 @@ export type KillPlan = {
 export type KillPlanSegment = {
   id: string;
   round: number;
+  tick_start?: number;
+  tick_end?: number;
   kills?: { weapon?: string }[];
 };
 
@@ -115,7 +117,15 @@ export function segmentToPlay(jobId: string, segment: KillPlanSegment): Play {
 
 /** All of a plan's segments → Plays for the given job. */
 export function planToPlays(jobId: string, plan: KillPlan): Play[] {
-  return (plan.segments ?? []).map((segment) => segmentToPlay(jobId, segment));
+  const seen = new Set<string>();
+  return (plan.segments ?? []).flatMap((segment) => {
+    const timelineKey = Number.isFinite(segment.tick_start) && Number.isFinite(segment.tick_end)
+      ? `${segment.round}:${segment.tick_start}:${segment.tick_end}`
+      : `id:${segment.id}`;
+    if (seen.has(timelineKey)) return [];
+    seen.add(timelineKey);
+    return [segmentToPlay(jobId, segment)];
+  });
 }
 
 /**
@@ -124,7 +134,7 @@ export function planToPlays(jobId: string, plan: KillPlan): Play[] {
  * Stats come from the roster tally for the picked player.
  */
 export function planToMatch(jobId: string, plan: KillPlan, player: DemoPlayer): Match {
-  const segments = plan.segments ?? [];
+  const plays = planToPlays(jobId, plan);
   const { kills, deaths, assists } = player;
   const match: Match = {
     id: jobId,
@@ -142,7 +152,7 @@ export function planToMatch(jobId: string, plan: KillPlan, player: DemoPlayer): 
       kast: player.kast,
       hsPct: player.hsPct,
     },
-    decentPlays: segments.length,
+    decentPlays: plays.length,
     thumbnailUrl: thumb(jobId),
     source: 'upload',
   };

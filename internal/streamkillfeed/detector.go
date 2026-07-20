@@ -18,6 +18,17 @@ type frameObservation struct {
 	rows     []observedRow
 }
 
+const (
+	jitterDuplicateWindowSeconds = 0.20
+	jitterMaxDistance            = 56
+	jitterMinOverlap             = 62
+)
+
+type detectedEvent struct {
+	event Event
+	born  []observedRow
+}
+
 func detectFrameEvents(frames []frameObservation, clip streamclips.ClipRange) ([]Event, error) {
 	if len(frames) == 0 {
 		return []Event{}, nil
@@ -43,7 +54,7 @@ func detectFrameEvents(frames []frameObservation, clip streamclips.ClipRange) ([
 		}
 	}
 
-	events := make([]Event, 0)
+	detected := make([]detectedEvent, 0)
 	for i := range frames {
 		frame := frames[i]
 		if frame.seconds < clip.StartSeconds || frame.seconds >= clip.EndSeconds {
@@ -103,9 +114,57 @@ func detectFrameEvents(frames []frameObservation, clip streamclips.ClipRange) ([
 		if err := event.Validate(); err != nil {
 			return nil, fmt.Errorf("event at PTS %d: %w", frame.pts, err)
 		}
-		events = append(events, event)
+		duplicateJitter := false
+		for previousIndex := len(detected) - 1; previousIndex >= 0; previousIndex-- {
+			previous := detected[previousIndex]
+			if event.CueSeconds-previous.event.CueSeconds > jitterDuplicateWindowSeconds {
+				break
+			}
+			if rowsLikelyJitter(previous.born, born) {
+				duplicateJitter = true
+				break
+			}
+		}
+		if duplicateJitter {
+			continue
+		}
+		detected = append(detected, detectedEvent{event: event, born: append([]observedRow(nil), born...)})
+	}
+	events := make([]Event, len(detected))
+	for i := range detected {
+		events[i] = detected[i].event
 	}
 	return events, nil
+}
+
+func rowsLikelyJitter(left, right []observedRow) bool {
+	if len(left) == 0 || len(left) != len(right) {
+		return false
+	}
+	used := make([]bool, len(right))
+	for _, candidate := range left {
+		matched := false
+		for j, current := range right {
+			if used[j] || candidate.bounds != current.bounds {
+				continue
+			}
+			distance, overlap, ok := fingerprintSimilarity(candidate.fingerprint, current.fingerprint)
+			// A detector oscillation can return to the original fingerprint
+			// after an intermediate frame was suppressed (A -> B -> A). Accept
+			// both exact/primary matches and the narrow similarity gap here;
+			// the 200 ms event window and identical bounds keep this stricter
+			// than the normal row matcher and preserve genuinely different rows.
+			if ok && distance <= jitterMaxDistance && overlap >= jitterMinOverlap {
+				used[j] = true
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func chooseSampleFrame(

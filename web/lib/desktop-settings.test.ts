@@ -18,6 +18,7 @@ const STATUS: XAISettingsStatus = {
 
 function bridge(): DesktopSettingsBridge {
   return {
+    getAppInfo: async () => ({ version: '2.2.9', build: 'production', electronVersion: '37.0.0', chromiumVersion: '138.0.0' }),
     getXAIStatus: async () => STATUS,
     saveXAIKey: async () => ({ ok: true, status: STATUS }),
     removeXAIKey: async () => ({ ok: true, status: STATUS }),
@@ -57,6 +58,7 @@ test('returns the complete narrow preload bridge', async () => {
   assert.equal(got, expected);
   if (got === null) throw new Error('expected the desktop settings bridge');
   assert.deepEqual(await got.getXAIStatus(), STATUS);
+  assert.equal((await got.getAppInfo()).version, '2.2.9');
   assert.deepEqual(await got.testXAIKey('candidate'), {
     ok: true,
     code: 'ok',

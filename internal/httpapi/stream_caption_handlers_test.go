@@ -229,6 +229,7 @@ func newCaptionHTTPFixture(t *testing.T) (*Handlers, *fakeStreamRepo, *fakeStora
 	queue := &fakeQueue{}
 	id := uuid.New()
 	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
 	plan.Captions = streamclips.CaptionsPlan{Enabled: true, Language: "es"}
 	plan.Clips = []streamclips.ClipRange{{ID: "clip-1", StartSeconds: 0, EndSeconds: 2}}
 	planJSON, err := json.Marshal(plan)

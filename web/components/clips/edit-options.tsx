@@ -1,6 +1,6 @@
 'use client';
 
-import { ListOrdered, PanelTop, Sparkles, Type, Zap } from 'lucide-react';
+import { ImageIcon, ListOrdered, PanelTop, Sparkles, Type, Zap } from 'lucide-react';
 import { BOOKEND_TEXT_MAX_LENGTH, type EditConfig } from '@/lib/api/types';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Input } from '@/components/ui/input';
@@ -141,6 +141,27 @@ export function EditOptions({ value, onChange, disabled = false }: EditOptionsPr
             onChange={(outroText) => onChange({ ...value, outroText })}
           />
         </div>
+      </OptionBlock>
+
+      <OptionBlock label="PORTADA" className="md:col-span-2">
+        <ToggleGroup
+          type="single"
+          value={value.coverStrategy}
+          onValueChange={(coverStrategy) =>
+            coverStrategy && onChange({ ...value, coverStrategy: coverStrategy as EditConfig['coverStrategy'] })
+          }
+          disabled={disabled}
+          variant="outline"
+          className="flex-wrap"
+        >
+          <ToggleGroupItem value="generated-gameplay" aria-label="Generar candidatos de gameplay">
+            <ImageIcon className="size-4" />
+            Candidatos de gameplay
+          </ToggleGroupItem>
+          <ToggleGroupItem value="no-cover" aria-label="No generar portada">
+            Sin portada
+          </ToggleGroupItem>
+        </ToggleGroup>
       </OptionBlock>
     </div>
   );

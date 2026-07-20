@@ -163,6 +163,7 @@ type Fetcher struct {
 type Result struct {
 	Path  string
 	Bytes int64
+	Title string
 }
 
 func (f Fetcher) binaryPath() string {
@@ -239,12 +240,13 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 		"--merge-output-format", "mp4",
 		"--no-playlist",
 		"--no-progress",
+		"--print", "after_move:%(title)s",
 		"--max-filesize", strconv.FormatInt(maxBytes, 10),
 		"-o", tmpPath,
 		rawURL,
 	}
 
-	_, stderr, runErr := f.runner().Run(ctx, destDir, f.binaryPath(), args...)
+	stdout, stderr, runErr := f.runner().Run(ctx, destDir, f.binaryPath(), args...)
 	if runErr != nil {
 		_ = os.Remove(tmpPath)
 		if ctx.Err() != nil {
@@ -275,7 +277,19 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 		return Result{}, fmt.Errorf("rename temp file into place: %w", err)
 	}
 
-	return Result{Path: destPath, Bytes: info.Size()}, nil
+	return Result{Path: destPath, Bytes: info.Size(), Title: downloadTitle(stdout)}, nil
+}
+
+func downloadTitle(stdout string) string {
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	title := strings.TrimSpace(lines[len(lines)-1])
+	if len(title) > 180 {
+		title = strings.ToValidUTF8(title[:180], "")
+	}
+	return title
 }
 
 // classifyError maps yt-dlp stderr text to a typed sentinel error, falling

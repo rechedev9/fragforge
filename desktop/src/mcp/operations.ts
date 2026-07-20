@@ -959,8 +959,8 @@ const operations: readonly OperationDefinition[] = [
   },
   {
     category: 'artifacts',
-    description: 'Return a loopback URL for a stream render gallery or MP4.',
-    inputSchema: objectSchema({ clip_id: SAFE_TOKEN_PROPERTY, kind: { enum: ['source', 'gallery', 'video'], type: 'string' }, stream_job_id: UUID_PROPERTY, variant: VARIANT_PROPERTY }, ['stream_job_id', 'kind']),
+    description: 'Return a loopback URL for a stream source, gallery, MP4, or upload-ready delivery asset.',
+    inputSchema: objectSchema({ clip_id: SAFE_TOKEN_PROPERTY, name: SAFE_TOKEN_PROPERTY, kind: { enum: ['source', 'gallery', 'video', 'delivery'], type: 'string' }, stream_job_id: UUID_PROPERTY, variant: VARIANT_PROPERTY }, ['stream_job_id', 'kind']),
     keywords: ['twitch', 'download', 'url', 'mp4'],
     name: 'artifacts.get_stream_url',
     preview: (input) => ({ method: 'GET', path: streamArtifactPath(input) }),
@@ -1215,6 +1215,7 @@ function streamArtifactPath(input: JsonObject): string {
   if (kind === 'source') return streamPath(input, '/source');
   if (kind === 'gallery') return streamRenderPath(input, '/gallery');
   if (kind === 'video') return streamRenderPath(input, `/videos/${encodeURIComponent(stringInput(input, 'clip_id'))}`);
+  if (kind === 'delivery') return streamRenderPath(input, `/delivery/${encodeURIComponent(stringInput(input, 'name'))}`);
   throw new Error(`unsupported stream artifact kind ${kind}`);
 }
 
@@ -1239,6 +1240,9 @@ function validateStreamArtifactInput(input: JsonObject): void {
   }
   if (input.kind === 'video' && typeof input.clip_id !== 'string') {
     throw new MissingOperationInputError('clip_id', 'arguments.clip_id is required when kind is video');
+  }
+  if (input.kind === 'delivery' && typeof input.name !== 'string') {
+    throw new MissingOperationInputError('name', 'arguments.name is required when kind is delivery');
   }
 }
 

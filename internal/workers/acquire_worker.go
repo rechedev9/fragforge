@@ -28,7 +28,11 @@ import (
 type StreamAcquireRepository interface {
 	Get(ctx context.Context, id uuid.UUID) (streamclips.Job, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, s streamclips.Status, failureReason string) error
-	SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error
+	SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256, discoveredTitle string) error
+}
+
+type acquiredSourceMetadata struct {
+	Title string `json:"title,omitempty"`
 }
 
 // AcquireWorkerConfig configures the "stream:acquire" worker.
@@ -100,6 +104,7 @@ func (w *AcquireWorker) acquire(ctx context.Context, j streamclips.Job) error {
 
 	destPath := filepath.Join(workDir, "source.mp4")
 	sourceKey := streamclips.SourceKey(j.ID)
+	metadataKey := streamclips.SourceMetadataKey(j.ID)
 
 	// Idempotent: a retried/redriven acquire skips the download when the
 	// durable source artifact already exists and just re-probes it.
@@ -107,16 +112,35 @@ func (w *AcquireWorker) acquire(ctx context.Context, j streamclips.Job) error {
 	if err != nil {
 		return fmt.Errorf("check stream source artifact: %w", err)
 	}
+	discoveredTitle := ""
 	if exists {
 		logWorkerSkip(j.ID, tasks.TypeStreamAcquire, []string{sourceKey})
 		if err := copyStorageToFile(w.storage, sourceKey, destPath); err != nil {
 			return fmt.Errorf("materialize existing stream source: %w", err)
 		}
+		metadataExists, err := w.storage.Exists(metadataKey)
+		if err != nil {
+			return fmt.Errorf("check stream source metadata: %w", err)
+		}
+		if metadataExists {
+			var metadata acquiredSourceMetadata
+			if err := readStoredJSON(w.storage, metadataKey, &metadata); err != nil {
+				return fmt.Errorf("read stream source metadata: %w", err)
+			}
+			discoveredTitle = metadata.Title
+		}
 	} else {
 		runCtx, cancel := context.WithTimeout(ctx, cfg.timeoutDuration())
 		defer cancel()
-		if _, err := w.fetcher.Download(runCtx, j.SourceURL, destPath); err != nil {
+		result, err := w.fetcher.Download(runCtx, j.SourceURL, destPath)
+		if err != nil {
 			return err
+		}
+		discoveredTitle = result.Title
+		// Publish metadata before the source. Once source.mp4 exists, a retry can
+		// therefore recover the title even if the job-row update was interrupted.
+		if err := putJSONToStorage(w.storage, metadataKey, acquiredSourceMetadata{Title: discoveredTitle}); err != nil {
+			return fmt.Errorf("upload stream source metadata: %w", err)
 		}
 		if err := uploadFile(w.storage, sourceKey, destPath); err != nil {
 			return fmt.Errorf("upload stream source: %w", err)
@@ -132,7 +156,7 @@ func (w *AcquireWorker) acquire(ctx context.Context, j streamclips.Job) error {
 		return fmt.Errorf("hash stream source: %w", err)
 	}
 
-	if err := w.repo.SetAcquired(ctx, j.ID, probe, sha); err != nil {
+	if err := w.repo.SetAcquired(ctx, j.ID, probe, sha, discoveredTitle); err != nil {
 		return fmt.Errorf("mark stream job acquired: %w", err)
 	}
 	// Seed the default edit plan artifact so GetStreamEditPlan has something

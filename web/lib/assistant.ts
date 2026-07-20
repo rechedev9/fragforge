@@ -300,6 +300,13 @@ export function assistantContextFromPathname(pathname: string): AssistantContext
     return { kind: ASSISTANT_CONTEXT_KINDS.none, label: 'Biblioteca', pathname };
   }
 
+  if (root === 'news') {
+    return { kind: ASSISTANT_CONTEXT_KINDS.none, label: 'Noticias', pathname };
+  }
+
+  if (root === 'feed') {
+    return { kind: ASSISTANT_CONTEXT_KINDS.none, label: 'Feed', pathname };
+  }
 
   if (root === 'series' && identifier !== undefined) {
     return { kind: ASSISTANT_CONTEXT_KINDS.demo, jobId: identifier, label: 'Serie actual', pathname };

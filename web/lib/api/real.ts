@@ -115,6 +115,7 @@ type EditRequestBody = {
   outro: boolean;
   hook_text: boolean;
   kill_counter: boolean;
+  cover_strategy: EditConfig['coverStrategy'];
   intro_text?: string;
   outro_text?: string;
 };
@@ -128,6 +129,7 @@ function buildEditRequest(edit: EditConfig): EditRequestBody {
     outro: edit.outro,
     hook_text: edit.hookText,
     kill_counter: edit.killCounter,
+    cover_strategy: edit.coverStrategy,
   };
   const introText = edit.introText?.trim();
   if (edit.intro && introText) body.intro_text = introText;

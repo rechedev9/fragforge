@@ -42,6 +42,13 @@ export type StudioRestartResult = {
   error?: string;
 };
 
+export type StudioAppInfo = {
+  version: string;
+  build: string;
+  electronVersion: string;
+  chromiumVersion: string;
+};
+
 /**
  * Registration material for the local MCP server, computed by the Electron
  * main process so the launcher path always matches this machine's install.
@@ -54,6 +61,7 @@ export type MCPConfigInfo = {
 };
 
 export interface DesktopSettingsBridge {
+  getAppInfo(): Promise<StudioAppInfo>;
   getXAIStatus(): Promise<XAISettingsStatus>;
   saveXAIKey(apiKey: string): Promise<XAISettingsMutationResult>;
   removeXAIKey(): Promise<XAISettingsMutationResult>;
@@ -75,7 +83,8 @@ export function getDesktopSettingsBridge(scope: unknown = globalThis): DesktopSe
 
 function isDesktopSettingsBridge(value: unknown): value is DesktopSettingsBridge {
   if (!isRecord(value)) return false;
-  return typeof value.getXAIStatus === 'function'
+  return typeof value.getAppInfo === 'function'
+    && typeof value.getXAIStatus === 'function'
     && typeof value.saveXAIKey === 'function'
     && typeof value.removeXAIKey === 'function'
     && typeof value.testXAIKey === 'function'

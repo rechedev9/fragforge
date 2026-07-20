@@ -65,6 +65,8 @@ export type KillfeedReadResult = {
   cue_seconds: number;
   aligned: boolean;
   events: KillfeedReadEvent[];
+  warnings?: string[];
+  review_required?: boolean;
 };
 
 /** Identifies one immutable source-PTS event captured by automatic analysis. */
@@ -203,6 +205,8 @@ export type StreamEditPlan = {
   schema_version: string;
   variant: StreamVariant;
   face_crop?: NormalizedRect;
+  /** Explicit human confirmation; default coordinates are never assumed to contain a face. */
+  face_crop_reviewed?: boolean;
   killfeed_crop?: NormalizedRect;
   killfeed_analysis?: {
     generation_id: string;
@@ -222,10 +226,12 @@ export type StreamJob = {
   id: string;
   status: StreamJobStatus;
   title?: string;
+  source_url?: string;
   probe?: StreamProbe;
   edit_plan?: StreamEditPlan;
   failure_reason?: string;
   created_at: string;
+  updated_at?: string;
 };
 
 export type StreamRenderVideo = { clip_id: string; title?: string; key: string; duration_seconds?: number };
@@ -243,6 +249,7 @@ export type StreamRenderState = {
   warnings?: string[];
   error?: string;
   error_code?: StreamRenderErrorCode | string;
+  delivery?: { name: string; kind: string; key: string }[];
 };
 
 export const CAPTION_GENERATION_STATUS = {
@@ -314,6 +321,7 @@ export interface StreamsApiClient {
   getRenderState(id: string, variant: StreamVariant): Promise<StreamRenderState>;
   /** Same-origin URL for a <video>/download link to a rendered Short. */
   videoUrl(id: string, variant: StreamVariant, clipId: string): string;
+  deliveryUrl(id: string, variant: StreamVariant, name: string): string;
   /** The weapon catalog keys a kill notice may use. */
   listKillfeedWeapons(): Promise<string[]>;
   /** Renders one kill notice to the exact synthetic PNG the render uses. */
@@ -432,6 +440,10 @@ export class RealStreamsApiClient implements StreamsApiClient {
 
   videoUrl(id: string, variant: StreamVariant, clipId: string): string {
     return `/api/streams/${id}/renders/${variant}/videos/${clipId}`;
+  }
+
+  deliveryUrl(id: string, variant: StreamVariant, name: string): string {
+    return `/api/streams/${id}/renders/${variant}/delivery/${encodeURIComponent(name)}`;
   }
 
   async listKillfeedWeapons(): Promise<string[]> {

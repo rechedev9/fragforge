@@ -81,6 +81,7 @@ function CroppedFrame({
   band,
   frameSeconds,
   className,
+  onMediaError,
 }: {
   videoSrc: string;
   rect: NormalizedRect;
@@ -88,6 +89,7 @@ function CroppedFrame({
   band: 'facecam' | 'gameplay';
   frameSeconds: number;
   className?: string;
+  onMediaError?: () => void;
 }) {
   const [source, setSource] = useState<FrameSize | null>(null);
   const videoRef = useControlledVideoFrame(frameSeconds, videoSrc);
@@ -103,6 +105,7 @@ function CroppedFrame({
         preload="auto"
         aria-hidden="true"
         data-stream-frame={`preview-${band}`}
+        onError={onMediaError}
         onLoadedMetadata={(event) => {
           const video = event.currentTarget;
           if (video.videoWidth > 0 && video.videoHeight > 0) {
@@ -135,12 +138,14 @@ function KillfeedOverlayFrame({
   frameSeconds,
   topPixels,
   visible,
+  onMediaError,
 }: {
   videoSrc: string;
   rect: NormalizedRect;
   frameSeconds: number;
   topPixels: number;
   visible: boolean;
+  onMediaError?: () => void;
 }) {
   const [source, setSource] = useState<FrameSize | null>(null);
   const videoRef = useControlledVideoFrame(frameSeconds, videoSrc);
@@ -168,6 +173,7 @@ function KillfeedOverlayFrame({
         preload="auto"
         aria-hidden="true"
         data-stream-frame="preview-killfeed"
+        onError={onMediaError}
         onLoadedMetadata={(event) => {
           const video = event.currentTarget;
           if (video.videoWidth > 0 && video.videoHeight > 0) {
@@ -305,6 +311,7 @@ export function StreamPreview({
   streamerSlideEnabled = false,
   onStreamerPositionChange,
   disabled = false,
+  onMediaError,
 }: {
   videoSrc: string;
   variant: StreamVariant;
@@ -318,6 +325,7 @@ export function StreamPreview({
   streamerSlideEnabled?: boolean;
   onStreamerPositionChange?: (position: number) => void;
   disabled?: boolean;
+  onMediaError?: () => void;
 }): ReactNode {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startClientY: number; startPosition: number } | null>(null);
@@ -383,6 +391,7 @@ export function StreamPreview({
               band="facecam"
               frameSeconds={frameSeconds}
               className="h-full w-full"
+              onMediaError={onMediaError}
             />
           </div>
         ) : null}
@@ -394,6 +403,7 @@ export function StreamPreview({
             band="gameplay"
             frameSeconds={frameSeconds}
             className="h-full w-full"
+            onMediaError={onMediaError}
           />
         </div>
       </div>
@@ -407,6 +417,7 @@ export function StreamPreview({
           frameSeconds={activeKillfeedCue === null ? frameSeconds : killfeedSampleFrameSeconds(clips, activeKillfeedCue)}
           topPixels={killfeedTop}
           visible={activeKillfeedCue !== null}
+          onMediaError={onMediaError}
         />
       ) : null}
       {activeOverlays.map((overlay, i) => (

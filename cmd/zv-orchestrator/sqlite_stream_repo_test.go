@@ -115,7 +115,7 @@ func TestSQLiteStreamRepoLifecycle(t *testing.T) {
 	}
 
 	probe := streamclips.SourceProbe{Width: 1920, Height: 1080, DurationSeconds: 42}
-	if err := repo.SetAcquired(ctx, j.ID, probe, "def456"); err != nil {
+	if err := repo.SetAcquired(ctx, j.ID, probe, "def456", "Título de Twitch"); err != nil {
 		t.Fatalf("SetAcquired: %v", err)
 	}
 	got, err = repo.Get(ctx, j.ID)
@@ -133,6 +133,28 @@ func TestSQLiteStreamRepoLifecycle(t *testing.T) {
 	}
 	if got.Probe.Width != 1920 || got.Probe.Height != 1080 {
 		t.Fatalf("probe after SetAcquired = %+v, want 1920x1080", got.Probe)
+	}
+	if got.Title != "match stream" {
+		t.Fatalf("title after SetAcquired = %q, want user title preserved", got.Title)
+	}
+}
+
+func TestSQLiteStreamRepoSetAcquiredFillsMissingTitle(t *testing.T) {
+	repo := newTestSQLiteStreamRepo(t)
+	ctx := context.Background()
+	job := &streamclips.Job{Status: streamclips.StatusAcquiring, SourcePath: "streams/source.mp4"}
+	if err := repo.Create(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetAcquired(ctx, job.ID, streamclips.SourceProbe{Width: 1920, Height: 1080}, "sha", "Título de Twitch"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Título de Twitch" {
+		t.Fatalf("title = %q, want discovered Twitch title", got.Title)
 	}
 }
 

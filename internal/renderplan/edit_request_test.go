@@ -7,7 +7,7 @@ import (
 )
 
 func TestEditRequestSerializesAutomaticTextControls(t *testing.T) {
-	b, err := json.Marshal(EditRequest{HookText: true, KillCounter: false})
+	b, err := json.Marshal(EditRequest{HookText: true, KillCounter: false, CoverStrategy: CoverStrategyNone})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -15,15 +15,19 @@ func TestEditRequestSerializesAutomaticTextControls(t *testing.T) {
 	if !strings.Contains(got, `"hook_text":true`) || !strings.Contains(got, `"kill_counter":false`) {
 		t.Fatalf("EditRequest JSON = %s, want explicit automatic text booleans", got)
 	}
+	if !strings.Contains(got, `"cover_strategy":"no-cover"`) {
+		t.Fatalf("EditRequest JSON = %s, want explicit cover strategy", got)
+	}
 }
 
 func TestNormalizeEditRequestDefaultsUnsetFields(t *testing.T) {
 	got := NormalizeEditRequest(EditRequest{Intro: true})
 	want := EditRequest{
-		Format:     FormatShort9x16,
-		KillEffect: KillEffectPunchIn,
-		Transition: TransitionFlash,
-		Intro:      true,
+		Format:        FormatShort9x16,
+		KillEffect:    KillEffectPunchIn,
+		Transition:    TransitionFlash,
+		Intro:         true,
+		CoverStrategy: CoverStrategyGenerated,
 	}
 	if got != want {
 		t.Fatalf("edit request = %#v, want %#v", got, want)
@@ -39,6 +43,7 @@ func TestEditRequestValidateRejectsUnknownFields(t *testing.T) {
 		{name: "format", req: EditRequest{Format: "square", KillEffect: KillEffectPunchIn, Transition: TransitionFlash}, want: "unknown render format"},
 		{name: "effect", req: EditRequest{Format: FormatShort9x16, KillEffect: "glitch", Transition: TransitionFlash}, want: "unknown kill effect"},
 		{name: "transition", req: EditRequest{Format: FormatShort9x16, KillEffect: KillEffectPunchIn, Transition: "spin"}, want: "unknown transition"},
+		{name: "cover strategy", req: EditRequest{Format: FormatShort9x16, KillEffect: KillEffectPunchIn, Transition: TransitionFlash, CoverStrategy: "uploaded"}, want: "unknown cover strategy"},
 		{
 			name: "intro text too long",
 			req: EditRequest{

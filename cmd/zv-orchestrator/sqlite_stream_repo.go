@@ -146,14 +146,14 @@ func (r *sqliteStreamJobRepository) UpdateStatus(ctx context.Context, id uuid.UU
 // SetAcquired records a successful acquire-by-URL download: the probed source
 // metadata and sha256, moving the job to "ready". It clears any prior failure
 // reason so a retried acquire does not leave a stale message behind.
-func (r *sqliteStreamJobRepository) SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error {
+func (r *sqliteStreamJobRepository) SetAcquired(ctx context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256, discoveredTitle string) error {
 	probeJSON, err := json.Marshal(probe)
 	if err != nil {
 		return fmt.Errorf("marshal probe: %w", err)
 	}
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE stream_jobs SET probe = ?, source_sha256 = ?, status = ?, failure_reason = NULL, updated_at = ? WHERE id = ?`,
-		probeJSON, sha256, string(streamclips.StatusReady), time.Now().UTC().UnixNano(), id.String(),
+		`UPDATE stream_jobs SET probe = ?, source_sha256 = ?, title = CASE WHEN COALESCE(trim(title), '') = '' THEN ? ELSE title END, status = ?, failure_reason = NULL, updated_at = ? WHERE id = ?`,
+		probeJSON, sha256, discoveredTitle, string(streamclips.StatusReady), time.Now().UTC().UnixNano(), id.String(),
 	)
 	if err != nil {
 		return fmt.Errorf("update stream job acquired: %w", err)

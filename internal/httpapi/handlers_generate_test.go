@@ -95,10 +95,11 @@ func TestStartGenerateEnqueuesRecordAndWritesIntent(t *testing.T) {
 		Variant:  "clean-pov-60",
 		MusicKey: "phonk-01",
 		Edit: renderplan.EditRequest{
-			Format:     renderplan.FormatShort9x16,
-			KillEffect: renderplan.KillEffectVelocity,
-			Transition: renderplan.TransitionWhip,
-			Intro:      true,
+			Format:        renderplan.FormatShort9x16,
+			KillEffect:    renderplan.KillEffectVelocity,
+			Transition:    renderplan.TransitionWhip,
+			Intro:         true,
+			CoverStrategy: renderplan.CoverStrategyGenerated,
 		},
 	}
 	if intent.ActiveRunID == uuid.Nil || intent.AcceptedAt.IsZero() {

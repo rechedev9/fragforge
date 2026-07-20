@@ -7,7 +7,8 @@ import type { EditConfig, Match, Play, Preset } from '@/lib/api/types';
 import { api } from '@/lib/api';
 import { DEFAULT_EDIT_CONFIG } from '@/lib/api/reel-store';
 import { isSeriesId } from '@/lib/series-status';
-import { formatKd, playsSelectionLabel, ratingClass, timeAgo } from '@/lib/format';
+import { formatKd, matchDateLabel, playsSelectionLabel, ratingClass } from '@/lib/format';
+import { canForgeReel, reelCreativeBrief } from '@/lib/reel-brief';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -67,6 +68,11 @@ export default function FindHighlightsPage({
   const [editConfig, setEditConfig] = useState<EditConfig>(DEFAULT_EDIT_CONFIG);
   const [songOpen, setSongOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [briefApproved, setBriefApproved] = useState(false);
+
+  useEffect(() => {
+    setBriefApproved(false);
+  }, [selectedIds, variant, songId, musicVolume, editConfig]);
 
   useEffect(() => {
     let active = true;
@@ -113,7 +119,9 @@ export default function FindHighlightsPage({
   // the filter below.
   const selectedPlays = (plays ?? []).filter((p) => selectedIds.has(p.id));
   const selectionLabel = playsSelectionLabel(selectedPlays);
-  const presetLabel = presets?.find((p) => p.name === variant)?.label ?? null;
+  const selectedPreset = presets?.find((p) => p.name === variant) ?? null;
+  const presetLabel = selectedPreset?.label ?? null;
+  const briefItems = reelCreativeBrief(editConfig, selectedPreset, songTitle, musicVolume);
   const busy = creating;
 
   function toggleSelect(playId: string) {
@@ -137,7 +145,7 @@ export default function FindHighlightsPage({
   }
 
   async function onCreate() {
-    if (busy || selectedPlays.length === 0 || variant === null) return;
+    if (!canForgeReel({ briefApproved, creating: busy, hasPreset: variant !== null, selectionCount: selectedPlays.length })) return;
     setCreating(true);
     try {
       await api.createVideo({
@@ -147,7 +155,7 @@ export default function FindHighlightsPage({
         songId: songId ?? undefined,
         // Only a reduced volume travels; full volume stays the legacy default.
         musicVolume: songId && musicVolume < VOLUME_MAX ? musicVolume / 100 : undefined,
-        variant,
+        variant: variant ?? undefined,
         editConfig,
       });
       router.push(seriesId ? `/series/${seriesId}` : '/videos');
@@ -192,7 +200,7 @@ export default function FindHighlightsPage({
     backLabel = 'SERIE';
   }
   const meta = [
-    timeAgo(match.playedAt),
+    matchDateLabel(match),
     `${n} ${n === 1 ? 'jugada' : 'jugadas'}`,
   ].join(' · ');
 
@@ -410,6 +418,9 @@ export default function FindHighlightsPage({
           format={editConfig.format}
           onFormatChange={(format) => setEditConfig({ ...editConfig, format })}
           creating={creating}
+          briefItems={briefItems}
+          briefApproved={briefApproved}
+          onBriefApprovedChange={setBriefApproved}
           onCreate={onCreate}
         />
       ) : null}

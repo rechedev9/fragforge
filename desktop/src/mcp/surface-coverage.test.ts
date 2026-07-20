@@ -110,6 +110,7 @@ const COVERAGE: readonly CoverageCase[] = [
   { input: { ...STREAM_INPUT, clip_id: 'clip-1', cue_seconds: 2 }, method: 'POST', operation: 'streams.read_killfeed', route: '/api/stream-jobs/{id}/killfeed-read' },
   { input: { ...STREAM_RENDER_INPUT, kind: 'gallery' }, method: 'GET', operation: 'artifacts.get_stream_url', route: '/api/stream-jobs/{id}/renders/{variant}/gallery' },
   { input: { ...STREAM_RENDER_INPUT, clip_id: 'clip-1', kind: 'video' }, method: 'GET', operation: 'artifacts.get_stream_url', route: '/api/stream-jobs/{id}/renders/{variant}/videos/{clip_id}' },
+  { input: { ...STREAM_RENDER_INPUT, name: 'manifest.json', kind: 'delivery' }, method: 'GET', operation: 'artifacts.get_stream_url', route: '/api/stream-jobs/{id}/renders/{variant}/delivery/{name}' },
 ];
 
 function routeKey(method: string, route: string): string {

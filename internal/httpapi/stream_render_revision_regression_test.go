@@ -22,6 +22,7 @@ func TestFailedStreamRerenderKeepsServingLastCommittedRevision(t *testing.T) {
 	locks := streamclips.NewJobLocks()
 	jobID := uuid.New()
 	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
 	plan.Clips = []streamclips.ClipRange{{
 		ID: "clip-001", StartSeconds: 0, EndSeconds: 2, Title: "published clip",
 	}}

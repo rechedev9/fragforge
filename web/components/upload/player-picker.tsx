@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { ratingBarClass, ratingBarPct, ratingClass, prettyMapName } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 /**
  * A picker row is a scan's DemoPlayer, optionally carrying `mapsPresent` in
@@ -16,7 +17,7 @@ export type PickerPlayer = DemoPlayer & { mapsPresent?: number };
 export type PlayerPickerProps = {
   /** Roster from the scan (single match) or aggregated across a series, sorted by kills desc. */
   players: PickerPlayer[];
-  /** Fires when the user confirms a target by clicking a row. */
+  /** Fires when the user confirms the currently selected target. */
   onPick: (steamId: string) => void;
   /** Match-level context (map, score, rounds) shown above the tables, when the scan has it. */
   match?: RosterMatch;
@@ -155,12 +156,20 @@ function SeriesSummary({ mapCount, playerCount }: { mapCount: number; playerCoun
  * (and MVP when the demo reports it), plus a Highlights line of multi-kill chips
  * under the player name. The roster's clip-worthiest player (by multi-kill rounds,
  * the strongest signal for a good reel) is auto-highlighted and tagged
- * "Recomendado", but the user must click a row to confirm the target, which is
- * the whole point of this screen.
+ * "Recomendado". Clicking a row changes the selection; the explicit continue
+ * action confirms it.
  */
 export function PlayerPicker({ players, onPick, match, seriesMapCount }: PlayerPickerProps) {
   const recommended = pickRecommended(players);
-  const [highlighted, setHighlighted] = useState<string | null>(recommended?.steamId ?? players[0]?.steamId ?? null);
+  const [selected, setSelected] = useState<string | null>(recommended?.steamId ?? players[0]?.steamId ?? null);
+
+  useEffect(() => {
+    setSelected((current) =>
+      current !== null && players.some((player) => player.steamId === current)
+        ? current
+        : (recommended?.steamId ?? players[0]?.steamId ?? null),
+    );
+  }, [players, recommended?.steamId]);
   const isSeries = (seriesMapCount ?? 0) >= 2;
 
   const showMvp = players.some((p) => p.mvps > 0);
@@ -234,7 +243,7 @@ export function PlayerPicker({ players, onPick, match, seriesMapCount }: PlayerP
               </div>
 
               {roster.map((p) => {
-                const active = p.steamId === highlighted;
+                const active = p.steamId === selected;
                 const isRecommended = p.steamId === recommended?.steamId;
                 const chips = highlightChips(p);
                 // Series mode: flag players who did not appear in every map. A
@@ -269,9 +278,8 @@ export function PlayerPicker({ players, onPick, match, seriesMapCount }: PlayerP
                   <button
                     key={p.steamId}
                     type="button"
-                    onMouseEnter={() => setHighlighted(p.steamId)}
-                    onFocus={() => setHighlighted(p.steamId)}
-                    onClick={() => onPick(p.steamId)}
+                    aria-pressed={active}
+                    onClick={() => setSelected(p.steamId)}
                     style={gridStyle}
                     className={cn(
                       'grid w-full cursor-pointer items-center gap-x-1 border-b border-border/40 px-3 py-2.5 text-left transition-colors last:border-b-0',
@@ -332,6 +340,12 @@ export function PlayerPicker({ players, onPick, match, seriesMapCount }: PlayerP
           </section>
         );
       })}
+      <div className="sticky bottom-0 z-10 flex items-center justify-between gap-4 border border-primary/25 bg-background/95 p-4 shadow-lg backdrop-blur">
+        <p className="text-sm text-muted-foreground">Selecciona un jugador y continúa cuando estés listo.</p>
+        <Button type="button" disabled={selected === null} onClick={() => selected && onPick(selected)}>
+          CONTINUAR
+        </Button>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clipEditIssue } from './clip-edit.ts';
+import { clipEditIssue, streamRangeIssue } from './clip-edit.ts';
 import type { StreamClipRange } from './api/streams.ts';
 
 function clip(edit: StreamClipRange['edit']): StreamClipRange[] {
@@ -45,4 +45,10 @@ test('overlay windows must stay inside the clip and be ordered', () => {
     clipEditIssue(clip({ text_overlays: [{ text: 'GG', position_y: 0.5, start_seconds: 3, end_seconds: 1 }] })) ?? '',
     /termina antes de empezar/,
   );
+});
+
+test('range validation reports source bounds immediately in Spanish', () => {
+  assert.match(streamRangeIssue({ id: 'clip-1', start_seconds: 2, end_seconds: 1 }, 15.112, 0) ?? '', /fin debe ser posterior/);
+  assert.match(streamRangeIssue({ id: 'clip-1', start_seconds: 0, end_seconds: 20 }, 15.112, 0) ?? '', /15\.11 s/);
+  assert.equal(streamRangeIssue({ id: 'clip-1', start_seconds: 0, end_seconds: 15.112 }, 15.112, 0), null);
 });

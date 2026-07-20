@@ -248,7 +248,7 @@ func TestNewComposeFinalTaskRoundtrip(t *testing.T) {
 
 func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	id := uuid.New()
-	edit := renderplan.EditRequest{Format: renderplan.FormatLandscape16x9, KillEffect: renderplan.KillEffectVelocity, Transition: renderplan.TransitionWhip, Intro: true, HookText: true, KillCounter: true}
+	edit := renderplan.EditRequest{Format: renderplan.FormatLandscape16x9, KillEffect: renderplan.KillEffectVelocity, Transition: renderplan.TransitionWhip, Intro: true, HookText: true, KillCounter: true, CoverStrategy: renderplan.CoverStrategyNone}
 	tk, err := NewRenderVariantTask(id, testRenderVariant, "concrete-teeth", 0.35, edit)
 	if err != nil {
 		t.Fatalf("NewRenderVariantTask error = %v", err)
@@ -275,6 +275,9 @@ func TestNewRenderVariantTaskRoundtrip(t *testing.T) {
 	}
 	if !strings.Contains(string(tk.Payload()), `"hook_text":true`) || !strings.Contains(string(tk.Payload()), `"kill_counter":true`) {
 		t.Errorf("payload missing automatic text fields: %s", tk.Payload())
+	}
+	if !strings.Contains(string(tk.Payload()), `"cover_strategy":"no-cover"`) {
+		t.Errorf("payload missing cover strategy: %s", tk.Payload())
 	}
 }
 

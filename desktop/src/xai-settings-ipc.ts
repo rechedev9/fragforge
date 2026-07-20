@@ -2,6 +2,7 @@ export const XAI_SETTINGS_CHANNEL = 'fragforge:xai-settings';
 const MAX_XAI_API_KEY_INPUT_LENGTH = 4096;
 
 export const XAI_SETTINGS_ACTION = {
+  appInfo: 'app-info',
   remove: 'remove',
   restart: 'restart',
   save: 'save',
@@ -13,6 +14,7 @@ export type XAISettingsAction = typeof XAI_SETTINGS_ACTION[keyof typeof XAI_SETT
 export type XAISettingsSource = 'environment' | 'stored' | 'none';
 
 export type XAISettingsRequest =
+  | { action: typeof XAI_SETTINGS_ACTION.appInfo }
   | { action: typeof XAI_SETTINGS_ACTION.status }
   | { action: typeof XAI_SETTINGS_ACTION.save; apiKey: string }
   | { action: typeof XAI_SETTINGS_ACTION.test; apiKey: string }
@@ -54,7 +56,8 @@ export function parseXAISettingsRequest(value: unknown): XAISettingsRequest {
     throw new Error('invalid xAI settings request');
   }
   const action = value.action;
-  if (action === XAI_SETTINGS_ACTION.status
+  if (action === XAI_SETTINGS_ACTION.appInfo
+    || action === XAI_SETTINGS_ACTION.status
     || action === XAI_SETTINGS_ACTION.remove
     || action === XAI_SETTINGS_ACTION.restart) {
     requireExactKeys(value, ['action']);

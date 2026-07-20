@@ -227,6 +227,7 @@ type EditPlan struct {
 	SchemaVersion    string                    `json:"schema_version"`
 	Variant          string                    `json:"variant"`
 	FaceCrop         CropRect                  `json:"face_crop"`
+	FaceCropReviewed bool                      `json:"face_crop_reviewed,omitempty"`
 	GameplayCrop     CropRect                  `json:"gameplay_crop"`
 	KillfeedCrop     *CropRect                 `json:"killfeed_crop,omitempty"`
 	KillfeedAnalysis *KillfeedAnalysisMetadata `json:"killfeed_analysis,omitempty"`
@@ -293,15 +294,23 @@ type RenderState struct {
 	// Published means ResultKey, GalleryKey, ArtifactDir, and Videos identify
 	// the last fully committed render. Those pointers remain valid while a
 	// newer attempt is rendering or has failed.
-	Published   bool         `json:"published,omitempty"`
-	ResultKey   string       `json:"result_key"`
-	GalleryKey  string       `json:"gallery_key"`
-	ArtifactDir string       `json:"artifact_dir"`
-	Warnings    []string     `json:"warnings,omitempty"`
-	Error       string       `json:"error,omitempty"`
-	ErrorCode   string       `json:"error_code,omitempty"`
-	UpdatedAt   time.Time    `json:"updated_at"`
-	Videos      []VideoEntry `json:"videos,omitempty"`
+	Published   bool            `json:"published,omitempty"`
+	ResultKey   string          `json:"result_key"`
+	GalleryKey  string          `json:"gallery_key"`
+	ArtifactDir string          `json:"artifact_dir"`
+	Warnings    []string        `json:"warnings,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	ErrorCode   string          `json:"error_code,omitempty"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	Videos      []VideoEntry    `json:"videos,omitempty"`
+	Delivery    []DeliveryEntry `json:"delivery,omitempty"`
+}
+
+// DeliveryEntry is one upload-ready asset inside shortslistosparasubir.
+type DeliveryEntry struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
 }
 
 type RenderResult struct {
@@ -393,6 +402,7 @@ func (s *RenderState) PreservePublishedRender(previous RenderState) {
 	s.GalleryKey = previous.GalleryKey
 	s.ArtifactDir = previous.ArtifactDir
 	s.Videos = append([]VideoEntry(nil), previous.Videos...)
+	s.Delivery = append([]DeliveryEntry(nil), previous.Delivery...)
 }
 
 func DefaultEditPlan() EditPlan {

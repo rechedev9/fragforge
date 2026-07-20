@@ -143,6 +143,90 @@ func TestDetectFrameEventsNeverMergesAdjacentPTS(t *testing.T) {
 	}
 }
 
+func TestDetectFrameEventsCollapsesNearDuplicateJitterBirths(t *testing.T) {
+	t.Parallel()
+	timeBase := TimeBase{Num: 1, Den: 1000}
+	var firstFingerprint rowFingerprint
+	firstFingerprint.bits[0] = ^uint64(0)
+	firstFingerprint.bits[1] = ^uint64(0)
+	firstFingerprint.features = 128
+	var jitterFingerprint rowFingerprint
+	jitterFingerprint.bits[0] = ^uint64(0)
+	jitterFingerprint.bits[1] = uint64(1)<<38 - 1
+	jitterFingerprint.bits[2] = uint64(1)<<26 - 1
+	jitterFingerprint.features = 128
+	frames := []frameObservation{
+		testFrame(1900, timeBase),
+		testFrame(1920, timeBase, testObservedRow(0, firstFingerprint)),
+		testFrame(1950, timeBase, testObservedRow(0, jitterFingerprint)),
+	}
+	clip := streamclips.ClipRange{ID: "clip-1", StartSeconds: 1, EndSeconds: 3}
+	events, err := detectFrameEvents(frames, clip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(events), 1; got != want {
+		t.Fatalf("event count = %d, want %d jitter-collapsed event", got, want)
+	}
+}
+
+func TestDetectFrameEventsCollapsesJitterThatReturnsToOriginalFingerprint(t *testing.T) {
+	t.Parallel()
+	timeBase := TimeBase{Num: 1, Den: 1000}
+	var firstFingerprint rowFingerprint
+	firstFingerprint.bits[0] = ^uint64(0)
+	firstFingerprint.bits[1] = ^uint64(0)
+	firstFingerprint.features = 128
+	var jitterFingerprint rowFingerprint
+	jitterFingerprint.bits[0] = ^uint64(0)
+	jitterFingerprint.bits[1] = uint64(1)<<38 - 1
+	jitterFingerprint.bits[2] = uint64(1)<<26 - 1
+	jitterFingerprint.features = 128
+	frames := []frameObservation{
+		testFrame(1900, timeBase),
+		testFrame(1920, timeBase, testObservedRow(0, firstFingerprint)),
+		testFrame(1950, timeBase, testObservedRow(0, jitterFingerprint)),
+		testFrame(1980, timeBase, testObservedRow(0, firstFingerprint)),
+	}
+	clip := streamclips.ClipRange{ID: "clip-1", StartSeconds: 1, EndSeconds: 3}
+	events, err := detectFrameEvents(frames, clip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(events), 1; got != want {
+		t.Fatalf("event count = %d, want %d A-B-A jitter-collapsed event", got, want)
+	}
+}
+
+func TestDetectFrameEventsCollapsesJitterAcrossInterveningEvent(t *testing.T) {
+	t.Parallel()
+	timeBase := TimeBase{Num: 1, Den: 1000}
+	var firstFingerprint rowFingerprint
+	firstFingerprint.bits[0] = ^uint64(0)
+	firstFingerprint.bits[1] = ^uint64(0)
+	firstFingerprint.features = 128
+	var jitterFingerprint rowFingerprint
+	jitterFingerprint.bits[0] = ^uint64(0)
+	jitterFingerprint.bits[1] = uint64(1)<<38 - 1
+	jitterFingerprint.bits[2] = uint64(1)<<26 - 1
+	jitterFingerprint.features = 128
+	other := testFingerprint(8)
+	frames := []frameObservation{
+		testFrame(1900, timeBase),
+		testFrame(1920, timeBase, testObservedRow(0, firstFingerprint)),
+		testFrame(1940, timeBase, testObservedRow(0, firstFingerprint), testObservedRow(1, other)),
+		testFrame(1960, timeBase, testObservedRow(0, jitterFingerprint), testObservedRow(1, other)),
+	}
+	clip := streamclips.ClipRange{ID: "clip-1", StartSeconds: 1, EndSeconds: 3}
+	events, err := detectFrameEvents(frames, clip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(events), 2; got != want {
+		t.Fatalf("event count = %d, want %d distinct events with repeated A jitter collapsed", got, want)
+	}
+}
+
 func TestDetectFrameEventsClampsSampleBeforeClipEnd(t *testing.T) {
 	t.Parallel()
 	timeBase := TimeBase{Num: 1, Den: 1000}

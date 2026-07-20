@@ -67,6 +67,17 @@ func newFakeStreamRepo() *fakeStreamRepo {
 	return &fakeStreamRepo{jobs: map[uuid.UUID]streamclips.Job{}}
 }
 
+func reviewedDefaultEditPlanJSON(t *testing.T) json.RawMessage {
+	t.Helper()
+	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
 func (f *fakeStreamRepo) Create(_ context.Context, j *streamclips.Job) error {
 	f.jobs[j.ID] = *j
 	return nil
@@ -117,13 +128,16 @@ func (f *fakeStreamRepo) SetEditPlan(_ context.Context, id uuid.UUID, plan strea
 	return nil
 }
 
-func (f *fakeStreamRepo) SetAcquired(_ context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256 string) error {
+func (f *fakeStreamRepo) SetAcquired(_ context.Context, id uuid.UUID, probe streamclips.SourceProbe, sha256, discoveredTitle string) error {
 	j, ok := f.jobs[id]
 	if !ok {
 		return streamclips.ErrNotFound
 	}
 	j.Probe = probe
 	j.SourceSHA256 = sha256
+	if j.Title == "" {
+		j.Title = discoveredTitle
+	}
 	j.Status = streamclips.StatusReady
 	j.FailureReason = ""
 	f.jobs[id] = j
@@ -892,11 +906,12 @@ func TestWorkbenchRenderFormEnqueuesEditOptions(t *testing.T) {
 		t.Fatalf("payload variant/music = %q/%q", payload.Variant, payload.MusicKey)
 	}
 	wantEdit := renderplan.EditRequest{
-		Format:     renderplan.FormatLandscape16x9,
-		KillEffect: renderplan.KillEffectVelocity,
-		Transition: renderplan.TransitionWhip,
-		Intro:      true,
-		Outro:      true,
+		Format:        renderplan.FormatLandscape16x9,
+		KillEffect:    renderplan.KillEffectVelocity,
+		Transition:    renderplan.TransitionWhip,
+		Intro:         true,
+		Outro:         true,
+		CoverStrategy: renderplan.CoverStrategyGenerated,
 	}
 	if payload.Edit != wantEdit {
 		t.Fatalf("edit = %#v, want %#v", payload.Edit, wantEdit)
@@ -1746,7 +1761,7 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Post("/api/jobs/{id}/renders/{variant}", h.StartRenderVariant)
-	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(`{"music":"track01","edit":{"format":"landscape-16x9","killEffect":"velocity","transition":"whip","intro":true,"outro":true,"hook_text":true,"kill_counter":true,"intro_text":"Watch this ace","outro_text":"follow for more"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/"+j.ID.String()+"/renders/viral-60-clean", strings.NewReader(`{"music":"track01","edit":{"format":"landscape-16x9","killEffect":"velocity","transition":"whip","intro":true,"outro":true,"hook_text":true,"kill_counter":true,"cover_strategy":"no-cover","intro_text":"Watch this ace","outro_text":"follow for more"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rw := httptest.NewRecorder()
 	r.ServeHTTP(rw, req)
@@ -1778,6 +1793,9 @@ func TestStartRenderVariantEnqueuesRenderTaskWhenRecorded(t *testing.T) {
 	}
 	if !payload.Edit.HookText || !payload.Edit.KillCounter {
 		t.Fatalf("edit automatic text = hook %v / counter %v, want true / true", payload.Edit.HookText, payload.Edit.KillCounter)
+	}
+	if payload.Edit.CoverStrategy != renderplan.CoverStrategyNone {
+		t.Fatalf("edit cover strategy = %q, want %q", payload.Edit.CoverStrategy, renderplan.CoverStrategyNone)
 	}
 	if len(queue.options) != 1 || !hasAsynqOption(queue.options[0], "Unique(") {
 		t.Fatalf("enqueue options = %#v, want Unique option", queue.options)
@@ -3022,6 +3040,7 @@ func TestStreamJobFlowSavesPlanAndEnqueuesRender(t *testing.T) {
 	}
 
 	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
 	plan.Clips = []streamclips.ClipRange{{ID: "clip-001", StartSeconds: 1, EndSeconds: 3, Title: "one"}}
 	planBody, err := json.Marshal(plan)
 	if err != nil {
@@ -3199,6 +3218,7 @@ func TestStartStreamRenderAcceptsLegacyTwentySecondPlanWithoutPersistingMigratio
 	queue := &fakeQueue{}
 	id := uuid.New()
 	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
 	plan.Clips = []streamclips.ClipRange{{ID: "legacy", StartSeconds: 0, EndSeconds: 20}}
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
@@ -3588,6 +3608,11 @@ func TestStartStreamRenderAcceptsRegistryVariantsAndRejectsUnknown(t *testing.T)
 			id := uuid.New()
 			plan := streamclips.DefaultEditPlan()
 			plan.Variant = variant
+			layout, ok := streamclips.VariantByName(variant)
+			if !ok {
+				t.Fatalf("variant %q missing from registry", variant)
+			}
+			plan.FaceCropReviewed = !layout.FullFrame
 			planJSON, err := json.Marshal(plan)
 			if err != nil {
 				t.Fatal(err)
@@ -3645,6 +3670,35 @@ func TestStartStreamRenderAcceptsRegistryVariantsAndRejectsUnknown(t *testing.T)
 		}
 	})
 
+	t.Run("facecam crop must be reviewed", func(t *testing.T) {
+		streamRepo := newFakeStreamRepo()
+		id := uuid.New()
+		plan := streamclips.DefaultEditPlan()
+		plan.FaceCropReviewed = false
+		planJSON, err := json.Marshal(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		streamRepo.jobs[id] = streamclips.Job{
+			ID: id, Status: streamclips.StatusReady,
+			SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+		}
+		queue := &fakeQueue{}
+		h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo))
+		r := Routes(h)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+plan.Variant, nil)
+		rw := httptest.NewRecorder()
+		r.ServeHTTP(rw, req)
+
+		if rw.Code != http.StatusConflict || !strings.Contains(rw.Body.String(), "facecam crop requires explicit review") {
+			t.Fatalf("response = %d %s, want actionable 409", rw.Code, rw.Body.String())
+		}
+		if len(queue.enqueued) != 0 {
+			t.Fatalf("queued render tasks = %d, want zero", len(queue.enqueued))
+		}
+	})
+
 	t.Run("unknown variant lists valid names", func(t *testing.T) {
 		streamRepo := newFakeStreamRepo()
 		id := uuid.New()
@@ -3672,7 +3726,7 @@ func TestStartStreamRenderMarksStateFailedWhenEnqueueFails(t *testing.T) {
 	store := newFakeStorage()
 	id := uuid.New()
 	variant := streamclips.DefaultVariant().Name
-	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: reviewedDefaultEditPlanJSON(t)}
 	queue := &fakeQueue{err: errors.New("inline queue is full")}
 	h := NewHandlers(newFakeRepo(), store, queue, WithStreamRepository(streamRepo))
 	r := Routes(h)
@@ -3709,7 +3763,7 @@ func TestStartStreamRenderMarksAcceptedPendingStateFailedWhenQueueDiscardsIt(t *
 	store := newFakeStorage()
 	id := uuid.New()
 	variant := streamclips.DefaultVariant().Name
-	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: reviewedDefaultEditPlanJSON(t)}
 	queue := &fakeQueue{}
 	h := NewHandlers(newFakeRepo(), store, queue, WithStreamRepository(streamRepo))
 	r := Routes(h)
@@ -3744,7 +3798,7 @@ func TestStartStreamRenderKeepsRenderingStateWhenTaskIsDuplicate(t *testing.T) {
 	store := newFakeStorage()
 	id := uuid.New()
 	variant := streamclips.DefaultVariant().Name
-	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id)}
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusReady, SourcePath: streamclips.SourceKey(id), EditPlan: reviewedDefaultEditPlanJSON(t)}
 	h := NewHandlers(newFakeRepo(), store, &fakeQueue{err: asynq.ErrDuplicateTask}, WithStreamRepository(streamRepo))
 	existing, err := streamclips.NewRenderState(id, variant, streamclips.StatusRendering, nil, "", nil)
 	if err != nil {
@@ -3784,7 +3838,7 @@ func TestStartStreamRenderPreservesRenderedStateWhenFinishedTaskIsStillDuplicate
 	store := newFakeStorage()
 	id := uuid.New()
 	variant := streamclips.DefaultVariant().Name
-	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusRendered, SourcePath: streamclips.SourceKey(id)}
+	streamRepo.jobs[id] = streamclips.Job{ID: id, Status: streamclips.StatusRendered, SourcePath: streamclips.SourceKey(id), EditPlan: reviewedDefaultEditPlanJSON(t)}
 	h := NewHandlers(newFakeRepo(), store, &fakeQueue{err: asynq.ErrDuplicateTask}, WithStreamRepository(streamRepo))
 	previous, err := streamclips.NewRenderState(id, variant, streamclips.StatusRendered, nil, "", nil)
 	if err != nil {
