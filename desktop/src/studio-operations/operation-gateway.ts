@@ -13,7 +13,7 @@ type MutationRisk = Exclude<OperationRisk, 'read'>;
 /**
  * Resolves any missing operation inputs before the gateway validates them.
  *
- * MCP uses this to elicit primitive values. Other callers can omit it and
+ * A caller may use this to elicit primitive values. Other callers can omit it and
  * provide a complete argument object themselves.
  */
 export type OperationInputCompleter = (
@@ -32,7 +32,7 @@ export interface OperationRequest {
 }
 
 export interface OperationExecutionOptions {
-  /** Optional caller-owned input completion, such as MCP form elicitation. */
+  /** Optional caller-owned input completion, such as an agent approval form. */
   completeInput?: OperationInputCompleter;
   /**
    * Explicit authority to run a non-read operation. Omit this (the default)

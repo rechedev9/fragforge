@@ -3,7 +3,6 @@ import { contextBridge, ipcRenderer } from 'electron';
 // Keep this preload self-contained: sandboxed Electron preloads can import the
 // electron module, but must not depend on local CommonJS modules at runtime.
 const XAI_SETTINGS_CHANNEL = 'fragforge:xai-settings';
-const MCP_CONFIG_CHANNEL = 'fragforge:mcp-config';
 const ASSISTANT_CHANNEL = 'fragforge:assistant';
 const ASSISTANT_EVENT_CHANNEL = 'fragforge:assistant-event';
 const MAX_XAI_API_KEY_INPUT_LENGTH = 4096;
@@ -22,7 +21,6 @@ contextBridge.exposeInMainWorld('fragforgeSettings', {
   removeXAIKey: (): Promise<unknown> => ipcRenderer.invoke(XAI_SETTINGS_CHANNEL, { action: 'remove' }),
   testXAIKey: (apiKey: string): Promise<unknown> => invokeKeyAction('test', apiKey),
   restartStudio: (): Promise<unknown> => ipcRenderer.invoke(XAI_SETTINGS_CHANNEL, { action: 'restart' }),
-  getMCPConfig: (): Promise<unknown> => ipcRenderer.invoke(MCP_CONFIG_CHANNEL, { action: 'info' }),
 });
 
 /**

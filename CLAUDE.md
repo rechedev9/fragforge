@@ -122,8 +122,8 @@ delegates its choice satisfies this gate; never repeat answered questions.
 
 Use JSON output for decisions, preserve the exact argv reported by preflight,
 and follow the existing explicit-authorization rules before HLAE/CS2 capture or
-long renders. MCP is optional and disabled by default in `.codex/config.toml`;
-enable it only for work that specifically needs a running Studio queue or UI.
+long renders. The retired external MCP server is not a supported product
+interface; use the CLI or the integrated FragForge Agent.
 The unified `short` and `record` commands resolve missing HLAE/CS2 paths through
 the same environment/local autodetection reported by `zv capabilities`; agents
 should not copy detected paths back into argv unless explicitly overriding them.
@@ -133,7 +133,9 @@ The rail requires a sufficiently current Codex installation. Its connection card
 It runs only through the Electron preload/IPC bridge, receives a dedicated empty working directory rather than the repository or Studio data, uses a `read-only` Codex sandbox, disables generic shell/browser/web/MCP/plugin/workspace capabilities, and strips `FRAGFORGE_*`, `ZV_*`, and credential-like environment variables.
 The integrated agent can use only the dynamic `fragforge` namespace backed by Studio's typed operation gateway: it searches live operations first, executes reads directly, and turns writes, costly work, and destructive operations into Studio approval previews. It can use all non-file-picker operations, including importing a public Twitch URL; local demos, recordings, and voice files remain in Studio's native pickers so local paths never enter model context.
 Capture and render therefore have two separate gates: approval of the complete creative brief, followed by approval of the exact operation preview.
-FragForge Agent is not an MCP client or the optional external MCP stdio server. That separate transport and its file-capable operation surface remain available only to explicitly configured external clients.
+FragForge Agent is the only assistant surface shipped in Studio. The former
+external MCP stdio transport, launcher, registration UI, and release gate have
+been removed.
 
 The orchestrator drives a job state machine: `queued -> scanning -> scanned -> parsing -> parsed -> recording -> recorded -> composing -> composed -> done` (or `failed`); jobs with a target already supplied may skip the roster-scan states.
 Each worker is idempotent: it checks whether the durable artifact already exists and skips the external media command if so, which makes manual retries safe.
@@ -153,7 +155,7 @@ Module boundaries (keep `cmd/` entrypoints thin):
 - `internal/voiceprofile` - local reusable narration-reference metadata and validated audio storage; API responses expose relative audio URLs, never absolute filesystem paths.
 - `internal/youtubeinsights`, `internal/youtubetrends` - deterministic Europe/Madrid scheduling, factual reel-derived metadata recommendations, and optional bounded Firecrawl trend discovery for the manual publication assistant. Firecrawl results are hints, never fabricated YouTube performance metrics.
 - `web/` - standalone Next.js (App Router) frontend: upload/series, match/clip/video, stream, and news views with a typed API client; it reaches local services only through same-origin proxy routes under `/api/demos/*`, `/api/streams/*`, and `/api/news/*` (see `web/CLAUDE.md`).
-- `desktop/` - Electron Local Studio packaging, process lifecycle, bundled resources, the external MCP stdio server, the shared typed Studio operation gateway, and the isolated FragForge Agent bridge to Codex app-server.
+- `desktop/` - Electron Local Studio packaging, process lifecycle, bundled resources, the shared typed Studio operation gateway, and the isolated FragForge Agent bridge to Codex app-server.
 - `data/` - generated/local media artifacts; treat as output unless the task is explicitly about test fixtures or artifact cleanup.
 
 The current foundation runs locally and concatenates segments into `final.mp4`; treat `README.md` as the source of truth for what exists today.

@@ -952,7 +952,7 @@ const operations: readonly OperationDefinition[] = [
     preview: (input) => requestPreview('POST', '/api/stream-killfeed/notice-preview', input),
     risk: 'read',
     run: async (_client, input) => ({
-      note: 'The kill notice is returned as image bytes and is not embedded in MCP context; open the FragForge web editor to view the synthetic notice.',
+      note: 'The kill notice is returned as image bytes and is not embedded in agent context; open the FragForge web editor to view the synthetic notice.',
       request: requestPreview('POST', '/api/stream-killfeed/notice-preview', input),
     }),
     title: 'Preview killfeed notice',

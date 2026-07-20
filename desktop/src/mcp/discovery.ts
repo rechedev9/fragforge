@@ -86,7 +86,7 @@ export function operationCatalogResource(): JsonObject {
   return {
     generated_from: 'desktop/src/mcp/operations.ts',
     operations: listOperations().map(operationDescriptor),
-    pattern: 'Cloudflare-inspired progressive disclosure: static MCP search/execute tools with allowlisted operations and schemas returned on demand.',
+    pattern: 'The integrated agent uses progressive disclosure: it searches allowlisted Studio operations and receives schemas on demand.',
   };
 }
 

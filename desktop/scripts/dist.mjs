@@ -13,6 +13,9 @@ const { artifacts: installerPaths, checksum: checksumPath } = releasePaths(deskt
 
 // Remove stale release-shaped outputs before building the same version again.
 for (const filePath of [...installerPaths, checksumPath]) rmSync(filePath, { force: true });
+// electron-builder can otherwise retain files removed from extraFiles between
+// releases (notably the retired external assistant launcher).
+rmSync(join(desktop, 'dist-installer', 'win-unpacked'), { recursive: true, force: true });
 
 if (process.argv.length > 2) {
   console.error('[dist] unsupported build argument');
@@ -38,11 +41,6 @@ try {
     join(desktop, 'dist-installer', 'win-unpacked', 'resources', 'hlae', hlae.archiveName),
     hlae,
   );
-  execSync('pnpm run test:mcp:packaged', {
-    cwd: desktop,
-    env: sanitizedEnvironment,
-    stdio: 'inherit',
-  });
   await requireNonEmptyFile(installerPaths[0], 'installer');
   await requireNonEmptyFile(installerPaths[1], 'installer blockmap');
   await writeReleaseChecksums(installerPaths, checksumPath);

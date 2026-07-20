@@ -48,7 +48,6 @@ import {
   type XAISettingsRequest,
   type XAISettingsStatus,
 } from './xai-settings-ipc';
-import { buildMCPConfigInfo, MCP_CONFIG_CHANNEL, parseMCPConfigRequest } from './mcp-config-ipc';
 import {
   ASSISTANT_CHANNEL,
   ASSISTANT_EVENT_CHANNEL,
@@ -754,28 +753,6 @@ function registerXAISettingsIPC(): void {
   });
 }
 
-/**
- * The MCP launcher ships next to FragForge Studio.exe in a packaged install
- * (electron-builder extraFiles); in dev it lives in desktop/scripts.
- */
-function mcpLauncherPath(): string {
-  if (app.isPackaged) return path.join(path.dirname(process.execPath), 'fragforge-mcp.cmd');
-  return path.join(appRoot, 'scripts', 'fragforge-mcp.cmd');
-}
-
-function registerMCPConfigIPC(): void {
-  ipcMain.handle(MCP_CONFIG_CHANNEL, async (event, value: unknown): Promise<unknown> => {
-    if (!trustedXAISettingsSender(event)) return settingsFailure('Solicitud de Ajustes rechazada.');
-    try {
-      parseMCPConfigRequest(value);
-    } catch {
-      return settingsFailure('Solicitud de Ajustes no válida.');
-    }
-    const launcherPath = mcpLauncherPath();
-    return buildMCPConfigInfo(launcherPath, fs.existsSync(launcherPath));
-  });
-}
-
 function registerAssistantIPC(): void {
   ipcMain.handle(ASSISTANT_CHANNEL, async (event, value: unknown): Promise<AssistantIPCResponse> => {
     if (!trustedXAISettingsSender(event)) return assistantCommandFailure('Solicitud del asistente rechazada.');
@@ -804,7 +781,6 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   registerXAISettingsIPC();
-  registerMCPConfigIPC();
   registerAssistantIPC();
   runBoot();
 });

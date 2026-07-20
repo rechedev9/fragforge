@@ -23,7 +23,7 @@ once per install and persisted in `<userData>/ports.json`; the web port in
 particular must stay stable across launches because the reel library lives in
 the browser's `localStorage`, which is keyed by origin (`host:port`). Electron
 also rotates a random `discovery_secret` in that file on every boot; it is used
-only to authenticate the matching local orchestrator to the MCP.
+only to authenticate the matching local orchestrator and integrated agent.
 
 The installer bundles the official HLAE 2.191.0 release. On first boot the app
 installs it alongside FFmpeg and yt-dlp into `<userData>/tools`, each verified
@@ -63,9 +63,9 @@ creative brief. Public Twitch clip/VOD URLs can be supplied in chat. Local demo,
 video, and voice files stay behind Studio's file pickers so their paths and raw
 media never enter model context.
 
-The embedded agent uses Codex app-server dynamic tools directly. It is separate
-from the optional external MCP server described below and does not require MCP
-registration.
+The embedded agent uses Codex app-server dynamic tools directly through the
+narrow Studio operation gateway. No external assistant transport or launcher
+is shipped.
 
 ## xAI subtitle credentials
 
@@ -98,160 +98,6 @@ per-user credential is supplied only to `zv-orchestrator.exe` for transcription
 and removed from the environments of the bundled Next.js server and media
 subprocesses.
 
-## Model Context Protocol (MCP)
-
-This source tree embeds a dependency-free TypeScript MCP server over stdio.
-Codex and Claude Code can operate the same local pipeline as the UI without a
-hosted backend, browser automation, raw shell commands, or a second API.
-
-The MCP follows Cloudflare's progressive-disclosure idea without evaluating
-model-generated JavaScript:
-
-- `search` ranks the allowlisted operation catalog and returns the exact JSON
-  input schema. With partial arguments it also resolves live values: job IDs,
-  roster players/SteamIDs, moments/segment IDs, presets, music, render artifact
-  names, and capture/render readiness.
-- `execute` validates an exact operation and arguments. Reads run immediately.
-  Writes, captures, renders, and deletes return a side-effect-free preview by
-  default; they run only with `mode: "apply"` and `confirmed: true`.
-- `fragforge://catalog` and `fragforge://status` expose the static catalog and
-  live readiness as MCP resources. Clients advertising MCP elicitation can be
-  asked for a missing scalar input during a tool call.
-
-Operations cover Studio status and metrics, catalogs, CS2 demo upload/scan/parse,
-record/generate/compose, render state/QA/publishing/artifacts, and stream/VOD
-jobs, exact edit plans, source/video URLs, subtitle configuration, and local
-voice profile references. Binary
-media never enters model context; artifact operations return loopback URLs when
-Studio uses its normal loopback read mode.
-
-MCP cancellation follows the protocol's fire-and-forget semantics: cancelled
-requests receive no response. If `streams.create_from_file` is cancelled after
-the orchestrator accepted its upload, search and execute `streams.list`, then
-use `streams.get` with the returned ID before considering a retry. This recovers
-the durable job without uploading the same video twice.
-
-### Repository development setup
-
-The repository already contains both client configurations:
-
-- Codex: `.codex/config.toml` (registered but disabled by default)
-- Claude Code: `.mcp.json`
-
-Codex Desktop uses `.\bin\zv.exe` as its primary FragForge interface and does
-not need Studio for normal CLI work. Start each task with
-`.\bin\zv.exe capabilities --format json`, then inspect
-`.\bin\zv.exe flows show demo --format json` or `flows show stream` before
-crossing the player/clip selection and expensive capture/render boundaries.
-Both journeys expose vertical 9:16 and landscape 16:9 delivery through the
-same structured CLI. To opt into MCP, set `enabled = true` in
-the `mcp_servers.fragforge` block, start FragForge Studio, and then open a new
-Codex session. The MCP launchers use Node's built-in TypeScript stripper, so
-use Node 22.10+.
-
-Launch the client from the repository root (for example,
-`codex --cd C:\Users\reche\Documents\zackvideo`), not from `desktop/`: the
-checked-in `cwd = "."` and TypeScript entry paths are intentionally root-relative.
-From `desktop/`, the same server can be run directly with `pnpm run mcp`.
-Claude Code shows a newly discovered project MCP as pending until the user
-approves it once; this is expected trust behavior for `.mcp.json`.
-
-The MCP discovers the desktop's stable orchestrator port from the same
-`<userData>/ports.json` used by Electron. Development and diagnostics can
-override this without editing config:
-
-```powershell
-$env:FRAGFORGE_ORCHESTRATOR_URL = "http://127.0.0.1:8080"
-$env:FRAGFORGE_MCP_TIMEOUT_MS = "30000"
-pnpm run mcp
-```
-
-For a token-protected orchestrator, pass the token only through
-`FRAGFORGE_MUTATION_TOKEN`; it becomes `X-FragForge-Token` internally and is
-never returned or logged. `FRAGFORGE_PORTS_FILE` overrides port discovery. A
-desktop port and its fresh `discovery_secret` are read from one snapshot; the
-server must prove possession through a bounded HMAC challenge before the MCP
-sends a token or local media. The proof is available only to loopback peers,
-and the discovery secret is never sent as an API header or returned/logged.
-Older manually maintained port files may omit it only when
-`FRAGFORGE_MUTATION_TOKEN` supplies the HMAC fallback. Tokenless automatic
-discovery without either secret is rejected. An explicit
-`FRAGFORGE_ORCHESTRATOR_URL` remains an intentional trust override. Only HTTP
-loopback URLs are accepted, redirects are rejected, and stdout is reserved
-exclusively for MCP JSON-RPC.
-
-The normal desktop bind does not authenticate reads, so artifact URLs open in a
-browser. If a custom orchestrator enables token authentication for read routes,
-API operations still work but `artifacts.get_url` and
-`artifacts.get_stream_url` return an explicit unsupported-mode error instead of
-an unusable bare URL. Use the loopback-only Studio configuration for MCP media
-links. Upload requests have a ten-minute server timeout; the checked-in Codex
-configuration gives tools fifteen minutes so a valid upload is not cut short.
-
-### Installed Studio setup
-
-Installers built from this source include `fragforge-mcp.cmd` beside the desktop
-executable. This source change does not modify any already-published v2.0.3
-release asset. The launcher runs the compiled TypeScript server with Electron's
-embedded Node runtime, so the end user does not install Node. Keep the normal
-Studio window running so its orchestrator is available. For Codex, add this
-block to `%USERPROFILE%\.codex\config.toml` (adjust the installation path if
-needed):
-
-```toml
-[mcp_servers.fragforge]
-enabled = true
-command = "cmd.exe"
-args = ["/d", "/s", "/c", 'C:\Users\<you>\AppData\Local\Programs\FragForge Studio\fragforge-mcp.cmd']
-startup_timeout_sec = 10
-tool_timeout_sec = 900
-default_tools_approval_mode = "writes"
-```
-
-The 900-second tool timeout accommodates local uploads and capture preparation;
-the `writes` approval mode keeps applying mutations behind client approval.
-Claude Code can register the same launcher once with:
-
-```powershell
-claude mcp add --transport stdio --scope user fragforge -- cmd.exe /d /s /c "C:\Users\<you>\AppData\Local\Programs\FragForge Studio\fragforge-mcp.cmd"
-```
-
-Restart/open a new client session after registration. A typical agent flow is:
-
-1. Search `studio status`, then execute the read-only `studio.status`.
-2. Search `create demo job` and execute the upload preview.
-3. Apply the approved upload; search `jobs.parse` with its `job_id` to discover
-   roster inputs, or poll `jobs.get` if a SteamID was supplied.
-4. Search `jobs.generate` with the job ID to discover segments, presets, and
-   music; preview first, then apply only after approval.
-5. Poll `renders.get`, read QA/publish metadata, and request an artifact URL.
-
-The launcher uses `ELECTRON_RUN_AS_NODE`, so the MCP process never loads the
-Electron main process, acquires its single-instance lock, or opens a window. It
-also never starts HLAE/CS2 merely because the server connects; only a confirmed
-costly operation can enqueue capture or render work.
-
-### MCP evaluation feedback loop
-
-The standalone evaluator uses an isolated in-memory orchestrator, fresh
-temporary data, authenticated `ports.json` discovery, and inaccessible
-sentinel paths for every external capture/render tool. It starts the real Go
-and MCP stdio processes, scores protocol, discovery, safety, validation,
-upload, artifact, HMAC, and shutdown scenarios, and exits non-zero on any
-failure:
-
-```powershell
-cd desktop
-pnpm run eval:mcp:gate
-```
-
-Every run writes timestamped JSON and Markdown plus `latest.json` and
-`latest.md` under `data/mcp-evals/`. Use the Markdown feedback queue to fix the
-root cause, rerun the gate, and require 100/100 on fresh runs. The gate always
-rebuilds `bin/zv-orchestrator.exe`, so a stale local binary cannot make a source
-change appear green. This complements, rather than replaces,
-`pnpm run test:mcp:e2e` and the packaged-launcher test.
-
 ## Build the installer (on Windows)
 
 Prerequisites: Go 1.26+, Node.js + pnpm, and the web deps installed.
@@ -273,13 +119,9 @@ pnpm run dist
 stages `zv-orchestrator.exe`, `zv-editor.exe`, `zv-recorder.exe`, and the
 standalone server into `build-resources/`), then `electron-builder` produces the
 installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
-where `<version>` is the `version` field in `desktop/package.json`). The app
-then runs a mandatory stdio handshake against the real
-`dist-installer/win-unpacked/fragforge-mcp.cmd` and its packaged `app.asar`;
-the distribution command fails if either artifact is absent or unusable. Run
-that gate separately after packaging with `pnpm run test:mcp:packaged`. Run all
-MCP E2E tests with a mandatory real Go orchestrator using `pnpm run test:mcp:e2e`.
-Run the scored real-process feedback gate with `pnpm run eval:mcp:gate`.
+where `<version>` is the `version` field in `desktop/package.json`). The
+distribution command verifies the packaged HLAE archive, installer, blockmap,
+and checksums before returning success.
 The app icon lives at `build/icon.ico`, which electron-builder picks up
 automatically;
 `assemble.mjs` fails fast if it's missing. `zv-orchestrator.exe`,
@@ -337,5 +179,3 @@ pnpm start
 6. Loads `/matches` in the window.
 7. Kills the orchestrator and web children on quit. A single-instance lock
    prevents a second launch from spawning a duplicate backend.
-8. The separately packaged `fragforge-mcp.cmd` launcher uses Electron's Node
-   mode to run the stdio server against the already-running orchestrator.

@@ -218,19 +218,6 @@ las capacidades, valida un Short con todas las kills de este demo y ejecútalo�
 The repo-local production skills add the specialized parse, capture, render,
 QA, and publishing steps while continuing to use `zv workflows run`.
 
-#### Optional Studio MCP
-
-The local TypeScript MCP server remains available for tasks that specifically
-need the running Studio queue/UI, but it is disabled by default for Codex in
-`.codex/config.toml`. Enable it explicitly and start Studio before opening a
-new session. Claude Code's `.mcp.json` integration is unchanged.
-
-The MCP uses progressive disclosure through `search` and `execute`; mutations
-stay in preview until `mode=apply` and `confirmed=true`. Already-published
-v2.0.3 release assets are unchanged. See setup, installed-app commands,
-security notes, and evaluation instructions in
-[`desktop/README.md`](./desktop/README.md#model-context-protocol-mcp).
-
 ### Manual YouTube publication assistant
 
 Every finished reel in the Library has a **PREPARAR PUBLICACIÓN** action. It
@@ -417,7 +404,7 @@ available.
 | POST | `/api/jobs/{id}/compose` | Enqueue final composition after recording. |
 | GET | `/api/jobs/{id}/final` | Stream the composed MP4 when ready. |
 | GET | `/api/presets` | Render preset registry as JSON (name, geometry, behavior flags, default). |
-| GET | `/api/stream-variants` | Stream/VOD render variant registry, including the default; MCP input discovery derives live choices from this endpoint. |
+| GET | `/api/stream-variants` | Stream/VOD render variant registry, including the default; the integrated agent derives live choices from this endpoint. |
 | GET | `/api/jobs/{id}/renders/{variant}/videos/{name}/publish-assistant?days=7` | Reel metadata, factual suggestions, Madrid schedule, optional trend hints, and the stable YouTube Studio URL. |
 
 `POST /record` is accepted for `parsed` and `recorded` jobs; `POST /compose`

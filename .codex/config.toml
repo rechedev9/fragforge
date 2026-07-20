@@ -1,13 +1,1 @@
 #:schema https://developers.openai.com/codex/config-schema.json
-
-[mcp_servers.fragforge]
-# Codex Desktop operates FragForge through .\bin\zv.exe by default. Enable this
-# optional server only for a task that needs the running Studio queue/UI.
-enabled = false
-# This path is intentionally relative to the repository root.
-command = "node"
-args = ["--no-warnings", "--experimental-strip-types", "desktop/src/mcp/stdio.ts"]
-cwd = "."
-startup_timeout_sec = 10
-tool_timeout_sec = 900
-default_tools_approval_mode = "writes"

@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { StudioPageHeader } from '@/components/studio/page-header';
-import { MCPSettings } from '@/components/settings/mcp-settings';
 import { XAISettings } from '@/components/settings/xai-settings';
 import { StudioInfo } from '@/components/settings/studio-info';
 import { navSection } from '@/lib/nav';
@@ -15,11 +14,10 @@ export default function SettingsPage(): ReactNode {
         number={Number(NAV.number)}
         label={NAV.label.toUpperCase()}
         title="CONFIGURACIÓN"
-        description="Configura las credenciales opcionales de subtítulos y conecta tu asistente por MCP, todo en tu propio equipo."
+        description="Consulta la versión instalada y configura las credenciales opcionales de subtítulos. El agente integrado usa tu sesión personal de Codex."
       />
       <StudioInfo />
       <XAISettings />
-      <MCPSettings />
     </div>
   );
 }

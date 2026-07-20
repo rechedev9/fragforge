@@ -49,17 +49,6 @@ export type StudioAppInfo = {
   chromiumVersion: string;
 };
 
-/**
- * Registration material for the local MCP server, computed by the Electron
- * main process so the launcher path always matches this machine's install.
- */
-export type MCPConfigInfo = {
-  launcherPath: string;
-  launcherInstalled: boolean;
-  claudeCommand: string;
-  mcpServersJSON: string;
-};
-
 export interface DesktopSettingsBridge {
   getAppInfo(): Promise<StudioAppInfo>;
   getXAIStatus(): Promise<XAISettingsStatus>;
@@ -67,7 +56,6 @@ export interface DesktopSettingsBridge {
   removeXAIKey(): Promise<XAISettingsMutationResult>;
   testXAIKey(apiKey: string): Promise<XAIConnectionTestResult>;
   restartStudio(): Promise<StudioRestartResult>;
-  getMCPConfig(): Promise<MCPConfigInfo>;
 }
 
 /**
@@ -88,8 +76,7 @@ function isDesktopSettingsBridge(value: unknown): value is DesktopSettingsBridge
     && typeof value.saveXAIKey === 'function'
     && typeof value.removeXAIKey === 'function'
     && typeof value.testXAIKey === 'function'
-    && typeof value.restartStudio === 'function'
-    && typeof value.getMCPConfig === 'function';
+    && typeof value.restartStudio === 'function';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
