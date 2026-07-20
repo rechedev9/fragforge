@@ -43,8 +43,8 @@ The inline queue keeps normal concurrency for parsing and rendering, but every H
 
 When this repository is opened in Codex Desktop, the unified `zv` CLI is the
 primary product interface. Codex loads these instructions through the tracked
-`AGENTS.md` symlink. Do not require FragForge Studio or MCP for normal demo,
-recording, render, QA, or publishing work.
+`AGENTS.md` symlink. Do not require FragForge Studio or an external protocol
+server for normal demo, recording, render, QA, or publishing work.
 
 Use this agent flow from the repository root in PowerShell:
 

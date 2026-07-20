@@ -53,11 +53,9 @@ must keep it aligned with the latest official AdvancedFX release.
 The `output.publish_dir` field points to the required upload-ready
 `<run>\shortslistosparasubir` folder; `output.shorts_dir` contains intermediates.
 
-The project-local FragForge MCP registration is intentionally disabled in
-`.codex/config.toml`. It is an optional adapter for work against a running
-Studio queue/UI. Set its `enabled` field to `true`, start Studio, and open a new
-Codex session only for that use case. Full details are in
-[`desktop/README.md`](../desktop/README.md#model-context-protocol-mcp).
+The former external FragForge MCP registration has been removed. Use the
+unified `zv` CLI for repository workflows or FragForge Agent inside Studio;
+`.codex/config.toml` must not register a FragForge MCP server.
 
 ## Common commands
 

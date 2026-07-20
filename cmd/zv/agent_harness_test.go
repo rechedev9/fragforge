@@ -48,7 +48,7 @@ func TestRepoSkillsUseUnifiedCLI(t *testing.T) {
 	}
 }
 
-func TestCodexAppUsesCLIAsPrimaryInterface(t *testing.T) {
+func TestCodexAppUsesCLIAndNoExternalMCP(t *testing.T) {
 	root := repoRoot(t)
 
 	configPath := filepath.Join(root, ".codex", "config.toml")
@@ -57,12 +57,12 @@ func TestCodexAppUsesCLIAsPrimaryInterface(t *testing.T) {
 		t.Fatalf("read %s: %v", configPath, err)
 	}
 	configBody := string(config)
-	for _, want := range []string{
+	for _, retired := range []string{
 		"[mcp_servers.fragforge]",
-		"enabled = false",
+		"fragforge-mcp",
 	} {
-		if !strings.Contains(configBody, want) {
-			t.Fatalf("%s does not contain %q", configPath, want)
+		if strings.Contains(configBody, retired) {
+			t.Fatalf("%s still contains retired external MCP configuration %q", configPath, retired)
 		}
 	}
 
@@ -78,7 +78,8 @@ func TestCodexAppUsesCLIAsPrimaryInterface(t *testing.T) {
 		`.\bin\zv.exe workflows show short --format json`,
 		`.\bin\zv.exe workflows validate short --format json -- match.dem --prompt "all kills 76561198000000000" --dry-run --format json`,
 		`.\bin\zv.exe workflows run short -- match.dem --prompt "all kills 76561198000000000" --dry-run --format json`,
-		"MCP is optional",
+		"retired external MCP server",
+		"FragForge Agent is the only assistant surface shipped in Studio",
 	} {
 		if !strings.Contains(agentBody, want) {
 			t.Fatalf("%s does not contain %q", agentPath, want)
