@@ -28,7 +28,7 @@
 .EXAMPLE
     .\run-experiment.ps1 -Experiment e1 `
         -Demo "C:\demos\lavked-vs-tnc-m2-nuke.dem" `
-        -HlaeExe "C:\HLAE\HLAE.exe"
+        -HlaeExe "C:\HLAE-<version>\HLAE.exe"
 #>
 [CmdletBinding()]
 param(

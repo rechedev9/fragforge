@@ -1,4 +1,4 @@
-# testdata/
+# Test Data Guide
 
 Demos `.dem` y planes esperados (`*.expected.json`) usados por los golden tests del
 demo parser. Los archivos `.dem` y `.expected.json` NO se commitean al repo —

@@ -26,12 +26,12 @@ func checkCodexPromptWrappers() (int, []skillIssue, error) {
 		prompts[filepath.ToSlash(filepath.Join(".codex", "prompts", entry.Name()))] = false
 	}
 
-	readmePath := filepath.Join(root, ".codex", "README.md")
-	b, err := os.ReadFile(readmePath)
+	guidePath := filepath.Join(root, ".codex", "GUIDE.md")
+	b, err := os.ReadFile(guidePath)
 	if err != nil {
-		return 0, nil, fmt.Errorf("read .codex/README.md: %w", err)
+		return 0, nil, fmt.Errorf("read .codex/GUIDE.md: %w", err)
 	}
-	readmeBody := string(b)
+	guideBody := string(b)
 	var issues []skillIssue
 	runnerPath := filepath.Join(root, "scripts", "codex-run.sh")
 	relRunner := filepath.ToSlash(mustRel(root, runnerPath))
@@ -43,8 +43,8 @@ func checkCodexPromptWrappers() (int, []skillIssue, error) {
 		}
 	} else {
 		issues = append(issues, validateAgentShellScript(relRunner, string(b))...)
-		if !strings.Contains(readmeBody, relRunner) {
-			issues = append(issues, skillIssue{Path: ".codex/README.md", Message: fmt.Sprintf("does not document runner %s", relRunner)})
+		if !strings.Contains(guideBody, relRunner) {
+			issues = append(issues, skillIssue{Path: ".codex/GUIDE.md", Message: fmt.Sprintf("does not document runner %s", relRunner)})
 		}
 	}
 
@@ -75,8 +75,8 @@ func checkCodexPromptWrappers() (int, []skillIssue, error) {
 		}
 		prompts[prompt] = true
 		checked++
-		if !strings.Contains(readmeBody, relWrapper) {
-			issues = append(issues, skillIssue{Path: ".codex/README.md", Message: fmt.Sprintf("does not document wrapper %s", relWrapper)})
+		if !strings.Contains(guideBody, relWrapper) {
+			issues = append(issues, skillIssue{Path: ".codex/GUIDE.md", Message: fmt.Sprintf("does not document wrapper %s", relWrapper)})
 		}
 	}
 	if checked == 0 {
@@ -108,12 +108,12 @@ func checkClaudePromptWrappers() (int, []skillIssue, error) {
 		commands[filepath.ToSlash(filepath.Join(".claude", "commands", entry.Name()))] = false
 	}
 
-	readmePath := filepath.Join(root, ".claude", "README.md")
-	b, err := os.ReadFile(readmePath)
+	guidePath := filepath.Join(root, ".claude", "GUIDE.md")
+	b, err := os.ReadFile(guidePath)
 	if err != nil {
-		return 0, nil, fmt.Errorf("read .claude/README.md: %w", err)
+		return 0, nil, fmt.Errorf("read .claude/GUIDE.md: %w", err)
 	}
-	readmeBody := string(b)
+	guideBody := string(b)
 	var issues []skillIssue
 	runnerPath := filepath.Join(root, "scripts", "claude-run.sh")
 	relRunner := filepath.ToSlash(mustRel(root, runnerPath))
@@ -125,8 +125,8 @@ func checkClaudePromptWrappers() (int, []skillIssue, error) {
 		}
 	} else {
 		issues = append(issues, validateAgentShellScript(relRunner, string(b))...)
-		if !strings.Contains(readmeBody, relRunner) {
-			issues = append(issues, skillIssue{Path: ".claude/README.md", Message: fmt.Sprintf("does not document runner %s", relRunner)})
+		if !strings.Contains(guideBody, relRunner) {
+			issues = append(issues, skillIssue{Path: ".claude/GUIDE.md", Message: fmt.Sprintf("does not document runner %s", relRunner)})
 		}
 	}
 
@@ -154,8 +154,8 @@ func checkClaudePromptWrappers() (int, []skillIssue, error) {
 		}
 		commands[command] = true
 		checked++
-		if !strings.Contains(readmeBody, relWrapper) {
-			issues = append(issues, skillIssue{Path: ".claude/README.md", Message: fmt.Sprintf("does not document wrapper %s", relWrapper)})
+		if !strings.Contains(guideBody, relWrapper) {
+			issues = append(issues, skillIssue{Path: ".claude/GUIDE.md", Message: fmt.Sprintf("does not document wrapper %s", relWrapper)})
 		}
 	}
 	if checked == 0 {

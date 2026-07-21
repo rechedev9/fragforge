@@ -1,4 +1,4 @@
-# FragForge web UI
+# FragForge Web UI Guide
 
 `web/` is the Next.js UI shipped inside the FragForge Windows desktop app. The
 desktop process starts this app as a standalone Next.js server alongside the
@@ -66,7 +66,7 @@ pnpm run build
 
 `output: 'standalone'` in `next.config.mjs` produces the self-contained server
 bundle assembled into the Windows installer. See
-[`../desktop/README.md`](../desktop/README.md) for the installer build and boot
+[`../desktop/GUIDE.md`](../desktop/GUIDE.md) for the installer build and boot
 architecture.
 
 ## Layout

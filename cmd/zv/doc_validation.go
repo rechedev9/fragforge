@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,16 @@ func checkWorkflowDocs() ([]workflowDoc, []skillIssue, error) {
 	// the filesystem for it on every doc.
 	legacyCommands := legacyWorkflowCommands()
 	var issues []skillIssue
+	readmePaths, err := findReadmeFiles(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, path := range readmePaths {
+		issues = append(issues, skillIssue{
+			Path:    path,
+			Message: "README files are not allowed; use a purpose-specific document name",
+		})
+	}
 	for i, doc := range docs {
 		path := filepath.Join(root, filepath.FromSlash(doc.Path))
 		// #nosec G304 -- workflow docs are fixed repo-local paths.
@@ -53,6 +64,44 @@ func checkWorkflowDocs() ([]workflowDoc, []skillIssue, error) {
 		}
 	}
 	return docs, issues, nil
+}
+
+func findReadmeFiles(root string) ([]string, error) {
+	var matches []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root && skipReadmeScanDirectory(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := entry.Name()
+		if !strings.EqualFold(strings.TrimSuffix(name, filepath.Ext(name)), "README") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return fmt.Errorf("relativize README path %s: %w", path, err)
+		}
+		matches = append(matches, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan for README files: %w", err)
+	}
+	return matches, nil
+}
+
+func skipReadmeScanDirectory(name string) bool {
+	switch name {
+	case ".atl", ".git", ".next", ".playwright-cli", ".vercel", ".worktrees", "bin", "build-resources", "data", "dist", "dist-installer", "ds-bundle", "node_modules", "worktrees":
+		return true
+	default:
+		return false
+	}
 }
 
 func isExecutableDirectWorkflowCommand(command []string, workflow workflowInfo) bool {

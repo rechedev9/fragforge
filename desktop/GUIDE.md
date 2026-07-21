@@ -1,4 +1,4 @@
-# FragForge Studio (desktop)
+# FragForge Studio Desktop Guide
 
 A Windows desktop wrapper around Local Studio: one app that boots the Go
 orchestrator and the Next.js web UI (in local mode) and shows the flow in a
@@ -25,15 +25,12 @@ the browser's `localStorage`, which is keyed by origin (`host:port`). Electron
 also rotates a random `discovery_secret` in that file on every boot; it is used
 only to authenticate the matching local orchestrator and integrated agent.
 
-The installer bundles the official HLAE 2.191.0 release. On first boot the app
-installs it alongside FFmpeg and yt-dlp into `<userData>/tools`, each verified
-against a pinned sha256 digest, plus the music catalog. HLAE is available
-offline; the remaining downloads are best-effort and retry on the next launch.
-After the current HLAE package is verified, Studio removes older versioned HLAE
-caches. The HLAE version is intentionally fixed instead of following the latest
-release so every desktop build uses the same official package. The window
-lands on `/matches` (the app shell/dashboard, not a single flow), since Studio
-has both the demo-upload path and the Twitch stream-clips path.
+The installer bundles the official HLAE archive pinned by `src/hlae-tool.json`.
+On first boot the app installs it alongside FFmpeg and yt-dlp into `<userData>/tools`, verifies every pinned SHA-256 digest, and provisions the music catalog.
+HLAE is available offline; the remaining downloads are best-effort and retry on the next launch.
+After the current HLAE package is verified, Studio removes older versioned HLAE caches.
+The packaged HLAE version is intentionally fixed by the manifest so every desktop build is reproducible.
+The window lands on `/matches` because Studio has both the demo-upload path and the Twitch stream-clips path.
 
 Capture still needs CS2 installed on the machine (Windows + GPU); Studio installs
 HLAE automatically. Job data (demos, artifacts) is written under the per-user

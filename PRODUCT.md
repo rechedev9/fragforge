@@ -1,4 +1,4 @@
-# FragForge
+# FragForge Product Guide
 
 Deterministic CS2 demo/stream-to-video pipeline. Give its agent-first CLI a
 `.dem` or a stream clip and produce upload-ready 1080x1920 vertical videos or
@@ -258,20 +258,20 @@ entries named `FragForge/YouTube/OAuthClient`,
 builds do not read or delete them. Remove them manually from **Credential
 Manager -> Windows Credentials** if desired.
 
-## Render preset
+## Render presets
 
-The single supported preset lives in `internal/editor/preset.go`: `viral-60-clean`.
-The loadout catalog (`internal/renderplan`), the
-HTTP API (`/api/presets`, `/api/loadouts`, render-variant validation), the
-workbench UI, and the render worker all derive from that registry. It defaults
-to 1080x1920 at 60fps; `--output-format landscape-16x9` uses the same editing
-contract at 1920x1080. Unknown preset names are rejected with the valid list.
+`internal/editor/preset.go` is the preset source of truth.
+The loadout catalog (`internal/renderplan`), the HTTP API (`/api/presets`, `/api/loadouts`, render-variant validation), the workbench UI, and the render worker all derive from that registry.
+All current presets default to 1080x1920 at 60fps; `--output-format landscape-16x9` uses the same editing contract at 1920x1080.
+Unknown preset names are rejected with the valid list.
 
 List them any time with `zv presets` (`--format json` for automation).
 
 | Preset | What it does |
 |--------|--------------|
-| `viral-60-clean` (default) | Clean HUD-less POV with kill notices, viral hook text, punch-ins, kill counter, and milestone labels. |
+| `viral-60-clean` (default) | HUD-less POV with in-game death notices and `viral-ultra-clean` effects. |
+| `clean-pov-60` | Fully HUD-less POV with no in-game killfeed. |
+| `full-hud-60` | Full gameplay HUD, including health, ammo, radar, and killfeed. |
 
 The editing choices behind the viral presets: hook text in the first 1-2s,
 punch-ins on kills, slow-mo only on the final kill, beat-synced drops,
@@ -352,7 +352,7 @@ xAI credential precedence is: an inherited `XAI_API_KEY`, then the encrypted
 per-user key from `/settings`, then no xAI credential. Every desktop build is
 credential-free: the packaging scripts remove `XAI_API_KEY` from child build
 environments and expose no target or resource capable of embedding a shared
-key. See `desktop/README.md` for the desktop and build details.
+key. See `desktop/GUIDE.md` for the desktop and build details.
 
 Set a newly generated key in the same PowerShell session that starts Local
 Studio without putting the secret in command history:

@@ -44,7 +44,7 @@ for (const required of [zvOrchestrator, zvEditor, zvRecorder]) {
     process.exit(1);
   }
 }
-// electron-builder picks up build/icon.ico automatically (see desktop/README.md);
+// electron-builder picks up build/icon.ico automatically (see desktop/GUIDE.md);
 // it does not fail loudly if it's missing, it just ships an installer with the
 // default Electron icon. Fail here instead, before the (slow) Next.js build
 // below, so a missing icon is caught in seconds rather than discovered by

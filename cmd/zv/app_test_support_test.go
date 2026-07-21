@@ -1267,7 +1267,7 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"```",
 		"",
 	}, "\n")
-	writeFile(t, filepath.Join(root, "README.md"), catalogDoc)
+	writeFile(t, filepath.Join(root, "PRODUCT.md"), catalogDoc)
 	writeFile(t, filepath.Join(root, "docs", "workflows", "catalog.md"), catalogDoc)
 	writeFile(t, filepath.Join(root, "docs", "toolchain.md"), strings.Join([]string{
 		"# Toolchain",
@@ -1279,7 +1279,7 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"```",
 		"",
 	}, "\n"))
-	writeFile(t, filepath.Join(root, "docs", "README.md"), strings.Join([]string{
+	writeFile(t, filepath.Join(root, "docs", "GUIDE.md"), strings.Join([]string{
 		"# Docs",
 		"",
 		"```bash",
@@ -1371,7 +1371,7 @@ func writeWorkflowDocs(t *testing.T, root string) {
 			"",
 		}, "\n"))
 	}
-	writeFile(t, filepath.Join(root, ".codex", "README.md"), strings.Join([]string{
+	writeFile(t, filepath.Join(root, ".codex", "GUIDE.md"), strings.Join([]string{
 		"# Codex",
 		"",
 		"```bash",
@@ -1522,7 +1522,7 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		`exec claude -p "$(cat "$prompt_file")" "$@"`,
 		"",
 	}, "\n"))
-	claudeReadmeLines := []string{
+	claudeGuideLines := []string{
 		"# Claude",
 		"",
 		"Style and operational rules live in CLAUDE.md.",
@@ -1531,9 +1531,9 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"scripts/claude-run.sh",
 	}
 	for _, fixture := range claudePromptWrapperFixtures() {
-		claudeReadmeLines = append(claudeReadmeLines, fixture.wrapper)
+		claudeGuideLines = append(claudeGuideLines, fixture.wrapper)
 	}
-	claudeReadmeLines = append(claudeReadmeLines,
+	claudeGuideLines = append(claudeGuideLines,
 		"```",
 		"",
 		"```text",
@@ -1545,7 +1545,7 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"```",
 		"",
 	)
-	writeFile(t, filepath.Join(root, ".claude", "README.md"), strings.Join(claudeReadmeLines, "\n"))
+	writeFile(t, filepath.Join(root, ".claude", "GUIDE.md"), strings.Join(claudeGuideLines, "\n"))
 	writeFile(t, filepath.Join(root, "CLAUDE.md"), strings.Join([]string{
 		"# Claude",
 		"",

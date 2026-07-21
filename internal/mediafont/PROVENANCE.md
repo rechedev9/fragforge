@@ -1,4 +1,4 @@
-# Montserrat ExtraBold
+# Montserrat ExtraBold Provenance
 
 `Montserrat-ExtraBold.ttf` and `Montserrat-ExtraBoldItalic.ttf` are the official static TTFs from the upstream [JulietaUla/Montserrat](https://github.com/JulietaUla/Montserrat) repository.
 

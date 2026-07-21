@@ -21,8 +21,8 @@ import (
 	"time"
 )
 
-// DefaultBaseURL is the orchestrator's default loopback bind (see the README
-// "Orchestrator" section: ZV_HTTP_ADDR defaults to 127.0.0.1:8080).
+// DefaultBaseURL is the orchestrator's default loopback bind (see PRODUCT.md;
+// ZV_HTTP_ADDR defaults to 127.0.0.1:8080).
 const DefaultBaseURL = "http://127.0.0.1:8080"
 
 // tokenHeader is the mutation/read token header the orchestrator checks

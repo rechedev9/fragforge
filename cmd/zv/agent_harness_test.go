@@ -307,17 +307,17 @@ func TestCodexPromptWrappersHaveExistingPromptsAndDocs(t *testing.T) {
 		prompts[filepath.ToSlash(filepath.Join(".codex", "prompts", entry.Name()))] = false
 	}
 
-	readme, err := os.ReadFile(filepath.Join(root, ".codex", "README.md"))
+	guide, err := os.ReadFile(filepath.Join(root, ".codex", "GUIDE.md"))
 	if err != nil {
-		t.Fatalf("read .codex/README.md: %v", err)
+		t.Fatalf("read .codex/GUIDE.md: %v", err)
 	}
-	readmeBody := string(readme)
+	guideBody := string(guide)
 	runner := filepath.Join(scriptsDir, "codex-run.sh")
 	if _, err := os.Stat(runner); err != nil {
 		t.Fatalf("missing codex runner %s: %v", runner, err)
 	}
-	if !strings.Contains(readmeBody, "scripts/codex-run.sh") {
-		t.Fatalf(".codex/README.md does not document runner scripts/codex-run.sh")
+	if !strings.Contains(guideBody, "scripts/codex-run.sh") {
+		t.Fatalf(".codex/GUIDE.md does not document runner scripts/codex-run.sh")
 	}
 
 	wrappers, err := filepath.Glob(filepath.Join(scriptsDir, "codex*.sh"))
@@ -342,8 +342,8 @@ func TestCodexPromptWrappersHaveExistingPromptsAndDocs(t *testing.T) {
 		}
 		prompts[prompt] = true
 		mappedWrappers++
-		if name := filepath.ToSlash(filepath.Join("scripts", filepath.Base(wrapper))); !strings.Contains(readmeBody, name) {
-			t.Fatalf(".codex/README.md does not document wrapper %s", name)
+		if name := filepath.ToSlash(filepath.Join("scripts", filepath.Base(wrapper))); !strings.Contains(guideBody, name) {
+			t.Fatalf(".codex/GUIDE.md does not document wrapper %s", name)
 		}
 	}
 	if mappedWrappers == 0 {
@@ -373,17 +373,17 @@ func TestClaudePromptWrappersHaveExistingCommandsAndDocs(t *testing.T) {
 		commands[filepath.ToSlash(filepath.Join(".claude", "commands", entry.Name()))] = false
 	}
 
-	readme, err := os.ReadFile(filepath.Join(root, ".claude", "README.md"))
+	guide, err := os.ReadFile(filepath.Join(root, ".claude", "GUIDE.md"))
 	if err != nil {
-		t.Fatalf("read .claude/README.md: %v", err)
+		t.Fatalf("read .claude/GUIDE.md: %v", err)
 	}
-	readmeBody := string(readme)
+	guideBody := string(guide)
 	runner := filepath.Join(scriptsDir, "claude-run.sh")
 	if _, err := os.Stat(runner); err != nil {
 		t.Fatalf("missing claude runner %s: %v", runner, err)
 	}
-	if !strings.Contains(readmeBody, "scripts/claude-run.sh") {
-		t.Fatalf(".claude/README.md does not document runner scripts/claude-run.sh")
+	if !strings.Contains(guideBody, "scripts/claude-run.sh") {
+		t.Fatalf(".claude/GUIDE.md does not document runner scripts/claude-run.sh")
 	}
 
 	wrappers, err := filepath.Glob(filepath.Join(scriptsDir, "claude-zv-*.sh"))
@@ -405,8 +405,8 @@ func TestClaudePromptWrappersHaveExistingCommandsAndDocs(t *testing.T) {
 		}
 		commands[command] = true
 		mappedWrappers++
-		if name := filepath.ToSlash(filepath.Join("scripts", filepath.Base(wrapper))); !strings.Contains(readmeBody, name) {
-			t.Fatalf(".claude/README.md does not document wrapper %s", name)
+		if name := filepath.ToSlash(filepath.Join("scripts", filepath.Base(wrapper))); !strings.Contains(guideBody, name) {
+			t.Fatalf(".claude/GUIDE.md does not document wrapper %s", name)
 		}
 	}
 	if mappedWrappers == 0 {
@@ -712,10 +712,10 @@ func TestCurrentBuildScriptsCoverCommandEntrypoints(t *testing.T) {
 	}
 }
 
-func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
+func TestProductGuideUsesUnifiedCLI(t *testing.T) {
 	root := repoRoot(t)
 	paths := []string{
-		filepath.Join(root, "README.md"),
+		filepath.Join(root, "PRODUCT.md"),
 	}
 	legacyCommands := legacyWorkflowCommands()
 	for _, path := range paths {
@@ -730,9 +730,9 @@ func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
 			}
 		}
 	}
-	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+	productGuide, err := os.ReadFile(filepath.Join(root, "PRODUCT.md"))
 	if err != nil {
-		t.Fatalf("read README.md: %v", err)
+		t.Fatalf("read PRODUCT.md: %v", err)
 	}
 	for _, want := range []string{
 		"./bin/zv demo parse",
@@ -745,8 +745,8 @@ func TestCurrentWorkflowDocsUseUnifiedCLI(t *testing.T) {
 		"./bin/zv check",
 		"./bin/zv serve",
 	} {
-		if !strings.Contains(string(readme), want) {
-			t.Fatalf("README.md does not contain unified workflow command %q", want)
+		if !strings.Contains(string(productGuide), want) {
+			t.Fatalf("PRODUCT.md does not contain unified workflow command %q", want)
 		}
 	}
 }

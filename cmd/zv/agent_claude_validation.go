@@ -21,7 +21,7 @@ func checkClaudeReviewerAgents() ([]skillIssue, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read claude agents: %w", err)
 	}
-	readmeBody, err := readWorkflowDocBody(root, ".claude/README.md")
+	guideBody, err := readWorkflowDocBody(root, ".claude/GUIDE.md")
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func checkClaudeReviewerAgents() ([]skillIssue, error) {
 			path string
 			body string
 		}{
-			{path: ".claude/README.md", body: readmeBody},
+			{path: ".claude/GUIDE.md", body: guideBody},
 			{path: "CLAUDE.md", body: claudeBody},
 		} {
 			if !strings.Contains(doc.body, "@"+wantName) {

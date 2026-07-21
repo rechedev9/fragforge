@@ -564,7 +564,7 @@ func TestZVBinaryJSONCheckFailuresEndToEnd(t *testing.T) {
 			"",
 		}, "\n"))
 		writeWorkflowDocs(t, root)
-		appendFile(t, filepath.Join(root, "README.md"), "\n./bin/zv-parser parse --demo demo.dem --steamid 76561198000000000\n")
+		appendFile(t, filepath.Join(root, "PRODUCT.md"), "\n./bin/zv-parser parse --demo demo.dem --steamid 76561198000000000\n")
 
 		tests := []struct {
 			name string

@@ -1,4 +1,4 @@
-# Codex app and CLI harness for FragForge
+# Codex App And CLI Guide
 
 Repo-local harness for using Codex Desktop or Codex CLI safely on FragForge.
 
@@ -59,11 +59,9 @@ unified `zv` CLI for repository workflows or FragForge Agent inside Studio;
 
 ## Common commands
 
-From WSL:
+Run these wrappers from the repository root in Git Bash, not through the broken bare `bash` WSL shim:
 
 ```bash
-cd /mnt/c/Users/reche/Documents/zackvideo
-
 scripts/codex-run.sh .codex/prompts/go-tdd.md "custom prompt run"
 scripts/codex-plan.sh "plan a small change"
 scripts/codex-go-tdd.sh "implement a behavior change"

@@ -1,4 +1,4 @@
-# HLAE Prototype — Operator Runbook
+# HLAE Prototype Operator Runbook
 
 This directory contains the artifacts for the HLAE prototype sub-slice
 (see [`../../docs/specs/2026-05-14-hlae-prototype.md`](../../docs/specs/2026-05-14-hlae-prototype.md)).
@@ -25,7 +25,7 @@ From a PowerShell prompt **inside this directory**:
 .\run-experiment.ps1 `
     -Experiment e1 `
     -Demo "C:\demos\lavked-vs-tnc-m2-nuke.dem" `
-    -HlaeExe "C:\HLAE\HLAE.exe"
+    -HlaeExe "C:\HLAE-<version>\HLAE.exe"
 ```
 
 The runner:

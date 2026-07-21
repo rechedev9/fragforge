@@ -1,4 +1,4 @@
-# Claude Code harness for FragForge
+# Claude Code Harness Guide
 
 Repo-local harness for using Claude Code safely on FragForge.
 
@@ -12,10 +12,9 @@ longer part of the product.
 
 ## Interactive use
 
-From WSL:
+Run Claude Code from the repository root in Git Bash, not through the broken bare `bash` WSL shim:
 
 ```bash
-cd /mnt/c/Users/reche/Documents/FragForge
 claude
 ```
 
@@ -61,7 +60,7 @@ scripts/claude-zv-toolchain-diagnose.sh
 Useful environment variables:
 
 ```bash
-CLAUDE_MODEL=sonnet scripts/claude-zv-tdd.sh "..."
+CLAUDE_MODEL=opus scripts/claude-zv-tdd.sh "..."
 CLAUDE_MAX_TURNS=18 scripts/claude-zv-tdd.sh "..."
 CLAUDE_DRY_RUN=1 scripts/claude-zv-tdd.sh "preview prompt only"
 CLAUDE_ALLOWED_TOOLS=Read,Bash scripts/claude-zv-artifact-audit.sh

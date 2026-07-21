@@ -158,22 +158,22 @@ func TestRunWorkflowsCheckRejectsLegacyWorkflowDocs(t *testing.T) {
 		{
 			name:    "parser",
 			command: "./bin/zv-parser parse --demo demo.dem --steamid 76561198000000000",
-			want:    "README.md: documents legacy direct command ./bin/zv-parser",
+			want:    "PRODUCT.md: documents legacy direct command ./bin/zv-parser",
 		},
 		{
 			name:    "demo players",
 			command: "./bin/zv-demo-players --demo demo.dem",
-			want:    "README.md: documents legacy direct command ./bin/zv-demo-players",
+			want:    "PRODUCT.md: documents legacy direct command ./bin/zv-demo-players",
 		},
 		{
 			name:    "analysis viewer",
 			command: "./bin/zv-analysis-viewer --input data/analysis.json",
-			want:    "README.md: documents legacy direct command ./bin/zv-analysis-viewer",
+			want:    "PRODUCT.md: documents legacy direct command ./bin/zv-analysis-viewer",
 		},
 		{
 			name:    "windows bin path",
 			command: `bin\zv-recorder --killplan plan.json --demo demo.dem --out recording`,
-			want:    `README.md: documents legacy direct command bin\zv-recorder`,
+			want:    `PRODUCT.md: documents legacy direct command bin\zv-recorder`,
 		},
 	}
 	for _, tt := range tests {
@@ -191,7 +191,7 @@ func TestRunWorkflowsCheckRejectsLegacyWorkflowDocs(t *testing.T) {
 				"",
 			}, "\n"))
 			writeWorkflowDocs(t, tempDir)
-			appendFile(t, filepath.Join(tempDir, "README.md"), "\n"+tt.command+"\n")
+			appendFile(t, filepath.Join(tempDir, "PRODUCT.md"), "\n"+tt.command+"\n")
 			withWorkingDir(t, tempDir)
 
 			var stdout, stderr strings.Builder
@@ -204,6 +204,34 @@ func TestRunWorkflowsCheckRejectsLegacyWorkflowDocs(t *testing.T) {
 				t.Fatalf("stderr = %q, want %q", stderr.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestRunWorkflowsCheckRejectsReadmeFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
+		"---",
+		"name: alpha",
+		`description: "Alpha workflow"`,
+		"---",
+		"",
+		"```powershell",
+		`.\bin\zv.exe workflows run demo-parse -- --demo demo.dem --steamid 76561198000000000 --out plan.json`,
+		"```",
+		"",
+	}, "\n"))
+	writeWorkflowDocs(t, tempDir)
+	writeFile(t, filepath.Join(tempDir, "notes", "README.md"), "# Ambiguous documentation\n")
+	withWorkingDir(t, tempDir)
+
+	var stdout, stderr strings.Builder
+	code := Run([]string{"zv", "workflows", "check"}, &stdout, &stderr, nil, &fakeRunner{})
+
+	if got, want := code, exitInvalidArgs; got != want {
+		t.Fatalf("code = %d, want %d", got, want)
+	}
+	if want := "notes/README.md: README files are not allowed; use a purpose-specific document name"; !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
 
@@ -273,7 +301,7 @@ func TestRunWorkflowsCheckRejectsDiscoveredLegacyCommandEntrypoint(t *testing.T)
 		`}`,
 		"",
 	}, "\n"))
-	appendFile(t, filepath.Join(tempDir, "README.md"), "\n./bin/zv-new-flow --demo demo.dem\n")
+	appendFile(t, filepath.Join(tempDir, "PRODUCT.md"), "\n./bin/zv-new-flow --demo demo.dem\n")
 	withWorkingDir(t, tempDir)
 
 	var stdout, stderr strings.Builder
@@ -282,7 +310,7 @@ func TestRunWorkflowsCheckRejectsDiscoveredLegacyCommandEntrypoint(t *testing.T)
 	if got, want := code, exitInvalidArgs; got != want {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
-	if want := "README.md: documents legacy direct command ./bin/zv-new-flow"; !strings.Contains(stderr.String(), want) {
+	if want := "PRODUCT.md: documents legacy direct command ./bin/zv-new-flow"; !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
@@ -301,7 +329,7 @@ func TestRunWorkflowsCheckRejectsNonCanonicalWorkflowDocCommands(t *testing.T) {
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	appendFile(t, filepath.Join(tempDir, "README.md"), strings.Join([]string{
+	appendFile(t, filepath.Join(tempDir, "PRODUCT.md"), strings.Join([]string{
 		"",
 		"```bash",
 		"./bin/zv parser parse --demo demo.dem --steamid 76561198000000000",
@@ -316,7 +344,7 @@ func TestRunWorkflowsCheckRejectsNonCanonicalWorkflowDocCommands(t *testing.T) {
 	if got, want := code, exitInvalidArgs; got != want {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
-	if !strings.Contains(stderr.String(), `README.md: uses non-standard zv command "parser"`) {
+	if !strings.Contains(stderr.String(), `PRODUCT.md: uses non-standard zv command "parser"`) {
 		t.Fatalf("stderr = %q, want noncanonical doc command error", stderr.String())
 	}
 }
@@ -897,7 +925,7 @@ func TestRunWorkflowsCheckRejectsUndocumentedClaudeReviewerAgent(t *testing.T) {
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	writeFile(t, filepath.Join(tempDir, ".claude", "README.md"), strings.Join([]string{
+	writeFile(t, filepath.Join(tempDir, ".claude", "GUIDE.md"), strings.Join([]string{
 		"# Claude",
 		"",
 		"```bash",
@@ -929,7 +957,7 @@ func TestRunWorkflowsCheckRejectsUndocumentedClaudeReviewerAgent(t *testing.T) {
 	if got, want := code, exitInvalidArgs; got != want {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
-	if want := `.claude/README.md: does not document reviewer agent @go-security-reviewer`; !strings.Contains(stderr.String(), want) {
+	if want := `.claude/GUIDE.md: does not document reviewer agent @go-security-reviewer`; !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
@@ -1108,7 +1136,7 @@ func TestRunWorkflowsCheckJSONReportsIssues(t *testing.T) {
 		"",
 	}, "\n"))
 	writeWorkflowDocs(t, tempDir)
-	appendFile(t, filepath.Join(tempDir, "README.md"), "\n./bin/zv-parser parse --demo demo.dem --steamid 76561198000000000\n")
+	appendFile(t, filepath.Join(tempDir, "PRODUCT.md"), "\n./bin/zv-parser parse --demo demo.dem --steamid 76561198000000000\n")
 	withWorkingDir(t, tempDir)
 
 	var stdout, stderr strings.Builder

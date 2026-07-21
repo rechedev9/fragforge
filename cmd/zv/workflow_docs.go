@@ -3,7 +3,7 @@ package main
 func workflowDocs() []workflowDoc {
 	return []workflowDoc{
 		{
-			Path: "README.md",
+			Path: "PRODUCT.md",
 			Required: []string{
 				"./bin/zv demo parse",
 				"./bin/zv demo players",
@@ -74,7 +74,7 @@ func workflowDocs() []workflowDoc {
 			},
 		},
 		{
-			Path: ".codex/README.md",
+			Path: ".codex/GUIDE.md",
 			Required: []string{
 				"./bin/zv skills list",
 				"./bin/zv skills show",
