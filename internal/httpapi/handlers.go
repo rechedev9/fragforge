@@ -31,7 +31,6 @@ import (
 	"github.com/rechedev9/fragforge/internal/generateintent"
 	"github.com/rechedev9/fragforge/internal/job"
 	"github.com/rechedev9/fragforge/internal/moments"
-	"github.com/rechedev9/fragforge/internal/recording"
 	"github.com/rechedev9/fragforge/internal/renderplan"
 	"github.com/rechedev9/fragforge/internal/rules"
 	"github.com/rechedev9/fragforge/internal/storage"
@@ -803,7 +802,7 @@ func (h *Handlers) StartRecording(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusBadRequest, err.Error())
 					return
 				}
-				portraitSafeKillfeed = preset.HUDMode == string(recording.HUDModeDeathnotices) && edit.Format == renderplan.FormatShort9x16
+				portraitSafeKillfeed = preset.KillfeedSource && edit.Format == renderplan.FormatShort9x16
 			}
 			if !validateSegmentSelection(w, j, req.SegmentIDs) {
 				return
@@ -901,7 +900,7 @@ func (h *Handlers) StartGenerate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	portraitSafeKillfeed := preset.HUDMode == string(recording.HUDModeDeathnotices) && intent.Edit.Format == renderplan.FormatShort9x16
+	portraitSafeKillfeed := preset.KillfeedSource && intent.Edit.Format == renderplan.FormatShort9x16
 	recordTask, err := tasks.NewGenerateRecordDemoTask(j.ID, preset.HUDMode, req.SegmentIDs, portraitSafeKillfeed, intent)
 	if err != nil {
 		internalError(w, "build record task", err)

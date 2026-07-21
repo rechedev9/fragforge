@@ -133,6 +133,7 @@ func TestRecordWorkerHUDFromPayloadOverridesDefault(t *testing.T) {
 		{name: "preset clean overrides default", hud: "clean", wantHUD: "clean"},
 		{name: "empty payload keeps worker default", hud: "", wantHUD: "deathnotices"},
 		{name: "vertical killfeed configures portrait safe capture", hud: "deathnotices", portraitSafeKillfeed: true, wantHUD: "deathnotices", wantPortraitFlag: true},
+		{name: "vertical full HUD configures portrait safe capture", hud: "gameplay", portraitSafeKillfeed: true, wantHUD: "gameplay", wantPortraitFlag: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

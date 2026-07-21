@@ -304,25 +304,42 @@ func TestStartGenerateRejectsWhileRenderStateIsActive(t *testing.T) {
 	}
 }
 
-func TestStartGenerateVerticalKillfeedRequestsPortraitSafeCapture(t *testing.T) {
-	repo := newFakeRepo()
-	store := newFakeStorage()
-	queue := &fakeQueue{}
-	plan := killplan.NewPlan()
-	j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
-	repo.jobs[j.ID] = j
-	h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
+func TestStartGenerateKillfeedCaptureProfile(t *testing.T) {
+	tests := []struct {
+		name                     string
+		preset                   string
+		format                   string
+		wantHUD                  string
+		wantPortraitSafeKillfeed bool
+	}{
+		{name: "kill feed vertical", preset: editor.PresetViral60Clean, format: renderplan.FormatShort9x16, wantHUD: "deathnotices", wantPortraitSafeKillfeed: true},
+		{name: "full HUD vertical", preset: editor.PresetFullHUD60, format: renderplan.FormatShort9x16, wantHUD: "gameplay", wantPortraitSafeKillfeed: true},
+		{name: "full HUD landscape", preset: editor.PresetFullHUD60, format: renderplan.FormatLandscape16x9, wantHUD: "gameplay"},
+		{name: "clean POV vertical", preset: editor.PresetCleanPOV60, format: renderplan.FormatShort9x16, wantHUD: "clean"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			store := newFakeStorage()
+			queue := &fakeQueue{}
+			plan := killplan.NewPlan()
+			j := job.Job{ID: uuid.New(), Status: job.StatusParsed, Rules: rules.Default(), KillPlan: &plan}
+			repo.jobs[j.ID] = j
+			h := NewHandlers(repo, store, queue, WithCapabilities(Capabilities{RecordEnabled: true}))
 
-	rw := postGenerate(t, h, j.ID, `{"preset":"viral-60-clean","edit":{"format":"short-9x16"}}`)
-	if rw.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
-	}
-	var payload tasks.RecordDemoPayload
-	if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
-		t.Fatalf("unmarshal record payload: %v", err)
-	}
-	if payload.HUDMode != "deathnotices" || !payload.PortraitSafeKillfeed {
-		t.Fatalf("record payload = %#v, want portrait-safe deathnotices", payload)
+			body := fmt.Sprintf(`{"preset":%q,"edit":{"format":%q}}`, tc.preset, tc.format)
+			rw := postGenerate(t, h, j.ID, body)
+			if rw.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202; body=%s", rw.Code, rw.Body.String())
+			}
+			var payload tasks.RecordDemoPayload
+			if err := json.Unmarshal(queue.enqueued[0].Payload(), &payload); err != nil {
+				t.Fatalf("unmarshal record payload: %v", err)
+			}
+			if payload.HUDMode != tc.wantHUD || payload.PortraitSafeKillfeed != tc.wantPortraitSafeKillfeed {
+				t.Fatalf("record payload = %#v, want HUD %q portrait-safe %t", payload, tc.wantHUD, tc.wantPortraitSafeKillfeed)
+			}
+		})
 	}
 }
 

@@ -212,7 +212,7 @@ func TestRecordWorkerSkipsWhenSelectedSegmentAlreadyRecorded(t *testing.T) {
 	}
 }
 
-func TestRecordWorkerInvalidatesAndDoesNotMergeAcrossCaptureProfiles(t *testing.T) {
+func TestRecordWorkerInvalidatesGameplayCaptureWhenPortraitSafetyChanges(t *testing.T) {
 	repo := newFakeRepo()
 	store := newFakeStorage()
 	id := uuid.New()
@@ -224,12 +224,12 @@ func TestRecordWorkerInvalidatesAndDoesNotMergeAcrossCaptureProfiles(t *testing.
 	w := newRecordWorkerForTest(repo, store, t)
 	w.runner = planRecorderRunner(t, &seen)
 
-	// The old profile records one segment with deathnotices outside the vertical
-	// safe zone. A later portrait-safe request must not reuse or merge that clip.
-	if err := w.HandleRecordDemo(context.Background(), recordTaskWithCaptureProfile(t, id, "deathnotices", []string{"seg-001"}, false)); err != nil {
+	// The old Full HUD profile records one segment without a portrait-safe native
+	// killfeed. A later portrait-safe Full HUD request must not reuse or merge it.
+	if err := w.HandleRecordDemo(context.Background(), recordTaskWithCaptureProfile(t, id, "gameplay", []string{"seg-001"}, false)); err != nil {
 		t.Fatalf("unsafe record error = %v", err)
 	}
-	if err := w.HandleRecordDemo(context.Background(), recordTaskWithCaptureProfile(t, id, "deathnotices", []string{"seg-002"}, true)); err != nil {
+	if err := w.HandleRecordDemo(context.Background(), recordTaskWithCaptureProfile(t, id, "gameplay", []string{"seg-002"}, true)); err != nil {
 		t.Fatalf("portrait-safe record error = %v", err)
 	}
 	if len(seen) != 2 {
@@ -246,7 +246,7 @@ func TestRecordWorkerInvalidatesAndDoesNotMergeAcrossCaptureProfiles(t *testing.
 	// Re-recording seg-001 under the new profile may now accumulate with seg-002;
 	// a fourth identical request proves the resulting profile remains idempotent.
 	portraitTask := func(segmentID string) *asynq.Task {
-		return recordTaskWithCaptureProfile(t, id, "deathnotices", []string{segmentID}, true)
+		return recordTaskWithCaptureProfile(t, id, "gameplay", []string{segmentID}, true)
 	}
 	if err := w.HandleRecordDemo(context.Background(), portraitTask("seg-001")); err != nil {
 		t.Fatalf("portrait-safe backfill error = %v", err)

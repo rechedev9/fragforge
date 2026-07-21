@@ -494,8 +494,7 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 	if hudMode != "" {
 		cfg.HUDMode = hudMode
 	}
-	effectivePortraitSafeKillfeed := portraitSafeKillfeed && cfg.HUDMode == string(recording.HUDModeDeathnotices)
-	expectedStream, err := normalizedRecordingStream(recordPlan, cfg.HUDMode, effectivePortraitSafeKillfeed)
+	expectedStream, err := normalizedRecordingStream(recordPlan, cfg.HUDMode, portraitSafeKillfeed)
 	if err != nil {
 		return fmt.Errorf("build recording profile: %w", err)
 	}
@@ -557,7 +556,7 @@ func (w *RecordWorker) record(ctx context.Context, j job.Job, hudMode string, se
 		"--hud", cfg.HUDMode,
 		"--timeout", cfg.Timeout,
 	}
-	if portraitSafeKillfeed && cfg.HUDMode == string(recording.HUDModeDeathnotices) {
+	if portraitSafeKillfeed {
 		recorderArgs = append(recorderArgs, "--portrait-safe-killfeed")
 	}
 	_, runErr := w.runner.Run(ctx, cfg.RecorderPath, recorderArgs...)

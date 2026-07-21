@@ -202,6 +202,9 @@ func (p RecordingPlan) Validate() error {
 	if p.Stream.HUDMode != "" && p.Stream.HUDMode != HUDModeGameplay && p.Stream.HUDMode != HUDModeClean && p.Stream.HUDMode != HUDModeDeathnotices {
 		return fmt.Errorf("stream hud_mode must be %q, %q, or %q", HUDModeGameplay, HUDModeClean, HUDModeDeathnotices)
 	}
+	if p.Stream.PortraitSafeKillfeed && p.Stream.HUDMode != HUDModeGameplay && p.Stream.HUDMode != HUDModeDeathnotices {
+		return fmt.Errorf("stream portrait_safe_killfeed requires hud_mode %q or %q", HUDModeGameplay, HUDModeDeathnotices)
+	}
 	if p.Stream.FPS <= 0 || p.Stream.Width <= 0 || p.Stream.Height <= 0 {
 		return fmt.Errorf("stream fps, width, and height must be positive")
 	}
@@ -217,9 +220,9 @@ func (p RecordingPlan) Validate() error {
 	if p.Stream.DeathnoticeLifetime < 0 || p.Stream.DeathnoticeLifetime > 10 {
 		return fmt.Errorf("stream deathnotice_lifetime_seconds must be between 0 and 10")
 	}
-	if p.Stream.HUDMode == HUDModeDeathnotices {
+	if p.Stream.HUDMode == HUDModeDeathnotices || p.Stream.PortraitSafeKillfeed {
 		if _, err := AccountIDFromSteamID64(p.TargetSteamID64); err != nil {
-			return fmt.Errorf("deathnotices target_steamid64: %w", err)
+			return fmt.Errorf("filtered deathnotices target_steamid64: %w", err)
 		}
 	}
 	seen := map[string]bool{}
@@ -261,13 +264,15 @@ func normalizeStreamConfig(stream StreamConfig) StreamConfig {
 	if stream.CRF == 0 {
 		stream.CRF = defaults.CRF
 	}
-	if stream.HUDMode == HUDModeDeathnotices {
-		if stream.PortraitSafeKillfeed && stream.DeathnoticeSafeZoneX == 0 {
+	if stream.PortraitSafeKillfeed {
+		if stream.DeathnoticeSafeZoneX == 0 {
 			stream.DeathnoticeSafeZoneX = defaultDeathnoticeSafeZoneX
 		}
-		if stream.PortraitSafeKillfeed && stream.DeathnoticeSafeZoneY == 0 {
+		if stream.DeathnoticeSafeZoneY == 0 {
 			stream.DeathnoticeSafeZoneY = defaultDeathnoticeSafeZoneY
 		}
+	}
+	if stream.HUDMode == HUDModeDeathnotices || stream.PortraitSafeKillfeed {
 		if stream.DeathnoticeLifetime == 0 {
 			stream.DeathnoticeLifetime = defaultDeathnoticeLifetimeSeconds
 		}

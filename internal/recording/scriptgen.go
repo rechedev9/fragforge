@@ -197,7 +197,7 @@ func buildSchedule(plan RecordingPlan) ([]scheduledCommand, []seekStep) {
 		pad = 200
 	}
 	shutdownTick := lastEnd + max(8, pad/2)
-	for i, cmd := range hudCleanupCommands(plan.Stream.HUDMode) {
+	for i, cmd := range hudCleanupCommands(plan.Stream) {
 		commands = append(commands, scheduledCommand{
 			Tick: shutdownTick - 4,
 			Key:  fmt.Sprintf("hud-cleanup-%02d", i+1),
@@ -302,34 +302,23 @@ func ffmpegSettingsCommand(name string, crf int) string {
 }
 
 func hudSetupCommands(plan RecordingPlan) []string {
+	var commands []string
 	switch plan.Stream.HUDMode {
 	case HUDModeClean:
 		return []string{
 			"spec_show_xray 0; cl_drawhud 0",
 		}
 	case HUDModeDeathnotices:
-		commands := []string{
+		commands = []string{
 			"spec_show_xray 0",
 			"cl_spec_show_bindings 0",
 			"cl_drawhud 1",
 			"cl_draw_only_deathnotices 1",
 			"cl_show_observer_crosshair 2",
 			"crosshair 1",
-			"mirv_deathmsg clear",
-			"mirv_deathmsg filter clear",
-			fmt.Sprintf("mirv_deathmsg filter add attackerMatch=!x%s block=1 lastRule=1", plan.TargetSteamID64),
-			"mirv_deathmsg localPlayer -1",
-			fmt.Sprintf("mirv_deathmsg lifetime %s", formatFloat(plan.Stream.DeathnoticeLifetime)),
 		}
-		if plan.Stream.PortraitSafeKillfeed {
-			commands = append(commands,
-				fmt.Sprintf("safezonex %s", formatFloat(plan.Stream.DeathnoticeSafeZoneX)),
-				fmt.Sprintf("safezoney %s", formatFloat(plan.Stream.DeathnoticeSafeZoneY)),
-			)
-		}
-		return commands
 	default:
-		return []string{
+		commands = []string{
 			"spec_show_xray 0",
 			"cl_spec_show_bindings 0",
 			"cl_drawhud 1",
@@ -338,10 +327,27 @@ func hudSetupCommands(plan RecordingPlan) []string {
 			"crosshair 1",
 		}
 	}
+	if plan.Stream.HUDMode != HUDModeDeathnotices && !plan.Stream.PortraitSafeKillfeed {
+		return commands
+	}
+	commands = append(commands,
+		"mirv_deathmsg clear",
+		"mirv_deathmsg filter clear",
+		fmt.Sprintf("mirv_deathmsg filter add attackerMatch=!x%s block=1 lastRule=1", plan.TargetSteamID64),
+		"mirv_deathmsg localPlayer -1",
+		fmt.Sprintf("mirv_deathmsg lifetime %s", formatFloat(plan.Stream.DeathnoticeLifetime)),
+	)
+	if plan.Stream.PortraitSafeKillfeed {
+		commands = append(commands,
+			fmt.Sprintf("safezonex %s", formatFloat(plan.Stream.DeathnoticeSafeZoneX)),
+			fmt.Sprintf("safezoney %s", formatFloat(plan.Stream.DeathnoticeSafeZoneY)),
+		)
+	}
+	return commands
 }
 
-func hudCleanupCommands(mode HUDMode) []string {
-	if mode != HUDModeDeathnotices {
+func hudCleanupCommands(stream StreamConfig) []string {
+	if stream.HUDMode != HUDModeDeathnotices && !stream.PortraitSafeKillfeed {
 		return nil
 	}
 	return []string{

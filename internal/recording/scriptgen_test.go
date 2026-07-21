@@ -240,6 +240,42 @@ func TestGenerateHLAEJavaScriptGameplayHUDIsDefault(t *testing.T) {
 	if strings.Contains(js, `cl_drawhud 0`) {
 		t.Fatalf("generated JS hides HUD in default mode:\n%s", js)
 	}
+	if strings.Contains(js, `mirv_deathmsg`) || strings.Contains(js, `safezonex`) || strings.Contains(js, `safezoney`) {
+		t.Fatalf("plain gameplay unexpectedly configures portrait killfeed:\n%s", js)
+	}
+}
+
+func TestGenerateHLAEJavaScriptPortraitSafeGameplayHUD(t *testing.T) {
+	p := testPlan()
+	p.Stream.HUDMode = HUDModeGameplay
+	p.Stream.PortraitSafeKillfeed = true
+
+	js, err := GenerateHLAEJavaScript(p)
+	if err != nil {
+		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
+	}
+	for _, want := range []string{
+		`cl_drawhud 1`,
+		`cl_draw_only_deathnotices 0`,
+		`mirv_deathmsg clear`,
+		`mirv_deathmsg filter clear`,
+		`mirv_deathmsg filter add attackerMatch=!x76561198148986856 block=1 lastRule=1`,
+		`mirv_deathmsg localPlayer -1`,
+		`mirv_deathmsg lifetime 1.6`,
+		`safezonex 0.28`,
+		`safezoney 0.82`,
+		`mirv_deathmsg localPlayer default`,
+		`mirv_deathmsg lifetime default`,
+		`safezonex 1`,
+		`safezoney 1`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("generated JS missing %q\n%s", want, js)
+		}
+	}
+	if strings.Contains(js, `cl_draw_only_deathnotices 1`) {
+		t.Fatalf("portrait-safe gameplay hid the full HUD:\n%s", js)
+	}
 }
 
 func TestGenerateHLAEJavaScriptCleanHUDMode(t *testing.T) {

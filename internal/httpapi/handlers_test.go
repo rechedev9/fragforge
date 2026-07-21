@@ -1487,7 +1487,8 @@ func TestStartRecordingAppliesPresetCaptureHUD(t *testing.T) {
 		{name: "kill feed vertical", preset: editor.PresetViral60Clean, format: renderplan.FormatShort9x16, wantHUD: "deathnotices", wantPortraitSafeKillfeed: true},
 		{name: "kill feed landscape", preset: editor.PresetViral60Clean, format: renderplan.FormatLandscape16x9, wantHUD: "deathnotices"},
 		{name: "clean POV", preset: editor.PresetCleanPOV60, format: renderplan.FormatShort9x16, wantHUD: "clean"},
-		{name: "full HUD", preset: editor.PresetFullHUD60, format: renderplan.FormatShort9x16, wantHUD: "gameplay"},
+		{name: "full HUD vertical", preset: editor.PresetFullHUD60, format: renderplan.FormatShort9x16, wantHUD: "gameplay", wantPortraitSafeKillfeed: true},
+		{name: "full HUD landscape", preset: editor.PresetFullHUD60, format: renderplan.FormatLandscape16x9, wantHUD: "gameplay"},
 	}
 
 	for _, tc := range tests {
