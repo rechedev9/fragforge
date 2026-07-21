@@ -31,14 +31,19 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAssistantContext } from '@/components/assistant/assistant-provider';
 import {
+  assistantActionStatusLabel,
+  assistantActionsSectionLabel,
+  assistantActionsSectionState,
   assistantContextFromPathname,
   ASSISTANT_ACCOUNT_STATUSES,
   ASSISTANT_ACTION_STATUSES,
   ASSISTANT_AVAILABILITY,
   ASSISTANT_MESSAGE_ROLES,
   type AssistantAction,
+  type AssistantActionStatus,
   type AssistantAccount,
   type AssistantActionRisk,
+  type AssistantActionsSectionState,
   type AssistantAvailability,
   type AssistantMessage,
   type AssistantSnapshot,
@@ -84,6 +89,8 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
   const endRef = useRef<HTMLDivElement>(null);
   const composerId = useId();
   const actionsTitleId = useId();
+  const actionsSectionLabel = assistantActionsSectionLabel(snapshot.pendingActions);
+  const actionsSectionState = assistantActionsSectionState(snapshot.pendingActions);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: snapshot.busy ? 'smooth' : 'auto', block: 'end' });
@@ -270,9 +277,9 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
         {snapshot.pendingActions.length > 0 ? (
           <section className="mt-5 space-y-2.5" aria-labelledby={actionsTitleId}>
             <div className="flex items-center gap-2 px-1">
-              <ShieldAlert className="size-3.5 text-warning" aria-hidden />
+              <ActionsSectionIcon state={actionsSectionState} />
               <h3 id={actionsTitleId} className="font-[family-name:var(--font-mono)] text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                Acciones para revisar
+                {actionsSectionLabel}
               </h3>
             </div>
             {snapshot.pendingActions.map((action) => (
@@ -357,7 +364,7 @@ function ConversationContent({ snapshot }: { snapshot: AssistantSnapshot }): Rea
           {snapshot.busy ? 'El agente está preparando la respuesta…' : 'Soy tu agente de FragForge'}
         </p>
         <p className="mt-1 max-w-64 text-xs leading-5 text-muted-foreground">
-          Puedo consultar y utilizar todas las operaciones de Studio para preparar demos, clips, renders, QA y entregas. Las acciones sensibles siempre se revisan antes de ejecutarse.
+          Puedo abrir tus demos o grabaciones de stream y utilizar todas las operaciones de Studio hasta el render, QA y entrega. Las acciones sensibles siempre se revisan antes de ejecutarse.
         </p>
       </div>
     );
@@ -467,9 +474,9 @@ function AssistantActionCard({
   );
 }
 
-function ActionMeta({ action, status }: { action: AssistantAction; status: string }): ReactElement {
+function ActionMeta({ action, status }: { action: AssistantAction; status: AssistantActionStatus }): ReactElement {
   if (status !== ASSISTANT_ACTION_STATUSES.pending) {
-    return <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{actionStatusLabel(status)}</span>;
+    return <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{assistantActionStatusLabel(action, status)}</span>;
   }
   if (action.expiresAt) {
     return (
@@ -521,6 +528,19 @@ function AccountConnection({
   );
 }
 
+function ActionsSectionIcon({ state }: { state: AssistantActionsSectionState }): ReactElement {
+  switch (state) {
+    case 'pending':
+      return <ShieldAlert className="size-3.5 text-warning" aria-hidden />;
+    case 'completed':
+      return <CircleCheck className="size-3.5 text-success" aria-hidden />;
+    case 'attention':
+      return <TriangleAlert className="size-3.5 text-warning" aria-hidden />;
+    case 'history':
+      return <Clock3 className="size-3.5 text-muted-foreground" aria-hidden />;
+  }
+}
+
 function AvailabilityDot({ account, availability }: { account: AssistantAccount; availability: AssistantAvailability }): ReactElement {
   if (availability === ASSISTANT_AVAILABILITY.ready && account.status === ASSISTANT_ACCOUNT_STATUSES.signedIn) {
     return <CircleCheck className="size-3.5 text-success" aria-hidden />;
@@ -570,23 +590,6 @@ function planLabel(planType: string): string {
   if (planType === 'edu') return 'ChatGPT Edu';
   if (planType === 'free') return 'ChatGPT Free';
   return 'ChatGPT';
-}
-
-function actionStatusLabel(status: string): string {
-  switch (status) {
-    case ASSISTANT_ACTION_STATUSES.approved:
-      return 'Aprobada';
-    case ASSISTANT_ACTION_STATUSES.completed:
-      return 'Completada';
-    case ASSISTANT_ACTION_STATUSES.expired:
-      return 'Caducada';
-    case ASSISTANT_ACTION_STATUSES.failed:
-      return 'Fallida';
-    case ASSISTANT_ACTION_STATUSES.rejected:
-      return 'Rechazada';
-    default:
-      return 'Pendiente';
-  }
 }
 
 function timestampLabel(value: string): string {

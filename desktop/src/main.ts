@@ -13,6 +13,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   safeStorage,
   shell,
@@ -205,9 +206,24 @@ function getAssistantController(): AssistantController {
     onEvent: sendAssistantEvent,
     openAuthURL: async (url) => shell.openExternal(url),
     orchestratorClient: client,
+    selectLocalMedia: selectAssistantLocalMedia,
     version: app.getVersion(),
   });
   return assistantController;
+}
+
+async function selectAssistantLocalMedia(kind: 'demo' | 'stream'): Promise<string | null> {
+  const win = aliveWindow();
+  if (win === null) return null;
+  const result = await dialog.showOpenDialog(win, {
+    filters: kind === 'demo'
+      ? [{ extensions: ['dem'], name: 'Demo de Counter-Strike 2' }]
+      : [{ extensions: ['avi', 'flv', 'm2ts', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 'ts', 'webm'], name: 'Grabación de stream' }],
+    properties: ['openFile'],
+    title: kind === 'demo' ? 'Selecciona una demo de CS2' : 'Selecciona una grabación de stream',
+  });
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
 }
 
 // Origins the window is allowed to navigate to on its own, populated once the

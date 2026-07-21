@@ -3255,6 +3255,40 @@ func TestStartStreamRenderAcceptsLegacyTwentySecondPlanWithoutPersistingMigratio
 	}
 }
 
+func TestStartStreamRenderRejectsApprovedPlanThatNeedsLegacyMigration(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	queue := &fakeQueue{}
+	id := uuid.New()
+	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
+	plan.Clips = []streamclips.ClipRange{{ID: "legacy", StartSeconds: 0, EndSeconds: 20}}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRepo.jobs[id] = streamclips.Job{
+		ID:         id,
+		Status:     streamclips.StatusReady,
+		SourcePath: streamclips.SourceKey(id),
+		Probe:      streamclips.SourceProbe{DurationSeconds: 15.15},
+		EditPlan:   planJSON,
+	}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo))
+	r := Routes(h)
+	body := strings.NewReader(fmt.Sprintf(`{"expected_edit_plan_updated_at":%q}`, plan.UpdatedAt.Format(time.RFC3339Nano)))
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+plan.Variant, body)
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusConflict || !strings.Contains(rw.Body.String(), "requires migration after approval") {
+		t.Fatalf("response = %d %s, want actionable 409", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("approved legacy plan queued %d render tasks, want zero", len(queue.enqueued))
+	}
+}
+
 func TestStartStreamRenderRejectsBeforePersistingPartialLegacyMigration(t *testing.T) {
 	streamRepo := newFakeStreamRepo()
 	store := newFakeStorage()
@@ -3719,6 +3753,80 @@ func TestStartStreamRenderAcceptsRegistryVariantsAndRejectsUnknown(t *testing.T)
 			}
 		}
 	})
+}
+
+func TestStartStreamRenderRequiresTheApprovedEditPlanRevision(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
+	plan.UpdatedAt = time.Date(2026, 7, 20, 20, 0, 0, 123, time.UTC)
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRepo.jobs[id] = streamclips.Job{
+		ID: id, Status: streamclips.StatusReady,
+		SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+	}
+	queue := &fakeQueue{}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo))
+	r := Routes(h)
+
+	staleBody := strings.NewReader(`{"expected_edit_plan_updated_at":"2026-07-20T19:59:59Z"}`)
+	staleRequest := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+plan.Variant, staleBody)
+	staleRequest.Header.Set("Content-Type", "application/json")
+	staleResponse := httptest.NewRecorder()
+	r.ServeHTTP(staleResponse, staleRequest)
+
+	if staleResponse.Code != http.StatusConflict || !strings.Contains(staleResponse.Body.String(), "changed after approval") {
+		t.Fatalf("stale response = %d %s, want actionable 409", staleResponse.Code, staleResponse.Body.String())
+	}
+	if len(queue.enqueued) != 0 {
+		t.Fatalf("stale revision queued %d render tasks, want zero", len(queue.enqueued))
+	}
+
+	currentBody := strings.NewReader(fmt.Sprintf(`{"expected_edit_plan_updated_at":%q}`, plan.UpdatedAt.Format(time.RFC3339Nano)))
+	currentRequest := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+plan.Variant, currentBody)
+	currentRequest.Header.Set("Content-Type", "application/json")
+	currentResponse := httptest.NewRecorder()
+	r.ServeHTTP(currentResponse, currentRequest)
+
+	if currentResponse.Code != http.StatusAccepted {
+		t.Fatalf("current response = %d %s, want 202", currentResponse.Code, currentResponse.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("current revision queued %d render tasks, want one", len(queue.enqueued))
+	}
+}
+
+func TestStartStreamRenderAcceptsAnEmptyOptionalJSONBody(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	id := uuid.New()
+	plan := streamclips.DefaultEditPlan()
+	plan.FaceCropReviewed = true
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRepo.jobs[id] = streamclips.Job{
+		ID: id, Status: streamclips.StatusReady,
+		SourcePath: streamclips.SourceKey(id), EditPlan: planJSON,
+	}
+	queue := &fakeQueue{}
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), queue, WithStreamRepository(streamRepo))
+	r := Routes(h)
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs/"+id.String()+"/renders/"+plan.Variant, strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	r.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusAccepted {
+		t.Fatalf("response = %d %s, want 202", rw.Code, rw.Body.String())
+	}
+	if len(queue.enqueued) != 1 {
+		t.Fatalf("empty optional JSON body queued %d render tasks, want one", len(queue.enqueued))
+	}
 }
 
 func TestStartStreamRenderMarksStateFailedWhenEnqueueFails(t *testing.T) {

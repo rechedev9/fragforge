@@ -72,6 +72,24 @@ function recoveryOperations(result: JsonObject): unknown[] {
   return recovery.steps.filter(isJsonObject).map((step) => step.operation);
 }
 
+test('streams.start_render sends the approved edit-plan revision as a request precondition', async () => {
+  const double = clientDouble(() => ({ status: 'rendering' }));
+  const revision = '2026-07-20T20:00:00.123Z';
+
+  await operation('streams.start_render').run(double.client, {
+    expected_edit_plan_updated_at: revision,
+    stream_job_id: STREAM_JOB_ID,
+    variant: 'streamer-vertical-stack-40-60',
+  });
+
+  assert.deepEqual(double.state.requests, [{
+    body: { expected_edit_plan_updated_at: revision },
+    method: 'POST',
+    path: `/api/stream-jobs/${STREAM_JOB_ID}/renders/streamer-vertical-stack-40-60`,
+    signal: undefined,
+  }]);
+});
+
 test('streams.create_from_file keeps its successful upload-and-initialize result', async () => {
   const plan: JsonObject = { gameplay_crop: { height: 1, width: 1, x: 0, y: 0 } };
   const readyPlan: JsonObject = { ...plan, updated_at: '2026-07-13T12:00:00Z' };

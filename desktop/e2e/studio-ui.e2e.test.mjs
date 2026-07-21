@@ -93,6 +93,7 @@ test('shows the branded agent, OAuth connection surface, and operation promise',
   await openAgent.click();
   const dialog = page.getByRole('dialog', { name: 'Agente de FragForge' });
   await dialog.waitFor({ state: 'visible' });
+  await dialog.getByRole('button', { name: 'Nueva conversación' }).click();
   assert.equal(await dialog.getByText('Agente FragForge', { exact: true }).isVisible(), true);
   assert.equal(await dialog.getByText('Soy tu agente de FragForge', { exact: true }).isVisible(), true);
   assert.equal(await dialog.getByText(/todas las operaciones de Studio/).isVisible(), true);

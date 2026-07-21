@@ -403,6 +403,10 @@ func (h *Handlers) PutStreamEditPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
+	expectedPlanUpdatedAt, hasExpectedPlanUpdatedAt, ok := decodeExpectedStreamPlanRevision(w, r)
+	if !ok {
+		return
+	}
 	releaseJob := h.lockStreamJobRequest(r)
 	defer releaseJob()
 	h.streamPlanMu.Lock()
@@ -428,11 +432,19 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plan = streamclips.NormalizeEditPlan(plan)
+	if hasExpectedPlanUpdatedAt && !plan.UpdatedAt.Equal(expectedPlanUpdatedAt) {
+		writeError(w, http.StatusConflict, "stream edit plan changed after approval; review the latest plan before rendering")
+		return
+	}
 	hadClipsBeforeMigration := len(plan.Clips) > 0
 	migrationApplied := false
 	if migrated, changed := streamclips.MigrateLegacySourceDuration(plan, j.Probe.DurationSeconds); changed {
 		plan = migrated
 		migrationApplied = true
+	}
+	if migrationApplied && hasExpectedPlanUpdatedAt {
+		writeError(w, http.StatusConflict, "stream edit plan requires migration after approval; save and review the migrated plan before rendering")
+		return
 	}
 	if err := plan.ValidateForSourceDuration(j.Probe.DurationSeconds); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -539,6 +551,44 @@ func (h *Handlers) StartStreamRender(w http.ResponseWriter, r *http.Request) {
 		"variant": variant,
 		"status":  state.Status,
 	})
+}
+
+type startStreamRenderRequest struct {
+	ExpectedEditPlanUpdatedAt string `json:"expected_edit_plan_updated_at"`
+}
+
+func decodeExpectedStreamPlanRevision(w http.ResponseWriter, r *http.Request) (time.Time, bool, bool) {
+	if !isJSONContentType(r.Header.Get("Content-Type")) {
+		return time.Time{}, false, true
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var input startStreamRenderRequest
+	if err := decoder.Decode(&input); err != nil {
+		if errors.Is(err, io.EOF) {
+			return time.Time{}, false, true
+		}
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, "stream render request JSON is too large")
+			return time.Time{}, false, false
+		}
+		writeError(w, http.StatusBadRequest, "invalid stream render request JSON")
+		return time.Time{}, false, false
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "stream render request must contain one JSON object")
+		return time.Time{}, false, false
+	}
+	if input.ExpectedEditPlanUpdatedAt == "" {
+		return time.Time{}, false, true
+	}
+	expected, err := time.Parse(time.RFC3339Nano, input.ExpectedEditPlanUpdatedAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "expected_edit_plan_updated_at must be an RFC3339 timestamp")
+		return time.Time{}, false, false
+	}
+	return expected, true, true
 }
 
 func invalidateChangedCaptionReviews(previous streamclips.EditPlan, current *streamclips.EditPlan) {

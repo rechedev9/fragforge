@@ -113,6 +113,45 @@ export interface AssistantAction {
   requiresApproval?: boolean;
 }
 
+export function assistantActionStatusLabel(
+  action: Pick<AssistantAction, 'operation' | 'risk'>,
+  status: AssistantActionStatus,
+): string {
+  switch (status) {
+    case ASSISTANT_ACTION_STATUSES.approved:
+      return 'Aprobada';
+    case ASSISTANT_ACTION_STATUSES.completed:
+      if (action.operation === 'studio.confirm_creative_brief') return 'Brief aprobado';
+      return action.risk === ASSISTANT_ACTION_RISKS.costly ? 'Solicitud enviada' : 'Completada';
+    case ASSISTANT_ACTION_STATUSES.expired:
+      return 'Caducada';
+    case ASSISTANT_ACTION_STATUSES.failed:
+      return 'Fallida';
+    case ASSISTANT_ACTION_STATUSES.rejected:
+      return 'Rechazada';
+    default:
+      return 'Pendiente';
+  }
+}
+
+export function assistantActionsSectionLabel(actions: readonly AssistantAction[]): string {
+  return actions.some((action) => (action.status ?? ASSISTANT_ACTION_STATUSES.pending) === ASSISTANT_ACTION_STATUSES.pending)
+    ? 'Acciones para revisar'
+    : 'Historial de acciones';
+}
+
+export type AssistantActionsSectionState = 'attention' | 'completed' | 'history' | 'pending';
+
+export function assistantActionsSectionState(actions: readonly AssistantAction[]): AssistantActionsSectionState {
+  const statuses = actions.map((action) => action.status ?? ASSISTANT_ACTION_STATUSES.pending);
+  if (statuses.includes(ASSISTANT_ACTION_STATUSES.pending)) return 'pending';
+  if (statuses.length > 0 && statuses.every((status) => status === ASSISTANT_ACTION_STATUSES.completed)) return 'completed';
+  if (statuses.some((status) => status === ASSISTANT_ACTION_STATUSES.failed
+    || status === ASSISTANT_ACTION_STATUSES.rejected
+    || status === ASSISTANT_ACTION_STATUSES.expired)) return 'attention';
+  return 'history';
+}
+
 export interface AssistantSnapshot {
   account: AssistantAccount;
   availability: AssistantAvailability;

@@ -409,6 +409,22 @@ const STREAM_VARIANT_SCHEMA = objectSchema(
   },
   ['stream_job_id', 'variant'],
 );
+const STREAM_RENDER_START_SCHEMA = objectSchema(
+  {
+    expected_edit_plan_updated_at: {
+      description: 'Optional optimistic-concurrency precondition for the exact saved plan approved by Studio.',
+      format: 'date-time',
+      type: 'string',
+    },
+    stream_job_id: UUID_PROPERTY,
+    variant: {
+      description: 'Stream layout variant. Search returns the currently supported choices.',
+      pattern: SAFE_TOKEN_PATTERN,
+      type: 'string',
+    },
+  },
+  ['stream_job_id', 'variant'],
+);
 
 const operations: readonly OperationDefinition[] = [
   {
@@ -886,7 +902,19 @@ const operations: readonly OperationDefinition[] = [
     run: editStreamClip,
     title: 'Edit stream clip options',
   },
-  mutationOperation({ category: 'streams', description: 'Start a costly stream clip render from the saved edit plan, including xAI subtitles when enabled.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'vertical', 'render', 'captions', 'subtitles', 'subtitulos', 'xai', 'grok'], name: 'streams.start_render', path: (input) => streamRenderPath(input), risk: 'costly', title: 'Start stream render' }),
+  mutationOperation({
+    body: (input) => input.expected_edit_plan_updated_at === undefined
+      ? undefined
+      : { expected_edit_plan_updated_at: input.expected_edit_plan_updated_at },
+    category: 'streams',
+    description: 'Start a costly stream clip render from the saved edit plan, including xAI subtitles when enabled.',
+    inputSchema: STREAM_RENDER_START_SCHEMA,
+    keywords: ['twitch', 'vertical', 'render', 'captions', 'subtitles', 'subtitulos', 'xai', 'grok'],
+    name: 'streams.start_render',
+    path: (input) => streamRenderPath(input),
+    risk: 'costly',
+    title: 'Start stream render',
+  }),
   readOperation({ category: 'streams', description: 'Read stream render progress and real video entries.', inputSchema: STREAM_VARIANT_SCHEMA, keywords: ['twitch', 'render', 'videos'], name: 'streams.get_render', path: (input) => streamRenderPath(input), title: 'Get stream render state' }),
   readOperation({
     category: 'streams',

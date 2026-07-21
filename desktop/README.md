@@ -59,9 +59,15 @@ After connecting, the agent can inspect and use Studio's typed operations for
 demos, stream clips, renders, captions, killfeed review, QA, publishing assets,
 and cleanup. Reads execute directly. Writes, costly work, and destructive work
 become exact approval cards, while capture and render also require an approved
-creative brief. Public Twitch clip/VOD URLs can be supplied in chat. Local demo,
-video, and voice files stay behind Studio's file pickers so their paths and raw
-media never enter model context.
+creative brief. It can open Studio's native picker to start a local demo or
+stream-video import, continue automatically after every approved operation, and
+watch queued parsing, capture, analysis, and render states so the next agent
+turn starts without another user message. A stream brief snapshots the canonical
+saved edit plan and is invalidated, together with prepared render cards, whenever
+that plan changes. The approved plan timestamp is also sent as an atomic backend
+precondition, so a last-moment edit cannot race past render admission. Public Twitch clip/VOD URLs can also
+be supplied in chat. Local demo, video, and voice files stay behind Studio's
+file pickers so their paths and raw media never enter model context.
 
 The embedded agent uses Codex app-server dynamic tools directly through the
 narrow Studio operation gateway. No external assistant transport or launcher

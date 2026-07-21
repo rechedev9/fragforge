@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyAssistantEvent,
+  assistantActionStatusLabel,
+  assistantActionsSectionLabel,
+  assistantActionsSectionState,
   beginAssistantCommand,
   assistantContextFromPathname,
+  ASSISTANT_ACTION_STATUSES,
   ASSISTANT_AVAILABILITY,
   finishAssistantCommand,
   getFragforgeAssistantBridge,
@@ -12,6 +16,27 @@ import {
   parseAssistantSnapshotEvent,
   type FragforgeAssistantBridge,
 } from './assistant.ts';
+
+test('labels approval history by what actually completed', () => {
+  const brief = { id: 'brief', operation: 'studio.confirm_creative_brief', risk: 'costly' as const, title: 'Brief' };
+  const render = { id: 'render', operation: 'jobs.generate', risk: 'costly' as const, title: 'Render' };
+  const write = { id: 'write', operation: 'jobs.parse', risk: 'write' as const, title: 'Parse' };
+
+  assert.equal(assistantActionStatusLabel(brief, ASSISTANT_ACTION_STATUSES.completed), 'Brief aprobado');
+  assert.equal(assistantActionStatusLabel(render, ASSISTANT_ACTION_STATUSES.completed), 'Solicitud enviada');
+  assert.equal(assistantActionStatusLabel(write, ASSISTANT_ACTION_STATUSES.completed), 'Completada');
+  assert.equal(assistantActionsSectionLabel([{ ...brief, status: ASSISTANT_ACTION_STATUSES.completed }]), 'Historial de acciones');
+  assert.equal(assistantActionsSectionLabel([
+    { ...brief, status: ASSISTANT_ACTION_STATUSES.completed },
+    { ...render, status: ASSISTANT_ACTION_STATUSES.pending },
+  ]), 'Acciones para revisar');
+  assert.equal(assistantActionsSectionState([{ ...render, status: ASSISTANT_ACTION_STATUSES.pending }]), 'pending');
+  assert.equal(assistantActionsSectionState([{ ...render, status: ASSISTANT_ACTION_STATUSES.completed }]), 'completed');
+  assert.equal(assistantActionsSectionState([{ ...render, status: ASSISTANT_ACTION_STATUSES.failed }]), 'attention');
+  assert.equal(assistantActionsSectionState([{ ...render, status: ASSISTANT_ACTION_STATUSES.rejected }]), 'attention');
+  assert.equal(assistantActionsSectionState([{ ...render, status: ASSISTANT_ACTION_STATUSES.expired }]), 'attention');
+  assert.equal(assistantActionsSectionState([{ ...render, status: ASSISTANT_ACTION_STATUSES.approved }]), 'history');
+});
 
 function bridge(): FragforgeAssistantBridge {
   const snapshot = initialAssistantSnapshot(ASSISTANT_AVAILABILITY.ready);

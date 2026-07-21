@@ -1,7 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { basename } from 'node:path';
 import {
   type AssistantAction,
   type AssistantActionPreview,
+  type AssistantActionPreviewField,
   type AssistantContext,
   type AssistantEvent,
   type AssistantMessage,
@@ -35,19 +37,25 @@ const ACTION_EXPIRY_MS = 15 * 60_000;
 const INITIALIZE_TIMEOUT_MS = 15_000;
 const INTERRUPT_TIMEOUT_MS = 5_000;
 const TURN_TIMEOUT_MS = 5 * 60_000;
+const STATE_WATCH_INTERVAL_MS = 3_000;
+const STATE_WATCH_TIMEOUT_MS = 2 * 60 * 60_000;
 const MAX_ACTION_CARDS = 16;
+const MAX_STATE_WATCHES = 4;
 const MAX_MESSAGE_CONTENT_LENGTH = 12_000;
 const MAX_MESSAGES = 200;
 const MAX_MODEL_VALUE_LENGTH = 12_000;
 const MAX_MODEL_VALUE_DEPTH = 8;
 const MAX_MODEL_VALUE_ITEMS = 100;
+const MAX_OPERATION_CONTINUATION_RESULT_LENGTH = 8_000;
 const MAX_REVIEWABLE_ACTION_ARRAY_ITEMS = 32;
 const MAX_REVIEWABLE_ACTION_FIELDS = 48;
 const MAX_REVIEWABLE_ACTION_STRING_LENGTH = 240;
+const MAX_STREAM_BRIEF_CLIPS = MAX_REVIEWABLE_ACTION_FIELDS - 10;
+const MAX_STREAM_BRIEF_TITLE_SUMMARY_LENGTH = 8_000;
 
-// File pickers remain in Studio so local paths never enter model context. Every
-// other typed Studio operation is available to the agent, including Twitch URL
-// intake, and mutations still require an exact approval card.
+// Local media intake uses a dedicated native picker tool below so paths never
+// enter model context. The path-taking catalog operations stay hidden while
+// every other typed Studio operation remains available to the agent.
 const STUDIO_FILE_PICKER_OPERATIONS = new Set([
   'jobs.create',
   'streams.create_from_file',
@@ -58,6 +66,12 @@ const ASSISTANT_OPERATIONS = new Set(
     .map((operation) => operation.name)
     .filter((name) => !STUDIO_FILE_PICKER_OPERATIONS.has(name)),
 );
+const STATE_WATCH_OPERATIONS = new Set<StateWatchOperation>([
+  'jobs.get',
+  'renders.get',
+  'streams.get',
+  'streams.get_render',
+]);
 
 const DYNAMIC_TOOLS: AppServerDynamicTool[] = [{
   description: 'Allowed local FragForge Studio operations. Search first. Read operations are safe; every change is only prepared as a preview and must be approved in Studio.',
@@ -99,24 +113,42 @@ const DYNAMIC_TOOLS: AppServerDynamicTool[] = [{
       name: 'creative_brief',
       type: 'function',
     },
+    {
+      description: 'Open Studio\'s native file picker for a local CS2 demo or stream recording, then prepare its upload as a separate approval card. The local path is never returned to the agent.',
+      inputSchema: localMediaSchema(),
+      name: 'select_local_media',
+      type: 'function',
+    },
+    {
+      description: 'Watch one exact demo, stream, or render status read in the background. When its state changes, Studio automatically starts a new agent turn so the workflow can continue without another user message.',
+      inputSchema: watchStateSchema(),
+      name: 'watch_state',
+      type: 'function',
+    },
   ],
   type: 'namespace',
 }];
 
-const DEVELOPER_INSTRUCTIONS = `You are the integrated FragForge Studio agent. You may use only the fragforge dynamic tools for Studio data and actions. They are not shell, filesystem, browser, or generic MCP tools. Never request, inspect, or repeat local file paths, raw media, credentials, tokens, or secrets; direct local media intake to Studio's existing file pickers. A public Twitch URL supplied by the user may only be used with streams.create_from_url.
+const DEVELOPER_INSTRUCTIONS = `You are the integrated FragForge Studio agent. You may use only the fragforge dynamic tools for Studio data and actions. They are not shell, filesystem, browser, or generic MCP tools. Never request, inspect, or repeat local file paths, raw media, credentials, tokens, or secrets. When the user wants to import a local demo or stream recording, call select_local_media so Studio opens its native picker; never ask the user to type a path. A public Twitch URL supplied by the user may only be used with streams.create_from_url.
 
 Always search the catalog before choosing an exact operation and use only IDs/options returned by the tool. Use read only for read-only operations. Preview only prepares a change for an exact Studio approval card; it never executes it. Never claim that a change ran unless Studio later reports completion. Never attempt a tool or workaround outside fragforge.
 
-Before previewing any capture or render action (including jobs.record, jobs.generate, renders.start, or streams.start_render), collect every unanswered creative-brief choice: format/aspect, HUD/killfeed treatment, effect/transition, numbering or counter, intro/outro, music, and cover strategy. Then call creative_brief with all choices. The user must explicitly approve its Studio card before you can preview the costly operation. Generic words such as “go”, “dale”, “ok”, or “hazlo” are not creative approval unless that approved brief is already visible in the conversation. The later Studio approval card is the separate final approval for the exact operation.
+Before previewing demo capture or render (jobs.record, jobs.generate, or renders.start), collect every unanswered demo brief choice: format/aspect, HUD and killfeed treatment, effect and transition, numbering/counter, intro/outro, music, and cover strategy. Before streams.start_render, first read and prepare the saved edit plan, then collect the stream brief: delivery format, exact live layout variant, saved clip selection and title, crop/framing, killfeed treatment, Spanish subtitle/review policy, music, and cover strategy. Call creative_brief with the matching complete shape. The user must explicitly approve its Studio card before you can preview the costly operation. Generic words such as “go”, “dale”, “ok”, or “hazlo” are not creative approval unless that approved brief is already visible in the conversation. The later Studio approval card is the separate final approval for the exact operation.
+
+Own the complete workflow instead of stopping after one step. After Studio reports an approved operation as started or completed, inspect the returned IDs and current state, continue all safe reads yourself, and prepare the next required mutation for approval. For demos this includes intake, roster/target selection, parsing, moment selection, creative brief, generation, render QA, and publish readiness. For streams this includes intake, edit planning, optional caption and killfeed review, creative brief, rendering, and artifact QA. Never repeat an accepted upload or costly action merely because its background job is still running.
+
+When a demo, stream analysis, capture, or render is still running and no next action is possible yet, call watch_state for its exact status-read operation. Studio will wake you with the changed state; do not ask the user to poll or send another message.
 
 Be concise, answer in the user's language, and explain unavailable capabilities honestly.`;
 
 interface PendingOperationAction {
   arguments: JsonObject;
   card: AssistantAction;
+  context: AssistantContext;
   expiryTimer: NodeJS.Timeout;
   kind: 'operation';
   operation: string;
+  streamPlanFingerprint?: string;
 }
 
 interface PendingCreativeBrief {
@@ -129,31 +161,70 @@ interface PendingCreativeBrief {
 type PendingAction = PendingOperationAction | PendingCreativeBrief;
 type TurnOutcome = 'cancelled' | 'completed' | 'failed';
 
-interface CreativeBrief {
+interface CreativeBriefBase {
   cover: CreativeBriefCover;
+  format: CreativeBriefFormat;
+  music: CreativeBriefMusic;
+  targetID: string;
+  targetKind: 'job' | 'stream-job';
+}
+
+interface DemoCreativeBrief extends CreativeBriefBase {
   counter: CreativeBriefCounter;
   effect: CreativeBriefEffect;
-  format: CreativeBriefFormat;
   hud: CreativeBriefHUD;
   intro: CreativeBriefIntro;
   killfeed: CreativeBriefKillfeed;
-  music: CreativeBriefMusic;
-  operation: CreativeOperation;
+  operation: Exclude<CreativeOperation, 'streams.start_render'>;
   outro: CreativeBriefOutro;
-  targetID: string;
-  targetKind: 'job' | 'stream-job';
+  targetKind: 'job';
   transition: CreativeBriefTransition;
 }
 
-interface ApprovedCreativeBrief extends CreativeBrief {
-  expiresAt: number;
+interface StreamCreativeBriefInput extends CreativeBriefBase {
+  captions: StreamCreativeBriefCaptions;
+  clipSelection: 'saved-edit-plan';
+  framing: StreamCreativeBriefFraming;
+  killfeed: StreamCreativeBriefKillfeed;
+  layout: string;
+  operation: 'streams.start_render';
+  targetKind: 'stream-job';
+  title: string;
 }
+
+interface StreamCreativeBrief extends StreamCreativeBriefInput {
+  planFingerprint: string;
+  planPreviewFields: readonly AssistantActionPreviewField[];
+  planUpdatedAt: string;
+}
+
+type CreativeBrief = DemoCreativeBrief | StreamCreativeBrief;
+type ParsedCreativeBrief = DemoCreativeBrief | StreamCreativeBriefInput;
+type ApprovedCreativeBrief = CreativeBrief & { expiresAt: number };
 
 interface CreativeBriefRequirement {
   format?: CreativeBriefFormat;
+  layout?: string;
   operation: CreativeOperation;
   targetID: string;
   targetKind: 'job' | 'stream-job';
+}
+
+interface LocalMediaRequest {
+  kind: LocalMediaKind;
+  targetSteamID?: string;
+  title?: string;
+}
+
+interface PendingStateWatch {
+  arguments: JsonObject;
+  controller: AbortController;
+  context: AssistantContext;
+  expiresAt: number;
+  expiryTimer: NodeJS.Timeout;
+  operation: StateWatchOperation;
+  state: string;
+  timer?: NodeJS.Timeout;
 }
 
 type CreativeOperation = 'jobs.generate' | 'jobs.record' | 'renders.start' | 'streams.start_render';
@@ -167,6 +238,11 @@ type CreativeBriefIntro = 'hook' | 'none';
 type CreativeBriefOutro = 'loop' | 'none';
 type CreativeBriefMusic = 'none' | 'selected';
 type CreativeBriefCover = 'generated-gameplay-candidates' | 'no-cover';
+type LocalMediaKind = 'demo' | 'stream';
+type StreamCreativeBriefCaptions = 'disabled' | 'spanish-auto-review' | 'spanish-reviewed';
+type StreamCreativeBriefFraming = 'clean-crop' | 'full-frame';
+type StreamCreativeBriefKillfeed = 'none' | 'preserve' | 'synthetic';
+type StateWatchOperation = 'jobs.get' | 'renders.get' | 'streams.get' | 'streams.get_render';
 
 export interface AssistantControllerOptions {
   /** A dedicated empty directory; Codex never receives the Studio repository or user-data directory as its cwd. */
@@ -179,6 +255,10 @@ export interface AssistantControllerOptions {
   orchestratorClient: OrchestratorClient;
   /** Non-sensitive diagnostic sink (usually the desktop studio log). */
   log?: (message: string) => void;
+  /** Opens a native picker and returns its selected path only to the main process. */
+  selectLocalMedia?: (kind: LocalMediaKind) => Promise<string | null>;
+  stateWatchIntervalMs?: number;
+  stateWatchTimeoutMs?: number;
   createAppServer?: CodexAppServerFactory;
   appServerOptions?: Omit<CodexAppServerClientOptions,
     'clientInfo' | 'cwd' | 'dynamicTools' | 'onAgentMessageDelta' | 'onDiagnostic' | 'onDynamicToolCall' | 'onError' | 'onNotification' | 'onStatus' | 'onTurnCompleted' | 'onTurnStarted'>;
@@ -203,6 +283,9 @@ export class AssistantController {
   readonly #onEvent: ((event: AssistantEvent) => void) | undefined;
   readonly #openAuthURL: (url: string) => Promise<void>;
   readonly #orchestratorClient: OrchestratorClient;
+  readonly #selectLocalMedia?: AssistantControllerOptions['selectLocalMedia'];
+  readonly #stateWatchIntervalMs: number;
+  readonly #stateWatchTimeoutMs: number;
   readonly #version: string;
   readonly #turnTimeoutMs: number;
   readonly #pendingActions = new Map<string, PendingAction>();
@@ -210,6 +293,7 @@ export class AssistantController {
   readonly #approvalControllers = new Set<AbortController>();
   readonly #approvedBriefs = new Map<string, ApprovedCreativeBrief>();
   readonly #stateNotes: string[] = [];
+  readonly #stateWatches = new Map<string, PendingStateWatch>();
   #appServer: CodexAppServer | null = null;
   #account: AssistantSnapshot['account'] = { status: 'checking' };
   #availability: AssistantSnapshot['availability'] = 'starting';
@@ -218,6 +302,7 @@ export class AssistantController {
   #error: string | undefined;
   #historyLoaded = false;
   #initializing: Promise<void> | null = null;
+  #lastContext: AssistantContext = { kind: 'none', label: 'Studio', pathname: '/' };
   #loginID: string | null = null;
   #messages: AssistantMessage[] = [];
   #revision = 0;
@@ -243,6 +328,9 @@ export class AssistantController {
     this.#onEvent = options.onEvent;
     this.#openAuthURL = options.openAuthURL ?? (() => Promise.reject(new Error('OAuth browser opener is unavailable')));
     this.#orchestratorClient = options.orchestratorClient;
+    this.#selectLocalMedia = options.selectLocalMedia;
+    this.#stateWatchIntervalMs = positiveDuration(options.stateWatchIntervalMs ?? STATE_WATCH_INTERVAL_MS, 'stateWatchIntervalMs');
+    this.#stateWatchTimeoutMs = positiveDuration(options.stateWatchTimeoutMs ?? STATE_WATCH_TIMEOUT_MS, 'stateWatchTimeoutMs');
     this.#version = options.version ?? '0.0.0';
     this.#turnTimeoutMs = positiveDuration(options.turnTimeoutMs ?? TURN_TIMEOUT_MS, 'turnTimeoutMs');
   }
@@ -283,6 +371,15 @@ export class AssistantController {
     if (this.#busy) throw new Error('an agent turn is already running');
 
     const userMessage = this.#appendMessage({ content: message, role: 'user' });
+    await this.#startAgentTurn(message, context, userMessage.id);
+  }
+
+  async #startAgentTurn(message: string, context: AssistantContext, clientUserMessageID?: string): Promise<void> {
+    const appServer = this.#appServer;
+    if (this.#availability !== 'ready' || appServer === null) throw new Error('FragForge Agent is not available');
+    if (this.#busy) throw new Error('an agent turn is already running');
+
+    this.#lastContext = { ...context };
     const assistantMessage = this.#appendMessage({ content: '', role: 'assistant', streaming: true });
     const generation = ++this.#turnGeneration;
     this.#activeMessageID = assistantMessage.id;
@@ -295,8 +392,8 @@ export class AssistantController {
 
     try {
       const threadID = await this.#ensureThread();
-      const turn = await this.#appServer.startTurn(threadID, turnPrompt(message, context, this.#stateNotes), {
-        clientUserMessageId: userMessage.id,
+      const turn = await appServer.startTurn(threadID, turnPrompt(message, context, this.#stateNotes), {
+        ...(clientUserMessageID === undefined ? {} : { clientUserMessageId: clientUserMessageID }),
         cwd: this.#cwd,
       });
       if (this.#busy && this.#activeTurnGeneration === generation) {
@@ -361,6 +458,32 @@ export class AssistantController {
     this.#publish();
 
     if (pending.kind === 'creative-brief') {
+      if (pending.brief.targetKind === 'stream-job') {
+        const controller = new AbortController();
+        this.#approvalControllers.add(controller);
+        let planMatches = false;
+        try {
+          const plan = await this.#readStreamEditPlan(pending.brief.targetID, controller.signal);
+          planMatches = streamPlanFingerprint(plan) === pending.brief.planFingerprint;
+        } catch {
+          // A stream brief fails closed when its canonical plan cannot be revalidated.
+        } finally {
+          this.#approvalControllers.delete(controller);
+        }
+        if (!planMatches) {
+          this.#replaceActionCard({ ...pending.card, status: 'expired' });
+          const invalidated = this.#invalidateStreamCreativeBrief('streams.update_edit_plan', {
+            stream_job_id: pending.brief.targetID,
+          });
+          const summary = invalidated
+            ?? `Studio detectó que el plan del stream ${pending.brief.targetID} cambió; el brief pendiente caducó antes de aprobarse.`;
+          this.#addStateNote(summary);
+          this.#appendMessage({ content: summary, role: 'system' });
+          this.#publish();
+          void this.#saveHistory();
+          throw new Error('El plan del stream cambió; revisa y aprueba un brief nuevo.');
+        }
+      }
       this.#approvedBriefs.set(creativeBriefKey(pending.brief), {
         ...pending.brief,
         expiresAt: Date.now() + ACTION_EXPIRY_MS,
@@ -371,29 +494,85 @@ export class AssistantController {
       this.#appendMessage({ content: summary, role: 'system' });
       this.#publish();
       void this.#saveHistory();
+      try {
+        await this.#startAgentTurn(
+          creativeBriefContinuationPrompt(pending.brief),
+          creativeBriefContext(pending.brief),
+        );
+      } catch {
+        const recovery = `El brief sigue aprobado para ${pending.brief.operation}, pero el Agent no pudo preparar la tarjeta final automáticamente. Escribe «prepara la acción aprobada» para reintentarlo sin repetir el brief.`;
+        this.#addStateNote(recovery);
+        this.#appendMessage({ content: recovery, role: 'system' });
+        this.#publish();
+        void this.#saveHistory();
+      }
       return;
     }
 
     const controller = new AbortController();
     this.#approvalControllers.add(controller);
+    let outcome: Extract<OperationGatewayOutcome, { kind: 'executed' }>;
     try {
-      const outcome = await this.#gateway.execute(
+      if (pending.streamPlanFingerprint !== undefined) {
+        const streamJobID = safeReferenceFrom(pending.arguments.stream_job_id);
+        let planMatches = false;
+        if (streamJobID !== undefined) {
+          try {
+            const plan = await this.#readStreamEditPlan(streamJobID, controller.signal);
+            planMatches = streamPlanFingerprint(plan) === pending.streamPlanFingerprint;
+          } catch {
+            // A costly render must fail closed when its approved plan cannot be verified.
+          }
+        }
+        if (!planMatches) {
+          const invalidated = streamJobID === undefined
+            ? undefined
+            : this.#invalidateStreamCreativeBrief('streams.update_edit_plan', { stream_job_id: streamJobID });
+          if (invalidated !== undefined) {
+            this.#addStateNote(invalidated);
+            this.#appendMessage({ content: invalidated, role: 'system' });
+          }
+          throw new Error('the approved stream plan changed before render execution');
+        }
+      }
+      const execution = await this.#gateway.execute(
         { arguments: pending.arguments, operation: pending.operation },
         { privileged: true, signal: controller.signal },
       );
-      if (outcome.kind !== 'executed') throw new Error('approved action did not execute');
-      const succeeded = !outcome.partialFailure;
-      const status = succeeded ? 'completed' : 'failed';
-      this.#replaceActionCard({ ...pending.card, status });
-      const summary = succeeded
-        ? `Studio completó ${pending.operation}.`
-        : `Studio no completó ${pending.operation}; revisa el estado actual antes de reintentar.`;
+      if (execution.kind !== 'executed') throw new Error('approved action did not execute');
+      if (execution.partialFailure) {
+        const invalidated = this.#invalidateStreamCreativeBrief(pending.operation, pending.arguments);
+        if (invalidated !== undefined) {
+          this.#addStateNote(invalidated);
+          this.#appendMessage({ content: invalidated, role: 'system' });
+        }
+        throw new Error('the action produced a partial result');
+      }
+      outcome = execution;
+      this.#replaceActionCard({ ...pending.card, status: 'completed' });
+      const summary = pending.card.risk === 'costly'
+        ? `Studio inició ${pending.operation}. La tarea continúa en segundo plano; consulta su estado antes de reintentar.`
+        : `Studio completó ${pending.operation}.`;
       this.#addStateNote(summary);
       this.#appendMessage({ content: summary, role: 'system' });
+      const invalidatedBrief = this.#invalidateStreamCreativeBrief(pending.operation, pending.arguments);
+      if (invalidatedBrief !== undefined) {
+        this.#addStateNote(invalidatedBrief);
+        this.#appendMessage({ content: invalidatedBrief, role: 'system' });
+      }
       this.#publish();
       void this.#saveHistory();
-      if (!succeeded) throw new Error('the action produced a partial result');
     } catch {
+      if (pending.streamPlanFingerprint !== undefined) {
+        const streamJobID = safeReferenceFrom(pending.arguments.stream_job_id);
+        const invalidated = streamJobID === undefined
+          ? undefined
+          : this.#invalidateStreamCreativeBrief('streams.update_edit_plan', { stream_job_id: streamJobID });
+        if (invalidated !== undefined) {
+          this.#addStateNote(invalidated);
+          this.#appendMessage({ content: invalidated, role: 'system' });
+        }
+      }
       this.#replaceActionCard({ ...pending.card, status: 'failed' });
       const summary = `Studio no pudo completar ${pending.operation}. La acción no se volverá a ejecutar automáticamente.`;
       this.#addStateNote(summary);
@@ -404,6 +583,17 @@ export class AssistantController {
     } finally {
       this.#approvalControllers.delete(controller);
     }
+
+    const context = operationContinuationContext(pending.operation, pending.arguments, outcome.result, pending.context);
+    try {
+      await this.#startAgentTurn(operationContinuationPrompt(pending.operation, outcome), context);
+    } catch {
+      const recovery = `Studio completó ${pending.operation}, pero el Agent no pudo continuar el flujo automáticamente. Escribe «continúa el flujo» para reanudar desde el estado actual sin repetir la acción.`;
+      this.#addStateNote(recovery);
+      this.#appendMessage({ content: recovery, role: 'system' });
+      this.#publish();
+      void this.#saveHistory();
+    }
   }
 
   reject(actionID: string): void {
@@ -413,7 +603,13 @@ export class AssistantController {
     this.#pendingActions.delete(actionID);
     clearTimeout(pending.expiryTimer);
     this.#replaceActionCard({ ...pending.card, status: 'rejected' });
+    const summary = pending.kind === 'creative-brief'
+      ? `El usuario rechazó el brief creativo para ${pending.brief.operation}; no se ejecutó ninguna acción.`
+      : `El usuario rechazó ${pending.operation}; no se ejecutó la acción.`;
+    this.#addStateNote(summary);
+    this.#appendMessage({ content: summary, role: 'system' });
     this.#publish();
+    void this.#saveHistory();
   }
 
   async newConversation(): Promise<void> {
@@ -423,6 +619,7 @@ export class AssistantController {
     this.#messages = [];
     this.#stateNotes.length = 0;
     this.#approvedBriefs.clear();
+    this.#clearStateWatches();
     this.#clearActions();
     await this.#history.save({ messages: [] });
     this.#publish();
@@ -498,6 +695,7 @@ export class AssistantController {
     for (const controller of this.#approvalControllers) controller.abort();
     this.#approvalControllers.clear();
     this.#approvedBriefs.clear();
+    this.#clearStateWatches();
     this.#clearActions();
     this.#clearTurnTimeout();
     this.#appServer?.close();
@@ -700,7 +898,9 @@ export class AssistantController {
         return isActive() ? result : toolFailure('This FragForge tool call is no longer active.');
       }
       if (call.tool === 'preview') return await this.#preview(call.arguments, signal, isActive);
-      if (call.tool === 'creative_brief') return this.#creativeBrief(call.arguments);
+      if (call.tool === 'creative_brief') return await this.#creativeBrief(call.arguments, signal, isActive);
+      if (call.tool === 'select_local_media') return await this.#selectLocalMediaForUpload(call.arguments, signal, isActive);
+      if (call.tool === 'watch_state') return await this.#watchState(call.arguments, signal, isActive);
       return toolFailure('Unknown FragForge Studio tool.');
     } catch (error) {
       this.#writeDiagnostic(`dynamic tool ${call.tool} failed: ${errorMessage(error)}`);
@@ -744,10 +944,23 @@ export class AssistantController {
     const definition = allowedOperation(request.operation);
     if (definition.risk === 'read') return toolFailure('That operation is read-only. Use read instead.');
     const requiredBrief = requiredCreativeBrief(request.operation, request.arguments);
-    if (requiredBrief !== null && !this.#hasApprovedBrief(requiredBrief)) {
-      return toolFailure('Studio requires a complete creative brief approved by the user for this exact capture or render action. Collect the choices, call creative_brief, wait for its card approval, then preview this operation again.');
+    let approvedBrief: ApprovedCreativeBrief | undefined;
+    if (requiredBrief !== null) {
+      approvedBrief = await this.#approvedBriefFor(requiredBrief, signal);
+      if (approvedBrief === undefined) {
+        return toolFailure('Studio requires a complete creative brief approved by the user for this exact capture or render action and current saved plan. Read the latest state, collect the choices, call creative_brief, wait for its card approval, then preview this operation again.');
+      }
     }
-    const outcome = await this.#gateway.execute(request, { signal });
+    const operationRequest = approvedBrief?.targetKind === 'stream-job'
+      ? {
+          arguments: {
+            ...request.arguments,
+            expected_edit_plan_updated_at: approvedBrief.planUpdatedAt,
+          },
+          operation: request.operation,
+        }
+      : request;
+    const outcome = await this.#gateway.execute(operationRequest, { signal });
     if (outcome.kind !== 'preview') return toolFailure('The operation did not produce an approval preview.');
     if (!isActive()) return toolFailure('This FragForge tool call is no longer active.');
     const cardPreview = reviewableActionPreview(outcome.arguments);
@@ -758,9 +971,11 @@ export class AssistantController {
     const pending: PendingAction = {
       arguments: cloneJsonObject(outcome.arguments),
       card,
+      context: operationContinuationContext(outcome.operation, outcome.arguments, undefined, this.#lastContext),
       expiryTimer: setTimeout(() => this.#expireAction(card.id), ACTION_EXPIRY_MS),
       kind: 'operation',
       operation: outcome.operation,
+      ...(approvedBrief?.targetKind === 'stream-job' ? { streamPlanFingerprint: approvedBrief.planFingerprint } : {}),
     };
     pending.expiryTimer.unref();
     this.#pendingActions.set(card.id, pending);
@@ -778,8 +993,170 @@ export class AssistantController {
     });
   }
 
-  #creativeBrief(value: unknown): AppServerDynamicToolResult {
-    const brief = parseCreativeBrief(value);
+  async #selectLocalMediaForUpload(
+    value: unknown,
+    signal: AbortSignal,
+    isActive: () => boolean,
+  ): Promise<AppServerDynamicToolResult> {
+    const request = parseLocalMediaRequest(value);
+    if (this.#selectLocalMedia === undefined) {
+      return toolFailure('Studio cannot open the local media picker in this build. Use the upload screen instead.');
+    }
+    const selectedPath = await this.#selectLocalMedia(request.kind);
+    if (!isActive()) return toolFailure('This FragForge tool call is no longer active.');
+    if (selectedPath === null) return toolSuccess({ kind: request.kind, status: 'cancelled' });
+
+    const operation = request.kind === 'demo' ? 'jobs.create' : 'streams.create_from_file';
+    const argumentsValue: JsonObject = request.kind === 'demo'
+      ? {
+          demo_path: selectedPath,
+          ...(request.targetSteamID === undefined ? {} : { target_steamid: request.targetSteamID }),
+        }
+      : {
+          video_path: selectedPath,
+          ...(request.title === undefined ? {} : { title: request.title }),
+        };
+    const definition = operationNamed(operation);
+    if (definition === undefined) throw new Error('local media operation is unavailable');
+    const outcome = await this.#gateway.execute({ arguments: argumentsValue, operation }, { signal });
+    if (outcome.kind !== 'preview') throw new Error('local media operation did not produce an approval preview');
+    if (!isActive()) return toolFailure('This FragForge tool call is no longer active.');
+
+    const cardPreview: AssistantActionPreview = {
+      fields: [
+        { label: 'Archivo', value: basename(selectedPath) },
+        ...(request.targetSteamID === undefined ? [] : [{ label: 'SteamID objetivo', value: request.targetSteamID }]),
+        ...(request.title === undefined ? [] : [{ label: 'Título', value: request.title }]),
+      ],
+    };
+    const card = this.#createActionCard(outcome, definition.title, definition.description, cardPreview);
+    const pending: PendingOperationAction = {
+      arguments: cloneJsonObject(outcome.arguments),
+      card,
+      context: { ...this.#lastContext },
+      expiryTimer: setTimeout(() => this.#expireAction(card.id), ACTION_EXPIRY_MS),
+      kind: 'operation',
+      operation,
+    };
+    pending.expiryTimer.unref();
+    this.#pendingActions.set(card.id, pending);
+    this.#actionCards.push(card);
+    this.#trimActionCards();
+    this.#publish();
+    return toolSuccess({
+      action_id: card.id,
+      kind: request.kind,
+      operation,
+      requires_user_approval: true,
+      status: 'pending',
+    });
+  }
+
+  async #watchState(
+    value: unknown,
+    signal: AbortSignal,
+    isActive: () => boolean,
+  ): Promise<AppServerDynamicToolResult> {
+    const request = parseStateWatchRequest(value);
+    const outcome = await this.#gateway.execute(request, { signal });
+    if (outcome.kind !== 'executed') throw new Error('state watch operation did not execute as a read');
+    const state = watchedState(outcome.result);
+    if (state === undefined) return toolFailure('Studio could not identify a bounded state field in that response. Use read and continue manually.');
+    if (!isActive()) return toolFailure('This FragForge tool call is no longer active.');
+
+    const key = stateWatchKey(request.operation, outcome.arguments);
+    if (!this.#stateWatches.has(key) && this.#stateWatches.size >= MAX_STATE_WATCHES) {
+      return toolFailure(`Studio already has ${MAX_STATE_WATCHES} active state watches in this conversation. Reuse an existing watch or wait for one to finish.`);
+    }
+    this.#removeStateWatch(key);
+    const expiresAt = Date.now() + this.#stateWatchTimeoutMs;
+    let watch: PendingStateWatch;
+    const expiryTimer = setTimeout(() => this.#expireStateWatch(key, watch), this.#stateWatchTimeoutMs);
+    expiryTimer.unref();
+    watch = {
+      arguments: cloneJsonObject(outcome.arguments),
+      context: operationContinuationContext(request.operation, outcome.arguments, outcome.result, this.#lastContext),
+      controller: new AbortController(),
+      expiresAt,
+      expiryTimer,
+      operation: request.operation,
+      state,
+    };
+    this.#stateWatches.set(key, watch);
+    this.#scheduleStateWatch(key, watch);
+    return toolSuccess({
+      current: executionForModel(outcome),
+      state,
+      status: 'watching',
+    });
+  }
+
+  #scheduleStateWatch(key: string, watch: PendingStateWatch): void {
+    watch.timer = setTimeout(() => void this.#pollStateWatch(key), this.#stateWatchIntervalMs);
+    watch.timer.unref();
+  }
+
+  async #pollStateWatch(key: string): Promise<void> {
+    const watch = this.#stateWatches.get(key);
+    if (watch === undefined || this.#closed) return;
+    if (watch.expiresAt <= Date.now()) {
+      this.#expireStateWatch(key, watch);
+      return;
+    }
+
+    try {
+      const outcome = await this.#gateway.execute(
+        { arguments: watch.arguments, operation: watch.operation },
+        { signal: watch.controller.signal },
+      );
+      if (this.#closed || this.#stateWatches.get(key) !== watch) return;
+      if (watch.expiresAt <= Date.now()) {
+        this.#expireStateWatch(key, watch);
+        return;
+      }
+      if (outcome.kind !== 'executed') throw new Error('state watch read did not execute');
+      const state = watchedState(outcome.result);
+      if (state === undefined || state === watch.state || this.#busy) {
+        this.#scheduleStateWatch(key, watch);
+        return;
+      }
+
+      this.#removeStateWatch(key);
+      const summary = `Studio detectó que ${watch.operation} cambió de ${watch.state} a ${state}.`;
+      this.#addStateNote(summary);
+      this.#appendMessage({ content: summary, role: 'system' });
+      this.#publish();
+      void this.#saveHistory();
+      try {
+        await this.#startAgentTurn(stateWatchContinuationPrompt(watch.operation, watch.state, state, outcome), watch.context);
+      } catch {
+        const recovery = `${summary} El Agent no pudo reanudarse automáticamente; escribe «continúa el flujo» para seguir desde este estado.`;
+        this.#addStateNote(recovery);
+        this.#appendMessage({ content: recovery, role: 'system' });
+        this.#publish();
+        void this.#saveHistory();
+      }
+    } catch {
+      if (!this.#closed && !watch.controller.signal.aborted && this.#stateWatches.get(key) === watch) {
+        this.#scheduleStateWatch(key, watch);
+      }
+    }
+  }
+
+  async #creativeBrief(
+    value: unknown,
+    signal: AbortSignal,
+    isActive: () => boolean,
+  ): Promise<AppServerDynamicToolResult> {
+    const parsed = parseCreativeBrief(value);
+    let brief: CreativeBrief;
+    if (parsed.targetKind === 'stream-job') {
+      const plan = await this.#readStreamEditPlan(parsed.targetID, signal);
+      if (!isActive()) return toolFailure('This FragForge tool call is no longer active.');
+      brief = bindStreamCreativeBrief(parsed, plan);
+    } else {
+      brief = parsed;
+    }
     const id = randomUUID();
     const createdAt = new Date();
     const card: AssistantAction = {
@@ -833,14 +1210,74 @@ export class AssistantController {
     };
   }
 
-  #hasApprovedBrief(required: CreativeBriefRequirement): boolean {
+  async #approvedBriefFor(required: CreativeBriefRequirement, signal: AbortSignal): Promise<ApprovedCreativeBrief | undefined> {
     const approved = this.#approvedBriefs.get(creativeBriefKey(required));
-    if (approved === undefined) return false;
+    if (approved === undefined) return undefined;
     if (approved.expiresAt <= Date.now()) {
       this.#approvedBriefs.delete(creativeBriefKey(required));
-      return false;
+      return undefined;
     }
-    return required.format === undefined || approved.format === required.format;
+    if (required.format !== undefined && approved.format !== required.format) return undefined;
+    if (required.layout !== undefined) {
+      if (approved.targetKind !== 'stream-job' || approved.layout !== required.layout) return undefined;
+      const plan = await this.#readStreamEditPlan(required.targetID, signal);
+      if (streamPlanFingerprint(plan) !== approved.planFingerprint) {
+        const invalidated = this.#invalidateStreamCreativeBrief('streams.update_edit_plan', { stream_job_id: required.targetID });
+        if (invalidated !== undefined) {
+          this.#addStateNote(invalidated);
+          this.#appendMessage({ content: invalidated, role: 'system' });
+          this.#publish();
+          void this.#saveHistory();
+        }
+        return undefined;
+      }
+    }
+    return approved;
+  }
+
+  async #readStreamEditPlan(streamJobID: string, signal: AbortSignal): Promise<JsonObject> {
+    const outcome = await this.#gateway.execute({
+      arguments: { stream_job_id: streamJobID },
+      operation: 'streams.get_edit_plan',
+    }, { signal });
+    if (outcome.kind !== 'executed' || !isJsonObject(outcome.result)) throw new Error('stream edit plan could not be read');
+    return outcome.result;
+  }
+
+  #invalidateStreamCreativeBrief(operation: string, argumentsValue: JsonObject): string | undefined {
+    if (!invalidatesStreamCreativeBrief(operation)) return undefined;
+    const streamJobID = safeReferenceFrom(argumentsValue.stream_job_id);
+    if (streamJobID === undefined) return undefined;
+    const key = creativeBriefKey({
+      operation: 'streams.start_render',
+      targetID: streamJobID,
+      targetKind: 'stream-job',
+    });
+    const briefInvalidated = this.#approvedBriefs.delete(key);
+    let briefCardsExpired = 0;
+    let renderCardsExpired = 0;
+    for (const [actionID, pending] of this.#pendingActions) {
+      const isPendingBrief = pending.kind === 'creative-brief'
+        && pending.brief.targetKind === 'stream-job'
+        && pending.brief.targetID === streamJobID;
+      const isPendingRender = pending.kind === 'operation'
+        && pending.operation === 'streams.start_render'
+        && pending.arguments.stream_job_id === streamJobID;
+      if (!isPendingBrief && !isPendingRender) continue;
+      this.#pendingActions.delete(actionID);
+      clearTimeout(pending.expiryTimer);
+      this.#replaceActionCard({ ...pending.card, status: 'expired' });
+      if (isPendingBrief) briefCardsExpired += 1;
+      else renderCardsExpired += 1;
+    }
+    if (!briefInvalidated && briefCardsExpired === 0 && renderCardsExpired === 0) return undefined;
+    const expiredBriefs = briefCardsExpired === 0
+      ? ''
+      : ` También caducó ${briefCardsExpired === 1 ? 'el brief pendiente' : `${briefCardsExpired} briefs pendientes`}.`;
+    const expiredRenders = renderCardsExpired === 0
+      ? ''
+      : ` También caducó ${renderCardsExpired === 1 ? 'la confirmación de render pendiente' : `${renderCardsExpired} confirmaciones de render pendientes`}.`;
+    return `Studio cambió el plan del stream ${streamJobID}; el brief creativo anterior quedó invalidado y debe revisarse de nuevo antes del render.${expiredBriefs}${expiredRenders}`;
   }
 
   #handleAgentDelta(delta: AppServerAgentMessageDelta, appServerGeneration: number): void {
@@ -1015,6 +1452,30 @@ export class AssistantController {
     this.#actionCards.length = 0;
   }
 
+  #removeStateWatch(key: string): void {
+    const watch = this.#stateWatches.get(key);
+    if (watch === undefined) return;
+    if (watch.timer !== undefined) clearTimeout(watch.timer);
+    clearTimeout(watch.expiryTimer);
+    watch.controller.abort();
+    this.#stateWatches.delete(key);
+  }
+
+  #expireStateWatch(key: string, expected?: PendingStateWatch): void {
+    const watch = this.#stateWatches.get(key);
+    if (watch === undefined || (expected !== undefined && watch !== expected)) return;
+    this.#removeStateWatch(key);
+    const summary = `Studio dejó de vigilar ${watch.operation} porque no cambió de estado dentro del tiempo máximo.`;
+    this.#addStateNote(summary);
+    this.#appendMessage({ content: summary, role: 'system' });
+    this.#publish();
+    void this.#saveHistory();
+  }
+
+  #clearStateWatches(): void {
+    for (const key of this.#stateWatches.keys()) this.#removeStateWatch(key);
+  }
+
   #addStateNote(note: string): void {
     this.#stateNotes.push(note);
     if (this.#stateNotes.length > 5) this.#stateNotes.splice(0, this.#stateNotes.length - 5);
@@ -1058,77 +1519,158 @@ function operationToolSchema(): JsonObject {
 
 function creativeBriefSchema(): JsonObject {
   return {
-    additionalProperties: false,
-    properties: {
-      counter: { enum: ['on', 'off'], type: 'string' },
-      cover: { enum: ['generated-gameplay-candidates', 'no-cover'], type: 'string' },
-      effect: { enum: ['clean', 'punch-in', 'velocity', 'freeze-flash'], type: 'string' },
-      format: { enum: ['short-9x16', 'landscape-16x9'], type: 'string' },
-      hud: { enum: ['full-game-ui', 'clean-hudless'], type: 'string' },
-      intro: { enum: ['hook', 'none'], type: 'string' },
-      job_id: { type: 'string' },
-      killfeed: { enum: ['preserve', 'synthetic'], type: 'string' },
-      music: { enum: ['none', 'selected'], type: 'string' },
-      operation: { enum: ['jobs.record', 'jobs.generate', 'renders.start', 'streams.start_render'], type: 'string' },
-      outro: { enum: ['loop', 'none'], type: 'string' },
-      stream_job_id: { type: 'string' },
-      transition: { enum: ['cut', 'flash', 'whip', 'dip'], type: 'string' },
-    },
-    required: ['operation', 'format', 'hud', 'killfeed', 'effect', 'transition', 'counter', 'intro', 'outro', 'music', 'cover'],
+    oneOf: [
+      {
+        additionalProperties: false,
+        properties: {
+          counter: { enum: ['on', 'off'], type: 'string' },
+          cover: { enum: ['generated-gameplay-candidates', 'no-cover'], type: 'string' },
+          effect: { enum: ['clean', 'punch-in', 'velocity', 'freeze-flash'], type: 'string' },
+          format: { enum: ['short-9x16', 'landscape-16x9'], type: 'string' },
+          hud: { enum: ['full-game-ui', 'clean-hudless'], type: 'string' },
+          intro: { enum: ['hook', 'none'], type: 'string' },
+          job_id: { type: 'string' },
+          killfeed: { enum: ['preserve', 'synthetic'], type: 'string' },
+          music: { enum: ['none', 'selected'], type: 'string' },
+          operation: { enum: ['jobs.record', 'jobs.generate', 'renders.start'], type: 'string' },
+          outro: { enum: ['loop', 'none'], type: 'string' },
+          transition: { enum: ['cut', 'flash', 'whip', 'dip'], type: 'string' },
+        },
+        required: ['operation', 'job_id', 'format', 'hud', 'killfeed', 'effect', 'transition', 'counter', 'intro', 'outro', 'music', 'cover'],
+        type: 'object',
+      },
+      {
+        additionalProperties: false,
+        properties: {
+          captions: { description: 'Must match the current saved plan: disabled, reviewed Spanish words, or enabled automatic review.', enum: ['disabled', 'spanish-reviewed', 'spanish-auto-review'], type: 'string' },
+          clip_selection: { enum: ['saved-edit-plan'], type: 'string' },
+          cover: { enum: ['generated-gameplay-candidates', 'no-cover'], type: 'string' },
+          format: { enum: ['short-9x16', 'landscape-16x9'], type: 'string' },
+          framing: { description: 'Must match the current saved face crop.', enum: ['clean-crop', 'full-frame'], type: 'string' },
+          killfeed: { description: 'Must match the current saved killfeed cues.', enum: ['none', 'preserve', 'synthetic'], type: 'string' },
+          layout: { description: 'Exact stream variant returned by catalog.stream_variants.', type: 'string' },
+          music: { description: 'Must match whether the current saved plan selects a music track.', enum: ['none', 'selected'], type: 'string' },
+          operation: { enum: ['streams.start_render'], type: 'string' },
+          stream_job_id: { type: 'string' },
+          title: { description: 'Exact current saved clip-title summary, joined with " · "; use "Sin título" when no clip has a title.', maxLength: MAX_STREAM_BRIEF_TITLE_SUMMARY_LENGTH, minLength: 1, type: 'string' },
+        },
+        required: ['operation', 'stream_job_id', 'format', 'layout', 'clip_selection', 'title', 'framing', 'killfeed', 'captions', 'music', 'cover'],
+        type: 'object',
+      },
+    ],
     type: 'object',
   };
 }
 
-function parseCreativeBrief(value: unknown): CreativeBrief {
+function localMediaSchema(): JsonObject {
+  return {
+    additionalProperties: false,
+    properties: {
+      kind: { enum: ['demo', 'stream'], type: 'string' },
+      target_steamid: { description: 'Optional SteamID64 when the demo target is already known.', pattern: '^[0-9]{1,20}$', type: 'string' },
+      title: { description: 'Optional title for a stream recording.', maxLength: 160, minLength: 1, type: 'string' },
+    },
+    required: ['kind'],
+    type: 'object',
+  };
+}
+
+function watchStateSchema(): JsonObject {
+  return {
+    additionalProperties: false,
+    properties: {
+      arguments: { additionalProperties: true, type: 'object' },
+      operation: { enum: ['jobs.get', 'renders.get', 'streams.get', 'streams.get_render'], type: 'string' },
+    },
+    required: ['operation', 'arguments'],
+    type: 'object',
+  };
+}
+
+function parseStateWatchRequest(value: unknown): { arguments: JsonObject; operation: StateWatchOperation } {
+  const request = parseOperationToolInput(value);
+  if (!STATE_WATCH_OPERATIONS.has(request.operation as StateWatchOperation)) throw new Error('operation cannot be watched');
+  return { arguments: request.arguments, operation: request.operation as StateWatchOperation };
+}
+
+function parseLocalMediaRequest(value: unknown): LocalMediaRequest {
+  if (!isJsonObject(value)) throw new Error('local media request must be an object');
+  const keys = Object.keys(value);
+  if (keys.some((key) => key !== 'kind' && key !== 'target_steamid' && key !== 'title')) {
+    throw new Error('local media request contains an unknown field');
+  }
+  const kind = enumValue(value.kind, ['demo', 'stream'] as const, 'kind');
+  if (kind === 'demo') {
+    if (value.title !== undefined
+      || (value.target_steamid !== undefined
+        && (typeof value.target_steamid !== 'string' || !/^[0-9]{1,20}$/.test(value.target_steamid)))) {
+      throw new Error('demo local media request is invalid');
+    }
+    return {
+      kind,
+      ...(value.target_steamid === undefined ? {} : { targetSteamID: value.target_steamid }),
+    };
+  }
+  if (value.target_steamid !== undefined
+    || (value.title !== undefined
+      && (typeof value.title !== 'string' || value.title.trim() === '' || value.title.length > 160))) {
+    throw new Error('stream local media request is invalid');
+  }
+  return {
+    kind,
+    ...(value.title === undefined ? {} : { title: value.title.trim() }),
+  };
+}
+
+function parseCreativeBrief(value: unknown): ParsedCreativeBrief {
   if (!isJsonObject(value)) throw new Error('creative brief must be an object');
-  const allowed = new Set([
-    'counter', 'cover', 'effect', 'format', 'hud', 'intro', 'job_id', 'killfeed', 'music', 'operation', 'outro', 'stream_job_id', 'transition',
-  ]);
-  if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('creative brief contains an unknown field');
   const operation = enumValue(value.operation, ['jobs.record', 'jobs.generate', 'renders.start', 'streams.start_render'] as const, 'operation');
   const format = enumValue(value.format, ['short-9x16', 'landscape-16x9'] as const, 'format');
-  const hud = enumValue(value.hud, ['full-game-ui', 'clean-hudless'] as const, 'hud');
-  const killfeed = enumValue(value.killfeed, ['preserve', 'synthetic'] as const, 'killfeed');
-  const effect = enumValue(value.effect, ['clean', 'punch-in', 'velocity', 'freeze-flash'] as const, 'effect');
-  const transition = enumValue(value.transition, ['cut', 'flash', 'whip', 'dip'] as const, 'transition');
-  const counter = enumValue(value.counter, ['on', 'off'] as const, 'counter');
-  const intro = enumValue(value.intro, ['hook', 'none'] as const, 'intro');
-  const outro = enumValue(value.outro, ['loop', 'none'] as const, 'outro');
   const music = enumValue(value.music, ['none', 'selected'] as const, 'music');
   const cover = enumValue(value.cover, ['generated-gameplay-candidates', 'no-cover'] as const, 'cover');
   if (operation === 'streams.start_render') {
-    if (!isSafeReference(value.stream_job_id) || value.job_id !== undefined) throw new Error('stream creative brief needs only stream_job_id');
+    const allowed = new Set([
+      'captions', 'clip_selection', 'cover', 'format', 'framing', 'killfeed', 'layout', 'music', 'operation', 'stream_job_id', 'title',
+    ]);
+    if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('stream creative brief contains an unknown field');
+    if (!isSafeReference(value.stream_job_id) || !isSafeReference(value.layout)) throw new Error('stream creative brief target or layout is invalid');
+    if (typeof value.title !== 'string'
+      || value.title.trim() === ''
+      || value.title.length > MAX_STREAM_BRIEF_TITLE_SUMMARY_LENGTH) throw new Error('stream creative brief title is invalid');
     return {
+      captions: enumValue(value.captions, ['disabled', 'spanish-reviewed', 'spanish-auto-review'] as const, 'captions'),
+      clipSelection: enumValue(value.clip_selection, ['saved-edit-plan'] as const, 'clip_selection'),
       cover,
-      counter,
-      effect,
       format,
-      hud,
-      intro,
-      killfeed,
+      framing: enumValue(value.framing, ['clean-crop', 'full-frame'] as const, 'framing'),
+      killfeed: enumValue(value.killfeed, ['none', 'preserve', 'synthetic'] as const, 'killfeed'),
+      layout: value.layout,
       music,
       operation,
-      outro,
       targetID: value.stream_job_id,
       targetKind: 'stream-job',
-      transition,
+      title: value.title.trim(),
     };
   }
-  if (!isSafeReference(value.job_id) || value.stream_job_id !== undefined) throw new Error('demo creative brief needs only job_id');
+  const allowed = new Set([
+    'counter', 'cover', 'effect', 'format', 'hud', 'intro', 'job_id', 'killfeed', 'music', 'operation', 'outro', 'transition',
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('demo creative brief contains an unknown field');
+  if (!isSafeReference(value.job_id)) throw new Error('demo creative brief job is invalid');
   return {
     cover,
-    counter,
-    effect,
+    counter: enumValue(value.counter, ['on', 'off'] as const, 'counter'),
+    effect: enumValue(value.effect, ['clean', 'punch-in', 'velocity', 'freeze-flash'] as const, 'effect'),
     format,
-    hud,
-    intro,
-    killfeed,
+    hud: enumValue(value.hud, ['full-game-ui', 'clean-hudless'] as const, 'hud'),
+    intro: enumValue(value.intro, ['hook', 'none'] as const, 'intro'),
+    killfeed: enumValue(value.killfeed, ['preserve', 'synthetic'] as const, 'killfeed'),
     music,
     operation,
-    outro,
+    outro: enumValue(value.outro, ['loop', 'none'] as const, 'outro'),
     targetID: value.job_id,
     targetKind: 'job',
-    transition,
+    transition: enumValue(value.transition, ['cut', 'flash', 'whip', 'dip'] as const, 'transition'),
   };
 }
 
@@ -1144,6 +1686,7 @@ function requiredCreativeBrief(operation: string, argumentsValue: JsonObject): C
   const format = asCreativeFormat(variant) ?? asCreativeFormat(editFormat);
   return {
     ...(format === undefined ? {} : { format }),
+    ...(stream && typeof variant === 'string' ? { layout: variant } : {}),
     operation,
     targetID,
     targetKind: stream ? 'stream-job' : 'job',
@@ -1154,7 +1697,163 @@ function creativeBriefKey(brief: Pick<CreativeBriefRequirement, 'operation' | 't
   return `${brief.operation}:${brief.targetKind}:${brief.targetID}`;
 }
 
+function bindStreamCreativeBrief(input: StreamCreativeBriefInput, plan: JsonObject): StreamCreativeBrief {
+  const layout = typeof plan.variant === 'string' ? plan.variant : '';
+  const format = streamPlanFormat(layout);
+  const title = streamPlanTitle(plan);
+  const framing = streamPlanFraming(plan, layout);
+  const captions = streamPlanCaptions(plan);
+  const killfeed = streamPlanKillfeed(plan);
+  const music = streamPlanMusic(plan);
+  const planUpdatedAt = typeof plan.updated_at === 'string' ? plan.updated_at : '';
+  if (layout === ''
+    || format === undefined
+    || input.format !== format
+    || input.layout !== layout
+    || input.title !== title
+    || input.framing !== framing
+    || captions === undefined
+    || input.captions !== captions
+    || input.killfeed !== killfeed
+    || input.music !== music
+    || planUpdatedAt === '') {
+    throw new Error('stream creative brief does not match the current saved edit plan');
+  }
+  const fingerprint = streamPlanFingerprint(plan);
+  return {
+    ...input,
+    planFingerprint: fingerprint,
+    planPreviewFields: streamPlanPreviewFields(plan, fingerprint, framing, captions, killfeed, music),
+    planUpdatedAt,
+  };
+}
+
+function streamPlanFingerprint(plan: JsonObject): string {
+  return createHash('sha256').update(stableJson(plan)).digest('hex');
+}
+
+function stableJson(value: JsonValue): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key] ?? null)}`).join(',')}}`;
+}
+
+function streamPlanClips(plan: JsonObject): JsonObject[] {
+  return Array.isArray(plan.clips) ? plan.clips.filter(isJsonObject) : [];
+}
+
+function streamPlanTitle(plan: JsonObject): string {
+  const clips = streamPlanClips(plan);
+  const titles = clips
+    .map((clip) => typeof clip.title === 'string' ? clip.title.trim() : '')
+    .filter((title) => title !== '');
+  const summary = titles.length === 0 ? 'Sin título' : titles.join(' · ');
+  if (summary.length > MAX_STREAM_BRIEF_TITLE_SUMMARY_LENGTH) {
+    throw new Error('stream clip titles do not fit in one exact creative brief');
+  }
+  return summary;
+}
+
+function streamPlanFraming(plan: JsonObject, layout: string): StreamCreativeBriefFraming {
+  if (layout === 'streamer-fullframe-nocam' || layout === 'streamer-landscape-16x9') return 'full-frame';
+  const crop = isJsonObject(plan.face_crop) ? plan.face_crop : undefined;
+  return typeof crop?.width === 'number' && crop.width > 0 && typeof crop.height === 'number' && crop.height > 0
+    ? 'clean-crop'
+    : 'full-frame';
+}
+
+function streamPlanFormat(layout: string): CreativeBriefFormat | undefined {
+  if (layout === 'streamer-landscape-16x9') return 'landscape-16x9';
+  if (layout === 'streamer-vertical-stack-40-60'
+    || layout === 'streamer-vertical-stack'
+    || layout === 'streamer-fullframe-nocam') return 'short-9x16';
+  return undefined;
+}
+
+function streamPlanCaptions(plan: JsonObject): StreamCreativeBriefCaptions | undefined {
+  const captions = isJsonObject(plan.captions) ? plan.captions : undefined;
+  if (captions?.enabled !== true) return 'disabled';
+  if (captions.language !== undefined && captions.language !== 'es') return undefined;
+  const clips = streamPlanClips(plan);
+  const reviewed = clips.length > 0 && clips.every((clip) => {
+    if (clip.caption_reviewed === true) return true;
+    if (Object.hasOwn(clip, 'caption_reviewed')) return false;
+    return Array.isArray(clip.caption_words) && clip.caption_words.length > 0;
+  });
+  return reviewed ? 'spanish-reviewed' : 'spanish-auto-review';
+}
+
+function streamPlanKillfeed(plan: JsonObject): StreamCreativeBriefKillfeed {
+  const clips = streamPlanClips(plan);
+  const hasSynthetic = clips.some((clip) => Array.isArray(clip.killfeed_kills)
+    && clip.killfeed_kills.some((kills) => Array.isArray(kills) && kills.length > 0));
+  if (hasSynthetic) return 'synthetic';
+  const hasPreserved = clips.some((clip) => Array.isArray(clip.killfeed_seconds) && clip.killfeed_seconds.length > 0);
+  return hasPreserved ? 'preserve' : 'none';
+}
+
+function streamPlanMusic(plan: JsonObject): CreativeBriefMusic {
+  const music = isJsonObject(plan.music) ? plan.music : undefined;
+  return typeof music?.key === 'string' && music.key !== '' ? 'selected' : 'none';
+}
+
+function streamPlanPreviewFields(
+  plan: JsonObject,
+  fingerprint: string,
+  framing: StreamCreativeBriefFraming,
+  captions: StreamCreativeBriefCaptions,
+  killfeed: StreamCreativeBriefKillfeed,
+  music: CreativeBriefMusic,
+): AssistantActionPreviewField[] {
+  const clips = streamPlanClips(plan);
+  if (clips.length > MAX_STREAM_BRIEF_CLIPS) {
+    throw new Error(`stream edit plan has ${clips.length} clips; at most ${MAX_STREAM_BRIEF_CLIPS} fit in one exact approval card`);
+  }
+  const clipFields = clips.length === 0
+    ? [{ label: 'Cortes · 0', value: 'Sin clips' }]
+    : clips.map((clip, index): AssistantActionPreviewField => {
+        const id = typeof clip.id === 'string' ? clip.id : '?';
+        const start = typeof clip.start_seconds === 'number' ? clip.start_seconds : '?';
+        const end = typeof clip.end_seconds === 'number' ? clip.end_seconds : '?';
+        const clipTitle = typeof clip.title === 'string' && clip.title.trim() !== '' ? clip.title.trim() : 'Sin título';
+        const value = `${id} · ${start}-${end}s · ${clipTitle}`;
+        if (value.length > MAX_REVIEWABLE_ACTION_STRING_LENGTH) {
+          throw new Error(`stream clip ${id} does not fit in one exact approval field`);
+        }
+        return { label: `Corte ${index + 1} de ${clips.length}`, value };
+      });
+  const planMusic = isJsonObject(plan.music) ? plan.music : undefined;
+  const musicValue = music === 'selected'
+    ? `${String(planMusic?.key)} · volumen ${String(planMusic?.volume ?? 'predeterminado')}`
+    : 'none';
+  const fields: AssistantActionPreviewField[] = [
+    { label: 'Revisión del plan', value: fingerprint.slice(0, 16) },
+    { label: 'Layout', value: String(plan.variant) },
+    ...clipFields,
+    { label: 'Encuadre', value: framing },
+    { label: 'Killfeed', value: killfeed },
+    { label: 'Subtítulos', value: captions },
+    { label: 'Música', value: musicValue },
+  ];
+  if (fields.length > MAX_REVIEWABLE_ACTION_FIELDS - 4
+    || fields.some((field) => field.value.length > MAX_REVIEWABLE_ACTION_STRING_LENGTH)) {
+    throw new Error('stream edit plan does not fit in one exact approval card');
+  }
+  return fields;
+}
+
 function creativeBriefPreview(brief: CreativeBrief): AssistantActionPreview {
+  if (brief.targetKind === 'stream-job') {
+    return {
+      fields: [
+        { label: 'Acción', value: brief.operation },
+        { label: 'Stream', value: brief.targetID },
+        { label: 'Formato', value: brief.format },
+        { label: 'Portada', value: brief.cover },
+        ...brief.planPreviewFields,
+      ],
+    };
+  }
   return {
     fields: [
       { label: 'Acción', value: brief.operation },
@@ -1174,6 +1873,14 @@ function creativeBriefPreview(brief: CreativeBrief): AssistantActionPreview {
 
 function isCreativeOperation(value: string): value is CreativeOperation {
   return value === 'jobs.record' || value === 'jobs.generate' || value === 'renders.start' || value === 'streams.start_render';
+}
+
+function invalidatesStreamCreativeBrief(operation: string): boolean {
+  return operation === 'streams.update_edit_plan'
+    || operation === 'streams.configure_captions'
+    || operation === 'streams.review_caption_candidates'
+    || operation === 'streams.edit_clip'
+    || operation === 'streams.apply_killfeed_analysis';
 }
 
 function asCreativeFormat(value: JsonValue | undefined): CreativeBriefFormat | undefined {
@@ -1237,7 +1944,7 @@ function parseSearchInput(value: unknown): JsonObject {
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('search input contains an unknown field');
   if (value.query !== undefined && (typeof value.query !== 'string' || value.query.length > 1_000)) throw new Error('query is invalid');
   if (value.operation !== undefined && (typeof value.operation !== 'string' || value.operation.length > 128)) throw new Error('operation is invalid');
-  if (value.category !== undefined && !['artifacts', 'catalog', 'jobs', 'renders', 'streams', 'studio'].includes(String(value.category))) {
+  if (value.category !== undefined && !['artifacts', 'catalog', 'jobs', 'renders', 'streams', 'studio', 'voices'].includes(String(value.category))) {
     throw new Error('category is invalid');
   }
   if (value.risk !== undefined && !['read', 'write', 'costly', 'destructive'].includes(String(value.risk))) throw new Error('risk is invalid');
@@ -1375,6 +2082,127 @@ function toolSuccess(value: JsonValue): AppServerDynamicToolResult {
 
 function toolFailure(message: string): AppServerDynamicToolResult {
   return { contentItems: [{ text: message, type: 'inputText' }], success: false };
+}
+
+function creativeBriefContext(brief: CreativeBrief): AssistantContext {
+  if (brief.targetKind === 'stream-job') {
+    return {
+      kind: 'stream',
+      label: 'Clip de stream actual',
+      pathname: '/streams',
+      streamJobId: brief.targetID,
+    };
+  }
+  return {
+    jobId: brief.targetID,
+    kind: 'demo',
+    label: 'Demo actual',
+    pathname: `/matches/${brief.targetID}`,
+  };
+}
+
+function creativeBriefContinuationPrompt(brief: CreativeBrief): string {
+  const approvedValues = brief.targetKind === 'stream-job'
+    ? `format=${brief.format}; layout=${brief.layout}; clip_selection=${brief.clipSelection}; title=${brief.title}; framing=${brief.framing}; killfeed=${brief.killfeed}; captions=${brief.captions}; music=${brief.music}; cover=${brief.cover}`
+    : `format=${brief.format}; hud=${brief.hud}; killfeed=${brief.killfeed}; effect=${brief.effect}; transition=${brief.transition}; counter=${brief.counter}; intro=${brief.intro}; outro=${brief.outro}; music=${brief.music}; cover=${brief.cover}`;
+  return [
+    `Studio event: The user approved the creative brief for ${brief.operation} on ${brief.targetKind} ${brief.targetID}.`,
+    `Approved values: ${approvedValues}.`,
+    `Continue the existing workflow now: search again if needed, then call fragforge.preview for that exact ${brief.operation} action with the target, selected moments, and choices already established in this conversation.`,
+    'Do not ask the user to repeat the creative approval. Do not claim execution; the preview must create the separate final Studio approval card.',
+  ].join(' ');
+}
+
+function operationContinuationContext(
+  operation: string,
+  argumentsValue: JsonObject,
+  result: JsonValue | undefined,
+  fallback: AssistantContext,
+): AssistantContext {
+  const explicitStreamID = safeReferenceFrom(argumentsValue.stream_job_id);
+  const resultObject = isJsonObject(result) ? result : undefined;
+  const nestedJob = resultObject !== undefined && isJsonObject(resultObject.job) ? resultObject.job : undefined;
+  const streamID = explicitStreamID
+    ?? (operation.startsWith('streams.') ? safeReferenceFrom(nestedJob?.id) ?? safeReferenceFrom(resultObject?.id) : undefined);
+  if (streamID !== undefined) {
+    return {
+      kind: 'stream',
+      label: 'Clip de stream actual',
+      pathname: '/streams',
+      streamJobId: streamID,
+    };
+  }
+
+  const explicitJobID = safeReferenceFrom(argumentsValue.job_id);
+  const jobID = explicitJobID
+    ?? (operation === 'jobs.create' ? safeReferenceFrom(resultObject?.id) : undefined);
+  if (jobID !== undefined) {
+    return {
+      jobId: jobID,
+      kind: 'demo',
+      label: 'Demo actual',
+      pathname: `/matches/${jobID}`,
+    };
+  }
+  return { ...fallback };
+}
+
+function operationContinuationPrompt(
+  operation: string,
+  outcome: Extract<OperationGatewayOutcome, { kind: 'executed' }>,
+): string {
+  const safeResult = JSON.stringify(executionForModel(outcome));
+  const boundedResult = safeResult.length <= MAX_OPERATION_CONTINUATION_RESULT_LENGTH
+    ? safeResult
+    : `${safeResult.slice(0, MAX_OPERATION_CONTINUATION_RESULT_LENGTH)}…[truncated]`;
+  return [
+    `Studio event: The user approved ${operation}, and Studio accepted it successfully.`,
+    `Safe execution result: ${boundedResult}.`,
+    'Continue owning the workflow now. Search or read the new current state yourself, use returned IDs instead of asking the user for them, and perform every safe next step.',
+    'If another write, costly, or destructive step is needed, prepare its exact Studio approval card. If background work is still running, report its state and next expected step without retrying it.',
+  ].join(' ');
+}
+
+function safeReferenceFrom(value: JsonValue | undefined): string | undefined {
+  return isSafeReference(value) ? value : undefined;
+}
+
+function stateWatchKey(operation: StateWatchOperation, argumentsValue: JsonObject): string {
+  return `${operation}:${stableJson(argumentsValue)}`;
+}
+
+function watchedState(value: JsonValue, depth = 0): string | undefined {
+  if (!isJsonObject(value) || depth >= 4) return undefined;
+  for (const key of ['status', 'state', 'phase']) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate.length > 0 && candidate.length <= 128) return candidate;
+  }
+  for (const key of ['job', 'render', 'result']) {
+    const nested = value[key];
+    if (isJsonObject(nested)) {
+      const state = watchedState(nested, depth + 1);
+      if (state !== undefined) return state;
+    }
+  }
+  return undefined;
+}
+
+function stateWatchContinuationPrompt(
+  operation: StateWatchOperation,
+  previousState: string,
+  nextState: string,
+  outcome: Extract<OperationGatewayOutcome, { kind: 'executed' }>,
+): string {
+  const safeResult = JSON.stringify(executionForModel(outcome));
+  const boundedResult = safeResult.length <= MAX_OPERATION_CONTINUATION_RESULT_LENGTH
+    ? safeResult
+    : `${safeResult.slice(0, MAX_OPERATION_CONTINUATION_RESULT_LENGTH)}…[truncated]`;
+  return [
+    `Studio event: The background watch for ${operation} changed from ${previousState} to ${nextState}.`,
+    `Safe current result: ${boundedResult}.`,
+    'Resume the full workflow autonomously from this state. Perform safe reads yourself and prepare the next exact approval when needed.',
+    'If work is still running with no actionable next step, register watch_state again. Never repeat the operation that produced this state.',
+  ].join(' ');
 }
 
 function turnPrompt(message: string, context: AssistantContext, stateNotes: readonly string[]): string {
