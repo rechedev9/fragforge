@@ -78,6 +78,58 @@ func TestListSongsCuratedFromCatalog(t *testing.T) {
 	}
 }
 
+func TestListSongsShippedCatalogIncludesViralPack(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "data", "music", "catalog.json"))
+	if err != nil {
+		t.Fatalf("read shipped music catalog: %v", err)
+	}
+	var catalog struct {
+		Tracks []struct {
+			ID  string `json:"id"`
+			Ext string `json:"ext"`
+		} `json:"tracks"`
+	}
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		t.Fatalf("decode shipped music catalog: %v", err)
+	}
+	files := make(map[string][]byte, len(catalog.Tracks))
+	for _, track := range catalog.Tracks {
+		files[track.ID+"."+track.Ext] = []byte("provisioned audio")
+	}
+	dir := writeMusicDir(t, string(raw), files)
+	h := NewHandlers(nil, nil, nil, WithMusicDir(dir))
+
+	rec := httptest.NewRecorder()
+	h.ListSongs(rec, httptest.NewRequest(http.MethodGet, "/api/songs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	songs := decodeSongs(t, rec.Body.Bytes())
+	if len(songs) != len(catalog.Tracks) {
+		t.Fatalf("songs = %d, want all %d shipped tracks", len(songs), len(catalog.Tracks))
+	}
+
+	got := make(map[string]bool, len(songs))
+	for _, song := range songs {
+		got[song.ID] = true
+	}
+	viralIDs := []string{
+		"pop-hook",
+		"club-jump-beat",
+		"dark-electroshuffle",
+		"percussive-party",
+		"hard-rap-loop",
+		"acid-beat",
+		"urban-funk",
+		"retro-fireworks",
+	}
+	for _, id := range viralIDs {
+		if !got[id] {
+			t.Errorf("shipped catalog API is missing viral track %q", id)
+		}
+	}
+}
+
 func TestListSongsScanFallbackWithoutCatalog(t *testing.T) {
 	dir := writeMusicDir(t, "", map[string][]byte{
 		"trap-1.mp3": []byte("audio"),

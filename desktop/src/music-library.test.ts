@@ -7,6 +7,17 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { provisionMusicLibrary } from './music-library.ts';
 
+const VIRAL_CC0_TRACK_IDS = [
+  'pop-hook',
+  'club-jump-beat',
+  'dark-electroshuffle',
+  'percussive-party',
+  'hard-rap-loop',
+  'acid-beat',
+  'urban-funk',
+  'retro-fireworks',
+] as const;
+
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -202,6 +213,25 @@ test('every remote track in the shipped catalog has a lowercase sha256', () => {
   assert.ok(remoteTracks.length > 0);
   for (const track of remoteTracks) {
     assert.match(typeof track.sha256 === 'string' ? track.sha256 : '', /^[a-f0-9]{64}$/, String(track.id));
+  }
+});
+
+test('the shipped catalog includes the verified viral CC0 pack', () => {
+  const sourceFile = fileURLToPath(import.meta.url);
+  const catalogPath = path.join(path.dirname(sourceFile), '..', '..', 'data', 'music', 'catalog.json');
+  const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8')) as { tracks?: unknown[] };
+  const tracks = catalog.tracks ?? [];
+
+  for (const id of VIRAL_CC0_TRACK_IDS) {
+    const track = tracks.find((candidate): candidate is Record<string, unknown> =>
+      typeof candidate === 'object' && candidate !== null && 'id' in candidate && candidate.id === id,
+    );
+    assert.ok(track, `missing viral track ${id}`);
+    assert.equal(track.license, 'CC0', `${id} license`);
+    assert.equal(track.attributionRequired, false, `${id} attributionRequired`);
+    assert.equal(track.ext, 'mp3', `${id} ext`);
+    assert.match(String(track.downloadUrl), /^https:\/\/archive\.org\/download\/freepd\//, `${id} downloadUrl`);
+    assert.match(String(track.sha256), /^[a-f0-9]{64}$/, `${id} sha256`);
   }
 });
 

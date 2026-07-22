@@ -37,6 +37,14 @@ https://archive.org/details/freepd — released under Creative Commons Zero (CC0
 
 | id          | title                       | artist | license | source |
 |-------------|-----------------------------|--------|---------|--------|
+| pop-hook     | Not Quite Top Of The Pops  | Anonymous | CC0  | https://archive.org/details/freepd |
+| club-jump-beat | Ragga C Jump Beat        | FreePD | CC0     | https://archive.org/details/freepd |
+| dark-electroshuffle | ElectroShuffle Dark | FreePD | CC0     | https://archive.org/details/freepd |
+| percussive-party | Electronic G Percussive Party | Frank Nora | CC0 | https://archive.org/details/freepd |
+| hard-rap-loop | Rap Hard Loop             | FreePD | CC0     | https://archive.org/details/freepd |
+| acid-beat   | Acid Beat                   | FreePD | CC0     | https://archive.org/details/freepd |
+| urban-funk  | Urban Funk A                | FreePD | CC0     | https://archive.org/details/freepd |
+| retro-fireworks | Fireworks               | Alexander Nakarada | CC0 | https://archive.org/details/freepd |
 | dnb-1       | Drum n Bass B Drive         | FreePD | CC0     | https://archive.org/details/freepd |
 | dnb-2       | Electro DnB B Chaos         | FreePD | CC0     | https://archive.org/details/freepd |
 | edm-1       | Electro DnB A               | FreePD | CC0     | https://archive.org/details/freepd |
