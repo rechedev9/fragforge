@@ -40,7 +40,7 @@ import (
 )
 
 const (
-	maxDemoBytes       = 500 << 20            // 500 MiB demo cap
+	maxDemoBytes       = 600 << 20            // 600 MiB demo cap
 	maxMultipartBytes  = maxDemoBytes + 1<<20 // allow multipart headers around the demo
 	multipartMemBudget = 32 << 20             // 32 MiB in-memory; spill beyond
 	maxJSONBodyBytes   = 1 << 20              // JSON control documents are small

@@ -817,12 +817,12 @@ test('rejects uploads above the orchestrator limits before opening an HTTP reque
   fs.writeFileSync(oversizedDemo, Buffer.from([0]));
   fs.writeFileSync(oversizedStream, Buffer.from([0]));
   fs.writeFileSync(oversizedVoice, Buffer.from([0]));
-  fs.truncateSync(oversizedDemo, (500 << 20) + 1);
+  fs.truncateSync(oversizedDemo, (600 << 20) + 1);
   fs.truncateSync(oversizedStream, (8 * 2 ** 30) + 1);
   fs.truncateSync(oversizedVoice, (25 << 20) + 1);
   const client = new OrchestratorClient({ baseUrl: 'http://127.0.0.1:1' });
 
-  await assert.rejects(client.uploadDemo(oversizedDemo, {}), /exceeds the 500 MiB limit/);
+  await assert.rejects(client.uploadDemo(oversizedDemo, {}), /exceeds the 600 MiB limit/);
   await assert.rejects(client.uploadStreamVideo(oversizedStream, {}), /exceeds the 8 GiB limit/);
   await assert.rejects(client.uploadVoiceProfile('raizerinhocs2', oversizedVoice, {}), /exceeds the 25 MiB limit/);
 });
