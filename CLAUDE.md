@@ -49,13 +49,19 @@ If `bin\zv.exe` is missing or stale, run `.\scripts\build.ps1` first.
 - Discover task-specific guidance with `.\bin\zv.exe skills list --format json` rather than duplicating skill tutorials here.
 - Do not resurrect the retired external MCP server; use the CLI or the integrated typed operation gateway.
 - FragForge Agent is the only assistant surface shipped in Studio.
+- This project has approved FACEIT Data API access for player, match, and statistics indexing. The FACEIT Download API is not approved; obtain demo files through FACEIT's authenticated room/Watch download flow or another user-authorized manual source. Keep every FACEIT credential in environment or server-side secret storage, and never commit, print, or persist the key in indexes or logs.
+- For "current" or "best performance" requests, persist the query cutoff, sample size, match IDs, filters, and ranking formula. Normalize rate statistics per round when match lengths differ. Use external statistics to shortlist demos, but use parsed demo evidence to select moments.
 
 ## Approval And Media
 
 - Before any non-dry-run capture or render, stop at the creative brief gate and ask only unanswered choices: format, HUD/killfeed, kill effect, transition, counter, intro/outro, music, and cover strategy.
 - Approval must answer a shown brief; ambiguous words such as `go`, `hazlo`, `dale`, or `ok` are not approval by themselves.
+- Translate every approved brief choice into an explicit final command value, including negative booleans such as `--kill-counter=false`, `--hook=false`, and `--covers=false`; never rely on a preset or flag default to preserve an approved `off` choice. After rendering, inspect the effective result configuration and generated effects/metadata, and reject any output that re-enables a disabled element or contradicts the selected kills, weapons, rounds, or narrative.
+- A successful render is not final while QA has unresolved warnings. Inspect every warning at its exact interval; remove unintended frozen, post-death, or dead-air footage, or document why it is intentional, then rerun QA.
+- Any trim, reorder, or duration change invalidates existing rhythm timing. Regenerate or update the canonical rhythm plan and verify every selected kill against its assigned beat or onset before rerendering.
 - For streams, also settle clip bounds/title, crop/framing, factual killfeed policy, Spanish captions and review policy, and source-audio treatment.
 - Thumbnail approval is a second gate after candidates exist; require a selected candidate or explicit delegation before calling the pack upload-ready.
+- Before marking a pack upload-ready, verify that the canonical MP4, title, caption, hashtags, cover, cover timestamp, gallery, manifest paths, and artifact metadata describe the same facts and files. After thumbnail selection, replace the canonical cover and visually verify the gallery again.
 - `--covers=false` removes the thumbnail gate.
 - Studio adds a separate approval of the exact costly/destructive operation preview; changing a stream plan invalidates its creative brief and prepared render preview.
 - Local Whisper transcription produces `requires_review` evidence, not publishable words; import only verified Spanish text and clip-relative timings, or an explicit reviewed no-speech decision.
@@ -66,6 +72,7 @@ The current default `viral-60-clean` records death notices and uses `viral-ultra
 HUD mode is a recording-stage choice, so changing it after capture requires recapture rather than a render-only change.
 The default kill/highlight deliverable is one compiled vertical video per player/game containing all selected kills, not one upload-ready file per kill.
 Put every final MP4, cover, caption, manifest, and review gallery under the run's `shortslistosparasubir/` directory, and point the user there when delivering media.
+For third-party music, persist the source URL, creator, license, downloaded-file SHA-256, and rhythm-analysis evidence under the run. Never claim a track is CC0 or otherwise reusable without an authoritative source.
 
 Do not launch HLAE, CS2, a long FFmpeg render, or paid/cloud media work without an explicit request; prefer the CLI preflight.
 Host capture auto-detects the highest installed HLAE version under `C:\HLAE-*\HLAE.exe`; before a real run, compare it with the latest official HLAE release.
