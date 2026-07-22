@@ -16,10 +16,19 @@ type localCapabilityGroup struct {
 
 type localCapabilities struct {
 	LocalStudioReady bool                  `json:"local_studio_ready"`
+	Faceit           localFaceitCapability `json:"faceit"`
 	Record           localCapabilityGroup  `json:"record"`
 	Compose          localCapabilityGroup  `json:"compose"`
 	Render           localCapabilityGroup  `json:"render"`
 	Stream           localStreamCapability `json:"stream"`
+}
+
+type localFaceitCapability struct {
+	Ready                    bool   `json:"ready"`
+	ManualDemoIndexReady     bool   `json:"manual_demo_index_ready"`
+	AutomatedDownloadReady   bool   `json:"automated_download_ready"`
+	DataAPIConfiguration     string `json:"data_api_configuration"`
+	DownloadAPIConfiguration string `json:"download_api_configuration"`
 }
 
 type localStreamCapability struct {
@@ -59,6 +68,7 @@ func runCapabilities(args []string, stdout, stderr io.Writer) int {
 	}
 
 	fmt.Fprintf(stdout, "local_studio_ready: %t\n", report.LocalStudioReady)
+	writeLocalFaceitCapability(stdout, report.Faceit)
 	writeLocalCapabilityGroup(stdout, "record", report.Record)
 	writeLocalCapabilityGroup(stdout, "compose", report.Compose)
 	writeLocalCapabilityGroup(stdout, "render", report.Render)
@@ -67,6 +77,14 @@ func runCapabilities(args []string, stdout, stderr io.Writer) int {
 }
 
 func buildLocalCapabilities(paths capturetools.Paths, sources capturetools.Sources) localCapabilities {
+	faceitReady := strings.TrimSpace(os.Getenv("FACEIT_API_KEY")) != ""
+	faceitCapability := localFaceitCapability{
+		Ready:                    faceitReady,
+		ManualDemoIndexReady:     faceitReady,
+		AutomatedDownloadReady:   false,
+		DataAPIConfiguration:     "set FACEIT_API_KEY",
+		DownloadAPIConfiguration: "requires FACEIT Download API approval and CLI download integration",
+	}
 	record := localCapabilityGroup{Tools: []capturetools.Tool{
 		capturetools.ResolveTool("ZV_RECORDER_PATH", paths.Recorder, sources),
 		capturetools.ResolveTool("ZV_HLAE_PATH", paths.HLAE, sources),
@@ -97,11 +115,18 @@ func buildLocalCapabilities(paths capturetools.Paths, sources capturetools.Sourc
 	stream.SpanishCaptionsReady = stream.Ready && strings.TrimSpace(os.Getenv("XAI_API_KEY")) != ""
 	return localCapabilities{
 		LocalStudioReady: record.Ready && compose.Ready && render.Ready,
+		Faceit:           faceitCapability,
 		Record:           record,
 		Compose:          compose,
 		Render:           render,
 		Stream:           stream,
 	}
+}
+
+func writeLocalFaceitCapability(w io.Writer, capability localFaceitCapability) {
+	fmt.Fprintf(w, "faceit_ready: %t\n", capability.Ready)
+	fmt.Fprintf(w, "  manual_demo_index_ready: %t configuration=%s\n", capability.ManualDemoIndexReady, capability.DataAPIConfiguration)
+	fmt.Fprintf(w, "  automated_download_ready: %t configuration=%s\n", capability.AutomatedDownloadReady, capability.DownloadAPIConfiguration)
 }
 
 func writeLocalStreamCapability(w io.Writer, stream localStreamCapability) {

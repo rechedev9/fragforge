@@ -5,6 +5,7 @@ func workflowDocs() []workflowDoc {
 		{
 			Path: "PRODUCT.md",
 			Required: []string{
+				"./bin/zv faceit index",
 				"./bin/zv demo parse",
 				"./bin/zv demo players",
 				"./bin/zv record",
@@ -88,6 +89,8 @@ func workflowDocs() []workflowDoc {
 				"./bin/zv workflows list --format json",
 				"./bin/zv workflows show",
 				"./bin/zv workflows show demo-parse --format json",
+				"./bin/zv workflows show faceit-index",
+				"./bin/zv workflows run faceit-index",
 				"./bin/zv workflows run demo-parse",
 				"./bin/zv workflows run demo-players",
 				"./bin/zv workflows run utility-audit",

@@ -53,6 +53,12 @@ func buildWorkflowCatalog() []workflowInfo {
 			RunArgs:     []string{"capabilities"},
 		},
 		{
+			Name:        "faceit-index",
+			Description: "Index a FACEIT player's CS2 matches, statistics, demo availability, and manual room links.",
+			Command:     "zv faceit index --profile <url-or-nickname> --out <demo-index.json>",
+			RunArgs:     []string{"faceit", "index"},
+		},
+		{
 			Name:        "demo-parse",
 			Description: "Parse a CS2 demo into a kill or utility plan.",
 			Command:     "zv demo parse --demo <demo.dem> --steamid <SteamID64> --out <plan.json>",
@@ -317,7 +323,7 @@ func workflowValueConstraints(workflow workflowInfo) []workflowValueConstraint {
 			constraint("--variant", streamclips.DefaultVariant().Name, "zv stream variants --format json", streamclips.VariantNames()...),
 			constraint("--format", "text", "", "text", "json"),
 		}
-	case "stream-render", "stream-killfeed", "stream-transcribe", "stream-captions", "stream-variants", "demo-players", "demo-moments", "demo-select", "flows-run":
+	case "faceit-index", "stream-render", "stream-killfeed", "stream-transcribe", "stream-captions", "stream-variants", "demo-players", "demo-moments", "demo-select", "flows-run":
 		return []workflowValueConstraint{
 			constraint("--format", "text", "", "text", "json"),
 		}
@@ -348,7 +354,7 @@ func workflowSafetyMetadata(workflow workflowInfo, arguments workflowArguments) 
 
 	longRunning := false
 	switch workflow.Name {
-	case "short", "record", "compose-final", "music-analyze", "shorts-render", "stream-plan", "stream-transcribe", "stream-render", "analysis-viewer", "serve", "flows-run":
+	case "short", "faceit-index", "record", "compose-final", "music-analyze", "shorts-render", "stream-plan", "stream-transcribe", "stream-render", "analysis-viewer", "serve", "flows-run":
 		// flows-run really parses demos and probes media across a whole journey.
 		longRunning = true
 	}

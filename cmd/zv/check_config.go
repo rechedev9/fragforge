@@ -117,6 +117,7 @@ func skillWorkflowRequirementMap() map[string][]string {
 
 func groupUsageTexts() map[string]string {
 	return map[string]string{
+		"faceit":    faceitUsage,
 		"demo":      demoUsage,
 		"utility":   utilityUsage,
 		"compose":   composeUsage,

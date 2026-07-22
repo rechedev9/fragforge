@@ -22,6 +22,23 @@ Codex follows this machine-readable loop:
 .\bin\zv.exe workflows run short -- match.dem --prompt "all kills 76561198000000000" --dry-run --format json
 ```
 
+For a FACEIT profile, validate the exact request without network access, then
+remove `--dry-run` to persist the current match/demo index:
+
+```powershell
+./bin/zv faceit index --profile https://www.faceit.com/en/players/m0NESY --from 2026-01-01 --to 2026-07-22 --out data/faceit/m0nesy-2026.json --dry-run --format json
+./bin/zv workflows show faceit-index
+./bin/zv workflows show faceit-index --format json
+./bin/zv workflows validate faceit-index --format json -- --profile https://www.faceit.com/en/players/m0NESY --out data/faceit/m0nesy-2026.json --dry-run --format json
+./bin/zv workflows run faceit-index -- --profile https://www.faceit.com/en/players/m0NESY --out data/faceit/m0nesy-2026.json --dry-run --format json
+```
+
+The real command reads only `FACEIT_API_KEY`. Until FACEIT approves Download
+API access, open the persisted `room_url` values and download demos manually;
+then continue with `demo players -> demo parse -> demo moments -> demo select`.
+FACEIT statistics rank matches for review only—the `.dem` remains the source of
+truth for every recording decision.
+
 Run `.\scripts\build.ps1` first when `bin\zv.exe` is missing or stale. Keep
 `--dry-run --format json` for planning; remove both flags only when the user
 requested the real capture/render. Real execution streams human-readable stage

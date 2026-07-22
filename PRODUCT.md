@@ -94,6 +94,25 @@ The deterministic agent loop is:
 .\bin\zv.exe workflows run short -- match.dem --prompt "all kills 76561198148986856" --dry-run --format json
 ```
 
+FACEIT profile discovery is available through the same contract. The Data API
+key stays in `FACEIT_API_KEY`; the command never prints or persists it. A
+preflight is network-free, while the real call writes every indexed match,
+match-level statistics, demo availability, and a manual room link:
+
+```powershell
+./bin/zv faceit index --profile https://www.faceit.com/en/players/m0NESY --from 2026-01-01 --to 2026-07-22 --out data/faceit/m0nesy-2026.json --dry-run --format json
+./bin/zv workflows show faceit-index
+./bin/zv workflows show faceit-index --format json
+./bin/zv workflows validate faceit-index --format json -- --profile https://www.faceit.com/en/players/m0NESY --from 2026-01-01 --to 2026-07-22 --out data/faceit/m0nesy-2026.json --dry-run --format json
+./bin/zv workflows run faceit-index -- --profile https://www.faceit.com/en/players/m0NESY --from 2026-01-01 --to 2026-07-22 --out data/faceit/m0nesy-2026.json --dry-run --format json
+```
+
+After preflight, remove `--dry-run` to create the index. Open each `room_url`
+and use FACEIT's Watch/Demo action until Download API access is approved. The
+manifest's `highlight_match_ids` is transparent match-level triage (multi-kill
+round counts, kills, ADR, date); it does not infer clip ranges. Downloaded
+`.dem` data remains authoritative for POV, weapons, kills, and capture ticks.
+
 `capabilities` reports local record/compose/render/stream readiness without
 starting workers or media processes, including separate booleans for local
 killfeed detection and xAI-backed Spanish captions. Workflow discovery exposes canonical commands,

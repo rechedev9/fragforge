@@ -36,6 +36,8 @@ func Run(argv []string, stdout, stderr io.Writer, stdin io.Reader, runner comman
 		return runPresets(args[1:], stdout, stderr)
 	case "capabilities":
 		return runCapabilities(args[1:], stdout, stderr)
+	case "faceit":
+		return runFaceit(args[1:], stdout, stderr)
 	case "demo":
 		return runDemo(args[1:], stdout, stderr, stdin, runner)
 	case "utility":

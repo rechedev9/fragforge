@@ -9,6 +9,7 @@ Usage:
   zv errors [--tail <n>] [--json] [--clear]
   zv presets [--format text|json]
   zv capabilities [--format text|json]
+  zv faceit index --profile <url-or-nickname> --out <demo-index.json> [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--format text|json]
   zv demo parse [zv-parser parse flags]
   zv demo players [zv-demo-players flags]
   zv demo moments --killplan <plan.json> [--top <n>] [--out <moments.json>] [--dry-run] [--format text|json]
@@ -92,6 +93,27 @@ const presetsUsage = `usage: zv presets [--format text|json]
 `
 
 const capabilitiesUsage = `usage: zv capabilities [--format text|json]
+`
+
+const faceitUsage = `usage: zv faceit index [flags]
+
+Index a player's FACEIT CS2 match history, statistics, demo availability, and
+manual room links without downloading demos. Set FACEIT_API_KEY first.
+`
+
+const faceitIndexUsage = `usage: zv faceit index --profile <url-or-nickname> --out <demo-index.json> [flags]
+
+Flags:
+  --profile <value>      FACEIT player URL or nickname; required
+  --out <path.json>      durable demo index artifact; required
+  --from <YYYY-MM-DD>    first UTC date (default January 1 of current year)
+  --to <YYYY-MM-DD>      last UTC date (default today)
+  --format <text|json>   output format (default text)
+  --dry-run              validate without network access or writing --out
+
+The index ranks matches only for triage. Downloaded .dem files remain the source
+of truth for kills, weapons, camera, and recording ranges. Authentication is
+read only from FACEIT_API_KEY and is never written to the index.
 `
 
 const batchUsage = `usage: zv batch <dir> [flags]

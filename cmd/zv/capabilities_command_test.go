@@ -18,6 +18,7 @@ func TestRunCapabilitiesJSONReportsReadyTools(t *testing.T) {
 		t.Setenv(name, path)
 	}
 	t.Setenv("XAI_API_KEY", "xai_test_secret_not_for_output")
+	t.Setenv("FACEIT_API_KEY", "faceit_test_secret_not_for_output")
 
 	var stdout, stderr strings.Builder
 	code := runCapabilities([]string{"--format", "json"}, &stdout, &stderr)
@@ -34,8 +35,14 @@ func TestRunCapabilitiesJSONReportsReadyTools(t *testing.T) {
 	if !report.Stream.KillfeedDetectionReady || !report.Stream.SpanishCaptionsReady || report.Stream.CaptionsProvider != "xai" {
 		t.Fatalf("stream = %#v, want killfeed and Spanish captions ready", report.Stream)
 	}
+	if !report.Faceit.Ready || !report.Faceit.ManualDemoIndexReady || report.Faceit.AutomatedDownloadReady {
+		t.Fatalf("faceit = %#v, want manual indexing ready and automated download pending", report.Faceit)
+	}
 	if strings.Contains(stdout.String(), "xai_test_secret_not_for_output") {
 		t.Fatal("capabilities output exposed XAI_API_KEY")
+	}
+	if strings.Contains(stdout.String(), "faceit_test_secret_not_for_output") {
+		t.Fatal("capabilities output exposed FACEIT_API_KEY")
 	}
 	for _, group := range []localCapabilityGroup{report.Record, report.Compose, report.Render} {
 		for _, tool := range group.Tools {
@@ -52,6 +59,7 @@ func TestRunCapabilitiesJSONReportsMissingToolsWithoutFailing(t *testing.T) {
 		t.Setenv(name, missing)
 	}
 	t.Setenv("XAI_API_KEY", "")
+	t.Setenv("FACEIT_API_KEY", "")
 
 	var stdout, stderr strings.Builder
 	code := runCapabilities([]string{"--format=json"}, &stdout, &stderr)
@@ -64,6 +72,9 @@ func TestRunCapabilitiesJSONReportsMissingToolsWithoutFailing(t *testing.T) {
 	}
 	if report.LocalStudioReady || report.Record.Ready || report.Compose.Ready || report.Render.Ready || report.Stream.Ready || report.Stream.KillfeedDetectionReady || report.Stream.SpanishCaptionsReady {
 		t.Fatalf("report = %#v, want unavailable tools reported as normal state", report)
+	}
+	if report.Faceit.Ready || report.Faceit.ManualDemoIndexReady || report.Faceit.AutomatedDownloadReady {
+		t.Fatalf("faceit = %#v, want unavailable integration", report.Faceit)
 	}
 }
 

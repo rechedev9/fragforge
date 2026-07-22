@@ -26,6 +26,11 @@ func validateSkillCommand(command []string) string {
 		if issue := validateFormattedCommand("capabilities", command[1:]); issue != "" {
 			return issue
 		}
+	case "faceit":
+		if len(command) < 2 || command[1] != "index" {
+			return `uses non-standard zv command "faceit"; expected "faceit index"`
+		}
+		return validateRequiredFlags(`"faceit index"`, command[2:], requiredFlagsForRunArgs("faceit", "index")...)
 	case "check":
 		if issue := validateFormattedCommand("check", command[1:]); issue != "" {
 			return issue
@@ -459,6 +464,8 @@ func commandValueFlags(commandName string, required []string) []string {
 	switch commandName {
 	case `"demo parse"`:
 		flags = append(flags, "--segment-mode", "--rules")
+	case `"faceit index"`:
+		flags = append(flags, "--from", "--to", "--format")
 	case `"demo players"`:
 		flags = append(flags, "--contains", "--out", "--format")
 	case `"demo moments"`:
@@ -564,6 +571,8 @@ func commandBoolFlags(commandName string) []string {
 	switch commandName {
 	case `"demo parse"`:
 		return []string{"--verbose", "--dry-run"}
+	case `"faceit index"`:
+		return []string{"--dry-run"}
 	case `"demo moments"`:
 		return []string{"--dry-run"}
 	case `"demo select"`:
