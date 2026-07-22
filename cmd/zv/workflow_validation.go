@@ -44,16 +44,6 @@ func checkWorkflows() ([]skillInfo, []workflowInfo, []workflowDoc, int, []skillI
 		return nil, nil, nil, 0, nil, err
 	}
 	issues = append(issues, promptContentIssues...)
-	claudeContentIssues, err := checkClaudeCommandContents()
-	if err != nil {
-		return nil, nil, nil, 0, nil, err
-	}
-	issues = append(issues, claudeContentIssues...)
-	claudeAgentIssues, err := checkClaudeReviewerAgents()
-	if err != nil {
-		return nil, nil, nil, 0, nil, err
-	}
-	issues = append(issues, claudeAgentIssues...)
 	claudeRuleIssues, err := checkClaudeRuleDocs()
 	if err != nil {
 		return nil, nil, nil, 0, nil, err

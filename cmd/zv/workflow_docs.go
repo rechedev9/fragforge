@@ -131,11 +131,11 @@ func workflowDocs() []workflowDoc {
 		{
 			Path: "CLAUDE.md",
 			Required: []string{
-				"scripts/claude-run.sh",
-				"scripts/claude-zv-tdd.sh",
-				"scripts/claude-zv-bugfix.sh",
-				"scripts/claude-zv-pr-ready.sh",
-				"CLAUDE_DRY_RUN=1",
+				"scripts/codex-run.sh",
+				"scripts/codex-go-tdd.sh",
+				"scripts/codex-go-bugfix.sh",
+				"scripts/codex-go-pr-ready.sh",
+				"CODEX_DRY_RUN=1",
 				"highest installed HLAE version",
 				"latest official HLAE release",
 				"creative brief gate",

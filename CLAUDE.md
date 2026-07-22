@@ -134,19 +134,14 @@ FragForge has no hosted backend; the desktop release command is `pnpm --dir desk
 Publish versioned installer assets and `SHA256SUMS.txt` to GitHub Releases in `rechedev9/fragforge`, update the landing download URL, then deploy Vercel project `fragforge-landing` with root `landing/` to `https://fragforge.gravityroom.app/`.
 Do not use the retired VPS landing path.
 
-## Agent Harnesses
+## Codex Harness
 
 ```bash
 CODEX_DRY_RUN=1 scripts/codex-run.sh .codex/prompts/go-tdd.md "preview"
 scripts/codex-go-tdd.sh "behavior change"
 scripts/codex-go-bugfix.sh "bug fix"
 scripts/codex-go-pr-ready.sh
-CLAUDE_DRY_RUN=1 scripts/claude-run.sh .claude/commands/zv-tdd.md "preview"
-scripts/claude-zv-tdd.sh "behavior change"
-scripts/claude-zv-bugfix.sh "bug fix"
-scripts/claude-zv-pr-ready.sh
 ```
 
-Focused reviewers are `@go-readability-reviewer`, `@go-test-reviewer`, `@go-concurrency-reviewer`, `@go-security-reviewer`, and `@zv-media-pipeline-reviewer`.
 Review findings use `BLOCKER`, `WARNING`, or `NIT` and include file/path, problem, why it matters, and a practical fix; if clean, say `No blocking issues found.`
 When using `codex --yolo` with GPT-5.6 Sol Ultra, cap the entire delegation tree at 15 sub-agents.

@@ -3,8 +3,11 @@ package streamclips
 import (
 	"image"
 	"image/color"
+	"image/draw"
 	"testing"
 )
+
+var benchmarkNoticeRows []NoticeRow
 
 func TestDetectNoticeRowsSeparatesStaggeredOverlappingNotices(t *testing.T) {
 	top := image.Rect(1621, 73, 1909, 110)
@@ -124,6 +127,67 @@ func TestDetectNoticeRowsEmptyFrame(t *testing.T) {
 	}
 }
 
+func TestDetectNoticeRowsMatchesConcreteAndGenericImages(t *testing.T) {
+	t.Parallel()
+
+	source := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	drawStreamKillfeedNotice(source, image.Rect(1510, 70, 1810, 106))
+	want := DetectNoticeRows(source, nil)
+	if len(want) != 1 {
+		t.Fatalf("RGBA fixture returned %d rows, want 1: %+v", len(want), want)
+	}
+
+	nrgba := image.NewNRGBA(source.Bounds())
+	draw.Draw(nrgba, nrgba.Bounds(), source, source.Bounds().Min, draw.Src)
+	images := []struct {
+		name  string
+		frame image.Image
+	}{
+		{name: "nrgba", frame: nrgba},
+		{name: "generic", frame: struct{ image.Image }{source}},
+	}
+	for _, tt := range images {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectNoticeRows(tt.frame, nil)
+			if len(got) != len(want) {
+				t.Fatalf("DetectNoticeRows returned %d rows, want %d: %+v", len(got), len(want), got)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("row %d = %+v, want %+v", i, got[i], want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestRedMasksPreserveNRGBAAlphaSemantics(t *testing.T) {
+	t.Parallel()
+
+	frame := image.NewNRGBA(image.Rect(0, 0, 4, 1))
+	for x, alpha := range []uint8{120, 121, 150, 151} {
+		frame.SetNRGBA(x, 0, color.NRGBA{R: 255, A: alpha})
+	}
+	loose, strict := redMasks(frame, frame.Bounds())
+	wantLoose := []bool{false, true, true, true}
+	wantStrict := []bool{false, false, false, true}
+	for i := range wantLoose {
+		if loose[i] != wantLoose[i] || strict[i] != wantStrict[i] {
+			t.Fatalf(
+				"pixel %d masks = loose:%t strict:%t, want loose:%t strict:%t",
+				i, loose[i], strict[i], wantLoose[i], wantStrict[i],
+			)
+		}
+	}
+
+	genericLoose, genericStrict := redMasks(struct{ image.Image }{frame}, frame.Bounds())
+	for i := range wantLoose {
+		if genericLoose[i] != loose[i] || genericStrict[i] != strict[i] {
+			t.Fatalf("generic pixel %d masks differ from NRGBA fast path", i)
+		}
+	}
+}
+
 func TestDetectNoticeRowsBoundsSearchToHintPadding(t *testing.T) {
 	hint := CropRect{X: 0.68, Y: 0.05, Width: 0.26, Height: 0.14}
 	tests := []struct {
@@ -237,6 +301,26 @@ func TestDetectNoticeRowsReturnsOnlyTightNoticeBounds(t *testing.T) {
 	}
 	assertNoticeRowWithinOnePixel(t, rows[0], top)
 	assertNoticeRowWithinOnePixel(t, rows[1], bottom)
+}
+
+func BenchmarkDetectNoticeRows1080pEmpty(b *testing.B) {
+	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchmarkNoticeRows = DetectNoticeRows(frame, nil)
+	}
+}
+
+func BenchmarkDetectNoticeRows1080pTwoRows(b *testing.B) {
+	frame := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	drawStreamKillfeedNotice(frame, image.Rect(1510, 70, 1810, 106))
+	drawCompressedStreamKillfeedNotice(frame, image.Rect(1450, 120, 1810, 158))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchmarkNoticeRows = DetectNoticeRows(frame, nil)
+	}
 }
 
 func assertNoticeRowNear(t *testing.T, got NoticeRow, want image.Rectangle) {

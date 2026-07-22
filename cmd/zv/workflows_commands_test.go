@@ -673,10 +673,10 @@ func TestRunWorkflowsCheckRejectsAgentInstructionHLAEDrift(t *testing.T) {
 		"# Claude",
 		"",
 		"```bash",
-		`CLAUDE_DRY_RUN=1 scripts/claude-run.sh .claude/commands/zv-tdd.md "custom prompt run"`,
-		`scripts/claude-zv-tdd.sh "implement a behavior change"`,
-		`scripts/claude-zv-bugfix.sh "fix a bug with a regression test"`,
-		`scripts/claude-zv-pr-ready.sh`,
+		`CODEX_DRY_RUN=1 scripts/codex-run.sh .codex/prompts/go-tdd.md "custom prompt run"`,
+		`scripts/codex-go-tdd.sh "implement a behavior change"`,
+		`scripts/codex-go-bugfix.sh "fix a bug with a regression test"`,
+		`scripts/codex-go-pr-ready.sh`,
 		`scripts/go-gate.sh --no-format`,
 		`scripts/go-gate.sh --race`,
 		`scripts/go-gate.sh --security`,
@@ -743,47 +743,6 @@ func TestRunWorkflowsCheckRejectsPartialCodexPromptChecks(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowsCheckRejectsPartialClaudeCommandChecks(t *testing.T) {
-	tempDir := t.TempDir()
-	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
-		"---",
-		"name: alpha",
-		`description: "Alpha workflow"`,
-		"---",
-		"",
-		"```powershell",
-		`.\bin\zv.exe workflows run demo-parse -- --demo demo.dem --steamid 76561198000000000 --out plan.json`,
-		"```",
-		"",
-	}, "\n"))
-	writeWorkflowDocs(t, tempDir)
-	writeFile(t, filepath.Join(tempDir, ".claude", "commands", "zv-tdd.md"), strings.Join([]string{
-		"# Command",
-		"",
-		"Run `go test ./... -count=1`.",
-		"Run `go vet ./...`.",
-		"",
-	}, "\n"))
-	withWorkingDir(t, tempDir)
-
-	var stdout, stderr strings.Builder
-	code := Run([]string{"zv", "workflows", "check"}, &stdout, &stderr, nil, &fakeRunner{})
-
-	if got, want := code, exitInvalidArgs; got != want {
-		t.Fatalf("code = %d, want %d", got, want)
-	}
-	for _, want := range []string{
-		`.claude/commands/zv-tdd.md: missing standard gate guidance "scripts/go-gate.sh --no-format"`,
-		`.claude/commands/zv-tdd.md: missing standard gate guidance "` + "`zv check`" + `"`,
-		`.claude/commands/zv-tdd.md: uses partial check "` + "`go test ./... -count=1`" + `"; use scripts/go-gate.sh`,
-		`.claude/commands/zv-tdd.md: uses partial check "` + "`go vet ./...`" + `"; use scripts/go-gate.sh`,
-	} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
-		}
-	}
-}
-
 func TestRunWorkflowsCheckRejectsMissingCodexRunner(t *testing.T) {
 	tempDir := t.TempDir()
 	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
@@ -810,36 +769,6 @@ func TestRunWorkflowsCheckRejectsMissingCodexRunner(t *testing.T) {
 		t.Fatalf("code = %d, want %d", got, want)
 	}
 	if want := `scripts/codex-run.sh: missing codex prompt runner`; !strings.Contains(stderr.String(), want) {
-		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
-	}
-}
-
-func TestRunWorkflowsCheckRejectsMissingClaudeRunner(t *testing.T) {
-	tempDir := t.TempDir()
-	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
-		"---",
-		"name: alpha",
-		`description: "Alpha workflow"`,
-		"---",
-		"",
-		"```powershell",
-		`.\bin\zv.exe workflows run demo-parse -- --demo demo.dem --steamid 76561198000000000 --out plan.json`,
-		"```",
-		"",
-	}, "\n"))
-	writeWorkflowDocs(t, tempDir)
-	if err := os.Remove(filepath.Join(tempDir, "scripts", "claude-run.sh")); err != nil {
-		t.Fatalf("remove claude runner: %v", err)
-	}
-	withWorkingDir(t, tempDir)
-
-	var stdout, stderr strings.Builder
-	code := Run([]string{"zv", "workflows", "check"}, &stdout, &stderr, nil, &fakeRunner{})
-
-	if got, want := code, exitInvalidArgs; got != want {
-		t.Fatalf("code = %d, want %d", got, want)
-	}
-	if want := `scripts/claude-run.sh: missing claude prompt runner`; !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
@@ -878,87 +807,6 @@ func TestRunWorkflowsCheckRejectsNonStandardAgentShellScript(t *testing.T) {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 		}
-	}
-}
-
-func TestRunWorkflowsCheckRejectsClaudeCommandWithoutWrapper(t *testing.T) {
-	tempDir := t.TempDir()
-	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
-		"---",
-		"name: alpha",
-		`description: "Alpha workflow"`,
-		"---",
-		"",
-		"```powershell",
-		`.\bin\zv.exe workflows run demo-parse -- --demo demo.dem --steamid 76561198000000000 --out plan.json`,
-		"```",
-		"",
-	}, "\n"))
-	writeWorkflowDocs(t, tempDir)
-	if err := os.Remove(filepath.Join(tempDir, "scripts", "claude-zv-tdd.sh")); err != nil {
-		t.Fatalf("remove claude wrapper: %v", err)
-	}
-	withWorkingDir(t, tempDir)
-
-	var stdout, stderr strings.Builder
-	code := Run([]string{"zv", "workflows", "check"}, &stdout, &stderr, nil, &fakeRunner{})
-
-	if got, want := code, exitInvalidArgs; got != want {
-		t.Fatalf("code = %d, want %d", got, want)
-	}
-	if want := `.claude/commands/zv-tdd.md: has no claude wrapper`; !strings.Contains(stderr.String(), want) {
-		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
-	}
-}
-
-func TestRunWorkflowsCheckRejectsUndocumentedClaudeReviewerAgent(t *testing.T) {
-	tempDir := t.TempDir()
-	writeSkillBody(t, tempDir, "alpha", strings.Join([]string{
-		"---",
-		"name: alpha",
-		`description: "Alpha workflow"`,
-		"---",
-		"",
-		"```powershell",
-		`.\bin\zv.exe workflows run demo-parse -- --demo demo.dem --steamid 76561198000000000 --out plan.json`,
-		"```",
-		"",
-	}, "\n"))
-	writeWorkflowDocs(t, tempDir)
-	writeFile(t, filepath.Join(tempDir, ".claude", "GUIDE.md"), strings.Join([]string{
-		"# Claude",
-		"",
-		"```bash",
-		"scripts/claude-run.sh",
-		"scripts/claude-zv-tdd.sh",
-		"scripts/claude-zv-bugfix.sh",
-		"scripts/claude-zv-pr-ready.sh",
-		"scripts/claude-zv-artifact-audit.sh",
-		"scripts/claude-zv-media-change.sh",
-		"scripts/claude-zv-parser-change.sh",
-		"scripts/claude-zv-plan.sh",
-		"scripts/claude-zv-toolchain-diagnose.sh",
-		"scripts/claude-zv-worker-api-change.sh",
-		"```",
-		"",
-		"```text",
-		"@go-readability-reviewer review the current diff",
-		"@go-test-reviewer review the tests in this diff",
-		"@go-concurrency-reviewer review shared-state changes",
-		"@zv-media-pipeline-reviewer review FFmpeg/rendering changes",
-		"```",
-		"",
-	}, "\n"))
-	withWorkingDir(t, tempDir)
-
-	var stdout, stderr strings.Builder
-	code := Run([]string{"zv", "workflows", "check"}, &stdout, &stderr, nil, &fakeRunner{})
-
-	if got, want := code, exitInvalidArgs; got != want {
-		t.Fatalf("code = %d, want %d", got, want)
-	}
-	if want := `.claude/GUIDE.md: does not document reviewer agent @go-security-reviewer`; !strings.Contains(stderr.String(), want) {
-		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
 

@@ -183,9 +183,6 @@ func currentAgentPromptWrappers(t *testing.T, root string) []string {
 	for _, fixture := range currentCodexPromptWrappers(t, root) {
 		wrappers = append(wrappers, fixture.wrapper)
 	}
-	for _, fixture := range currentClaudePromptWrappers(t, root) {
-		wrappers = append(wrappers, fixture.wrapper)
-	}
 	return wrappers
 }
 
@@ -213,31 +210,6 @@ func currentCodexPromptWrappers(t *testing.T, root string) []codexPromptWrapperF
 	}
 	if len(fixtures) == 0 {
 		t.Fatalf("no codex prompt wrappers found")
-	}
-	return fixtures
-}
-
-func currentClaudePromptWrappers(t *testing.T, root string) []claudePromptWrapperFixture {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(root, "scripts", "claude-zv-*.sh"))
-	if err != nil {
-		t.Fatalf("glob claude wrappers: %v", err)
-	}
-	var fixtures []claudePromptWrapperFixture
-	for _, wrapper := range matches {
-		relWrapper := filepath.ToSlash(mustRel(root, wrapper))
-		body := readFileString(t, wrapper)
-		command, ok := claudeWrapperCommandPath(body)
-		if !ok {
-			t.Fatalf("%s does not exec scripts/claude-run.sh with a command prompt", relWrapper)
-		}
-		fixtures = append(fixtures, claudePromptWrapperFixture{
-			wrapper: relWrapper,
-			command: command,
-		})
-	}
-	if len(fixtures) == 0 {
-		t.Fatalf("no claude prompt wrappers found")
 	}
 	return fixtures
 }
@@ -1027,9 +999,6 @@ func agentPromptWrapperFixtures() []string {
 	for _, fixture := range codexPromptWrapperFixtures() {
 		out = append(out, fixture.wrapper)
 	}
-	for _, fixture := range claudePromptWrapperFixtures() {
-		out = append(out, fixture.wrapper)
-	}
 	return out
 }
 
@@ -1046,69 +1015,6 @@ func codexPromptWrapperFixtures() []codexPromptWrapperFixture {
 		{wrapper: "scripts/codex-review-diff.sh", prompt: ".codex/prompts/review-diff.md"},
 		{wrapper: "scripts/codex-spike.sh", prompt: ".codex/prompts/go-spike.md"},
 	}
-}
-
-type claudePromptWrapperFixture struct {
-	wrapper string
-	command string
-}
-
-func claudePromptWrapperFixtures() []claudePromptWrapperFixture {
-	return []claudePromptWrapperFixture{
-		{wrapper: "scripts/claude-zv-artifact-audit.sh", command: ".claude/commands/zv-artifact-audit.md"},
-		{wrapper: "scripts/claude-zv-bugfix.sh", command: ".claude/commands/zv-bugfix.md"},
-		{wrapper: "scripts/claude-zv-media-change.sh", command: ".claude/commands/zv-media-change.md"},
-		{wrapper: "scripts/claude-zv-parser-change.sh", command: ".claude/commands/zv-parser-change.md"},
-		{wrapper: "scripts/claude-zv-plan.sh", command: ".claude/commands/zv-plan.md"},
-		{wrapper: "scripts/claude-zv-pr-ready.sh", command: ".claude/commands/zv-pr-ready.md"},
-		{wrapper: "scripts/claude-zv-tdd.sh", command: ".claude/commands/zv-tdd.md"},
-		{wrapper: "scripts/claude-zv-toolchain-diagnose.sh", command: ".claude/commands/zv-toolchain-diagnose.md"},
-		{wrapper: "scripts/claude-zv-worker-api-change.sh", command: ".claude/commands/zv-worker-api-change.md"},
-	}
-}
-
-type claudeReviewerAgentFixture struct {
-	path string
-	body string
-}
-
-func claudeReviewerAgentFixtures() []claudeReviewerAgentFixture {
-	names := []string{
-		"go-readability-reviewer",
-		"go-test-reviewer",
-		"go-concurrency-reviewer",
-		"go-security-reviewer",
-		"zv-media-pipeline-reviewer",
-	}
-	fixtures := make([]claudeReviewerAgentFixture, 0, len(names))
-	for _, name := range names {
-		extra := ""
-		switch name {
-		case "go-concurrency-reviewer":
-			extra = "\nRecommend `scripts/go-gate.sh --race` when shared state changed.\n"
-		case "go-security-reviewer":
-			extra = "\nDo not read `.env`, private keys, or token files.\n"
-		case "zv-media-pipeline-reviewer":
-			extra = "\nAvoid tests that require real HLAE/CS2/large media unless explicitly requested.\n"
-		}
-		fixtures = append(fixtures, claudeReviewerAgentFixture{
-			path: ".claude/agents/" + name + ".md",
-			body: strings.Join([]string{
-				"---",
-				"name: " + name,
-				"description: Review " + name,
-				"model: sonnet",
-				"tools: [Read, Bash]",
-				"---",
-				"",
-				"Use `BLOCKER`, `WARNING`, and `NIT`.",
-				"Every finding needs file/path, problem, why it matters, and a practical fix.",
-				"If clean, say `No blocking issues found.`.",
-				extra,
-			}, "\n"),
-		})
-	}
-	return fixtures
 }
 
 func codexPromptFixtureBody(prompt string) string {
@@ -1504,48 +1410,14 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"```",
 		"",
 	}, "\n"))
-	for _, fixture := range claudePromptWrapperFixtures() {
-		writeFile(t, filepath.Join(root, filepath.FromSlash(fixture.command)), claudeCommandFixtureBody(fixture.command))
-		writeFile(t, filepath.Join(root, filepath.FromSlash(fixture.wrapper)), strings.Join([]string{
-			"#!/usr/bin/env bash",
-			"set -euo pipefail",
-			`root="$(git rev-parse --show-toplevel)"`,
-			fmt.Sprintf(`exec "$root/scripts/claude-run.sh" %s "$@"`, fixture.command),
-			"",
-		}, "\n"))
-	}
-	writeFile(t, filepath.Join(root, "scripts", "claude-run.sh"), strings.Join([]string{
-		"#!/usr/bin/env bash",
-		"set -euo pipefail",
-		`prompt_file="$1"`,
-		`shift || true`,
-		`exec claude -p "$(cat "$prompt_file")" "$@"`,
-		"",
-	}, "\n"))
-	claudeGuideLines := []string{
+	writeFile(t, filepath.Join(root, ".claude", "GUIDE.md"), strings.Join([]string{
 		"# Claude",
 		"",
 		"Style and operational rules live in CLAUDE.md.",
 		"",
-		"```bash",
-		"scripts/claude-run.sh",
-	}
-	for _, fixture := range claudePromptWrapperFixtures() {
-		claudeGuideLines = append(claudeGuideLines, fixture.wrapper)
-	}
-	claudeGuideLines = append(claudeGuideLines,
-		"```",
+		"Claude Code loads CLAUDE.md and uses .claude/settings.json.",
 		"",
-		"```text",
-		"@go-readability-reviewer review the current diff",
-		"@go-test-reviewer review the tests in this diff",
-		"@go-concurrency-reviewer review shared-state changes",
-		"@go-security-reviewer review filesystem/subprocess/security changes",
-		"@zv-media-pipeline-reviewer review FFmpeg/rendering changes",
-		"```",
-		"",
-	)
-	writeFile(t, filepath.Join(root, ".claude", "GUIDE.md"), strings.Join(claudeGuideLines, "\n"))
+	}, "\n"))
 	writeFile(t, filepath.Join(root, "CLAUDE.md"), strings.Join([]string{
 		"# Claude",
 		"",
@@ -1557,26 +1429,18 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"Do not add generated video/audio/image artifacts to git.",
 		"",
 		"```bash",
-		`CLAUDE_DRY_RUN=1 scripts/claude-run.sh .claude/commands/zv-tdd.md "custom prompt run"`,
+		`CODEX_DRY_RUN=1 scripts/codex-run.sh .codex/prompts/go-tdd.md "custom prompt run"`,
 		`highest installed HLAE version`,
 		`latest official HLAE release`,
 		`creative brief gate`,
 		`Thumbnail approval is a second gate`,
 		`C:\HLAE\HLAE.exe`,
-		`scripts/claude-zv-tdd.sh "implement a behavior change"`,
-		`scripts/claude-zv-bugfix.sh "fix a bug with a regression test"`,
-		`scripts/claude-zv-pr-ready.sh`,
+		`scripts/codex-go-tdd.sh "implement a behavior change"`,
+		`scripts/codex-go-bugfix.sh "fix a bug with a regression test"`,
+		`scripts/codex-go-pr-ready.sh`,
 		`scripts/go-gate.sh --no-format`,
 		`scripts/go-gate.sh --race`,
 		`scripts/go-gate.sh --security`,
-		"```",
-		"",
-		"```text",
-		"@go-readability-reviewer review the current diff",
-		"@go-test-reviewer review the tests in this diff",
-		"@go-concurrency-reviewer review shared-state changes",
-		"@go-security-reviewer review filesystem/subprocess/security changes",
-		"@zv-media-pipeline-reviewer review FFmpeg/rendering changes",
 		"```",
 		"",
 	}, "\n"))
@@ -1589,86 +1453,7 @@ func writeWorkflowDocs(t *testing.T, root string) {
 		"No re-exports: update every import when moving code.",
 		"",
 	}, "\n"))
-	for _, fixture := range claudeReviewerAgentFixtures() {
-		writeFile(t, filepath.Join(root, filepath.FromSlash(fixture.path)), fixture.body)
-	}
 	writeFile(t, filepath.Join(root, ".claude", "settings.json"), claudeSettingsFixture())
-}
-
-func claudeCommandFixtureBody(command string) string {
-	switch command {
-	case ".claude/commands/zv-plan.md":
-		return strings.Join([]string{
-			"# Command",
-			"",
-			"Read-only. Do not edit files.",
-			"Run `git status --short`.",
-			"",
-			"Output:",
-			"",
-			"- Tests and verification",
-			"- Risks / open questions",
-			"",
-		}, "\n")
-	case ".claude/commands/zv-tdd.md", ".claude/commands/zv-bugfix.md":
-		return strings.Join([]string{
-			"# Command",
-			"",
-			"Run `scripts/go-gate.sh --no-format` so tests, vet, `zv check`, and static analysis share the project contract.",
-			"If concurrency/shared state changed, run `scripts/go-gate.sh --race --no-format`.",
-			"",
-		}, "\n")
-	case ".claude/commands/zv-parser-change.md", ".claude/commands/zv-media-change.md":
-		return strings.Join([]string{
-			"# Command",
-			"",
-			"Run targeted package tests first.",
-			"If broad, run `scripts/go-gate.sh --no-format`; it includes `zv check`.",
-			"",
-		}, "\n")
-	case ".claude/commands/zv-worker-api-change.md":
-		return strings.Join([]string{
-			"# Command",
-			"",
-			"Run targeted package tests first.",
-			"If broad, run `scripts/go-gate.sh --no-format`; it includes `zv check`.",
-			"If concurrency/shared state changed, run `scripts/go-gate.sh --race --no-format`.",
-			"",
-		}, "\n")
-	case ".claude/commands/zv-pr-ready.md":
-		return strings.Join([]string{
-			"# Command",
-			"",
-			"Run `scripts/go-gate.sh --no-format`; it includes `zv check`.",
-			"If concurrency changed, run `scripts/go-gate.sh --race`.",
-			"If security changed, run `scripts/go-gate.sh --security`.",
-			"",
-		}, "\n")
-	case ".claude/commands/zv-artifact-audit.md":
-		return strings.Join([]string{
-			"# Command",
-			"",
-			"Read-only. Do not edit or delete files.",
-			"Run `git status --short`.",
-			"Inspect `.gitignore`.",
-			"Check generated run data under `data/`.",
-			"Output Suggested commands for manual cleanup only.",
-			"",
-		}, "\n")
-	case ".claude/commands/zv-toolchain-diagnose.md":
-		return strings.Join([]string{
-			"# Command",
-			"",
-			"Read-only diagnosis. Do not install tools or edit files unless the user asks.",
-			"Run `scripts/go-tools-check.sh`.",
-			"Inspect `scripts/check-toolchain.ps1`.",
-			"Do not run CS2/HLAE, Docker compose, migrations, or renders.",
-			"Output Exact next commands.",
-			"",
-		}, "\n")
-	default:
-		return "# " + command + "\n"
-	}
 }
 
 func claudeSettingsFixture() string {

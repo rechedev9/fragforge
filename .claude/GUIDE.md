@@ -1,16 +1,16 @@
-# Claude Code Harness Guide
+# Claude Code Guide
 
-Repo-local harness for using Claude Code safely on FragForge.
+Guidance for using Claude Code safely on FragForge.
 
-Claude Code automatically loads `CLAUDE.md` from the repo root. That file holds
-project boundaries, Go and TypeScript style, safety rules, and verification
-expectations. All style and operational rules live directly in `CLAUDE.md`.
+Claude Code automatically loads `CLAUDE.md` from the repo root.
+That file holds project boundaries, Go and TypeScript style, safety rules, and verification expectations.
+All style and operational rules live directly in `CLAUDE.md`.
 
-Studio ships its own integrated FragForge Agent. Claude Code repository work
-uses the CLI and the harness below; the former external MCP registration is no
-longer part of the product.
+Studio ships its own integrated FragForge Agent.
+Claude Code is a repository-development tool and is not an assistant surface in Studio.
+The former external MCP registration is no longer part of the product.
 
-## Interactive use
+## Use
 
 Run Claude Code from the repository root in Git Bash, not through the broken bare `bash` WSL shim:
 
@@ -18,59 +18,27 @@ Run Claude Code from the repository root in Git Bash, not through the broken bar
 claude
 ```
 
-Then use project slash commands:
+Use the unified CLI for FragForge operations and inspect its executable contracts before composing commands:
 
-```text
-/zv-plan describe the change
-/zv-tdd implement behavior with tests
-/zv-bugfix fix bug with regression test
-/zv-parser-change adjust parser/killplan behavior
-/zv-media-change adjust editor/recording/FFmpeg behavior
-/zv-worker-api-change adjust orchestrator/API/worker behavior
-/zv-pr-ready
-/zv-artifact-audit
-/zv-toolchain-diagnose
+```powershell
+.\bin\zv.exe capabilities --format json
+.\bin\zv.exe flows show demo --format json
+.\bin\zv.exe workflows show short --format json
+.\bin\zv.exe skills list --format json
 ```
 
-Use repo-local reviewer agents directly when useful:
-
-```text
-@go-readability-reviewer review the current diff
-@go-test-reviewer review the tests in this diff
-@go-concurrency-reviewer review shared-state changes
-@go-security-reviewer review filesystem/subprocess/security changes
-@zv-media-pipeline-reviewer review FFmpeg/rendering changes
-```
-
-## Non-interactive wrappers
+For repository verification, run the relevant project gates from Git Bash:
 
 ```bash
-scripts/claude-run.sh .claude/commands/zv-plan.md "custom prompt run"
-scripts/claude-zv-plan.sh "plan a small change"
-scripts/claude-zv-tdd.sh "implement a behavior change"
-scripts/claude-zv-bugfix.sh "fix a bug with a regression test"
-scripts/claude-zv-parser-change.sh "change parser/killplan behavior"
-scripts/claude-zv-media-change.sh "change editor/recording/FFmpeg behavior"
-scripts/claude-zv-worker-api-change.sh "change orchestrator/API/worker behavior"
-scripts/claude-zv-pr-ready.sh
-scripts/claude-zv-artifact-audit.sh
-scripts/claude-zv-toolchain-diagnose.sh
-```
-
-Useful environment variables:
-
-```bash
-CLAUDE_MODEL=opus scripts/claude-zv-tdd.sh "..."
-CLAUDE_MAX_TURNS=18 scripts/claude-zv-tdd.sh "..."
-CLAUDE_DRY_RUN=1 scripts/claude-zv-tdd.sh "preview prompt only"
-CLAUDE_ALLOWED_TOOLS=Read,Bash scripts/claude-zv-artifact-audit.sh
+scripts/go-gate.sh --no-format
+scripts/go-gate.sh --race
+scripts/go-gate.sh --security
+scripts/check-codex-harness.sh
 ```
 
 ## Safety defaults
 
-- Read-only commands restrict tools to `Read,Bash,WebSearch,WebFetch`.
-- Write-oriented commands allow `Read,Edit,Write,Bash,WebSearch,WebFetch`.
-- `.claude/settings.json` allows normal Go checks and asks before dependency,
-  git-history, Docker, migration, HLAE/CS2, and destructive operations.
-- Do not use `--dangerously-skip-permissions` for this repo unless you have an
-  external sandbox.
+- `.claude/settings.json` allows normal repository work and Go checks.
+- It asks before dependency, git-history, Docker, FFmpeg, PowerShell, build, and cleanup operations.
+- It denies secret reads and destructive Git or filesystem commands.
+- Do not use `--dangerously-skip-permissions` for this repo unless you have an external sandbox.

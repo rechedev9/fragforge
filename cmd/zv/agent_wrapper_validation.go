@@ -90,85 +90,6 @@ func checkCodexPromptWrappers() (int, []skillIssue, error) {
 	return checked, issues, nil
 }
 
-func checkClaudePromptWrappers() (int, []skillIssue, error) {
-	root, err := findWorkflowRoot()
-	if err != nil {
-		return 0, nil, err
-	}
-	commandsDir := filepath.Join(root, ".claude", "commands")
-	entries, err := os.ReadDir(commandsDir)
-	if err != nil {
-		return 0, nil, fmt.Errorf("read claude commands: %w", err)
-	}
-	commands := make(map[string]bool)
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
-			continue
-		}
-		commands[filepath.ToSlash(filepath.Join(".claude", "commands", entry.Name()))] = false
-	}
-
-	guidePath := filepath.Join(root, ".claude", "GUIDE.md")
-	b, err := os.ReadFile(guidePath)
-	if err != nil {
-		return 0, nil, fmt.Errorf("read .claude/GUIDE.md: %w", err)
-	}
-	guideBody := string(b)
-	var issues []skillIssue
-	runnerPath := filepath.Join(root, "scripts", "claude-run.sh")
-	relRunner := filepath.ToSlash(mustRel(root, runnerPath))
-	if b, err := os.ReadFile(runnerPath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			issues = append(issues, skillIssue{Path: relRunner, Message: "missing claude prompt runner"})
-		} else {
-			return 0, nil, fmt.Errorf("read %s: %w", relRunner, err)
-		}
-	} else {
-		issues = append(issues, validateAgentShellScript(relRunner, string(b))...)
-		if !strings.Contains(guideBody, relRunner) {
-			issues = append(issues, skillIssue{Path: ".claude/GUIDE.md", Message: fmt.Sprintf("does not document runner %s", relRunner)})
-		}
-	}
-
-	wrappers, err := filepath.Glob(filepath.Join(root, "scripts", "claude-zv-*.sh"))
-	if err != nil {
-		return 0, nil, fmt.Errorf("glob claude wrappers: %w", err)
-	}
-	var checked int
-	for _, wrapper := range wrappers {
-		relWrapper := filepath.ToSlash(mustRel(root, wrapper))
-		b, err := os.ReadFile(wrapper)
-		if err != nil {
-			return 0, nil, fmt.Errorf("read %s: %w", relWrapper, err)
-		}
-		body := string(b)
-		issues = append(issues, validateAgentShellScript(relWrapper, body)...)
-		command, ok := claudeWrapperCommandPath(body)
-		if !ok {
-			issues = append(issues, skillIssue{Path: relWrapper, Message: "does not exec scripts/claude-run.sh with a command prompt"})
-			continue
-		}
-		if _, ok := commands[command]; !ok {
-			issues = append(issues, skillIssue{Path: relWrapper, Message: fmt.Sprintf("references missing claude command %s", command)})
-			continue
-		}
-		commands[command] = true
-		checked++
-		if !strings.Contains(guideBody, relWrapper) {
-			issues = append(issues, skillIssue{Path: ".claude/GUIDE.md", Message: fmt.Sprintf("does not document wrapper %s", relWrapper)})
-		}
-	}
-	if checked == 0 {
-		issues = append(issues, skillIssue{Path: "scripts", Message: "no claude prompt wrappers found"})
-	}
-	for command, used := range commands {
-		if !used {
-			issues = append(issues, skillIssue{Path: command, Message: "has no claude wrapper"})
-		}
-	}
-	return checked, issues, nil
-}
-
 func validateAgentShellScript(path, body string) []skillIssue {
 	var issues []skillIssue
 	lines := strings.Split(body, "\n")
@@ -189,21 +110,6 @@ func codexWrapperPromptPath(body string) (string, bool) {
 		for _, field := range strings.Fields(line) {
 			field = strings.Trim(field, `"'`)
 			if strings.HasPrefix(field, ".codex/prompts/") && strings.HasSuffix(field, ".md") {
-				return filepath.ToSlash(field), true
-			}
-		}
-	}
-	return "", false
-}
-
-func claudeWrapperCommandPath(body string) (string, bool) {
-	for _, line := range strings.Split(body, "\n") {
-		if !strings.Contains(line, "scripts/claude-run.sh") {
-			continue
-		}
-		for _, field := range strings.Fields(line) {
-			field = strings.Trim(field, `"'`)
-			if strings.HasPrefix(field, ".claude/commands/") && strings.HasSuffix(field, ".md") {
 				return filepath.ToSlash(field), true
 			}
 		}

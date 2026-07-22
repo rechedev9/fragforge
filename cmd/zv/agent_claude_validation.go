@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,68 +10,6 @@ import (
 	"strings"
 )
 
-func checkClaudeReviewerAgents() ([]skillIssue, error) {
-	root, err := findWorkflowRoot()
-	if err != nil {
-		return nil, err
-	}
-	agentsDir := filepath.Join(root, ".claude", "agents")
-	entries, err := os.ReadDir(agentsDir)
-	if err != nil {
-		return nil, fmt.Errorf("read claude agents: %w", err)
-	}
-	guideBody, err := readWorkflowDocBody(root, ".claude/GUIDE.md")
-	if err != nil {
-		return nil, err
-	}
-	claudeBody, err := readWorkflowDocBody(root, "CLAUDE.md")
-	if err != nil {
-		return nil, err
-	}
-	var issues []skillIssue
-	var checked int
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
-			continue
-		}
-		checked++
-		relPath := filepath.ToSlash(filepath.Join(".claude", "agents", entry.Name()))
-		path := filepath.Join(agentsDir, entry.Name())
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", relPath, err)
-		}
-		body := string(b)
-		name, ok := markdownFrontMatterValue(body, "name")
-		wantName := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		if !ok {
-			issues = append(issues, skillIssue{Path: relPath, Message: "missing agent front matter name"})
-		} else if name != wantName {
-			issues = append(issues, skillIssue{Path: relPath, Message: fmt.Sprintf("agent name %q does not match file name %q", name, wantName)})
-		}
-		for _, doc := range []struct {
-			path string
-			body string
-		}{
-			{path: ".claude/GUIDE.md", body: guideBody},
-			{path: "CLAUDE.md", body: claudeBody},
-		} {
-			if !strings.Contains(doc.body, "@"+wantName) {
-				issues = append(issues, skillIssue{Path: doc.path, Message: fmt.Sprintf("does not document reviewer agent @%s", wantName)})
-			}
-		}
-		for _, required := range claudeReviewerAgentRequiredText(wantName) {
-			if !strings.Contains(body, required) {
-				issues = append(issues, skillIssue{Path: relPath, Message: fmt.Sprintf("missing reviewer guidance %q", required)})
-			}
-		}
-	}
-	if checked == 0 {
-		issues = append(issues, skillIssue{Path: ".claude/agents", Message: "no claude reviewer agents found"})
-	}
-	return issues, nil
-}
-
 func readWorkflowDocBody(root, relPath string) (string, error) {
 	path := filepath.Join(root, filepath.FromSlash(relPath))
 	b, err := os.ReadFile(path)
@@ -80,48 +17,6 @@ func readWorkflowDocBody(root, relPath string) (string, error) {
 		return "", fmt.Errorf("read %s: %w", relPath, err)
 	}
 	return string(b), nil
-}
-
-func markdownFrontMatterValue(body, key string) (string, bool) {
-	scanner := bufio.NewScanner(strings.NewReader(body))
-	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
-		return "", false
-	}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "---" {
-			break
-		}
-		k, value, ok := strings.Cut(line, ":")
-		if !ok || strings.TrimSpace(k) != key {
-			continue
-		}
-		return trimMetadataValue(value), true
-	}
-	return "", false
-}
-
-func claudeReviewerAgentRequiredText(name string) []string {
-	required := []string{
-		"BLOCKER",
-		"WARNING",
-		"NIT",
-		"Every finding",
-		"file/path",
-		"why",
-		"practical fix",
-		"No blocking",
-		"issues found.",
-	}
-	switch name {
-	case "go-concurrency-reviewer":
-		required = append(required, "scripts/go-gate.sh --race")
-	case "go-security-reviewer":
-		required = append(required, "Do not read `.env`")
-	case "zv-media-pipeline-reviewer":
-		required = append(required, "HLAE/CS2/large media")
-	}
-	return required
 }
 
 // Style and operational norms live directly in CLAUDE.md; the .claude/rules

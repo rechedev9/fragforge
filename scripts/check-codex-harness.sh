@@ -31,7 +31,7 @@ if ! codex --cd "$root" debug prompt-input "harness smoke test" > "$tmp" 2> "$er
   exit 1
 fi
 
-grep -q "FragForge is a deterministic CS2 demo-to-video pipeline" "$tmp"
+grep -q "FragForge is a Windows-local, deterministic CS2 demo/stream-to-video pipeline" "$tmp"
 grep -q "AGENTS.md" "$tmp"
 
 echo "== FragForge workflow contract =="

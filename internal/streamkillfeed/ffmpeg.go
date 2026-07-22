@@ -60,6 +60,12 @@ type stderrResult struct {
 	err        error
 }
 
+type stderrTail struct {
+	buffer []byte
+	start  int
+	length int
+}
+
 func (a Analyzer) decodeRange(
 	ctx context.Context,
 	request decodeRequest,
@@ -221,12 +227,13 @@ func readPNGFrames(reader io.Reader, crop streamclips.CropRect) stdoutResult {
 
 func readShowinfo(reader io.Reader) stderrResult {
 	result := stderrResult{}
+	tail := stderrTail{}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64<<10), maxStderrLine)
 	expectedOrdinal := 0
 	for scanner.Scan() {
 		line := scanner.Text()
-		appendStderrTail(&result.tail, line)
+		appendStderrTail(&tail, line)
 		if !strings.Contains(line, showinfoLabel) {
 			continue
 		}
@@ -280,14 +287,52 @@ func readShowinfo(reader io.Reader) stderrResult {
 	if result.timeBase.Den == 0 && result.err == nil {
 		result.err = fmt.Errorf("showinfo did not report a time base")
 	}
+	result.tail = tail.String()
 	return result
 }
 
-func appendStderrTail(tail *string, line string) {
-	*tail += line + "\n"
-	if len(*tail) > maxStderrTail {
-		*tail = (*tail)[len(*tail)-maxStderrTail:]
+func appendStderrTail(tail *stderrTail, line string) {
+	tail.append(line)
+	tail.append("\n")
+}
+
+func (t *stderrTail) append(value string) {
+	if value == "" {
+		return
 	}
+	if t.buffer == nil {
+		t.buffer = make([]byte, maxStderrTail)
+	}
+	if len(value) >= maxStderrTail {
+		copy(t.buffer, value[len(value)-maxStderrTail:])
+		t.start = 0
+		t.length = maxStderrTail
+		return
+	}
+	if overflow := t.length + len(value) - maxStderrTail; overflow > 0 {
+		t.start = (t.start + overflow) % maxStderrTail
+		t.length -= overflow
+	}
+
+	writeAt := (t.start + t.length) % maxStderrTail
+	first := min(len(value), maxStderrTail-writeAt)
+	copy(t.buffer[writeAt:], value[:first])
+	copy(t.buffer, value[first:])
+	t.length += len(value)
+}
+
+func (t *stderrTail) String() string {
+	if t.length == 0 {
+		return ""
+	}
+	if t.start+t.length <= maxStderrTail {
+		return string(t.buffer[t.start : t.start+t.length])
+	}
+	var result strings.Builder
+	result.Grow(t.length)
+	result.Write(t.buffer[t.start:])
+	result.Write(t.buffer[:t.length-(maxStderrTail-t.start)])
+	return result.String()
 }
 
 func decodePNG(reader io.Reader) (image.Image, error) {

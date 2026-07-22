@@ -179,7 +179,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 	writeFile(t, fakeCodex, strings.Join([]string{
 		"#!/usr/bin/env bash",
 		"set -euo pipefail",
-		`printf '%s\n' 'FragForge is a deterministic CS2 demo-to-video pipeline'`,
+		`printf '%s\n' 'FragForge is a Windows-local, deterministic CS2 demo/stream-to-video pipeline'`,
 		`printf '%s\n' 'AGENTS.md'`,
 	}, "\n"))
 	if err := os.Chmod(fakeCodex, 0o755); err != nil {
@@ -197,7 +197,7 @@ func TestCodexHarnessExecutesWorkflowContractEndToEnd(t *testing.T) {
 		"== shell syntax ==",
 		"== Codex sees AGENTS.md ==",
 		"== FragForge workflow contract ==",
-		fmt.Sprintf("OK: 7 skills, %d workflows, 11 workflow docs, and 19 agent prompt wrappers checked", len(workflowCatalog())),
+		fmt.Sprintf("OK: 7 skills, %d workflows, 11 workflow docs, and 10 agent prompt wrappers checked", len(workflowCatalog())),
 		"OK: Codex harness is wired",
 	} {
 		if !strings.Contains(body, want) {
@@ -356,69 +356,6 @@ func TestCodexPromptWrappersHaveExistingPromptsAndDocs(t *testing.T) {
 	}
 }
 
-func TestClaudePromptWrappersHaveExistingCommandsAndDocs(t *testing.T) {
-	root := repoRoot(t)
-	scriptsDir := filepath.Join(root, "scripts")
-	commandsDir := filepath.Join(root, ".claude", "commands")
-
-	commandEntries, err := os.ReadDir(commandsDir)
-	if err != nil {
-		t.Fatalf("read commands dir: %v", err)
-	}
-	commands := make(map[string]bool)
-	for _, entry := range commandEntries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
-			continue
-		}
-		commands[filepath.ToSlash(filepath.Join(".claude", "commands", entry.Name()))] = false
-	}
-
-	guide, err := os.ReadFile(filepath.Join(root, ".claude", "GUIDE.md"))
-	if err != nil {
-		t.Fatalf("read .claude/GUIDE.md: %v", err)
-	}
-	guideBody := string(guide)
-	runner := filepath.Join(scriptsDir, "claude-run.sh")
-	if _, err := os.Stat(runner); err != nil {
-		t.Fatalf("missing claude runner %s: %v", runner, err)
-	}
-	if !strings.Contains(guideBody, "scripts/claude-run.sh") {
-		t.Fatalf(".claude/GUIDE.md does not document runner scripts/claude-run.sh")
-	}
-
-	wrappers, err := filepath.Glob(filepath.Join(scriptsDir, "claude-zv-*.sh"))
-	if err != nil {
-		t.Fatalf("glob claude wrappers: %v", err)
-	}
-	var mappedWrappers int
-	for _, wrapper := range wrappers {
-		b, err := os.ReadFile(wrapper)
-		if err != nil {
-			t.Fatalf("read %s: %v", wrapper, err)
-		}
-		command, ok := claudeWrapperCommandPath(string(b))
-		if !ok {
-			t.Fatalf("%s does not exec scripts/claude-run.sh with a command prompt", wrapper)
-		}
-		if _, ok := commands[command]; !ok {
-			t.Fatalf("%s references missing claude command %s", wrapper, command)
-		}
-		commands[command] = true
-		mappedWrappers++
-		if name := filepath.ToSlash(filepath.Join("scripts", filepath.Base(wrapper))); !strings.Contains(guideBody, name) {
-			t.Fatalf(".claude/GUIDE.md does not document wrapper %s", name)
-		}
-	}
-	if mappedWrappers == 0 {
-		t.Fatalf("no claude prompt wrappers found")
-	}
-	for command, used := range commands {
-		if !used {
-			t.Fatalf("claude command %s has no wrapper", command)
-		}
-	}
-}
-
 func TestCodexPromptWrappersDryRunEndToEnd(t *testing.T) {
 	root := repoRoot(t)
 	for _, fixture := range currentCodexPromptWrappers(t, root) {
@@ -445,29 +382,6 @@ func TestCodexPromptWrappersDryRunEndToEnd(t *testing.T) {
 	}
 }
 
-func TestClaudePromptWrappersDryRunEndToEnd(t *testing.T) {
-	root := repoRoot(t)
-	for _, fixture := range currentClaudePromptWrappers(t, root) {
-		t.Run(filepath.Base(fixture.wrapper), func(t *testing.T) {
-			commandBody := readFileString(t, filepath.Join(root, filepath.FromSlash(fixture.command)))
-			firstLine := strings.TrimSpace(strings.SplitN(commandBody, "\n", 2)[0])
-			out := runAgentWrapperDryRun(t, root, fixture.wrapper, []string{"CLAUDE_DRY_RUN=1"}, "dry run task")
-			for _, want := range []string{
-				firstLine,
-				"User task:",
-				"dry run task",
-			} {
-				if !strings.Contains(out, want) {
-					t.Fatalf("output for %s = %q, want %q", fixture.wrapper, out, want)
-				}
-			}
-			if !strings.Contains(normalizedText(out), strings.TrimRight(normalizedText(commandBody), "\n")) {
-				t.Fatalf("output for %s did not include command body from %s", fixture.wrapper, fixture.command)
-			}
-		})
-	}
-}
-
 func TestCodexRunnerDryRunIncludesStdinContextEndToEnd(t *testing.T) {
 	root := repoRoot(t)
 	stdout, stderr := runAgentRunnerDryRunWithInput(t, root, "CODEX_DRY_RUN=1", "scripts/codex-run.sh", ".codex/prompts/go-plan.md", "argument task", "stdin task context\n")
@@ -483,24 +397,6 @@ func TestCodexRunnerDryRunIncludesStdinContextEndToEnd(t *testing.T) {
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("codex-run dry-run stdout = %q, want %q", stdout, want)
-		}
-	}
-}
-
-func TestClaudeRunnerDryRunIncludesStdinContextEndToEnd(t *testing.T) {
-	root := repoRoot(t)
-	stdout, stderr := runAgentRunnerDryRunWithInput(t, root, "CLAUDE_DRY_RUN=1", "scripts/claude-run.sh", ".claude/commands/zv-plan.md", "argument task", "stdin task context\n")
-	if stderr != "" {
-		t.Fatalf("claude-run dry-run stderr = %q, want empty", stderr)
-	}
-	for _, want := range []string{
-		"User task:",
-		"argument task",
-		"## Stdin task/context",
-		"stdin task context",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("claude-run dry-run stdout = %q, want %q", stdout, want)
 		}
 	}
 }
@@ -545,76 +441,6 @@ func TestCodexPromptsUseProjectGate(t *testing.T) {
 		{
 			path: filepath.Join(root, ".codex", "prompts", "go-security-review.md"),
 			want: []string{
-				"scripts/go-gate.sh --security",
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(filepath.Base(tt.path), func(t *testing.T) {
-			b, err := os.ReadFile(tt.path)
-			if err != nil {
-				t.Fatalf("read %s: %v", tt.path, err)
-			}
-			body := string(b)
-			for _, want := range tt.want {
-				if !strings.Contains(body, want) {
-					t.Fatalf("%s does not contain %q", tt.path, want)
-				}
-			}
-		})
-	}
-}
-
-func TestClaudeCommandsUseProjectGate(t *testing.T) {
-	root := repoRoot(t)
-	tests := []struct {
-		path string
-		want []string
-	}{
-		{
-			path: filepath.Join(root, ".claude", "commands", "zv-tdd.md"),
-			want: []string{
-				"scripts/go-gate.sh --no-format",
-				"`zv check`",
-				"scripts/go-gate.sh --race --no-format",
-			},
-		},
-		{
-			path: filepath.Join(root, ".claude", "commands", "zv-bugfix.md"),
-			want: []string{
-				"scripts/go-gate.sh --no-format",
-				"`zv check`",
-				"scripts/go-gate.sh --race --no-format",
-			},
-		},
-		{
-			path: filepath.Join(root, ".claude", "commands", "zv-parser-change.md"),
-			want: []string{
-				"scripts/go-gate.sh --no-format",
-				"`zv check`",
-			},
-		},
-		{
-			path: filepath.Join(root, ".claude", "commands", "zv-media-change.md"),
-			want: []string{
-				"scripts/go-gate.sh --no-format",
-				"`zv check`",
-			},
-		},
-		{
-			path: filepath.Join(root, ".claude", "commands", "zv-worker-api-change.md"),
-			want: []string{
-				"scripts/go-gate.sh --no-format",
-				"`zv check`",
-				"scripts/go-gate.sh --race --no-format",
-			},
-		},
-		{
-			path: filepath.Join(root, ".claude", "commands", "zv-pr-ready.md"),
-			want: []string{
-				"scripts/go-gate.sh --no-format",
-				"`zv check`",
-				"scripts/go-gate.sh --race",
 				"scripts/go-gate.sh --security",
 			},
 		},

@@ -52,8 +52,9 @@ func DetectNoticeRows(frame image.Image, hint *CropRect) []NoticeRow {
 	// it. A bright loose-red notice interior can instead collapse that mask into
 	// one mega-stroke while its strict ring still pairs. Run both passes because
 	// one frame can contain both styles.
-	looseBoxes := detectNoticeBoxes(frame, region, bounds.Dy(), 120, 70)
-	strictBoxes := detectNoticeBoxes(frame, region, bounds.Dy(), 150, 55)
+	looseMask, strictMask := redMasks(frame, region)
+	looseBoxes := detectNoticeBoxes(frame, looseMask, region, bounds.Dy())
+	strictBoxes := detectNoticeBoxes(frame, strictMask, region, bounds.Dy())
 	boxes := make([]image.Rectangle, 0, len(looseBoxes)+len(strictBoxes))
 	boxes = append(boxes, looseBoxes...)
 	boxes = append(boxes, strictBoxes...)
@@ -109,16 +110,50 @@ func noticeSearchRegion(bounds image.Rectangle, hint *CropRect) image.Rectangle 
 	).Intersect(bounds)
 }
 
-func redMask(frame image.Image, region image.Rectangle, minRed, maxGreenBlue uint32) []bool {
+type redPixelReader struct {
+	rgba    *image.RGBA
+	nrgba   *image.NRGBA
+	generic image.Image
+}
+
+func newRedPixelReader(frame image.Image) redPixelReader {
+	switch concrete := frame.(type) {
+	case *image.RGBA:
+		return redPixelReader{rgba: concrete}
+	case *image.NRGBA:
+		return redPixelReader{nrgba: concrete}
+	default:
+		return redPixelReader{generic: frame}
+	}
+}
+
+func (reader redPixelReader) rgbAt(x, y int) (uint32, uint32, uint32) {
+	if reader.rgba != nil {
+		r, g, b, _ := reader.rgba.RGBAAt(x, y).RGBA()
+		return r, g, b
+	}
+	if reader.nrgba != nil {
+		r, g, b, _ := reader.nrgba.NRGBAAt(x, y).RGBA()
+		return r, g, b
+	}
+	r, g, b, _ := reader.generic.At(x, y).RGBA()
+	return r, g, b
+}
+
+func redMasks(frame image.Image, region image.Rectangle) ([]bool, []bool) {
 	width, height := region.Dx(), region.Dy()
-	mask := make([]bool, width*height)
+	loose := make([]bool, width*height)
+	strict := make([]bool, width*height)
+	reader := newRedPixelReader(frame)
 	for dy := range height {
 		for dx := range width {
-			r, g, b, _ := frame.At(region.Min.X+dx, region.Min.Y+dy).RGBA()
-			mask[dy*width+dx] = r>>8 > minRed && g>>8 < maxGreenBlue && b>>8 < maxGreenBlue
+			r, g, b := reader.rgbAt(region.Min.X+dx, region.Min.Y+dy)
+			index := dy*width + dx
+			loose[index] = r>>8 > 120 && g>>8 < 70 && b>>8 < 70
+			strict[index] = r>>8 > 150 && g>>8 < 55 && b>>8 < 55
 		}
 	}
-	return mask
+	return loose, strict
 }
 
 type horizontalRun struct {
@@ -244,14 +279,14 @@ func roundedMean(sum, count int) int {
 	return (sum + count/2) / count
 }
 
-func detectNoticeBoxes(frame image.Image, region image.Rectangle, frameHeight int, minRed, maxGreenBlue uint32) []image.Rectangle {
-	mask := redMask(frame, region, minRed, maxGreenBlue)
+func detectNoticeBoxes(frame image.Image, mask []bool, region image.Rectangle, frameHeight int) []image.Rectangle {
 	strokes := mergeHorizontalRuns(horizontalRedRuns(mask, region))
 	return filterNoticeBoxes(frame, pairNoticeStrokes(strokes, frameHeight), frameHeight)
 }
 
 func filterNoticeBoxes(frame image.Image, boxes []image.Rectangle, frameHeight int) []image.Rectangle {
 	filtered := boxes[:0]
+	reader := newRedPixelReader(frame)
 	for _, box := range boxes {
 		if box.Dx() < killfeedMinRowAspect*box.Dy() || box.Dy() > frameHeight/12 {
 			continue
@@ -259,7 +294,7 @@ func filterNoticeBoxes(frame image.Image, boxes []image.Rectangle, frameHeight i
 		strictPixels := 0
 		for y := box.Min.Y; y < box.Max.Y; y++ {
 			for x := box.Min.X; x < box.Max.X; x++ {
-				r, g, b, _ := frame.At(x, y).RGBA()
+				r, g, b := reader.rgbAt(x, y)
 				if r>>8 > 150 && g>>8 < 55 && b>>8 < 55 {
 					strictPixels++
 				}
@@ -366,9 +401,10 @@ func rectangleArea(rect image.Rectangle) int {
 func looseRedBounds(frame image.Image, region image.Rectangle) (image.Rectangle, bool) {
 	found := image.Rectangle{}
 	ok := false
+	reader := newRedPixelReader(frame)
 	for y := region.Min.Y; y < region.Max.Y; y++ {
 		for x := region.Min.X; x < region.Max.X; x++ {
-			r, g, b, _ := frame.At(x, y).RGBA()
+			r, g, b := reader.rgbAt(x, y)
 			if r>>8 <= 120 || g>>8 >= 70 || b>>8 >= 70 {
 				continue
 			}
