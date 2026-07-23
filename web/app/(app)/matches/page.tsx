@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ChevronRight, Clapperboard, Layers, Swords, UploadCloud } from 'lucide-react';
+import { ChevronRight, Clapperboard, Crosshair, Gauge, Layers, Skull, Swords, UploadCloud } from 'lucide-react';
 import { api } from '@/lib/api';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { Match } from '@/lib/api/types';
@@ -17,7 +17,7 @@ import { StudioPageHeader } from '@/components/studio/page-header';
 import { Button } from '@/components/ui/button';
 import { seriesTitle } from '@/lib/series-status';
 import { navSection } from '@/lib/nav';
-import { timeAgo } from '@/lib/format';
+import { formatKd, timeAgo } from '@/lib/format';
 
 const NAV = navSection('/matches');
 
@@ -176,6 +176,21 @@ export default function MatchesPage() {
   }, [matches, filter, query]);
 
   const hasContent = (matches !== null && matches.length > 0) || series.length > 0;
+  const overview = useMemo(() => {
+    if (!matches?.length) return null;
+    const totals = matches.reduce(
+      (summary, match) => ({
+        kills: summary.kills + match.stats.kills,
+        deaths: summary.deaths + match.stats.deaths,
+      }),
+      { kills: 0, deaths: 0 },
+    );
+    return {
+      matches: matches.length,
+      kills: totals.kills,
+      kd: totals.deaths > 0 ? totals.kills / totals.deaths : totals.kills,
+    };
+  }, [matches]);
 
   let content: ReactNode;
   if (matches === null) {
@@ -199,12 +214,12 @@ export default function MatchesPage() {
   const showFilters = matches !== null && matches.length > 0;
 
   return (
-    <div className="flex flex-col gap-8 sm:gap-10">
+    <div className="flex flex-col gap-6 sm:gap-8">
       <StudioPageHeader
         number={Number(NAV.number)}
         label={NAV.label.toUpperCase()}
         title="TUS PARTIDAS"
-        description="Tus últimas partidas de CS2. Elige una y forja sus highlights en un reel."
+        description="Convierte tus mejores jugadas en reels listos para publicar."
         actions={
           showFilters ? (
             <MatchFilters
@@ -216,6 +231,27 @@ export default function MatchesPage() {
           ) : null
         }
       />
+
+      {overview ? (
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Resumen de partidas">
+          {[
+            { label: 'Partidas', value: overview.matches, icon: Crosshair },
+            { label: 'Kills', value: overview.kills, icon: Skull },
+            { label: 'K/D global', value: formatKd(overview.kd), icon: Gauge },
+          ].map(({ label, value, icon: Icon }) => (
+            <div key={label} className="studio-panel group flex min-h-24 items-center gap-4 overflow-hidden px-5 py-4 transition-colors hover:border-primary/30">
+              <div className="grid size-11 shrink-0 place-items-center border border-primary/20 bg-primary/[0.06] text-primary transition-colors group-hover:bg-primary/10">
+                <Icon size={21} strokeWidth={1.6} aria-hidden />
+              </div>
+              <div>
+                <p className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+                <p className="mt-0.5 font-[family-name:var(--font-mono)] text-2xl font-semibold tabular-nums text-foreground">{value}</p>
+              </div>
+              <span className="ml-auto h-10 w-px bg-gradient-to-b from-transparent via-primary/25 to-transparent" aria-hidden />
+            </div>
+          ))}
+        </section>
+      ) : null}
 
       {content}
     </div>

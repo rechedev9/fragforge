@@ -30,6 +30,11 @@ export function MatchList({ matches, onDelete, onDeleted }: MatchListProps) {
       {matches.map((match, index) => (
         <MatchRow key={match.id} match={match} featured={index === 0} onDelete={onDelete} onDeleted={onDeleted} />
       ))}
+      <div className="flex items-center justify-center gap-4 py-3 text-muted-foreground/60" aria-hidden>
+        <span className="h-px w-12 bg-border" />
+        <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.18em]">Fin de la lista</span>
+        <span className="h-px w-12 bg-border" />
+      </div>
     </section>
   );
 }

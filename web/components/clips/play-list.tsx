@@ -1,6 +1,7 @@
 'use client';
 
 import type { Play } from '@/lib/api/types';
+import { CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PlayRow } from './play-row';
 
@@ -23,9 +24,10 @@ export function PlayList({ plays, selectedIds, onToggle, onSelectAll, onClear }:
   const allSelected = plays.length > 0 && selectedIds.size === plays.length;
 
   return (
-    <div className="flex flex-col overflow-hidden border border-primary/15">
-      <div className="flex items-center justify-between gap-3 border-b border-primary/15 bg-muted/30 px-3 py-2">
-        <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.14em] text-muted-foreground/70">
+    <div className="studio-panel flex max-h-[430px] flex-col overflow-hidden border-primary/20">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-primary/15 bg-muted/35 px-4 py-3">
+        <span className="inline-flex items-center gap-2 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.14em] text-muted-foreground">
+          <CheckCircle2 size={14} className={selectedIds.size > 0 ? 'text-primary' : 'text-muted-foreground/50'} aria-hidden />
           {selectedIds.size > 0
             ? `${selectedIds.size} ${selectedIds.size === 1 ? 'SELECCIONADA' : 'SELECCIONADAS'}`
             : 'TOCA PARA SELECCIONAR'}
@@ -54,9 +56,11 @@ export function PlayList({ plays, selectedIds, onToggle, onSelectAll, onClear }:
         </div>
       </div>
 
-      {plays.map((play) => (
-        <PlayRow key={play.id} play={play} selected={selectedIds.has(play.id)} onToggle={() => onToggle(play.id)} />
-      ))}
+      <div className="min-h-0 overflow-y-auto">
+        {plays.map((play) => (
+          <PlayRow key={play.id} play={play} selected={selectedIds.has(play.id)} onToggle={() => onToggle(play.id)} />
+        ))}
+      </div>
     </div>
   );
 }

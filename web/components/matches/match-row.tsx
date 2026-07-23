@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Clapperboard } from 'lucide-react';
 import { ScoreBar } from '@/components/brand/score-bar';
 import { StatMono } from '@/components/brand/stat-mono';
 import { DeleteMatchButton } from '@/components/matches/delete-match-button';
@@ -43,17 +44,24 @@ export function MatchRow({ match, featured = false, onDelete, onDeleted }: Match
   return (
     <article
       className={cn(
-        'studio-defer-render flex items-stretch gap-4 px-4 py-4 transition-colors sm:gap-5 sm:px-5',
+        'studio-defer-render group relative isolate flex items-stretch gap-4 overflow-hidden px-4 py-4 transition-all sm:gap-5 sm:px-5',
         featured
-          ? 'studio-panel studio-panel-raised'
-          : 'studio-panel studio-panel-interactive bg-card/80',
+          ? 'studio-panel studio-panel-raised min-h-[190px] border-primary/55 py-6 sm:px-7'
+          : 'studio-panel studio-panel-interactive bg-card/80 hover:-translate-y-px',
       )}
     >
+      {featured ? (
+        <>
+          {match.thumbnailUrl ? <div className="absolute inset-0 -z-20 bg-cover bg-center opacity-25 saturate-50" style={{ backgroundImage: `url("${match.thumbnailUrl}")` }} aria-hidden /> : null}
+          <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_28%_40%,color-mix(in_oklch,var(--primary)_13%,transparent),transparent_35%),linear-gradient(90deg,var(--card)_10%,color-mix(in_oklch,var(--card)_82%,transparent)_52%,var(--card)_100%)]" aria-hidden />
+        </>
+      ) : null}
       <ScoreBar win={win} className="w-1 shrink-0" />
 
       <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-4 xl:grid-cols-[minmax(160px,1.1fr)_90px_minmax(320px,1.7fr)_auto] xl:gap-x-8">
         <div className="min-w-0">
-          <h2 className="truncate font-[family-name:var(--font-display)] text-xl font-bold uppercase leading-tight text-foreground">
+          {featured ? <span className="mb-3 inline-flex border border-success/35 bg-success/[0.07] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.15em] text-success">{win ? 'Victoria' : 'Partida'}</span> : null}
+          <h2 className={cn('truncate font-[family-name:var(--font-display)] font-bold uppercase leading-tight text-foreground', featured ? 'text-2xl sm:text-[28px]' : 'text-xl')}>
             {match.map}
           </h2>
           <p className="mt-1 truncate font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.1em] text-muted-foreground">
@@ -85,8 +93,9 @@ export function MatchRow({ match, featured = false, onDelete, onDeleted }: Match
           {featured ? (
             <Link
               href={`/matches/${match.id}`}
-              className="neon-glow rounded-md inline-flex h-11 flex-1 items-center justify-center bg-primary px-5 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:flex-initial"
+              className="neon-glow inline-flex h-12 flex-1 items-center justify-center gap-2 bg-primary px-6 font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.06em] text-primary-foreground transition-all hover:-translate-y-px hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-initial"
             >
+              <Clapperboard size={17} aria-hidden />
               FORJAR REEL
             </Link>
           ) : (

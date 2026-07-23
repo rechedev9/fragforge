@@ -237,7 +237,7 @@ export default function FindHighlightsPage({
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-5rem)] flex-col gap-8 pb-2">
+    <div className="flex min-h-[calc(100vh-5rem)] flex-col gap-7 pb-2">
       <button
         type="button"
         onClick={() => router.push(backHref)}
@@ -247,11 +247,16 @@ export default function FindHighlightsPage({
       </button>
 
       {/* Match summary — accent bar + map title + mono meta, score, stat strip. */}
-      <section className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+      <section className="studio-panel studio-panel-raised relative isolate flex flex-col gap-6 overflow-hidden border-primary/25 px-5 py-5 sm:px-7 sm:py-6 lg:flex-row lg:items-center lg:justify-between">
+        {match.thumbnailUrl ? <div className="absolute inset-0 -z-20 bg-cover bg-center opacity-[0.12] saturate-50" style={{ backgroundImage: `url("${match.thumbnailUrl}")` }} aria-hidden /> : null}
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_50%,color-mix(in_oklch,var(--primary)_10%,transparent),transparent_34%),linear-gradient(90deg,color-mix(in_oklch,var(--card)_96%,transparent),var(--card)_70%)]" aria-hidden />
         <div className="flex items-center gap-5">
-          <ScoreBar win={win} className="h-[52px] w-[3px]" />
+          <ScoreBar win={win} className="h-[72px] w-[3px]" />
           <div className="flex flex-col gap-1">
-            <h1 className="font-[family-name:var(--font-display)] text-[28px] font-bold uppercase leading-none tracking-tight text-foreground sm:text-[32px]">
+            <span className="mb-1 w-fit border border-primary/25 bg-primary/[0.06] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[9px] uppercase tracking-[0.16em] text-primary">
+              {hasScore && win ? 'Victoria' : 'Demo importada'}
+            </span>
+            <h1 className="font-[family-name:var(--font-display)] text-[30px] font-bold uppercase leading-none tracking-tight text-foreground sm:text-[36px]">
               {match.map}
             </h1>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -276,7 +281,7 @@ export default function FindHighlightsPage({
             </div>
           </div>
           {hasScore && score ? (
-            <div className="ml-2 font-[family-name:var(--font-mono)] text-[26px] tabular-nums">
+            <div className="ml-2 border-l border-border pl-5 font-[family-name:var(--font-mono)] text-[30px] font-semibold tabular-nums">
               <span className={win ? 'text-primary' : 'text-muted-foreground'}>{score[0]}</span>
               <span className="text-muted-foreground/70"> : </span>
               <span className="text-muted-foreground">{score[1]}</span>
@@ -284,7 +289,7 @@ export default function FindHighlightsPage({
           ) : null}
         </div>
 
-        <div className="grid grid-cols-4 gap-x-5 gap-y-3 sm:flex sm:flex-wrap sm:items-center sm:gap-x-7">
+        <div className="grid grid-cols-4 gap-x-6 gap-y-4 border-t border-border/60 pt-5 sm:grid-cols-8 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
           <StatMono label="K" value={match.stats.kills} />
           <StatMono label="D" value={match.stats.deaths} />
           <StatMono label="A" value={match.stats.assists} />
@@ -299,15 +304,11 @@ export default function FindHighlightsPage({
       {/* Detected plays */}
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <h2 className="font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.24em] text-primary">
-            JUGADAS DETECTADAS{' '}
-            <span className="tracking-[0.14em] text-muted-foreground/70">
-              · <span className="tabular-nums">{n}</span>
-            </span>
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Elige las jugadas que quieras forjar en un reel; 2 o más se concatenan en uno.
-          </p>
+          <div className="flex items-center gap-2">
+            <span className="grid size-6 place-items-center bg-primary font-[family-name:var(--font-mono)] text-[10px] font-bold text-primary-foreground">01</span>
+            <h2 className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-[0.04em] text-foreground">Elige tus jugadas</h2>
+          </div>
+          <p className="pl-8 text-sm text-muted-foreground">Selecciona una o varias; las uniremos en un único reel. <span className="font-[family-name:var(--font-mono)] text-primary">{n} detectadas</span></p>
         </div>
 
         {n === 0 ? (

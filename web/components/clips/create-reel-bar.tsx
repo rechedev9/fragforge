@@ -60,7 +60,7 @@ export function CreateReelBar({
   });
 
   return (
-    <div className="sticky bottom-0 z-20 -mx-4 mt-2 border-t border-primary/20 bg-background/90 px-4 py-3 backdrop-blur md:-mx-8 md:px-8">
+    <div className="sticky bottom-3 z-20 mt-2 border border-primary/25 bg-card/95 px-4 py-3 shadow-[0_-16px_48px_-28px_color-mix(in_oklch,var(--primary)_45%,transparent)] backdrop-blur-xl sm:px-5">
       <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">
           <p className="font-[family-name:var(--font-mono)] text-[9.5px] tracking-[0.2em] text-muted-foreground/70">
