@@ -49,7 +49,7 @@ func (h *Handlers) GetCapabilities(w http.ResponseWriter, _ *http.Request) {
 	c := h.capabilities
 	writeJSON(w, http.StatusOK, map[string]any{
 		"auth": map[string]any{
-			"read_requires_token": h.requireReadAuth && h.mutationToken != "",
+			"read_requires_token": h.requireReadAuth,
 		},
 		"record":  map[string]any{"enabled": c.RecordEnabled, "tools": resolveTools(c.RecordTools)},
 		"render":  map[string]any{"enabled": c.RenderEnabled, "tools": resolveTools(c.RenderTools)},

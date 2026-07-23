@@ -13,12 +13,12 @@ const MAX_MESSAGE_LENGTH = 8_000;
 const MAX_PATHNAME_LENGTH = 512;
 
 export const ASSISTANT_ACTION = {
-  approve: 'approve',
   cancel: 'cancel',
   clear: 'clear',
   login: 'login',
   logout: 'logout',
   newConversation: 'new',
+  requestApproval: 'request-approval',
   reject: 'reject',
   send: 'send',
   status: 'status',
@@ -53,7 +53,7 @@ export type AssistantRequest =
   | { action: typeof ASSISTANT_ACTION.login }
   | { action: typeof ASSISTANT_ACTION.logout }
   | { action: typeof ASSISTANT_ACTION.newConversation }
-  | { action: typeof ASSISTANT_ACTION.approve; actionId: string }
+  | { action: typeof ASSISTANT_ACTION.requestApproval; actionId: string }
   | { action: typeof ASSISTANT_ACTION.reject; actionId: string }
   | AssistantSendRequest;
 
@@ -142,7 +142,7 @@ export function parseAssistantRequest(value: unknown): AssistantRequest {
     requireExactKeys(value, ['action']);
     return { action };
   }
-  if (action === ASSISTANT_ACTION.approve || action === ASSISTANT_ACTION.reject) {
+  if (action === ASSISTANT_ACTION.requestApproval || action === ASSISTANT_ACTION.reject) {
     requireExactKeys(value, ['action', 'actionId']);
     if (!isSafeOpaqueID(value.actionId, MAX_ACTION_ID_LENGTH)) throw new Error('invalid assistant request');
     return { action, actionId: value.actionId };

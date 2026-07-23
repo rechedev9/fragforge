@@ -27,6 +27,13 @@ only to authenticate the matching local orchestrator and integrated agent.
 
 The installer bundles the official HLAE archive pinned by `src/hlae-tool.json`.
 On first boot the app installs it alongside FFmpeg and yt-dlp into `<userData>/tools`, verifies every pinned SHA-256 digest, and provisions the music catalog.
+Each tool also has a trusted extracted-tree SHA-256 embedded in the signed app.
+Studio rehashes every cached file before reuse and compares the canonical tree
+against that code-pinned value; the writable cache manifest is metadata, not a
+root of trust. Markerless, forged, and archive-only legacy caches are migrated
+only by reinstalling from the pinned, verified source. The FFmpeg source is an
+immutable FragForge release asset copied from a checksum-verified BtbN build,
+not a rotating `latest` autobuild URL.
 HLAE is available offline; the remaining downloads are best-effort and retry on the next launch.
 After the current HLAE package is verified, Studio removes older versioned HLAE caches.
 The packaged HLAE version is intentionally fixed by the manifest so every desktop build is reproducible.
@@ -65,6 +72,12 @@ that plan changes. The approved plan timestamp is also sent as an atomic backend
 precondition, so a last-moment edit cannot race past render admission. Public Twitch clip/VOD URLs can also
 be supplied in chat. Local demo, video, and voice files stay behind Studio's
 file pickers so their paths and raw media never enter model context.
+
+The content renderer can only request a privileged confirmation. Main reads the
+pending executable state it owns and opens a parented native Electron dialog
+with the exact risk, operation, and preview fields. Only the affirmative result
+from that native dialog can execute or approve the pending action; renderer
+code cannot provide the decision even when it knows the action ID.
 
 The embedded agent uses Codex app-server dynamic tools directly through the
 narrow Studio operation gateway. No external assistant transport or launcher
@@ -105,6 +118,16 @@ subprocesses.
 
 Prerequisites: Go 1.26+, Node.js + pnpm, and the web deps installed.
 
+Release packaging additionally requires Authenticode material supplied by the
+release environment, never by the repository:
+
+- `WIN_CSC_LINK` or `CSC_LINK`: protected certificate/PFX input understood by
+  electron-builder.
+- `WIN_CSC_KEY_PASSWORD` or `CSC_KEY_PASSWORD`: its secret supplied by the
+  authorized release secret store.
+- `FRAGFORGE_AUTHENTICODE_SUBJECT`: the exact public subject expected on the
+  produced installer.
+
 ```powershell
 # 1. From the repo root: build the Go binaries.
 .\scripts\build.ps1
@@ -124,7 +147,10 @@ standalone server into `build-resources/`), then `electron-builder` produces the
 installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
 where `<version>` is the `version` field in `desktop/package.json`). The
 distribution command verifies the packaged HLAE archive, installer, blockmap,
-and checksums before returning success.
+and checksums before returning success. It also fails before building when the
+signing configuration is absent, requires SHA-256 Authenticode signing with an
+RFC 3161 timestamp, verifies the installer's Windows trust result and exact
+publisher, and writes `AUTHENTICODE_PUBLISHER.json` beside the artifacts.
 The app icon lives at `build/icon.ico`, which electron-builder picks up
 automatically;
 `assemble.mjs` fails fast if it's missing. `zv-orchestrator.exe`,
@@ -138,15 +164,12 @@ arguments, removes `XAI_API_KEY` from every child build environment, and cannot
 stage or declare a credential resource. Users configure credentials after
 installation through `/settings`, where Windows DPAPI protects them per user.
 
-The distribution command also creates dist-installer/SHA256SUMS.txt for the
-installer and its blockmap, then verifies both before returning success. CI
-repeats that verification in a fresh Node process. Publish SHA256SUMS.txt beside
-the versioned installer assets in GitHub Releases so recipients can verify the
-download before running it.
-
-This v2 is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt
-on first run - choose "More info" -> "Run anyway". Code signing and auto-update
-are intentionally out of scope for v2.
+The distribution command also creates `dist-installer/SHA256SUMS.txt` for the
+installer, its blockmap, and `AUTHENTICODE_PUBLISHER.json`, then verifies all
+three before returning success. `pnpm run verify:dist-integrity` repeats both
+the Authenticode/publisher verification and checksum verification in a fresh
+Node process; it needs only the public `FRAGFORGE_AUTHENTICODE_SUBJECT`, never
+the signing credential. Publish all four files together in GitHub Releases.
 
 ## Run without packaging (dev)
 
@@ -184,8 +207,11 @@ when comparing builds.
 `src/main.ts` (Electron main process, compiled to `dist/main.js`):
 
 1. Reads or picks two per-install-stable loopback ports (`orchestrator`,
-   `web`), rotates a 32-byte discovery secret, and persists all three atomically
-   in `<userData>/ports.json`.
+   `web`) and creates three distinct 32-byte per-boot secrets. Only the
+   discovery secret is persisted in `<userData>/ports.json`; the mutation token
+   is shared directly between the orchestrator, Next server, and trusted main
+   process, while the proxy capability reaches only Next and an HttpOnly,
+   SameSite=Strict loopback cookie seeded before the first app navigation.
 2. Kicks off music catalog provisioning in the background, and awaits
    provisioning of bundled HLAE plus FFmpeg/yt-dlp into `<userData>/tools`
    (first boot only; later boots return the cached installs instantly).

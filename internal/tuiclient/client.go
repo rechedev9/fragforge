@@ -36,8 +36,9 @@ type Config struct {
 	// falls back to ORCHESTRATOR_URL, then DefaultBaseURL.
 	BaseURL string
 	// Token is the X-FragForge-Token value. Empty falls back to
-	// ZV_MUTATION_TOKEN. A loopback orchestrator with no token configured
-	// accepts requests without one, so an empty token is valid.
+	// ZV_MUTATION_TOKEN. Production orchestrators require a per-session token
+	// even on loopback; an empty value is retained only so the server can return
+	// its canonical authentication error.
 	Token string
 	// HTTPClient is optional; a 30s-timeout client is used when nil.
 	HTTPClient *http.Client

@@ -109,6 +109,9 @@ func (f *fakeStreamRepo) UpdateStatus(_ context.Context, id uuid.UUID, s streamc
 	}
 	j.Status = s
 	j.FailureReason = reason
+	if s == streamclips.StatusFailed {
+		j.SourceURL = ""
+	}
 	f.jobs[id] = j
 	return nil
 }
@@ -140,6 +143,7 @@ func (f *fakeStreamRepo) SetAcquired(_ context.Context, id uuid.UUID, probe stre
 	}
 	j.Status = streamclips.StatusReady
 	j.FailureReason = ""
+	j.SourceURL = ""
 	f.jobs[id] = j
 	return nil
 }
@@ -3563,8 +3567,51 @@ func TestCreateStreamJobFromURLAcquiresAndEnqueues(t *testing.T) {
 	if job.SourceURL != "https://clips.twitch.tv/SomeSlug" {
 		t.Fatalf("source url = %q", job.SourceURL)
 	}
+	if job.PublicSourceURL != "https://clips.twitch.tv/SomeSlug" {
+		t.Fatalf("public source url = %q", job.PublicSourceURL)
+	}
 	if len(queue.enqueued) != 1 || queue.enqueued[0].Type() != tasks.TypeStreamAcquire {
 		t.Fatalf("queue = %#v", queue.enqueued)
+	}
+}
+
+func TestStreamJobAPINeverReturnsPrivateAcquisitionURL(t *testing.T) {
+	streamRepo := newFakeStreamRepo()
+	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{},
+		WithStreamRepository(streamRepo),
+		WithCapabilities(Capabilities{YtdlpEnabled: true}),
+	)
+	r := Routes(h)
+	const secret = "signed-private-value"
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/stream-jobs",
+		strings.NewReader(`{"source_url":"https://www.youtube.com/watch?v=abc123&utm_source=test&token=`+secret+`"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("create status = %d, want 202; body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/stream-jobs/"+created.ID, nil)
+	getRec := httptest.NewRecorder()
+	r.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want 200; body=%s", getRec.Code, getRec.Body.String())
+	}
+	if strings.Contains(getRec.Body.String(), secret) || strings.Contains(getRec.Body.String(), "utm_source") {
+		t.Fatalf("stream job response leaked private query material: %s", getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), `"source_url":"https://www.youtube.com/watch?v=abc123"`) {
+		t.Fatalf("stream job response missing public source URL: %s", getRec.Body.String())
 	}
 }
 
@@ -3598,23 +3645,42 @@ func TestCreateStreamJobFromURLMarksAcceptedPendingJobFailedWhenQueueDiscardsIt(
 }
 
 func TestCreateStreamJobFromURLRejectsInvalidURL(t *testing.T) {
-	streamRepo := newFakeStreamRepo()
-	h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{},
-		WithStreamRepository(streamRepo),
-		WithCapabilities(Capabilities{YtdlpEnabled: true}),
-	)
-	r := Routes(h)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", strings.NewReader(`{"source_url":"not-a-url"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rw := httptest.NewRecorder()
-	r.ServeHTTP(rw, req)
-
-	if rw.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+	urls := []string{
+		"not-a-url",
+		"http://www.youtube.com/watch?v=abc123",
+		"https://127.0.0.1/admin",
+		"https://[::1]/admin",
+		"https://169.254.169.254/latest/meta-data",
+		"https://10.0.0.1/video.mp4",
+		"https://youtube.com.evil.example/watch?v=abc123",
+		"https://www.youtube.com/redirect/private-token",
+		"https://user:password@www.youtube.com/watch?v=abc123",
+		"https://www.youtube.com:8443/watch?v=abc123",
 	}
-	if len(streamRepo.jobs) != 0 {
-		t.Fatalf("stream job created for an invalid url: %#v", streamRepo.jobs)
+	for _, sourceURL := range urls {
+		t.Run(sourceURL, func(t *testing.T) {
+			streamRepo := newFakeStreamRepo()
+			h := NewHandlers(newFakeRepo(), newFakeStorage(), &fakeQueue{},
+				WithStreamRepository(streamRepo),
+				WithCapabilities(Capabilities{YtdlpEnabled: true}),
+			)
+			r := Routes(h)
+			body, err := json.Marshal(map[string]string{"source_url": sourceURL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rw := httptest.NewRecorder()
+			r.ServeHTTP(rw, req)
+
+			if rw.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rw.Code, rw.Body.String())
+			}
+			if len(streamRepo.jobs) != 0 {
+				t.Fatalf("stream job created for an invalid url: %#v", streamRepo.jobs)
+			}
+		})
 	}
 }
 

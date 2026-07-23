@@ -28,7 +28,7 @@ const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
  * unconfigured) passes through with its message so the UI can surface it.
  */
 export async function POST(request: Request): Promise<Response> {
-  const localError = localAPIRequestError(request.headers);
+  const localError = await localAPIRequestError(request.headers, request.method);
   if (localError !== undefined) return NextResponse.json({ error: localError }, { status: 403 });
 
   const contentType = request.headers.get('content-type') ?? '';
@@ -36,7 +36,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let init: RequestInit;
   if (contentType.includes('multipart/form-data')) {
-    const upload = prepareLocalUploadBody(request, MAX_UPLOAD_BYTES);
+    const upload = await prepareLocalUploadBody(request, MAX_UPLOAD_BYTES);
     if (!upload.ok) return NextResponse.json({ error: upload.error }, { status: upload.status });
 
     const headers: Record<string, string> = { 'Content-Type': contentType };
@@ -83,7 +83,7 @@ export async function POST(request: Request): Promise<Response> {
 
 /** GET /api/streams — list stream-clip jobs. */
 export async function GET(request: Request): Promise<Response> {
-  const localError = localAPIRequestError(request.headers);
+  const localError = await localAPIRequestError(request.headers, request.method);
   if (localError !== undefined) return NextResponse.json({ error: localError }, { status: 403 });
 
   const res = await callOrchestrator(`${orchestratorUrl()}/api/stream-jobs`);

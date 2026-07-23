@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -448,7 +449,17 @@ end)
 }
 
 func TestEvaluateEffectsImageCallbackProducesOverlay(t *testing.T) {
+	dir := t.TempDir()
+	assetsDir := filepath.Join(dir, "assets")
+	if err := os.MkdirAll(assetsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll assets: %v", err)
+	}
+	imagePath := filepath.Join(assetsDir, "title.png")
+	if err := os.WriteFile(imagePath, []byte("test image"), 0o600); err != nil {
+		t.Fatalf("WriteFile image: %v", err)
+	}
 	source := effectsSource{
+		Path:   filepath.Join(dir, "effects.lua"),
 		Preset: EffectsPresetExternal,
 		Script: `
 on_segment(function(s)
@@ -480,11 +491,124 @@ end)
 		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
 	}
 	effect := effects[0]
-	if effect.Type != EffectImage || effect.Path != "assets/title.png" || effect.Width != 720 {
+	if effect.Type != EffectImage || effect.Path != imagePath || effect.Width != 720 {
 		t.Fatalf("image effect = %#v", effect)
 	}
 	if effect.StartSeconds != 0 || effect.EndSeconds != 6 {
 		t.Fatalf("image window = %.3f-%.3f", effect.StartSeconds, effect.EndSeconds)
+	}
+}
+
+func TestLoadEffectsSourceRejectsOversizedScript(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "effects.lua")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", maxEffectsSourceBytes+1)), 0o600); err != nil {
+		t.Fatalf("WriteFile effects script: %v", err)
+	}
+
+	_, err := loadEffectsSource(path, "")
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("loadEffectsSource error = %v, want size limit", err)
+	}
+}
+
+func TestEvaluateEffectsRejectsExcessiveCallbacks(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: strings.Repeat("on_segment(function() end)\n", maxEffectCallbacks+1),
+	}
+
+	_, _, err := evaluateEffects(source, ShortEdit{SegmentID: "seg-001", DurationSeconds: 6})
+	if err == nil || !strings.Contains(err.Error(), "callback limit") {
+		t.Fatalf("evaluateEffects error = %v, want callback limit", err)
+	}
+}
+
+func TestEvaluateEffectsRejectsExcessiveCallbackExecutions(t *testing.T) {
+	kills := make([]KillCue, maxCallbackExecutions+1)
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `on_kill(function() end)`,
+	}
+
+	_, _, err := evaluateEffects(source, ShortEdit{
+		SegmentID:       "seg-001",
+		DurationSeconds: 6,
+		Kills:           kills,
+	})
+	if err == nil || !strings.Contains(err.Error(), "callback execution limit") {
+		t.Fatalf("evaluateEffects error = %v, want callback execution limit", err)
+	}
+}
+
+func TestEvaluateEffectsRejectsOversizedStringRep(t *testing.T) {
+	source := effectsSource{
+		Preset: EffectsPresetExternal,
+		Script: `
+on_segment(function()
+  text({ value = string.rep("x", 4097), duration = 1 })
+end)
+`,
+	}
+
+	_, _, err := evaluateEffects(source, ShortEdit{SegmentID: "seg-001", DurationSeconds: 6})
+	if err == nil || !strings.Contains(err.Error(), "string.rep result exceeds") {
+		t.Fatalf("evaluateEffects error = %v, want string size limit", err)
+	}
+}
+
+func TestEvaluateEffectsRejectsImagePathOutsideScriptDirectory(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(filepath.Dir(dir), "outside.png")
+	if err := os.WriteFile(outside, []byte("test image"), 0o600); err != nil {
+		t.Fatalf("WriteFile outside image: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(outside) })
+	source := effectsSource{
+		Path:   filepath.Join(dir, "effects.lua"),
+		Preset: EffectsPresetExternal,
+		Script: `
+on_segment(function()
+  image({ path = "../outside.png", duration = 1 })
+end)
+`,
+	}
+
+	_, _, err := evaluateEffects(source, ShortEdit{SegmentID: "seg-001", DurationSeconds: 6})
+	if err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("evaluateEffects error = %v, want path escape rejection", err)
+	}
+}
+
+func TestResolveEffectImagePathRejectsNonLocalInputs(t *testing.T) {
+	root := t.TempDir()
+	for _, raw := range []string{
+		"https://example.invalid/title.png",
+		`\\server\share\title.png`,
+		`\\?\C:\Windows\title.png`,
+		`C:\Windows\title.png`,
+	} {
+		if _, err := resolveEffectImagePath(root, raw); err == nil {
+			t.Fatalf("resolveEffectImagePath(%q) error = nil, want rejection", raw)
+		}
+	}
+}
+
+func TestResolveEffectImagePathRejectsSymlinkEscape(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "effects")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("Mkdir effects root: %v", err)
+	}
+	outside := filepath.Join(parent, "outside.png")
+	if err := os.WriteFile(outside, []byte("test image"), 0o600); err != nil {
+		t.Fatalf("WriteFile outside image: %v", err)
+	}
+	link := filepath.Join(root, "linked.png")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := resolveEffectImagePath(root, "linked.png"); err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("resolveEffectImagePath symlink error = %v, want escape rejection", err)
 	}
 }
 
@@ -556,11 +680,18 @@ func TestEvaluateEffectsDisablesUnsafeLuaLibraries(t *testing.T) {
 	_, _, err := evaluateEffects(effectsSource{
 		Preset: EffectsPresetExternal,
 		Script: `
-for _, name in ipairs({"dofile", "loadfile", "require", "collectgarbage", "print", "os", "io", "package", "debug"}) do
-  if _G[name] ~= nil then
-    error(name .. " should be disabled")
-  end
-end
+if dofile ~= nil then error("dofile should be disabled") end
+if loadfile ~= nil then error("loadfile should be disabled") end
+if load ~= nil then error("load should be disabled") end
+if loadstring ~= nil then error("loadstring should be disabled") end
+if require ~= nil then error("require should be disabled") end
+if collectgarbage ~= nil then error("collectgarbage should be disabled") end
+if print ~= nil then error("print should be disabled") end
+if os ~= nil then error("os should be disabled") end
+if io ~= nil then error("io should be disabled") end
+if package ~= nil then error("package should be disabled") end
+if debug ~= nil then error("debug should be disabled") end
+if table ~= nil then error("table should be disabled") end
 on_segment(function(s)
   text({ value = s.label, start = 0, duration = 1 })
 end)
@@ -576,13 +707,22 @@ end)
 	}
 }
 
-func TestEvaluateEffectsTimesOutRunawayScript(t *testing.T) {
-	oldTimeout := effectsEvaluationTimeout
-	effectsEvaluationTimeout = 50 * time.Millisecond
-	t.Cleanup(func() {
-		effectsEvaluationTimeout = oldTimeout
-	})
+func TestEvaluateEffectsCannotLoadUncheckedLua(t *testing.T) {
+	for _, loader := range []string{"load", "loadstring"} {
+		_, _, err := evaluateEffects(effectsSource{
+			Preset: EffectsPresetExternal,
+			Script: fmt.Sprintf(`%s("while true do end")()`, loader),
+		}, ShortEdit{
+			SegmentID:       "seg-001",
+			DurationSeconds: 5,
+		})
+		if err == nil || !strings.Contains(err.Error(), "attempt to call a non-function object") {
+			t.Fatalf("%s bypass error = %v, want disabled loader", loader, err)
+		}
+	}
+}
 
+func TestEvaluateEffectsRejectsRunawayControlFlow(t *testing.T) {
 	start := time.Now()
 	_, _, err := evaluateEffects(effectsSource{
 		Preset: EffectsPresetExternal,
@@ -592,11 +732,11 @@ func TestEvaluateEffectsTimesOutRunawayScript(t *testing.T) {
 		Preset:          PresetViral60Clean,
 		DurationSeconds: 5,
 	})
-	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
-		t.Fatalf("evaluateEffects error = %v, want context deadline", err)
+	if err == nil || !strings.Contains(err.Error(), "loops are disabled") {
+		t.Fatalf("evaluateEffects error = %v, want loop rejection", err)
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("runaway Lua script took %s to stop", elapsed)
+		t.Fatalf("runaway Lua script took %s to reject", elapsed)
 	}
 }
 

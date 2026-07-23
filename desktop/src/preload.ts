@@ -42,7 +42,10 @@ contextBridge.exposeInMainWorld('fragforgeAssistant', {
     });
   },
   cancel: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'cancel' }),
-  approve: (actionId: unknown): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'approve', actionId }),
+  // This can only request the main-owned native dialog. The renderer never
+  // receives or supplies the privileged confirmation result.
+  approve: (actionId: unknown): Promise<unknown> =>
+    ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'request-approval', actionId }),
   reject: (actionId: unknown): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'reject', actionId }),
   newConversation: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'new' }),
   clearHistory: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'clear' }),

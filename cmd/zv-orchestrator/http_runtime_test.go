@@ -4,9 +4,12 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rechedev9/fragforge/internal/httpapi"
 )
 
 func TestNewOrchestratorHTTPServerSetsDefensiveTimeouts(t *testing.T) {
@@ -21,6 +24,12 @@ func TestNewOrchestratorHTTPServerSetsDefensiveTimeouts(t *testing.T) {
 	}
 	if got, want := server.ReadHeaderTimeout, orchestratorReadHeaderTimeout; got != want {
 		t.Fatalf("ReadHeaderTimeout = %s, want %s", got, want)
+	}
+	if got, want := server.ReadTimeout, orchestratorReadTimeout; got != want {
+		t.Fatalf("ReadTimeout = %s, want %s", got, want)
+	}
+	if server.WriteTimeout != 0 {
+		t.Fatalf("WriteTimeout = %s, want zero so media streaming stays client-paced", server.WriteTimeout)
 	}
 	if got, want := server.IdleTimeout, orchestratorIdleTimeout; got != want {
 		t.Fatalf("IdleTimeout = %s, want %s", got, want)
@@ -42,6 +51,17 @@ func TestPrepareHTTPServerRejectsOccupiedAddress(t *testing.T) {
 	}
 	if got, want := err.Error(), "listen on "+occupied.Addr().String(); !strings.Contains(got, want) {
 		t.Fatalf("prepareHTTPServer() error = %q, want containing %q", got, want)
+	}
+}
+
+func TestPrepareHTTPServerRejectsResolvedNonLoopbackListener(t *testing.T) {
+	prepared, err := prepareHTTPServer(&http.Server{Addr: "0.0.0.0:0"})
+	if err == nil {
+		_ = prepared.listener.Close()
+		t.Fatal("prepareHTTPServer() error = nil, want non-loopback rejection")
+	}
+	if !strings.Contains(err.Error(), "resolved to non-loopback authority") {
+		t.Fatalf("prepareHTTPServer() error = %q, want resolved authority rejection", err)
 	}
 }
 
@@ -96,5 +116,64 @@ func TestPreparedHTTPServerReportsUnexpectedServeFailure(t *testing.T) {
 	}
 	if got, want := ctx.Err(), context.Canceled; got != want {
 		t.Fatalf("runtime context error = %v, want %v", got, want)
+	}
+}
+
+func TestPreparedHTTPServerRejectsRebindingHostAndRequiresCapability(t *testing.T) {
+	const capability = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	handlers := httpapi.NewHandlers(nil, nil, nil,
+		httpapi.WithMutationToken(capability),
+		httpapi.WithRequireReadAuth(true),
+	)
+	server := newOrchestratorHTTPServer("127.0.0.1:0", httpapi.Routes(handlers))
+	prepared, err := prepareHTTPServer(server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Start()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = prepared.Shutdown(ctx)
+	})
+	endpoint := "http://" + prepared.Addr().String() + "/api/capabilities"
+
+	response, err := http.Get(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("tokenless status = %d, want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+
+	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("X-FragForge-Token", capability)
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	request, err = http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Host = "attacker.example:" + strconv.Itoa(prepared.Addr().(*net.TCPAddr).Port)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.Header.Set("X-FragForge-Token", capability)
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusMisdirectedRequest {
+		t.Fatalf("rebinding status = %d, want %d", response.StatusCode, http.StatusMisdirectedRequest)
 	}
 }

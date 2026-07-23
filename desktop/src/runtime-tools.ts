@@ -18,6 +18,7 @@ export interface RuntimeToolProvisioningOptions {
   maxInstallTimeMs?: number;
   bundledHLAEArchive?: string;
   sha256File?: (filePath: string) => string;
+  testOnlyTreeSha256?: Partial<Record<RuntimeToolName, string>>;
   download?: typeof downloadFile;
   extractArchive?: (archive: string, destination: string, signal: AbortSignal) => Promise<void>;
 }
@@ -39,13 +40,26 @@ interface RuntimeToolSpec {
   version: string;
   url: string;
   sha256: string;
+  treeSha256: string;
   kind: 'zip' | 'exe';
   exeRel: string;
   requiredRel: readonly string[];
   timeoutMs: number;
 }
 
-const FFMPEG_RELEASE_DIR = 'ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1';
+interface RuntimeToolFileDigest {
+  path: string;
+  sha256: string;
+}
+
+interface RuntimeToolInstallMarker {
+  files: readonly RuntimeToolFileDigest[];
+  schemaVersion: 2;
+  sourceSha256: string;
+  version: string;
+}
+
+const FFMPEG_RELEASE_DIR = 'ffmpeg-n8.1-latest-win64-gpl-shared-8.1';
 const FFMPEG_EXE = path.join(FFMPEG_RELEASE_DIR, 'bin', 'ffmpeg.exe');
 const FFPROBE_EXE = path.join(FFMPEG_RELEASE_DIR, 'bin', 'ffprobe.exe');
 
@@ -58,9 +72,10 @@ const RUNTIME_TOOLS: Record<RuntimeToolName, RuntimeToolSpec> = {
     requiredRel: [PINNED_HLAE_TOOL.exeRel],
   },
   ffmpeg: {
-    version: 'n8.1.2',
-    url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-03-13-21/ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1.zip',
-    sha256: 'e0337e822bc66d01747bfa917080561739252aaceef3bccc049bcb299d6f9be0',
+    version: 'n8.1.2-30-g45f1910444-20260723',
+    url: 'https://github.com/rechedev9/fragforge/releases/download/v2.2.12/ffmpeg-n8.1-win64-gpl-shared.zip',
+    sha256: 'c22260c1b2d5f2e499e5bb9c5ab32224ff6bf3da79beb7543a955b4b31a4c03c',
+    treeSha256: '8f5c301e5f090feee829b23b0ba1bb478d6377f7d8778e38f50b50f613bfa53e',
     kind: 'zip',
     exeRel: FFMPEG_EXE,
     requiredRel: [FFMPEG_EXE, FFPROBE_EXE],
@@ -70,6 +85,7 @@ const RUNTIME_TOOLS: Record<RuntimeToolName, RuntimeToolSpec> = {
     version: '2026.06.09',
     url: 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp.exe',
     sha256: '3a48cb955d55c8821b60ccbdbbc6f61bc958f2f3d3b7ad5eaf3d83a543293a27',
+    treeSha256: 'ebfc17314ddb5f84e52a223824c5659e92afa6c3934dfc8fdaea5d17c2303397',
     kind: 'exe',
     exeRel: 'yt-dlp.exe',
     requiredRel: ['yt-dlp.exe'],
@@ -84,6 +100,8 @@ export const RUNTIME_TOOL_LABELS: Record<RuntimeToolName, string> = {
 };
 
 const INSTALL_MARKER = '.fragforge-install.json';
+const INSTALL_MARKER_SCHEMA_VERSION = 2;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const PROGRESS_REPORT_MIN_INTERVAL_MS = 1000;
 
 /**
@@ -129,29 +147,30 @@ async function provisionRuntimeTool(
   const tool = RUNTIME_TOOLS[name];
   const installDir = path.join(options.toolsDir, name, tool.version);
   const executable = path.join(installDir, tool.exeRel);
-  let legacyFallback = false;
   throwIfProvisioningAborted(options.signal);
   try {
     restoreInterruptedPromotion(installDir);
     cleanupStagingInstall(installDir, options.logLine);
-    if (completeInstall(installDir, tool)) {
+    if (await completeInstall(installDir, tool, trustedTreeSha256(options, name, tool))) {
       cleanupPreviousInstall(installDir, options.logLine);
       return executable;
     }
-    // Markerless releases predate atomic publication. Keep them in place as
-    // an offline fallback, but do not bless a potentially partial shared-tool
-    // extraction: refresh through staging and publish a verified replacement.
-    legacyFallback = !fs.existsSync(path.join(installDir, INSTALL_MARKER))
-      && requiredFilesExist(installDir, tool);
+    if (requiredFilesExist(installDir, tool)) {
+      options.logLine(
+        `[tools] ${name} cache has no valid per-file digest manifest; replacing it from the pinned source\n`,
+      );
+    }
   } catch (err) {
     options.logLine(`[tools] ${name} cache inspection failed: ${String(err)}\n`);
     return '';
   }
 
+  throwIfProvisioningAborted(options.signal);
   onStatus?.(name);
   const controller = new AbortController();
   const abortFromCaller = (): void => controller.abort();
-  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', abortFromCaller, { once: true });
   const timeoutMs = Math.max(1, Math.min(tool.timeoutMs, options.maxInstallTimeMs ?? tool.timeoutMs));
   let timedOut = false;
   const timeout = setTimeout(() => {
@@ -171,12 +190,6 @@ async function provisionRuntimeTool(
   } catch (err) {
     if (options.signal?.aborted) throw new Error('runtime tool provisioning aborted');
     const reason = timedOut ? `timed out after ${timeoutMs}ms` : String(err);
-    if (legacyFallback) {
-      options.logLine(
-        `[tools] ${name} verified refresh failed (${reason}); using markerless legacy install until retry\n`,
-      );
-      return executable;
-    }
     options.logLine(
       `[tools] ${name} provisioning failed (feature stays unconfigured, retried next boot): ${reason}\n`,
     );
@@ -267,7 +280,14 @@ async function installRuntimeTool(
     if (!requiredFilesExist(stagingDir, tool)) {
       throw new Error(`installation is missing required files in ${stagingDir}`);
     }
-    writeInstallMarker(stagingDir, tool);
+    const installedTreeSha256 = await sha256InstallTree(stagingDir);
+    const expectedTreeSha256 = trustedTreeSha256(options, name, tool);
+    if (installedTreeSha256 !== expectedTreeSha256) {
+      throw new Error(
+        `installed file tree sha256 mismatch: got ${installedTreeSha256}, want ${expectedTreeSha256}`,
+      );
+    }
+    await writeInstallMarker(stagingDir, tool);
     promoteInstall(stagingDir, installDir, options.logLine);
 
     const executable = path.join(installDir, tool.exeRel);
@@ -324,25 +344,126 @@ function requiredFilesExist(installDir: string, tool: RuntimeToolSpec): boolean 
   return tool.requiredRel.every((relativePath) => fs.existsSync(path.join(installDir, relativePath)));
 }
 
-function completeInstall(installDir: string, tool: RuntimeToolSpec): boolean {
+async function completeInstall(
+  installDir: string,
+  tool: RuntimeToolSpec,
+  expectedTreeSha256: string,
+): Promise<boolean> {
   if (!requiredFilesExist(installDir, tool)) return false;
   try {
+    const markerPath = path.join(installDir, INSTALL_MARKER);
+    const markerInfo = fs.lstatSync(markerPath);
+    if (!markerInfo.isFile() || markerInfo.isSymbolicLink()) return false;
     const value: unknown = JSON.parse(fs.readFileSync(path.join(installDir, INSTALL_MARKER), 'utf8'));
-    return isRecord(value) && value.version === tool.version && value.sha256 === tool.sha256;
+    if (!isInstallMarker(value, tool)) return false;
+    const files = collectInstallFiles(installDir);
+    if (files.length !== value.files.length) return false;
+    const declared = new Map(value.files.map((file) => [file.path, file.sha256]));
+    if (declared.size !== value.files.length || files.some((file) => !declared.has(file))) return false;
+    return await sha256InstallTree(installDir, files) === expectedTreeSha256;
   } catch {
     return false;
   }
 }
 
-function writeInstallMarker(installDir: string, tool: RuntimeToolSpec): void {
+async function writeInstallMarker(installDir: string, tool: RuntimeToolSpec): Promise<void> {
+  const files: RuntimeToolFileDigest[] = [];
+  for (const relativePath of collectInstallFiles(installDir)) {
+    files.push({
+      path: relativePath,
+      sha256: await sha256InstallFile(path.join(installDir, ...relativePath.split('/'))),
+    });
+  }
+  const marker: RuntimeToolInstallMarker = {
+    files,
+    schemaVersion: INSTALL_MARKER_SCHEMA_VERSION,
+    sourceSha256: tool.sha256,
+    version: tool.version,
+  };
   fs.writeFileSync(
     path.join(installDir, INSTALL_MARKER),
-    JSON.stringify({ version: tool.version, sha256: tool.sha256 }),
+    JSON.stringify(marker),
   );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isInstallMarker(value: unknown, tool: RuntimeToolSpec): value is RuntimeToolInstallMarker {
+  if (!isRecord(value)
+    || value.schemaVersion !== INSTALL_MARKER_SCHEMA_VERSION
+    || value.version !== tool.version
+    || value.sourceSha256 !== tool.sha256
+    || !Array.isArray(value.files)) return false;
+  return value.files.every((file): file is RuntimeToolFileDigest =>
+    isRecord(file)
+    && typeof file.path === 'string'
+    && isSafeManifestPath(file.path)
+    && typeof file.sha256 === 'string'
+    && SHA256_PATTERN.test(file.sha256));
+}
+
+function isSafeManifestPath(value: string): boolean {
+  return value !== ''
+    && !value.includes('\\')
+    && !value.startsWith('/')
+    && value.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
+}
+
+function collectInstallFiles(installDir: string): string[] {
+  const files: string[] = [];
+  const visit = (directory: string, relativeDirectory: string): void => {
+    const entries = fs.readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const relativePath = relativeDirectory === '' ? entry.name : `${relativeDirectory}/${entry.name}`;
+      if (relativePath === INSTALL_MARKER) continue;
+      if (entry.isSymbolicLink()) throw new Error(`runtime tool cache contains a link: ${relativePath}`);
+      if (entry.isDirectory()) {
+        visit(path.join(directory, entry.name), relativePath);
+      } else if (entry.isFile()) {
+        files.push(relativePath);
+      } else {
+        throw new Error(`runtime tool cache contains an unsupported entry: ${relativePath}`);
+      }
+    }
+  };
+  visit(installDir, '');
+  return files;
+}
+
+async function sha256InstallFile(filePath: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of fs.createReadStream(filePath)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+async function sha256InstallTree(
+  installDir: string,
+  files: string[] = collectInstallFiles(installDir),
+): Promise<string> {
+  const tree = createHash('sha256');
+  for (const relativePath of files) {
+    const digest = await sha256InstallFile(path.join(installDir, ...relativePath.split('/')));
+    tree.update(relativePath, 'utf8');
+    tree.update('\0', 'utf8');
+    tree.update(digest, 'utf8');
+    tree.update('\n', 'utf8');
+  }
+  return tree.digest('hex');
+}
+
+function trustedTreeSha256(
+  options: RuntimeToolProvisioningOptions,
+  name: RuntimeToolName,
+  tool: RuntimeToolSpec,
+): string {
+  const expected = options.testOnlyTreeSha256?.[name] ?? tool.treeSha256;
+  if (!SHA256_PATTERN.test(expected)) {
+    throw new Error(`invalid trusted file tree sha256 for ${name}`);
+  }
+  return expected;
 }
 
 // Rename happens on the same volume and is the publication point: the desktop

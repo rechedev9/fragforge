@@ -5,9 +5,9 @@ import {
   type AssistantIPCResponse,
   type AssistantSnapshot,
 } from './assistant-ipc.ts';
+import type { NativeApprovalTarget } from './assistant/native-approval.ts';
 
-export interface AssistantCommandController {
-  approve(actionID: string): Promise<void>;
+export interface AssistantCommandController extends NativeApprovalTarget {
   cancel(): Promise<void>;
   clearHistory(): Promise<void>;
   login(): Promise<void>;
@@ -28,6 +28,10 @@ export function assistantCommandFailure(error: string, snapshot?: AssistantSnaps
 export async function dispatchAssistantRequest(
   value: unknown,
   getController: () => AssistantCommandController,
+  requestNativeApproval?: (
+    actionId: string,
+    controller: AssistantCommandController,
+  ) => Promise<void>,
 ): Promise<AssistantIPCResponse> {
   let request;
   try {
@@ -56,8 +60,9 @@ export async function dispatchAssistantRequest(
       case ASSISTANT_ACTION.cancel:
         await controller.cancel();
         break;
-      case ASSISTANT_ACTION.approve:
-        await controller.approve(request.actionId);
+      case ASSISTANT_ACTION.requestApproval:
+        if (requestNativeApproval === undefined) throw new Error('native approval is unavailable');
+        await requestNativeApproval(request.actionId, controller);
         break;
       case ASSISTANT_ACTION.reject:
         controller.reject(request.actionId);

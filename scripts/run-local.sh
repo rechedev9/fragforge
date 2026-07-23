@@ -17,6 +17,14 @@ BIN="${ZV_BIN_DIR:-$ROOT/bin}"
 DATA="${ZV_DATA_DIR:-$ROOT/.local/data}"
 WORK="${ZV_MEDIA_WORK_DIR:-$ROOT/.local/work}"
 HTTP_ADDR="${ZV_HTTP_ADDR:-127.0.0.1:8080}"
+if [ -z "${ZV_MUTATION_TOKEN:-}" ]; then
+  ZV_MUTATION_TOKEN="$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')"
+fi
+if [[ ! "$ZV_MUTATION_TOKEN" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "ZV_MUTATION_TOKEN must contain exactly 32 random bytes encoded as 64 lowercase hexadecimal characters" >&2
+  exit 1
+fi
+export ZV_MUTATION_TOKEN
 
 HLAE="${ZV_HLAE_PATH:-}"
 CS2="${ZV_CS2_PATH:-C:/Program Files (x86)/Steam/steamapps/common/Counter-Strike Global Offensive/game/bin/win64/cs2.exe}"
@@ -66,10 +74,11 @@ ORCH_PID=$!
 trap 'kill "$ORCH_PID" 2>/dev/null || true' EXIT
 
 for _ in $(seq 1 60); do
-  curl -sf -o /dev/null "http://$HTTP_ADDR/api/jobs" && break
+  curl -sf -o /dev/null "http://$HTTP_ADDR/healthz" && break
   sleep 1
 done
 
 echo "==> local UI ready: http://$HTTP_ADDR/"
+echo "    session capability (paste into the workbench token field): $ZV_MUTATION_TOKEN"
 echo "    drop a .dem, pick a player, record through HLAE/CS2, and render from the HTMX workbench."
 wait "$ORCH_PID"

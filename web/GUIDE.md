@@ -21,6 +21,30 @@ the source of truth for jobs and artifacts; the client stores only lightweight
 reel intent in `localStorage`. Screens without an orchestrator-backed product
 surface still use typed fixture data through `MockApiClient`.
 
+## Local mutation capability
+
+Read-only proxy requests require the loopback/Origin guard. Every `POST`,
+`PUT`, `PATCH`, and `DELETE` additionally requires the HttpOnly,
+`SameSite=Strict`, `Path=/` cookie named `fragforge_proxy_capability`. The
+Next server compares it in constant time with its server-only
+`FRAGFORGE_PROXY_MUTATION_CAPABILITY` environment value and fails closed when
+either is absent.
+
+Electron main owns this integration: generate a fresh high-entropy value for
+each launch, pass it only to the Next child as that environment variable, and
+seed the cookie through Electron's `session.cookies` before `loadURL`. Never
+place the value in `NEXT_PUBLIC_*`, HTML, a route response, or renderer
+JavaScript. The value is a proxy capability, separate from
+`ORCHESTRATOR_TOKEN`, which remains server-side.
+
+For `scripts/local-studio.ps1`, a second server-only
+`FRAGFORGE_PROXY_BOOTSTRAP_CAPABILITY` is generated (or accepted from the
+environment) and printed only to the launching terminal. Open `/bootstrap` and
+enter it in the password form. The same-origin POST validates that bootstrap
+value, then sets the separate mutation capability as the HttpOnly cookie. This
+route is disabled when either server-side value is absent; it never places a
+capability in a URL or renderer JavaScript.
+
 ## Design
 
 The look and feel is the v2 "replay studio" identity: a left-sidebar shell,

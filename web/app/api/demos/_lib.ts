@@ -14,17 +14,19 @@ export function orchestratorUrl(): string {
  * ORCHESTRATOR_URL or an aborted request lands here too, and all are reported as
  * "service unavailable". The thrown error is logged server-side first so the
  * real cause (ECONNREFUSED, a URL typo) is not lost, since the client only sees
- * the generic 503. A reachable orchestrator's own non-2xx still comes back as a
- * Response for forwardError to translate. Never logs demo bytes (only url+method).
+ * the generic 503. Authenticated requests never follow redirects: an upstream
+ * redirect is converted to a generic 502 before it can receive or retain the
+ * orchestrator token. Other non-2xx responses come back for forwardError to
+ * translate. Never logs demo bytes (only url+method).
  */
 export async function callOrchestrator(url: string, init?: RequestInit): Promise<Response | null> {
-  // Carry the orchestrator token on every call, reads included. An explicitly
-  // configured non-loopback orchestrator gates reads behind the token too, not
-  // only mutations. mutationHeaders() is empty for the loopback desktop and dev
-  // setup, where no token is required.
+  // Carry the required per-session orchestrator token on every call, reads
+  // included. Desktop and standalone launchers keep it server-side; when the
+  // environment is misconfigured, the loopback orchestrator fails closed.
   const headers = { ...mutationHeaders(), ...((init?.headers as Record<string, string> | undefined) ?? {}) };
   try {
-    return await fetch(url, { ...init, headers });
+    const response = await fetch(url, { ...init, headers, redirect: 'manual' });
+    return rejectUpstreamRedirect(response, init?.method);
   } catch (err) {
     console.error(`orchestrator unreachable: ${init?.method ?? 'GET'} ${url}`, err);
     return null;
@@ -52,12 +54,21 @@ export async function callOrchestratorStreamingUpload(
 ): Promise<Response | null | typeof UPLOAD_BODY_LIMIT_EXCEEDED> {
   const headers = { ...mutationHeaders(), ...init.headers };
   try {
-    return await fetch(url, { ...init, headers });
+    const response = await fetch(url, { ...init, headers, redirect: 'manual' });
+    return rejectUpstreamRedirect(response, init.method);
   } catch (err) {
     if (bodyLimitExceeded()) return UPLOAD_BODY_LIMIT_EXCEEDED;
     console.error(`orchestrator unreachable: POST ${url}`, err);
     return null;
   }
+}
+
+function rejectUpstreamRedirect(response: Response, method: string | undefined): Response {
+  if (response.status < 300 || response.status >= 400) return response;
+  // Do not expose Location: it could contain an attacker-controlled URL or a
+  // signed upstream location. The token-bearing fetch has already stopped.
+  console.error(`orchestrator redirect rejected: ${method ?? 'GET'} (${response.status})`);
+  return new Response(null, { status: 502 });
 }
 
 /** 503 for when the local analysis service (orchestrator) is unreachable. */
@@ -98,7 +109,7 @@ export function jobsListUrl(): string {
   return `${orchestratorUrl()}/api/jobs?limit=${JOBS_LIST_LIMIT}`;
 }
 
-/** Mutation headers: the optional orchestrator token, server-side only. */
+/** Auth headers: the required orchestrator session token, server-side only. */
 export function mutationHeaders(): Record<string, string> {
   const token = process.env.ORCHESTRATOR_TOKEN;
   return token ? { 'X-FragForge-Token': token } : {};

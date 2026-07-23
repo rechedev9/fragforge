@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -72,10 +73,15 @@ func TestRequireReadAuthGatesExposedReads(t *testing.T) {
 		{name: "exposed workbench head with token", readAuth: true, method: http.MethodHead, path: "/ui/jobs", token: "secret", wantStatus: http.StatusOK, wantReached: true},
 		{name: "exposed workbench shell stays open", readAuth: true, path: "/", wantStatus: http.StatusOK, wantReached: true},
 		{name: "loopback default api read open", readAuth: false, path: "/api/jobs", wantStatus: http.StatusOK, wantReached: true},
+		{name: "missing configured capability fails closed", readAuth: true, path: "/api/jobs", wantStatus: http.StatusServiceUnavailable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &Handlers{mutationToken: "secret", requireReadAuth: tc.readAuth}
+			token := "secret"
+			if tc.name == "missing configured capability fails closed" {
+				token = ""
+			}
+			h := &Handlers{mutationToken: token, requireReadAuth: tc.readAuth}
 			reached := false
 			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				reached = true
@@ -99,6 +105,21 @@ func TestRequireReadAuthGatesExposedReads(t *testing.T) {
 				t.Fatalf("handler reached = %v, want %v", reached, tc.wantReached)
 			}
 		})
+	}
+}
+
+func TestSessionCapabilityBlocksSameOriginDNSRebindingRequest(t *testing.T) {
+	h := &Handlers{mutationToken: "unguessable-session-capability", requireReadAuth: true}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", nil)
+	req.Host = "attacker.example:8080"
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	h.requireMutationToken(next).ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
 	}
 }
 
@@ -202,5 +223,110 @@ func TestRateLimiterKeysPerClientIP(t *testing.T) {
 	// A different client must not be throttled by the first client's usage.
 	if !l.allow("2.2.2.2", now) {
 		t.Fatal("second client request denied, want allowed (per-IP buckets)")
+	}
+}
+
+func TestRateLimiterEvictsIdleBucketsAndCapsCardinality(t *testing.T) {
+	l := newRateLimiter(1, 1)
+	now := time.Now()
+	if !l.allow("idle", now) {
+		t.Fatal("initial request denied")
+	}
+	if !l.allow("fresh", now.Add(rateLimiterBucketTTL)) {
+		t.Fatal("fresh request denied")
+	}
+	if _, ok := l.buckets["idle"]; ok {
+		t.Fatal("idle bucket survived TTL eviction")
+	}
+
+	for i := range rateLimiterMaxBuckets + 100 {
+		l.allow("client-"+strconv.Itoa(i), now.Add(rateLimiterBucketTTL+time.Duration(i)*time.Millisecond))
+	}
+	if got := len(l.buckets); got > rateLimiterMaxBuckets {
+		t.Fatalf("bucket count = %d, want <= %d", got, rateLimiterMaxBuckets)
+	}
+}
+
+func TestClientIPAggregatesIPv6Prefix(t *testing.T) {
+	first := clientIP("[2001:db8:abcd:12::1]:1234")
+	second := clientIP("[2001:db8:abcd:12:ffff::2]:4321")
+	if first != second {
+		t.Fatalf("IPv6 keys = %q and %q, want same /64", first, second)
+	}
+	if first != "2001:db8:abcd:12::/64" {
+		t.Fatalf("IPv6 key = %q, want canonical /64", first)
+	}
+}
+
+func TestUploadLimiterRejectsConcurrentMultipartBody(t *testing.T) {
+	h := &Handlers{uploadLimiter: newUploadLimiter(1)}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := h.boundHTTPResources(next)
+
+	firstDone := make(chan int, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", nil)
+		req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		firstDone <- rec.Code
+	}()
+	<-started
+
+	req := httptest.NewRequest(http.MethodPost, "/api/stream-jobs", nil)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("concurrency rejection missing Retry-After")
+	}
+	close(release)
+	if status := <-firstDone; status != http.StatusNoContent {
+		t.Fatalf("first status = %d, want %d", status, http.StatusNoContent)
+	}
+}
+
+func TestMultipartUploadRoutesIncludeWorkbench(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/api/jobs"},
+		{method: http.MethodPost, path: "/api/stream-jobs"},
+		{method: http.MethodPost, path: "/ui/jobs"},
+		{method: http.MethodPut, path: "/api/voice-profiles/default"},
+	}
+	for _, tt := range tests {
+		req := httptest.NewRequest(tt.method, tt.path, nil)
+		req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+		if !isMultipartUpload(req) {
+			t.Errorf("isMultipartUpload(%s %s) = false, want true", tt.method, tt.path)
+		}
+	}
+}
+
+func TestMediaResponsesRemainWriteDeadlineFree(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "/api/stream-jobs/id/source", want: true},
+		{path: "/api/jobs/id/renders/v/videos/reel.mp4", want: true},
+		{path: "/api/stream-jobs/id/renders/v/delivery/clip.mp4", want: true},
+		{path: "/api/jobs", want: false},
+	}
+	for _, tt := range tests {
+		if got := isMediaResponse(http.MethodGet, tt.path); got != tt.want {
+			t.Errorf("isMediaResponse(GET, %q) = %v, want %v", tt.path, got, tt.want)
+		}
 	}
 }

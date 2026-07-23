@@ -29,7 +29,7 @@ async function frontendProfileResponse(res: Response): Promise<Response> {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const localError = localAPIRequestError(request.headers);
+  const localError = await localAPIRequestError(request.headers, request.method);
   if (localError !== undefined) return NextResponse.json({ error: localError }, { status: 403 });
 
   const res = await callOrchestrator(upstreamURL());
@@ -39,7 +39,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function PUT(request: Request): Promise<Response> {
-  const localError = localAPIRequestError(request.headers);
+  const localError = await localAPIRequestError(request.headers, request.method);
   if (localError !== undefined) return NextResponse.json({ error: localError }, { status: 403 });
 
   const contentType = request.headers.get('content-type') ?? '';
@@ -47,7 +47,7 @@ export async function PUT(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'multipart voice upload required' }, { status: 400 });
   }
 
-  const upload = prepareLocalUploadBody(request, MAX_VOICE_UPLOAD_BYTES);
+  const upload = await prepareLocalUploadBody(request, MAX_VOICE_UPLOAD_BYTES);
   if (!upload.ok) return NextResponse.json({ error: upload.error }, { status: upload.status });
 
   const headers: Record<string, string> = { 'Content-Type': contentType };
@@ -67,7 +67,7 @@ export async function PUT(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
-  const localError = localAPIRequestError(request.headers);
+  const localError = await localAPIRequestError(request.headers, request.method);
   if (localError !== undefined) return NextResponse.json({ error: localError }, { status: 403 });
 
   const res = await callOrchestrator(upstreamURL(), { method: 'DELETE' });

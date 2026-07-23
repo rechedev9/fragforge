@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AssistantSnapshot } from './assistant-ipc.ts';
 import { dispatchAssistantRequest } from './assistant-command.ts';
+import { NativeApprovalGate } from './assistant/native-approval.ts';
 
 const snapshot: AssistantSnapshot = {
   account: { planType: 'plus', status: 'signed-in' },
@@ -36,6 +37,7 @@ test('returns the current snapshot when a controller command fails', async () =>
     context: { kind: 'none', label: 'Studio', pathname: '/settings' },
     message: 'continúa',
   }, () => ({
+    approvalPrompt: () => { throw new Error('unexpected approval'); },
     approve: async () => {},
     cancel: async () => {},
     clearHistory: async () => {},
@@ -60,6 +62,7 @@ test('returns the current snapshot when a controller command fails', async () =>
 
 test('wraps status in the same terminal command result as every mutation', async () => {
   const result = await dispatchAssistantRequest({ action: 'status' }, () => ({
+    approvalPrompt: () => { throw new Error('unexpected approval'); },
     approve: async () => {},
     cancel: async () => {},
     clearHistory: async () => {},
@@ -82,6 +85,7 @@ test('still returns a terminal failure when taking the fallback snapshot also fa
     context: { kind: 'none', label: 'Studio', pathname: '/settings' },
     message: 'continúa',
   }, () => ({
+    approvalPrompt: () => { throw new Error('unexpected approval'); },
     approve: async () => {},
     cancel: async () => {},
     clearHistory: async () => {},
@@ -103,4 +107,36 @@ test('still returns a terminal failure when taking the fallback snapshot also fa
     error: 'No se pudo completar la operación del asistente.',
     ok: false,
   });
+});
+
+test('routes renderer approval requests through the native gate instead of approving by ID', async () => {
+  let approved = false;
+  const gate = new NativeApprovalGate(async () => 'cancel');
+  const result = await dispatchAssistantRequest(
+    { action: 'request-approval', actionId: 'action_123' },
+    () => ({
+      approvalPrompt: (actionId) => ({
+        actionId,
+        fields: [],
+        operation: 'jobs.delete',
+        risk: 'destructive',
+        title: 'Eliminar trabajo',
+      }),
+      approve: async () => { approved = true; },
+      cancel: async () => {},
+      clearHistory: async () => {},
+      login: async () => {},
+      logout: async () => {},
+      newConversation: async () => {},
+      reject: () => {},
+      send: async () => {},
+      snapshot: () => snapshot,
+      status: async () => snapshot,
+      wake: async () => {},
+    }),
+    (actionId, controller) => gate.request(actionId, controller),
+  );
+
+  assert.equal(approved, false);
+  assert.deepEqual(result, { ok: true, snapshot });
 });

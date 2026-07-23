@@ -249,7 +249,7 @@ func TestAcquireWorkerFailureRecordsReasonAndObs(t *testing.T) {
 
 func TestAcquireWorkerRejectsOversizedDownload(t *testing.T) {
 	id := uuid.New()
-	repo := newFakeStreamRepo(streamclips.Job{ID: id, Status: streamclips.StatusAcquiring, SourceURL: "https://cdn.example.com/clip.mp4"})
+	repo := newFakeStreamRepo(streamclips.Job{ID: id, Status: streamclips.StatusAcquiring, SourceURL: "https://clips.twitch.tv/OversizedClip"})
 	store := newFakeStorage()
 
 	w := NewAcquireWorker(repo, store, AcquireWorkerConfig{WorkDir: t.TempDir(), MaxBytes: 4})

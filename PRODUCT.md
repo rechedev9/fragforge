@@ -318,12 +318,14 @@ Unix-like shells can use `make build` / `make test` instead.
 ```bash
 export ZV_DATABASE_URL=memory   # in-memory job repo + inline queue, no external services needed
 export ZV_DATA_DIR="./data"
+export ZV_MUTATION_TOKEN="$(openssl rand -hex 32)" # required per launch
 
 ./bin/zv serve
 ```
 
-The server binds to `127.0.0.1:8080` by default; binding to a non-loopback
-address requires `ZV_MUTATION_TOKEN`. Optional environment variables:
+The server binds to `127.0.0.1:8080` by default and rejects non-loopback
+addresses. `ZV_MUTATION_TOKEN` is a required 32-byte lowercase-hex session
+capability for API reads and mutations. Other environment variables:
 
 | Variable | Purpose |
 |----------|---------|

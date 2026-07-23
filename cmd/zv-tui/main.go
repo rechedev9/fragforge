@@ -26,7 +26,7 @@ onto the running TUI uploads it too.
 
 Flags:
   --url <addr>     orchestrator base URL (default $ORCHESTRATOR_URL or ` + tuiclient.DefaultBaseURL + `)
-  --token <tok>    X-FragForge-Token for a non-loopback orchestrator
+  --token <tok>    required per-session X-FragForge-Token
                    (default $ZV_MUTATION_TOKEN)
 
 Keys (the mouse works too: click tabs and rows, wheel to scroll, click the

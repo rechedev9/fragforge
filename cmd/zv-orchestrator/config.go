@@ -98,8 +98,11 @@ func loadConfig() (config, error) {
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("ZV_DATABASE_URL is required")
 	}
-	if !httpapi.IsLoopbackAddr(c.HTTPAddr) && c.MutationToken == "" {
-		return c, fmt.Errorf("ZV_MUTATION_TOKEN is required when ZV_HTTP_ADDR is not loopback")
+	if !httpapi.IsLoopbackAddr(c.HTTPAddr) {
+		return c, fmt.Errorf("ZV_HTTP_ADDR must be an explicit loopback address; remote HTTP binds are not supported")
+	}
+	if !validSessionCapability(c.MutationToken) {
+		return c, fmt.Errorf("ZV_MUTATION_TOKEN must be a per-session capability of 32 random bytes encoded as lowercase hex")
 	}
 	if c.DiscoverySecret != "" && !validDiscoverySecret(c.DiscoverySecret) {
 		return c, fmt.Errorf("ZV_DISCOVERY_SECRET must be 32 random bytes encoded as lowercase hex")
@@ -132,6 +135,10 @@ func loadConfig() (config, error) {
 }
 
 func validDiscoverySecret(secret string) bool {
+	return validSessionCapability(secret)
+}
+
+func validSessionCapability(secret string) bool {
 	if len(secret) != 64 || secret != strings.ToLower(secret) {
 		return false
 	}

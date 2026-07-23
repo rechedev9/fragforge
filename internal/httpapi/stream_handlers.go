@@ -198,18 +198,20 @@ func (h *Handlers) createStreamJobFromURL(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid stream job JSON")
 		return
 	}
-	if _, err := vodfetch.ClassifySource(req.SourceURL); err != nil {
+	source, err := vodfetch.ValidateSource(req.SourceURL)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid source_url: "+err.Error())
 		return
 	}
 
 	id := uuid.New()
 	j := &streamclips.Job{
-		ID:         id,
-		Status:     streamclips.StatusAcquiring,
-		SourcePath: streamclips.SourceKey(id),
-		SourceURL:  req.SourceURL,
-		Title:      req.Title,
+		ID:              id,
+		Status:          streamclips.StatusAcquiring,
+		SourcePath:      streamclips.SourceKey(id),
+		SourceURL:       source.AcquisitionURL,
+		PublicSourceURL: source.PublicURL,
+		Title:           req.Title,
 	}
 	if err := h.streamRepo.Create(r.Context(), j); err != nil {
 		internalError(w, "create stream job", err)

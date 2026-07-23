@@ -14,6 +14,7 @@ export function releasePaths(desktopDirectory) {
       join(outputDirectory, `${installerName}.blockmap`),
     ],
     checksum: join(outputDirectory, 'SHA256SUMS.txt'),
+    publisher: join(outputDirectory, 'AUTHENTICODE_PUBLISHER.json'),
   };
 }
 

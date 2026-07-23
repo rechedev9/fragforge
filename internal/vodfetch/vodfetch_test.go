@@ -136,7 +136,7 @@ func TestDownload_RejectsOversizedResultAndRemovesTemp(t *testing.T) {
 	runner := &fakeRunner{fileContent: []byte("12345")}
 	f := Fetcher{Runner: runner, MaxBytes: 4}
 
-	_, err := f.Download(context.Background(), "https://cdn.example.com/clip.mp4", dest)
+	_, err := f.Download(context.Background(), "https://clips.twitch.tv/OversizedClip", dest)
 	if !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("Download() error = %v, want errors.Is(_, ErrTooLarge)", err)
 	}
@@ -153,7 +153,7 @@ func TestDownload_RejectsOversizedResultAndRemovesTemp(t *testing.T) {
 }
 
 func TestDownload_RedactsSensitiveURLFromErrors(t *testing.T) {
-	rawURL := "https://sentinel-user:sentinel-pass@example.com/clip.mp4?token=sentinel-query#sentinel-fragment"
+	rawURL := "https://www.youtube.com/watch?v=abc123&token=sentinel-query#sentinel-fragment"
 	tests := []struct {
 		name    string
 		stderr  string
@@ -190,12 +190,12 @@ func TestDownload_RedactsSensitiveURLFromErrors(t *testing.T) {
 			if tt.wantErr == nil && !errors.Is(err, runErr) {
 				t.Fatalf("Download() error = %v, want wrapped command error", err)
 			}
-			for _, secret := range []string{"sentinel-user", "sentinel-pass", "sentinel-query", "sentinel-fragment"} {
+			for _, secret := range []string{"sentinel-query", "sentinel-fragment"} {
 				if strings.Contains(err.Error(), secret) {
 					t.Errorf("Download() error leaked %q: %v", secret, err)
 				}
 			}
-			if !strings.Contains(err.Error(), "https://example.com/clip.mp4") {
+			if !strings.Contains(err.Error(), "https://www.youtube.com/watch?v=abc123") {
 				t.Errorf("Download() error = %v, want redacted source URL", err)
 			}
 		})
@@ -363,10 +363,15 @@ func TestDownload_ArgsShape(t *testing.T) {
 	}
 
 	want := []string{
+		"--ignore-config",
 		"-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
 		"--merge-output-format", "mp4",
 		"--no-playlist",
 		"--no-progress",
+		"--socket-timeout", "30",
+		"--retries", "2",
+		"--fragment-retries", "2",
+		"--extractor-retries", "2",
 		"--print", "after_move:%(title)s",
 		"--max-filesize", "8589934592",
 	}
@@ -412,14 +417,24 @@ func TestClassifySource(t *testing.T) {
 			want: SourceOther,
 		},
 		{
-			name: "twitch channel homepage is other",
-			url:  "https://www.twitch.tv/somechannel",
+			name:    "twitch channel homepage rejected",
+			url:     "https://www.twitch.tv/somechannel",
+			wantErr: true,
+		},
+		{
+			name: "youtube short link",
+			url:  "https://youtu.be/abc123",
 			want: SourceOther,
 		},
 		{
-			name: "direct mp4 link is allowed",
-			url:  "https://cdn.example.com/clips/highlight.mp4",
+			name: "youtube shorts path",
+			url:  "https://www.youtube.com/shorts/abc123",
 			want: SourceOther,
+		},
+		{
+			name:    "arbitrary public host rejected",
+			url:     "https://cdn.example.com/clips/highlight.mp4",
+			wantErr: true,
 		},
 		{
 			// The reported bug: a ShareX screenshot upload URL pasted into the
@@ -459,6 +474,66 @@ func TestClassifySource(t *testing.T) {
 			url:     "https:///videos/1",
 			wantErr: true,
 		},
+		{
+			name:    "loopback rejected",
+			url:     "https://127.0.0.1/admin",
+			wantErr: true,
+		},
+		{
+			name:    "ipv6 loopback rejected",
+			url:     "https://[::1]/admin",
+			wantErr: true,
+		},
+		{
+			name:    "link local metadata rejected",
+			url:     "https://169.254.169.254/latest/meta-data",
+			wantErr: true,
+		},
+		{
+			name:    "private network rejected",
+			url:     "https://192.168.1.1/video",
+			wantErr: true,
+		},
+		{
+			name:    "multicast rejected",
+			url:     "https://224.0.0.1/video",
+			wantErr: true,
+		},
+		{
+			name:    "reserved documentation range rejected",
+			url:     "https://192.0.2.1/video",
+			wantErr: true,
+		},
+		{
+			name:    "unspecified address rejected",
+			url:     "https://0.0.0.0/video",
+			wantErr: true,
+		},
+		{
+			name:    "provider suffix attack rejected",
+			url:     "https://youtube.com.evil.example/watch?v=abc123",
+			wantErr: true,
+		},
+		{
+			name:    "allowlisted provider arbitrary path rejected",
+			url:     "https://www.youtube.com/redirect/private-token",
+			wantErr: true,
+		},
+		{
+			name:    "youtube watch without video id rejected",
+			url:     "https://www.youtube.com/watch?token=private",
+			wantErr: true,
+		},
+		{
+			name:    "userinfo rejected",
+			url:     "https://user:password@www.youtube.com/watch?v=abc123",
+			wantErr: true,
+		},
+		{
+			name:    "explicit port rejected",
+			url:     "https://www.youtube.com:8443/watch?v=abc123",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -477,6 +552,23 @@ func TestClassifySource(t *testing.T) {
 				t.Errorf("ClassifySource(%q) = %v, want %v", tt.url, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateSourceSeparatesPrivateAndPublicURLs(t *testing.T) {
+	const raw = "https://www.youtube.com/watch?v=abc123&list=private-list&token=private-token#chapter"
+	source, err := ValidateSource(raw)
+	if err != nil {
+		t.Fatalf("ValidateSource() error = %v", err)
+	}
+	if source.AcquisitionURL == source.PublicURL {
+		t.Fatalf("acquisition and public URL are identical: %q", source.PublicURL)
+	}
+	if !strings.Contains(source.AcquisitionURL, "private-token") {
+		t.Fatalf("acquisition URL lost provider query material: %q", source.AcquisitionURL)
+	}
+	if got, want := source.PublicURL, "https://www.youtube.com/watch?v=abc123"; got != want {
+		t.Fatalf("PublicURL = %q, want %q", got, want)
 	}
 }
 

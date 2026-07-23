@@ -24,6 +24,12 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { escapeHtml } from './escaping';
+import {
+  createBootSecurityCapabilities,
+  installProxyCapabilityCookie,
+  orchestratorSecurityEnvironment,
+  webSecurityEnvironment,
+} from './boot-security';
 import { validateWindowState, type WindowState } from './window-state';
 import { lastLines } from './log-tail';
 import { provisionRuntimeTools, RUNTIME_TOOL_LABELS } from './runtime-tools';
@@ -31,7 +37,7 @@ import { PINNED_HLAE_TOOL } from './hlae-tool';
 import { ProcessSession, type LaunchedProcess } from './process-session';
 import { waitForDesktopServices } from './service-health';
 import { provisionMusicLibrary } from './music-library';
-import { allocateStableServicePorts, createDiscoverySecret } from './stable-ports';
+import { allocateStableServicePorts } from './stable-ports';
 import {
   resolveXAIAPIKeyDetails,
   takeXAIAPIKeyFromEnvironment,
@@ -58,6 +64,12 @@ import {
 import { assistantCommandFailure, dispatchAssistantRequest } from './assistant-command';
 import { AssistantController } from './assistant/controller';
 import { AssistantHistoryStore } from './assistant/history';
+import {
+  NativeApprovalGate,
+  nativeApprovalDetail,
+  type NativeApprovalDecision,
+  type NativeApprovalPrompt,
+} from './assistant/native-approval';
 import { OperationGateway } from './studio-operations/operation-gateway';
 import { OrchestratorClient } from './mcp/orchestrator-client';
 
@@ -164,6 +176,8 @@ let activeWebOrigin: string | null = null;
 let activeXAIAPIKeySource: XAIAPIKeySource = 'none';
 let xaiRelaunchScheduled = false;
 let assistantController: AssistantController | null = null;
+let activeMutationToken: string | null = null;
+const assistantNativeApproval = new NativeApprovalGate(showAssistantNativeApproval);
 
 const assistantHistoryFile = path.join(app.getPath('userData'), 'assistant', 'history.json');
 // Codex gets an intentionally empty, dedicated cwd. It is never pointed at
@@ -196,8 +210,9 @@ function sendAssistantEvent(event: AssistantEvent): void {
 
 function getAssistantController(): AssistantController {
   if (assistantController !== null) return assistantController;
+  if (activeMutationToken === null) throw new Error('orchestrator authentication is not ready');
   fs.mkdirSync(assistantWorkspace, { recursive: true });
-  const client = new OrchestratorClient({ portsFile });
+  const client = new OrchestratorClient({ mutationToken: activeMutationToken, portsFile });
   assistantController = new AssistantController({
     cwd: assistantWorkspace,
     gateway: new OperationGateway({ client }),
@@ -224,6 +239,24 @@ async function selectAssistantLocalMedia(kind: 'demo' | 'stream'): Promise<strin
   });
   if (result.canceled) return null;
   return result.filePaths[0] ?? null;
+}
+
+async function showAssistantNativeApproval(
+  prompt: NativeApprovalPrompt,
+): Promise<NativeApprovalDecision> {
+  const win = aliveWindow();
+  if (win === null) return 'cancel';
+  const result = await dialog.showMessageBox(win, {
+    buttons: ['Cancelar', 'Aprobar en Studio'],
+    cancelId: 0,
+    defaultId: 0,
+    detail: nativeApprovalDetail(prompt),
+    message: prompt.title,
+    noLink: true,
+    title: 'Confirmación privilegiada de FragForge Studio',
+    type: prompt.risk === 'destructive' ? 'warning' : 'question',
+  });
+  return result.response === 1 ? 'approve' : 'cancel';
 }
 
 // Origins the window is allowed to navigate to on its own, populated once the
@@ -463,10 +496,15 @@ interface BootFailureDetails {
 let activeBootAttempt: BootAttempt | null = null;
 
 /** Sends the window to the app shell once boot is done. */
-async function loadMatches(webPort: number): Promise<void> {
+async function loadMatches(webPort: number, proxyMutationCapability: string): Promise<void> {
   loadingScreenShowing = false;
   const win = aliveWindow();
   if (win === null) throw new Error('main window is unavailable');
+  await installProxyCapabilityCookie(
+    win.webContents.session.cookies,
+    `http://${LOOPBACK_HOST}:${webPort}`,
+    proxyMutationCapability,
+  );
   await win.loadURL(`http://${LOOPBACK_HOST}:${webPort}/matches`);
 }
 
@@ -603,17 +641,18 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
   // first boot, so selecting ports before it would leave a long window for an
   // unrelated process to claim a released probe port.
   setLoadingStatus('Eligiendo puertos libres…');
-  const discoverySecret = createDiscoverySecret();
+  const security = createBootSecurityCapabilities();
   const { orchestrator: orchPort, web: webPort } = await allocateStableServicePorts({
     host: LOOPBACK_HOST,
     portsFile,
     logLine,
-    discoverySecret,
+    discoverySecret: security.discoverySecret,
     signal: attempt.controller.signal,
   });
   assertBootAttemptActive(attempt);
   const orchestratorUrl = `http://${LOOPBACK_HOST}:${orchPort}`;
   activeWebOrigin = `http://${LOOPBACK_HOST}:${webPort}`;
+  activeMutationToken = security.mutationToken;
   allowedOrigins.add(`http://${LOOPBACK_HOST}:${orchPort}`);
   allowedOrigins.add(activeWebOrigin);
 
@@ -622,9 +661,9 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
     ZV_DATABASE_URL: 'sqlite',
     ZV_DATA_DIR: dataDir,
     ZV_HTTP_ADDR: `${LOOPBACK_HOST}:${orchPort}`,
-    ZV_DISCOVERY_SECRET: discoverySecret,
     ZV_MUSIC_DIR: musicDir,
     XAI_API_KEY: xaiAPIKey,
+    ...orchestratorSecurityEnvironment(security),
     ...toolEnv,
   });
 
@@ -636,6 +675,7 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
     HOSTNAME: LOOPBACK_HOST,
     ORCHESTRATOR_URL: orchestratorUrl,
     NODE_OPTIONS: '--max-old-space-size=256 --max-semi-space-size=8',
+    ...webSecurityEnvironment(security),
     // ProcessSession normally inherits the desktop environment. Explicitly
     // remove this server-irrelevant secret from the Next child.
     XAI_API_KEY: undefined,
@@ -670,7 +710,7 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
 
   setLoadingStatus('Abriendo la interfaz…');
   allowedInternalUrls.clear();
-  await loadMatches(webPort);
+  await loadMatches(webPort, security.proxyMutationCapability);
   assertBootAttemptActive(attempt);
 }
 
@@ -682,6 +722,9 @@ function failBootAttempt(attempt: BootAttempt, err: unknown, details: BootFailur
   allowedOrigins.clear();
   allowedInternalUrls.clear();
   activeWebOrigin = null;
+  activeMutationToken = null;
+  assistantController?.close();
+  assistantController = null;
   logLine(`[boot] ${details.logLabel ?? 'failed'}: ${String(err)}\n`);
   if (!quitting) showErrorScreen(err, details.title, details.hint);
 }
@@ -697,6 +740,9 @@ function stopActiveBootAttempt(): boolean {
   allowedOrigins.clear();
   allowedInternalUrls.clear();
   activeWebOrigin = null;
+  activeMutationToken = null;
+  assistantController?.close();
+  assistantController = null;
   if (attempt === null) return true;
   attempt.controller.abort();
   const stopped = attempt.processes.stop();
@@ -781,7 +827,11 @@ function registerXAISettingsIPC(): void {
 function registerAssistantIPC(): void {
   ipcMain.handle(ASSISTANT_CHANNEL, async (event, value: unknown): Promise<AssistantIPCResponse> => {
     if (!trustedXAISettingsSender(event)) return assistantCommandFailure('Solicitud del asistente rechazada.');
-    return dispatchAssistantRequest(value, getAssistantController);
+    return dispatchAssistantRequest(
+      value,
+      getAssistantController,
+      (actionId, controller) => assistantNativeApproval.request(actionId, controller),
+    );
   });
 }
 

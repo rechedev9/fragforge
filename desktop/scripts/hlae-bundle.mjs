@@ -16,13 +16,16 @@ const defaultDesktopDirectory = join(here, '..');
 export function readPinnedHLAETool(desktopDirectory = defaultDesktopDirectory) {
   const manifestPath = join(desktopDirectory, 'src', 'hlae-tool.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  for (const field of ['version', 'archiveName', 'url', 'sha256', 'exeRel']) {
+  for (const field of ['version', 'archiveName', 'url', 'sha256', 'treeSha256', 'exeRel']) {
     if (typeof manifest[field] !== 'string' || manifest[field] === '') {
       throw new Error(`[hlae-bundle] invalid ${field} in ${manifestPath}`);
     }
   }
   if (!/^[a-f0-9]{64}$/.test(manifest.sha256)) {
     throw new Error(`[hlae-bundle] invalid sha256 in ${manifestPath}`);
+  }
+  if (!/^[a-f0-9]{64}$/.test(manifest.treeSha256)) {
+    throw new Error(`[hlae-bundle] invalid treeSha256 in ${manifestPath}`);
   }
   if (!/^hlae_[a-zA-Z0-9_]+\.zip$/.test(manifest.archiveName)) {
     throw new Error(`[hlae-bundle] unsafe archiveName in ${manifestPath}`);

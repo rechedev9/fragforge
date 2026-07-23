@@ -643,6 +643,10 @@ test('resumes jobs.generate after creative brief approval and still requires exa
   assert.notEqual(action, undefined);
   assert.equal(action?.preview?.fields?.some((field) => field.label === 'Job id' && field.value === 'job-123'), true);
   assert.equal(action?.preview?.fields?.some((field) => field.label === 'Segment ids · 1' && field.value === 'segment-1'), true);
+  const nativePrompt = fixture.controller.approvalPrompt(action?.id as string);
+  assert.equal(nativePrompt.operation, 'jobs.generate');
+  assert.equal(nativePrompt.risk, 'costly');
+  assert.deepEqual(nativePrompt.fields, action?.preview?.fields);
 
   await fixture.controller.approve(action?.id as string);
   assert.deepEqual(fixture.calls.map((call) => call.privileged), [undefined, true]);

@@ -46,18 +46,44 @@ func TestLoadConfigRejectsLANBindWithoutMutationToken(t *testing.T) {
 	}
 }
 
-func TestLoadConfigAllowsLANBindWithMutationToken(t *testing.T) {
+func TestLoadConfigRejectsLANBindEvenWithMutationToken(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ZV_DATABASE_URL", "postgres://example")
 	t.Setenv("ZV_HTTP_ADDR", "0.0.0.0:8080")
-	t.Setenv("ZV_MUTATION_TOKEN", "local-token")
+	t.Setenv("ZV_MUTATION_TOKEN", strings.Repeat("a", 64))
 
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig error = %v", err)
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("loadConfig error = nil, want cleartext non-loopback bind rejected")
 	}
-	if cfg.MutationToken != "local-token" {
-		t.Fatalf("MutationToken = %q, want local-token", cfg.MutationToken)
+	if !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("loadConfig error = %q, want loopback requirement", err)
+	}
+}
+
+func TestLoadConfigRequiresStrongSessionCapability(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{name: "missing"},
+		{name: "short", token: "local-token"},
+		{name: "uppercase hex", token: strings.Repeat("A", 64)},
+		{name: "non hex", token: strings.Repeat("g", 64)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("ZV_DATABASE_URL", "memory")
+			t.Setenv("ZV_MUTATION_TOKEN", tt.token)
+			_, err := loadConfig()
+			if err == nil {
+				t.Fatal("loadConfig error = nil, want invalid session capability rejected")
+			}
+			if strings.Contains(err.Error(), tt.token) && tt.token != "" {
+				t.Fatalf("loadConfig error reflected capability: %q", err)
+			}
+		})
 	}
 }
 
@@ -121,7 +147,7 @@ func TestClearDiscoverySecretEnvironmentKeepsLoadedConfigOnlyInMemory(t *testing
 func TestClearSubprocessCredentialEnvironmentKeepsLoadedConfigOnlyInMemory(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ZV_DATABASE_URL", "memory")
-	t.Setenv(mutationTokenEnvironmentVariable, "mutation-secret")
+	t.Setenv(mutationTokenEnvironmentVariable, strings.Repeat("b", 64))
 	t.Setenv(firecrawlAPIKeyEnvironmentVariable, "firecrawl-secret")
 
 	cfg, err := loadConfig()
@@ -395,4 +421,5 @@ func clearConfigEnv(t *testing.T) {
 	} {
 		t.Setenv(key, "")
 	}
+	t.Setenv(mutationTokenEnvironmentVariable, strings.Repeat("a", 64))
 }

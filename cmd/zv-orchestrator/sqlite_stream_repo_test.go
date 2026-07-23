@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -155,6 +158,138 @@ func TestSQLiteStreamRepoSetAcquiredFillsMissingTitle(t *testing.T) {
 	}
 	if got.Title != "Título de Twitch" {
 		t.Fatalf("title = %q, want discovered Twitch title", got.Title)
+	}
+}
+
+func TestSQLiteStreamRepoSeparatesAndClearsPrivateSourceURL(t *testing.T) {
+	repo := newTestSQLiteStreamRepo(t)
+	ctx := context.Background()
+	const secret = "signed-private-value"
+	job := &streamclips.Job{
+		Status:     streamclips.StatusAcquiring,
+		SourcePath: "streams/source.mp4",
+		SourceURL:  "https://www.youtube.com/watch?v=abc123&token=" + secret,
+	}
+	if err := repo.Create(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+
+	var private, public sql.NullString
+	if err := repo.db.QueryRow(
+		`SELECT source_url, public_source_url FROM stream_jobs WHERE id = ?`,
+		job.ID.String(),
+	).Scan(&private, &public); err != nil {
+		t.Fatal(err)
+	}
+	if !private.Valid || !strings.Contains(private.String, secret) {
+		t.Fatalf("private acquisition URL = %#v, want transient secret retained for worker", private)
+	}
+	if !public.Valid || strings.Contains(public.String, secret) || public.String != "https://www.youtube.com/watch?v=abc123" {
+		t.Fatalf("public source URL = %#v, want redacted provider URL", public)
+	}
+	got, err := repo.Get(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), secret) {
+		t.Fatalf("serialized job leaked private acquisition URL: %s", body)
+	}
+
+	if err := repo.SetAcquired(ctx, job.ID, streamclips.SourceProbe{Width: 1920}, "sha", "title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.QueryRow(
+		`SELECT source_url, public_source_url FROM stream_jobs WHERE id = ?`,
+		job.ID.String(),
+	).Scan(&private, &public); err != nil {
+		t.Fatal(err)
+	}
+	if private.Valid {
+		t.Fatalf("private acquisition URL survived successful download: %#v", private)
+	}
+	if !public.Valid || public.String != "https://www.youtube.com/watch?v=abc123" {
+		t.Fatalf("public URL after acquisition = %#v", public)
+	}
+}
+
+func TestSQLiteStreamRepoClearsPrivateSourceURLOnFailure(t *testing.T) {
+	repo := newTestSQLiteStreamRepo(t)
+	ctx := context.Background()
+	job := &streamclips.Job{
+		Status:     streamclips.StatusAcquiring,
+		SourcePath: "streams/source.mp4",
+		SourceURL:  "https://clips.twitch.tv/SomeSlug?token=private",
+	}
+	if err := repo.Create(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, job.ID, streamclips.StatusFailed, "download failed"); err != nil {
+		t.Fatal(err)
+	}
+	var private sql.NullString
+	if err := repo.db.QueryRow(`SELECT source_url FROM stream_jobs WHERE id = ?`, job.ID.String()).Scan(&private); err != nil {
+		t.Fatal(err)
+	}
+	if private.Valid {
+		t.Fatalf("private acquisition URL survived terminal failure: %#v", private)
+	}
+}
+
+func TestSQLiteStreamRepoMigratesLegacySourceURLsWithoutRetainingSecrets(t *testing.T) {
+	jobRepo, err := newSQLiteJobRepository(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = jobRepo.Close() })
+	if _, err := jobRepo.db.Exec(`CREATE TABLE stream_jobs (
+		id TEXT PRIMARY KEY, status TEXT NOT NULL, failure_reason TEXT,
+		source_path TEXT NOT NULL, source_sha256 TEXT NOT NULL, source_url TEXT,
+		title TEXT, probe TEXT NOT NULL, edit_plan TEXT,
+		created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	completedID := uuid.New()
+	rejectedID := uuid.New()
+	if _, err := jobRepo.db.Exec(
+		`INSERT INTO stream_jobs
+		 (id,status,source_path,source_sha256,source_url,probe,created_at,updated_at)
+		 VALUES (?,?,?,?,?,'{}',1,1), (?,?,?,?,?,'{}',1,1)`,
+		completedID.String(), string(streamclips.StatusReady), "streams/a.mp4", "sha",
+		"https://www.youtube.com/watch?v=abc123&token=legacy-secret",
+		rejectedID.String(), string(streamclips.StatusAcquiring), "streams/b.mp4", "",
+		"https://user:password@www.youtube.com/watch?v=abc123",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newSQLiteStreamJobRepository(jobRepo.db); err != nil {
+		t.Fatal(err)
+	}
+
+	var private, public sql.NullString
+	if err := jobRepo.db.QueryRow(
+		`SELECT source_url, public_source_url FROM stream_jobs WHERE id = ?`,
+		completedID.String(),
+	).Scan(&private, &public); err != nil {
+		t.Fatal(err)
+	}
+	if private.Valid || !public.Valid || public.String != "https://www.youtube.com/watch?v=abc123" {
+		t.Fatalf("migrated completed source = private %#v public %#v", private, public)
+	}
+
+	var status string
+	if err := jobRepo.db.QueryRow(
+		`SELECT status, source_url, public_source_url FROM stream_jobs WHERE id = ?`,
+		rejectedID.String(),
+	).Scan(&status, &private, &public); err != nil {
+		t.Fatal(err)
+	}
+	if status != string(streamclips.StatusFailed) || private.Valid || public.Valid {
+		t.Fatalf("migrated rejected source = status %q private %#v public %#v", status, private, public)
 	}
 }
 

@@ -6,12 +6,13 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 type scheduledCommand struct {
-	Tick int    `json:"tick"`
-	Key  string `json:"key"`
-	Cmd  string `json:"cmd"`
+	Tick     int      `json:"tick"`
+	Key      string   `json:"key"`
+	Commands []string `json:"commands"`
 }
 
 // seekStep tells the runtime to seek the demo to Target once playback has passed
@@ -71,8 +72,8 @@ func GenerateHLAEJavaScript(plan RecordingPlan) (string, error) {
 	sb.WriteString("    const run = (item) => {\n")
 	sb.WriteString("        if (fired[item.key]) return;\n")
 	sb.WriteString("        fired[item.key] = true;\n")
-	sb.WriteString("        mirv.message(`[zackvideo] ${item.key}: ${item.cmd}\\n`);\n")
-	sb.WriteString("        for (const cmd of item.cmd.split(';')) {\n")
+	sb.WriteString("        mirv.message(`[zackvideo] ${item.key}: ${item.commands.join(\" | \")}\\n`);\n")
+	sb.WriteString("        for (const cmd of item.commands) {\n")
 	sb.WriteString("            const trimmed = cmd.trim();\n")
 	sb.WriteString("            if (trimmed.length > 0) mirv.exec(trimmed);\n")
 	sb.WriteString("        }\n")
@@ -124,9 +125,9 @@ func buildSchedule(plan RecordingPlan) ([]scheduledCommand, []seekStep) {
 	setupTick := 25
 	for i, cmd := range streamSetupCommands(plan) {
 		commands = append(commands, scheduledCommand{
-			Tick: setupTick,
-			Key:  fmt.Sprintf("stream-setup-%02d", i+1),
-			Cmd:  cmd,
+			Tick:     setupTick,
+			Key:      fmt.Sprintf("stream-setup-%02d", i+1),
+			Commands: []string{cmd},
 		})
 	}
 
@@ -156,37 +157,37 @@ func buildSchedule(plan RecordingPlan) ([]scheduledCommand, []seekStep) {
 		}
 
 		commands = append(commands,
-			scheduledCommand{Tick: max(seekTarget+1, cameraWarmupTick), Key: "camera-warmup-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
-			scheduledCommand{Tick: max(seekTarget+2, cameraLead3Tick), Key: "camera-lead-3s-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
-			scheduledCommand{Tick: max(seekTarget+3, cameraLead2Tick), Key: "camera-lead-2s-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
-			scheduledCommand{Tick: max(seekTarget+4, cameraLead1Tick), Key: "camera-lead-1s-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
-			scheduledCommand{Tick: max(seekTarget+5, cameraLockTick), Key: "camera-lock-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
-			scheduledCommand{Tick: recordStart + max(1, plan.Tickrate/2), Key: "camera-relock-" + s.ID, Cmd: cameraCommand(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+1, cameraWarmupTick), Key: "camera-warmup-" + s.ID, Commands: cameraCommands(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+2, cameraLead3Tick), Key: "camera-lead-3s-" + s.ID, Commands: cameraCommands(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+3, cameraLead2Tick), Key: "camera-lead-2s-" + s.ID, Commands: cameraCommands(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+4, cameraLead1Tick), Key: "camera-lead-1s-" + s.ID, Commands: cameraCommands(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: max(seekTarget+5, cameraLockTick), Key: "camera-lock-" + s.ID, Commands: cameraCommands(plan.TargetNameInDemo, plan.TargetAccountID)},
+			scheduledCommand{Tick: recordStart + max(1, plan.Tickrate/2), Key: "camera-relock-" + s.ID, Commands: cameraCommands(plan.TargetNameInDemo, plan.TargetAccountID)},
 		)
 		if i == 0 {
 			commands = append(commands,
-				scheduledCommand{Tick: max(seekTarget, recordStart-6), Key: "hide-demoui", Cmd: "demoui"},
+				scheduledCommand{Tick: max(seekTarget, recordStart-6), Key: "hide-demoui", Commands: []string{"demoui"}},
 			)
 		}
 
 		if plan.Runtime.HostTimescale > 0 && plan.Runtime.HostTimescale != 1 {
 			commands = append(commands,
 				scheduledCommand{
-					Tick: max(1, recordStart-6),
-					Key:  "timescale-up-" + s.ID,
-					Cmd:  fmt.Sprintf("host_timescale %s", formatFloat(plan.Runtime.HostTimescale)),
+					Tick:     max(1, recordStart-6),
+					Key:      "timescale-up-" + s.ID,
+					Commands: []string{fmt.Sprintf("host_timescale %s", formatFloat(plan.Runtime.HostTimescale))},
 				},
 			)
 		}
 
 		commands = append(commands,
-			scheduledCommand{Tick: recordStart, Key: "record-start-" + s.ID, Cmd: "mirv_streams record start"},
-			scheduledCommand{Tick: s.TickEnd, Key: "record-end-" + s.ID, Cmd: "mirv_streams record end"},
+			scheduledCommand{Tick: recordStart, Key: "record-start-" + s.ID, Commands: []string{"mirv_streams record start"}},
+			scheduledCommand{Tick: s.TickEnd, Key: "record-end-" + s.ID, Commands: []string{"mirv_streams record end"}},
 		)
 
 		if plan.Runtime.HostTimescale > 0 && plan.Runtime.HostTimescale != 1 {
 			commands = append(commands,
-				scheduledCommand{Tick: s.TickEnd + 4, Key: "timescale-reset-" + s.ID, Cmd: "host_timescale 1"},
+				scheduledCommand{Tick: s.TickEnd + 4, Key: "timescale-reset-" + s.ID, Commands: []string{"host_timescale 1"}},
 			)
 		}
 	}
@@ -199,26 +200,42 @@ func buildSchedule(plan RecordingPlan) ([]scheduledCommand, []seekStep) {
 	shutdownTick := lastEnd + max(8, pad/2)
 	for i, cmd := range hudCleanupCommands(plan.Stream) {
 		commands = append(commands, scheduledCommand{
-			Tick: shutdownTick - 4,
-			Key:  fmt.Sprintf("hud-cleanup-%02d", i+1),
-			Cmd:  cmd,
+			Tick:     shutdownTick - 4,
+			Key:      fmt.Sprintf("hud-cleanup-%02d", i+1),
+			Commands: []string{cmd},
 		})
 	}
 	commands = append(commands,
-		scheduledCommand{Tick: shutdownTick, Key: "shutdown", Cmd: "disconnect; quit"},
+		scheduledCommand{Tick: shutdownTick, Key: "shutdown", Commands: []string{"disconnect", "quit"}},
 	)
 	return commands, seeks
 }
 
-func cameraCommand(targetName string, accountID uint32) string {
+func cameraCommands(targetName string, accountID uint32) []string {
 	if slot := strings.TrimSpace(os.Getenv("ZV_SPEC_PLAYER_SLOT")); slot != "" {
-		return fmt.Sprintf("spec_autodirector 0; spec_mode 2; spec_player %s; spec_player %s", slot, slot)
+		return []string{"spec_autodirector 0", "spec_mode 2", "spec_player " + slot, "spec_player " + slot}
 	}
-	if targetName != "" {
+	if accountID != 0 {
+		player := fmt.Sprintf("spec_player_by_accountid %d", accountID)
+		return []string{"spec_autodirector 0", "spec_mode 2", player, player}
+	}
+	if safeConsolePlayerName(targetName) {
 		target := quoteConsoleArg(targetName)
-		return fmt.Sprintf("spec_autodirector 0; spec_mode 2; spec_player %s; spec_mode 2; spec_player %s", target, target)
+		return []string{"spec_autodirector 0", "spec_mode 2", "spec_player " + target, "spec_mode 2", "spec_player " + target}
 	}
-	return fmt.Sprintf("spec_autodirector 0; spec_mode 2; spec_player_by_accountid %d; spec_player_by_accountid %d", accountID, accountID)
+	return []string{"spec_autodirector 0", "spec_mode 2"}
+}
+
+func safeConsolePlayerName(name string) bool {
+	if name == "" || strings.ContainsRune(name, ';') {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func quoteConsoleArg(value string) string {
@@ -306,7 +323,8 @@ func hudSetupCommands(plan RecordingPlan) []string {
 	switch plan.Stream.HUDMode {
 	case HUDModeClean:
 		return []string{
-			"spec_show_xray 0; cl_drawhud 0",
+			"spec_show_xray 0",
+			"cl_drawhud 0",
 		}
 	case HUDModeDeathnotices:
 		commands = []string{

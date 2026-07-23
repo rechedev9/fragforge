@@ -12,6 +12,7 @@ function fixtureSpec(bytes) {
     archiveName: 'hlae_test.zip',
     url: 'https://example.invalid/hlae_test.zip',
     sha256: createHash('sha256').update(bytes).digest('hex'),
+    treeSha256: '0'.repeat(64),
     exeRel: 'HLAE.exe',
   };
 }

@@ -7,10 +7,13 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/rechedev9/fragforge/internal/httpapi"
 )
 
 const (
 	orchestratorReadHeaderTimeout = 10 * time.Second
+	orchestratorReadTimeout       = 30 * time.Minute
 	orchestratorIdleTimeout       = 60 * time.Second
 )
 
@@ -19,6 +22,7 @@ func newOrchestratorHTTPServer(addr string, handler http.Handler) *http.Server {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: orchestratorReadHeaderTimeout,
+		ReadTimeout:       orchestratorReadTimeout,
 		IdleTimeout:       orchestratorIdleTimeout,
 	}
 }
@@ -37,6 +41,11 @@ func prepareHTTPServer(server *http.Server) (*preparedHTTPServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", server.Addr, err)
 	}
+	if !httpapi.IsLoopbackAddr(listener.Addr().String()) {
+		_ = listener.Close()
+		return nil, fmt.Errorf("listen on %s resolved to non-loopback authority %s", server.Addr, listener.Addr())
+	}
+	server.Handler = httpapi.RequireAuthority(listener.Addr(), server.Handler)
 	return &preparedHTTPServer{
 		server:   server,
 		listener: listener,

@@ -1,5 +1,5 @@
-// Package vodfetch downloads a Twitch clip/VOD (or any yt-dlp-supported URL)
-// to a local MP4 using an external yt-dlp binary. It is a standalone
+// Package vodfetch downloads an allowlisted Twitch or YouTube clip/VOD to a
+// local MP4 using an external yt-dlp binary. It is a standalone
 // building block for the streamclips pipeline: it does not know about jobs,
 // workers, or storage, only how to fetch one URL to one destination path.
 package vodfetch
@@ -40,13 +40,12 @@ var (
 	ErrTooLarge = errors.New("vodfetch: source exceeds maximum size")
 )
 
-// SourceKind classifies a URL so callers can special-case Twitch clips and
-// VODs while still allowing any other yt-dlp-supported URL to pass through.
+// SourceKind classifies an allowlisted provider URL.
 type SourceKind int
 
 const (
-	// SourceOther is any http(s) URL that is not a recognized Twitch clip or
-	// VOD URL. yt-dlp supports many sites, so this is not an error.
+	// SourceOther is an allowlisted provider URL that is not a recognized
+	// Twitch clip or VOD URL (currently YouTube and Twitch channel URLs).
 	SourceOther SourceKind = iota
 	// SourceTwitchClip is a clips.twitch.tv/<slug> or
 	// www.twitch.tv/<channel>/clip/<slug> URL.
@@ -67,8 +66,23 @@ func (k SourceKind) String() string {
 }
 
 var twitchVODPath = regexp.MustCompile(`^/videos/\d+/?$`)
-var twitchClipPath = regexp.MustCompile(`^/[^/]+/clip/[^/]+/?$`)
+var twitchClipPath = regexp.MustCompile(`^/[A-Za-z0-9_]{1,25}/clip/[A-Za-z0-9_-]{1,128}/?$`)
+var twitchClipSlugPath = regexp.MustCompile(`^/[A-Za-z0-9_-]{1,128}/?$`)
+var youtubeVideoPath = regexp.MustCompile(`^/(?:shorts|live|embed)/([A-Za-z0-9_-]{1,64})/?$`)
 var reflectedURLPattern = regexp.MustCompile(`https?://[^\s<>"']+`)
+var youtubeVideoIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+var allowedProviderHosts = map[string]struct{}{
+	"clips.twitch.tv":   {},
+	"m.twitch.tv":       {},
+	"twitch.tv":         {},
+	"www.twitch.tv":     {},
+	"m.youtube.com":     {},
+	"music.youtube.com": {},
+	"www.youtube.com":   {},
+	"youtu.be":          {},
+	"youtube.com":       {},
+}
 
 // nonVideoExts are file extensions whose URLs are direct links to a non-video
 // asset: an image pasted from a clipboard uploader (the reported case was a
@@ -89,41 +103,117 @@ var nonVideoExts = map[string]bool{
 	".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
 }
 
-// ClassifySource validates url as http(s) and reports what kind of source it
-// is. Non-http(s) schemes are rejected.
-func ClassifySource(rawURL string) (SourceKind, error) {
+// Source is a validated acquisition URL and its safe public representation.
+// AcquisitionURL may retain provider query parameters needed by yt-dlp and
+// must never be serialized or logged. PublicURL contains no userinfo,
+// fragment, or secret query fields.
+type Source struct {
+	Kind           SourceKind
+	AcquisitionURL string
+	PublicURL      string
+}
+
+// ValidateSource accepts only HTTPS URLs on the exact Twitch and YouTube
+// provider allowlist. Exact provider ownership is the SSRF boundary: yt-dlp
+// owns its HTTP transport, redirects, and DNS lookups, so arbitrary public
+// hostnames cannot be made safe against rebinding by a one-time Go DNS check.
+func ValidateSource(rawURL string) (Source, error) {
+	if rawURL == "" || strings.TrimSpace(rawURL) != rawURL || strings.ContainsAny(rawURL, "\r\n\t") {
+		return Source{}, errors.New("parse url")
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		// url.Parse errors can quote the input. Keep credentials and signed
 		// query parameters out of callers' logs even for malformed URLs.
-		return SourceOther, errors.New("parse url")
+		return Source{}, errors.New("parse url")
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return SourceOther, fmt.Errorf("unsupported url scheme %q, want http or https", u.Scheme)
+	if !u.IsAbs() || u.Opaque != "" || !strings.EqualFold(u.Scheme, "https") {
+		return Source{}, errors.New("source url must use https")
 	}
 	if u.Host == "" {
-		return SourceOther, errors.New("url has no host")
+		return Source{}, errors.New("url has no host")
+	}
+	if u.User != nil {
+		return Source{}, errors.New("source url must not contain userinfo")
+	}
+	if u.Port() != "" {
+		return Source{}, errors.New("source url must not contain an explicit port")
+	}
+	host := strings.ToLower(u.Hostname())
+	if _, ok := allowedProviderHosts[host]; !ok {
+		return Source{}, errors.New("source provider is not supported; use a Twitch or YouTube URL")
 	}
 	if ext := strings.ToLower(path.Ext(u.Path)); ext != "" && nonVideoExts[ext] {
-		return SourceOther, fmt.Errorf("url points to a %s file, not a video; paste a twitch or youtube clip or vod link", ext)
+		return Source{}, fmt.Errorf("url points to a %s file, not a video; paste a twitch or youtube clip or vod link", ext)
 	}
 
-	host := strings.ToLower(u.Hostname())
+	kind := SourceOther
 	switch host {
 	case "clips.twitch.tv":
-		if strings.Trim(u.Path, "/") == "" {
-			return SourceOther, errors.New("twitch clip url has no slug")
+		if !twitchClipSlugPath.MatchString(u.Path) {
+			return Source{}, errors.New("unsupported twitch video url")
 		}
-		return SourceTwitchClip, nil
+		kind = SourceTwitchClip
 	case "www.twitch.tv", "twitch.tv", "m.twitch.tv":
 		switch {
 		case twitchVODPath.MatchString(u.Path):
-			return SourceTwitchVOD, nil
+			kind = SourceTwitchVOD
 		case twitchClipPath.MatchString(u.Path):
-			return SourceTwitchClip, nil
+			kind = SourceTwitchClip
+		default:
+			return Source{}, errors.New("unsupported twitch video url")
+		}
+	case "youtu.be":
+		if !twitchClipSlugPath.MatchString(u.Path) {
+			return Source{}, errors.New("unsupported youtube video url")
+		}
+	default:
+		if u.Path == "/watch" {
+			if !youtubeVideoIDPattern.MatchString(u.Query().Get("v")) {
+				return Source{}, errors.New("youtube watch url has no valid video id")
+			}
+		} else if !youtubeVideoPath.MatchString(u.Path) {
+			return Source{}, errors.New("unsupported youtube video url")
 		}
 	}
-	return SourceOther, nil
+
+	acquisition := *u
+	acquisition.Scheme = "https"
+	acquisition.Host = host
+	acquisition.Fragment = ""
+	acquisition.RawFragment = ""
+	return Source{
+		Kind:           kind,
+		AcquisitionURL: acquisition.String(),
+		PublicURL:      publicProviderURL(&acquisition),
+	}, nil
+}
+
+// ClassifySource validates rawURL and reports its provider kind.
+func ClassifySource(rawURL string) (SourceKind, error) {
+	source, err := ValidateSource(rawURL)
+	if err != nil {
+		return SourceOther, err
+	}
+	return source.Kind, nil
+}
+
+func publicProviderURL(source *url.URL) string {
+	public := *source
+	public.User = nil
+	public.RawQuery = ""
+	public.ForceQuery = false
+	public.Fragment = ""
+	public.RawFragment = ""
+	if strings.HasSuffix(public.Hostname(), "youtube.com") && public.Path == "/watch" {
+		videoID := source.Query().Get("v")
+		if youtubeVideoIDPattern.MatchString(videoID) {
+			query := make(url.Values)
+			query.Set("v", videoID)
+			public.RawQuery = query.Encode()
+		}
+	}
+	return public.String()
 }
 
 // CommandRunner runs an external command and captures its stdout/stderr
@@ -193,11 +283,13 @@ func (f Fetcher) maxBytes() int64 {
 // and atomically renames it into place, so a crash or cancellation never
 // leaves a truncated file at destPath.
 func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result, error) {
-	if _, err := ClassifySource(rawURL); err != nil {
+	validated, err := ValidateSource(rawURL)
+	if err != nil {
 		return Result{}, fmt.Errorf("classify source: %w", err)
 	}
+	rawURL = validated.AcquisitionURL
 	maxBytes := f.maxBytes()
-	source := redactedURL(rawURL)
+	source := validated.PublicURL
 
 	if info, err := os.Stat(destPath); err == nil {
 		if info.IsDir() {
@@ -236,10 +328,15 @@ func (f Fetcher) Download(ctx context.Context, rawURL, destPath string) (Result,
 	}
 
 	args := []string{
+		"--ignore-config",
 		"-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
 		"--merge-output-format", "mp4",
 		"--no-playlist",
 		"--no-progress",
+		"--socket-timeout", "30",
+		"--retries", "2",
+		"--fragment-retries", "2",
+		"--extractor-retries", "2",
 		"--print", "after_move:%(title)s",
 		"--max-filesize", strconv.FormatInt(maxBytes, 10),
 		"-o", tmpPath,
@@ -296,6 +393,9 @@ func downloadTitle(stdout string) string {
 // back to a generic wrapped error when no known pattern matches.
 func classifyError(rawURL, stderr string, runErr error) error {
 	source := redactedURL(rawURL)
+	if validated, err := ValidateSource(rawURL); err == nil {
+		source = validated.PublicURL
+	}
 	sanitized := sanitizedErrorText(rawURL, stderr)
 	line := firstLine(sanitized)
 	text := strings.ToLower(sanitized)

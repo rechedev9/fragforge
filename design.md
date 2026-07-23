@@ -653,7 +653,7 @@ current stage.
 - The primary recommended next action appears in the Codex Operator panel.
 - Buttons are disabled when the backend status does not allow the transition.
 - Disabled controls must explain why through tooltip or adjacent reason text.
-- Every mutating request includes the mutation token when configured.
+- Every API read and mutation includes the required per-session capability.
 - Polling should pause when the tab is hidden; SSE can replace polling later.
 - UI state is advisory. Backend state wins after every refresh.
 
@@ -1047,7 +1047,7 @@ state enum.
 Local defaults:
 
 - bind to `127.0.0.1:8080`
-- require `ZV_MUTATION_TOKEN` for non-loopback binds
+- require a fresh `ZV_MUTATION_TOKEN` for every loopback server launch and reject non-loopback binds
 - deny CORS by default
 - load no third-party scripts in the embedded Workbench
 - cap upload size

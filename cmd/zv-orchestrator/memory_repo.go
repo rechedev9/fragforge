@@ -14,6 +14,7 @@ import (
 	"github.com/rechedev9/fragforge/internal/killplan"
 	"github.com/rechedev9/fragforge/internal/rules"
 	"github.com/rechedev9/fragforge/internal/streamclips"
+	"github.com/rechedev9/fragforge/internal/vodfetch"
 )
 
 type orchestratorJobRepository interface {
@@ -276,6 +277,14 @@ func (r *memoryStreamJobRepository) Create(ctx context.Context, j *streamclips.J
 	now := time.Now().UTC()
 	j.CreatedAt = now
 	j.UpdatedAt = now
+	if j.SourceURL != "" {
+		source, err := vodfetch.ValidateSource(j.SourceURL)
+		if err != nil {
+			return err
+		}
+		j.SourceURL = source.AcquisitionURL
+		j.PublicSourceURL = source.PublicURL
+	}
 	stored := cloneStreamJob(*j)
 	r.jobs[stored.ID] = stored
 	*j = cloneStreamJob(stored)
@@ -356,6 +365,9 @@ func (r *memoryStreamJobRepository) UpdateStatus(ctx context.Context, id uuid.UU
 	}
 	j.Status = status
 	j.FailureReason = failureReason
+	if status == streamclips.StatusFailed {
+		j.SourceURL = ""
+	}
 	j.UpdatedAt = time.Now().UTC()
 	r.jobs[id] = j
 	return nil
@@ -404,6 +416,7 @@ func (r *memoryStreamJobRepository) SetAcquired(ctx context.Context, id uuid.UUI
 	}
 	j.Status = streamclips.StatusReady
 	j.FailureReason = ""
+	j.SourceURL = ""
 	j.UpdatedAt = time.Now().UTC()
 	r.jobs[id] = j
 	return nil
@@ -412,6 +425,9 @@ func (r *memoryStreamJobRepository) SetAcquired(ctx context.Context, id uuid.UUI
 func cloneStreamJob(j streamclips.Job) streamclips.Job {
 	if j.EditPlan != nil {
 		j.EditPlan = append(json.RawMessage(nil), j.EditPlan...)
+	}
+	if j.SourceURL == "" {
+		j.SourceURL = j.PublicSourceURL
 	}
 	return j
 }

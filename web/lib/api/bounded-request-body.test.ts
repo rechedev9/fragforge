@@ -10,9 +10,12 @@ const LOCAL_HEADERS = {
   host: '127.0.0.1:3000',
   origin: 'http://127.0.0.1:3000',
   'sec-fetch-site': 'same-origin',
+  cookie: 'fragforge_proxy_capability=upload-test-secret',
 };
 
-test('rejects an oversized Content-Length before reading the upload body', () => {
+process.env.FRAGFORGE_PROXY_MUTATION_CAPABILITY = 'upload-test-secret';
+
+test('rejects an oversized Content-Length before reading the upload body', async () => {
   let bodyRead = false;
   const request: RequestBodySource = {
     headers: new Headers({ ...LOCAL_HEADERS, 'content-length': '6' }),
@@ -22,13 +25,13 @@ test('rejects an oversized Content-Length before reading the upload body', () =>
     },
   };
 
-  const result = prepareLocalUploadBody(request, 5);
+  const result = await prepareLocalUploadBody(request, 5);
 
   assert.deepEqual(result, { ok: false, error: 'request body too large', status: 413 });
   assert.equal(bodyRead, false);
 });
 
-test('rejects a hostile Host before reading Content-Length or body', () => {
+test('rejects a hostile Host before reading Content-Length or body', async () => {
   let bodyRead = false;
   const request: RequestBodySource = {
     headers: new Headers({ host: 'attacker.example:3000', 'content-length': '1' }),
@@ -38,14 +41,14 @@ test('rejects a hostile Host before reading Content-Length or body', () => {
     },
   };
 
-  const result = prepareLocalUploadBody(request, 5);
+  const result = await prepareLocalUploadBody(request, 5);
 
   assert.deepEqual(result, { ok: false, error: 'local API host rejected', status: 403 });
   assert.equal(bodyRead, false);
 });
 
-test('preserves a valid Content-Length for raw upstream streaming', () => {
-  const result = prepareLocalUploadBody({
+test('preserves a valid Content-Length for raw upstream streaming', async () => {
+  const result = await prepareLocalUploadBody({
     headers: new Headers({ ...LOCAL_HEADERS, 'content-length': '5' }),
     body: byteStream([new Uint8Array(5)]),
   }, 5);
@@ -56,7 +59,7 @@ test('preserves a valid Content-Length for raw upstream streaming', () => {
 });
 
 test('terminates a chunked upload when streamed bytes exceed the limit', async () => {
-  const result = prepareLocalUploadBody({
+  const result = await prepareLocalUploadBody({
     headers: new Headers(LOCAL_HEADERS),
     body: byteStream([new Uint8Array(3), new Uint8Array(3)]),
   }, 5);

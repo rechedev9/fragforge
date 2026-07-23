@@ -61,8 +61,8 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 		`cl_demo_predict 0`,
 		`cl_trueview_show_status 0`,
 		`mirv_panorama panelstyle panelId=trueview_row opacity=0`,
-		`spec_player \"maaryy\"`,
-		`spec_autodirector 0; spec_mode 2; spec_player \"maaryy\"`,
+		`spec_player_by_accountid 188721128`,
+		`"commands": [`,
 		`camera-warmup-seg-001`,
 		`camera-lead-3s-seg-001`,
 		`camera-lead-2s-seg-001`,
@@ -81,7 +81,8 @@ func TestGenerateHLAEJavaScriptUsesOneShotTickSchedule(t *testing.T) {
 		`mirv_streams settings add ffmpeg zvFfmpegYuv420pCrf18`,
 		`-crf 18`,
 		`mirv_streams record screen settings zvFfmpegYuv420pCrf18`,
-		`disconnect; quit`,
+		`"disconnect"`,
+		`"quit"`,
 		`spec_show_xray 0`,
 		`cl_spec_show_bindings 0`,
 		`cl_drawhud 1`,
@@ -221,9 +222,38 @@ func TestEffectiveRecordStartTickAllowsCameraToSettleBeforeFirstKill(t *testing.
 	}
 }
 
-func TestCameraCommandFallsBackToAccountID(t *testing.T) {
-	if got := cameraCommand("", 188721128); !strings.Contains(got, `spec_player_by_accountid 188721128`) {
-		t.Fatalf("cameraCommand() = %q, want account-id fallback", got)
+func TestCameraCommandsPreferAccountID(t *testing.T) {
+	got := strings.Join(cameraCommands("name;quit", 188721128), "\n")
+	if !strings.Contains(got, `spec_player_by_accountid 188721128`) {
+		t.Fatalf("cameraCommands() = %q, want account id", got)
+	}
+	if strings.Contains(got, "quit") {
+		t.Fatalf("cameraCommands() reflected demo-controlled command separator: %q", got)
+	}
+}
+
+func TestCameraCommandsRejectUnsafeFallbackNames(t *testing.T) {
+	for _, name := range []string{"victim;quit", "victim\nquit", "victim\x00quit", "victim\u0085quit"} {
+		got := cameraCommands(name, 0)
+		if len(got) != 2 || got[0] != "spec_autodirector 0" || got[1] != "spec_mode 2" {
+			t.Fatalf("cameraCommands(%q) = %#v, want safe fallback", name, got)
+		}
+	}
+}
+
+func TestGenerateHLAEJavaScriptDoesNotSplitDemoControlledNames(t *testing.T) {
+	plan := testPlan()
+	plan.TargetNameInDemo = "victim;quit;rest"
+
+	js, err := GenerateHLAEJavaScript(plan)
+	if err != nil {
+		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
+	}
+	if strings.Contains(js, "item.cmd.split") || strings.Contains(js, "victim;quit;rest") {
+		t.Fatalf("generated JS permits injected command:\n%s", js)
+	}
+	if !strings.Contains(js, "for (const cmd of item.commands)") {
+		t.Fatalf("generated JS does not use structured commands:\n%s", js)
 	}
 }
 
@@ -285,8 +315,10 @@ func TestGenerateHLAEJavaScriptCleanHUDMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateHLAEJavaScript error = %v", err)
 	}
-	if !strings.Contains(js, `spec_show_xray 0; cl_drawhud 0`) {
-		t.Fatalf("generated JS missing clean HUD command:\n%s", js)
+	for _, want := range []string{`"spec_show_xray 0"`, `"cl_drawhud 0"`} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("generated JS missing clean HUD command %q:\n%s", want, js)
+		}
 	}
 	if strings.Contains(js, `cl_draw_only_deathnotices 0`) {
 		t.Fatalf("clean mode should not enable gameplay HUD commands:\n%s", js)

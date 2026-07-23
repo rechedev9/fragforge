@@ -27,11 +27,11 @@ export type BoundedText = BodyReadFailure | { ok: true; text: string };
  * byte counter. A missing Content-Length is allowed for browser multipart
  * uploads, but the counter still terminates the stream at maxBytes.
  */
-export function prepareLocalUploadBody(
+export async function prepareLocalUploadBody(
   request: RequestBodySource,
   maxBytes: number,
-): BodyReadFailure | PreparedUploadBody {
-  const localError = localAPIRequestError(request.headers);
+): Promise<BodyReadFailure | PreparedUploadBody> {
+  const localError = await localAPIRequestError(request.headers, 'POST');
   if (localError !== undefined) return { ok: false, error: localError, status: 403 };
 
   const length = validateContentLength(request.headers, maxBytes);

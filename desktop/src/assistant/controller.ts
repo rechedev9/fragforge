@@ -32,6 +32,7 @@ import {
   type CodexAppServerFactory,
 } from './app-server-client.ts';
 import { AssistantHistoryStore } from './history.ts';
+import type { NativeApprovalPrompt } from './native-approval.ts';
 
 const ACTION_EXPIRY_MS = 15 * 60_000;
 const INITIALIZE_TIMEOUT_MS = 15_000;
@@ -460,6 +461,24 @@ export class AssistantController {
       }
       throw new Error('No se pudo cancelar el turno del agente.');
     }
+  }
+
+  approvalPrompt(actionID: string): NativeApprovalPrompt {
+    this.#expireActions();
+    if (this.#busy) throw new Error('wait for the active agent turn before approving an action');
+    const pending = this.#pendingActions.get(actionID);
+    if (pending === undefined) throw new Error('this action is no longer available for approval');
+    const { card } = pending;
+    if (card.risk === 'read') throw new Error('read operations do not require native approval');
+    return {
+      actionId: actionID,
+      ...(card.description === undefined ? {} : { description: card.description }),
+      fields: card.preview?.fields?.map((field) => ({ ...field })) ?? [],
+      operation: card.operation,
+      risk: card.risk,
+      ...(card.preview?.summary === undefined ? {} : { summary: card.preview.summary }),
+      title: card.title,
+    };
   }
 
   async approve(actionID: string): Promise<void> {

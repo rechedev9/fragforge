@@ -14,6 +14,7 @@ func Routes(h *Handlers) chi.Router {
 	r.Use(h.rateLimiter.middleware)
 	r.Use(crossSiteGuard)
 	r.Use(h.requireMutationToken)
+	r.Use(h.boundHTTPResources)
 	r.Get("/healthz", h.Health)
 	r.Get("/metrics", h.Metrics)
 	r.Get("/", h.Workbench)
@@ -87,29 +88,24 @@ func Routes(h *Handlers) chi.Router {
 
 func (h *Handlers) requireMutationToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.mutationToken == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if isMutationMethod(r.Method) {
-			if !h.tokenMatches(r) {
-				writeError(w, http.StatusUnauthorized, "mutation token required")
-				return
-			}
-			next.ServeHTTP(w, r)
-			return
-		}
-		// When the bind is exposed, reads of the API and workbench data require
-		// the token so an untrusted network cannot enumerate jobs or artifacts.
-		// /metrics is guarded too so it does not leak pipeline activity off-box;
-		// a local Prometheus scrapes the loopback default where requireReadAuth is
-		// off. The workbench shell (GET /) and /healthz stay open so the operator
-		// console can load and prompt for the token before requesting /ui/* data.
 		protectedRead := strings.HasPrefix(r.URL.Path, "/api/") ||
 			r.URL.Path == "/metrics" ||
 			((r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.HasPrefix(r.URL.Path, "/ui/"))
-		if h.requireReadAuth && protectedRead && !h.tokenMatches(r) {
-			writeError(w, http.StatusUnauthorized, "authentication required")
+		protected := isMutationMethod(r.Method) || (h.requireReadAuth && protectedRead)
+		if !protected {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if h.mutationToken == "" {
+			if !h.requireReadAuth {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, http.StatusServiceUnavailable, "session capability is not configured")
+			return
+		}
+		if !h.tokenMatches(r) {
+			writeError(w, http.StatusUnauthorized, "session capability required")
 			return
 		}
 		next.ServeHTTP(w, r)

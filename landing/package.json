@@ -9,22 +9,23 @@
     "start": "next start -p 3100"
   },
   "dependencies": {
-    "next": "^15.1.0",
+    "@react-three/drei": "^10",
+    "@react-three/fiber": "^9",
+    "@react-three/postprocessing": "^3",
+    "lucide-react": "^0.469.0",
+    "next": "^15.5.21",
     "react": "^19",
     "react-dom": "^19",
-    "three": "^0.184.0",
-    "@react-three/fiber": "^9",
-    "@react-three/drei": "^10",
-    "@react-three/postprocessing": "^3",
-    "lucide-react": "^0.469.0"
+    "sharp": "^0.35.3",
+    "three": "^0.184.0"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@tailwindcss/postcss": "^4.3.2",
+    "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/node": "^22",
     "@types/three": "^0.184.0",
-    "@tailwindcss/postcss": "^4.3.2",
-    "tailwindcss": "^4.3.2"
+    "tailwindcss": "^4.3.2",
+    "typescript": "^5"
   }
 }

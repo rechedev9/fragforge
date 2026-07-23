@@ -4,17 +4,31 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
+	"github.com/yuin/gopher-lua/ast"
 	"github.com/yuin/gopher-lua/parse"
 )
 
-var effectsEvaluationTimeout = 2 * time.Second
+var effectsEvaluationTimeout = 500 * time.Millisecond
+
+const (
+	maxEffectsSourceBytes = 256 << 10
+	maxEffectCallbacks    = 64
+	maxCallbackExecutions = 512
+	maxEffectsPerShort    = 2048
+	maxEffectStringBytes  = 4096
+	maxEffectASTNodes     = 4096
+	effectsRegistrySize   = 1024
+	effectsRegistryMax    = 8192
+)
 
 // viralUltraCleanEffectsScript keeps the reel clean: no overlay lettering and
 // no per-kill effects (zoom, flash, or killfeed overlay). It applies only a
@@ -43,6 +57,8 @@ type effectEvalContext struct {
 	sourceIndex      int
 	sourceKill       *KillCue
 	sourceSmoke      *SmokeCue
+	assetRoot        string
+	callbackRuns     int
 	segmentCallbacks []lua.LValue
 	killCallbacks    []lua.LValue
 	smokeCallbacks   []lua.LValue
@@ -56,9 +72,17 @@ func loadEffectsSource(path, preset string) (effectsSource, error) {
 			return effectsSource{}, fmt.Errorf("resolve effects script path: %w", err)
 		}
 		// #nosec G304 -- effects script path is an explicit local CLI/config input.
-		b, err := os.ReadFile(abs)
+		f, err := os.Open(abs)
 		if err != nil {
 			return effectsSource{}, fmt.Errorf("read effects script: %w", err)
+		}
+		defer f.Close()
+		b, err := io.ReadAll(io.LimitReader(f, maxEffectsSourceBytes+1))
+		if err != nil {
+			return effectsSource{}, fmt.Errorf("read effects script: %w", err)
+		}
+		if len(b) > maxEffectsSourceBytes {
+			return effectsSource{}, fmt.Errorf("effects script exceeds %d bytes", maxEffectsSourceBytes)
 		}
 		return effectsSource{Path: abs, Preset: EffectsPresetExternal, Script: string(b)}, nil
 	}
@@ -90,7 +114,7 @@ func applyEffectsToManifest(manifest *Manifest, source effectsSource, ffmpegPath
 	}
 	for i := range manifest.Shorts {
 		short := &manifest.Shorts[i]
-		effects, warnings, err := evaluateCompiledEffects(proto, *short)
+		effects, warnings, err := evaluateCompiledEffects(proto, *short, effectsAssetRoot(source))
 		if err != nil {
 			return fmt.Errorf("evaluate effects for %s: %w", short.SegmentID, err)
 		}
@@ -512,11 +536,165 @@ func compileEffectsScript(source effectsSource) (*lua.FunctionProto, error) {
 	if strings.TrimSpace(source.Script) == "" {
 		return nil, nil
 	}
+	if len(source.Script) > maxEffectsSourceBytes {
+		return nil, fmt.Errorf("effects script exceeds %d bytes", maxEffectsSourceBytes)
+	}
 	chunk, err := parse.Parse(strings.NewReader(source.Script), "effects")
 	if err != nil {
 		return nil, err
 	}
+	if err := validateEffectsAST(chunk); err != nil {
+		return nil, err
+	}
 	return lua.Compile(chunk, "effects")
+}
+
+func validateEffectsAST(stmts []ast.Stmt) error {
+	nodes := 0
+	var walkStmts func([]ast.Stmt) error
+	var walkExpr func(ast.Expr, bool) error
+	countNode := func() error {
+		nodes++
+		if nodes > maxEffectASTNodes {
+			return fmt.Errorf("effects script exceeds %d syntax nodes", maxEffectASTNodes)
+		}
+		return nil
+	}
+	walkExpr = func(expr ast.Expr, allowCallback bool) error {
+		if expr == nil {
+			return nil
+		}
+		if err := countNode(); err != nil {
+			return err
+		}
+		switch value := expr.(type) {
+		case *ast.TrueExpr, *ast.FalseExpr, *ast.NilExpr, *ast.NumberExpr, *ast.StringExpr, *ast.Comma3Expr, *ast.IdentExpr:
+			return nil
+		case *ast.AttrGetExpr:
+			if err := walkExpr(value.Object, false); err != nil {
+				return err
+			}
+			return walkExpr(value.Key, false)
+		case *ast.TableExpr:
+			for _, field := range value.Fields {
+				if err := walkExpr(field.Key, false); err != nil {
+					return err
+				}
+				if err := walkExpr(field.Value, false); err != nil {
+					return err
+				}
+			}
+			return nil
+		case *ast.FuncCallExpr:
+			registrar := false
+			if ident, ok := value.Func.(*ast.IdentExpr); ok {
+				switch ident.Value {
+				case "on_segment", "on_kill", "on_smoke":
+					registrar = true
+				}
+			}
+			if err := walkExpr(value.Func, false); err != nil {
+				return err
+			}
+			if err := walkExpr(value.Receiver, false); err != nil {
+				return err
+			}
+			for _, arg := range value.Args {
+				if err := walkExpr(arg, registrar); err != nil {
+					return err
+				}
+			}
+			return nil
+		case *ast.LogicalOpExpr:
+			if err := walkExpr(value.Lhs, false); err != nil {
+				return err
+			}
+			return walkExpr(value.Rhs, false)
+		case *ast.RelationalOpExpr:
+			if err := walkExpr(value.Lhs, false); err != nil {
+				return err
+			}
+			return walkExpr(value.Rhs, false)
+		case *ast.StringConcatOpExpr:
+			if err := walkExpr(value.Lhs, false); err != nil {
+				return err
+			}
+			return walkExpr(value.Rhs, false)
+		case *ast.ArithmeticOpExpr:
+			if err := walkExpr(value.Lhs, false); err != nil {
+				return err
+			}
+			return walkExpr(value.Rhs, false)
+		case *ast.UnaryMinusOpExpr:
+			return walkExpr(value.Expr, false)
+		case *ast.UnaryNotOpExpr:
+			return walkExpr(value.Expr, false)
+		case *ast.UnaryLenOpExpr:
+			return walkExpr(value.Expr, false)
+		case *ast.FunctionExpr:
+			if !allowCallback {
+				return fmt.Errorf("effects script functions are allowed only as direct callback registrations")
+			}
+			return walkStmts(value.Stmts)
+		default:
+			return fmt.Errorf("unsupported effects expression %T", expr)
+		}
+	}
+	walkStmts = func(statements []ast.Stmt) error {
+		for _, statement := range statements {
+			if err := countNode(); err != nil {
+				return err
+			}
+			switch value := statement.(type) {
+			case *ast.AssignStmt:
+				for _, expr := range append(append([]ast.Expr{}, value.Lhs...), value.Rhs...) {
+					if err := walkExpr(expr, false); err != nil {
+						return err
+					}
+				}
+			case *ast.LocalAssignStmt:
+				for _, expr := range value.Exprs {
+					if err := walkExpr(expr, false); err != nil {
+						return err
+					}
+				}
+			case *ast.FuncCallStmt:
+				if err := walkExpr(value.Expr, false); err != nil {
+					return err
+				}
+			case *ast.DoBlockStmt:
+				if err := walkStmts(value.Stmts); err != nil {
+					return err
+				}
+			case *ast.IfStmt:
+				if err := walkExpr(value.Condition, false); err != nil {
+					return err
+				}
+				if err := walkStmts(value.Then); err != nil {
+					return err
+				}
+				if err := walkStmts(value.Else); err != nil {
+					return err
+				}
+			case *ast.ReturnStmt:
+				for _, expr := range value.Exprs {
+					if err := walkExpr(expr, false); err != nil {
+						return err
+					}
+				}
+			case *ast.WhileStmt, *ast.RepeatStmt, *ast.NumberForStmt, *ast.GenericForStmt:
+				return fmt.Errorf("effects script loops are disabled to bound memory and execution")
+			case *ast.FuncDefStmt:
+				return fmt.Errorf("named effects script functions are disabled")
+			case *ast.BreakStmt, *ast.LabelStmt, *ast.GotoStmt:
+				return fmt.Errorf("effects script control-flow statement %T is disabled", statement)
+			default:
+				return fmt.Errorf("unsupported effects statement %T", statement)
+			}
+		}
+		return nil
+	}
+	return walkStmts(stmts)
 }
 
 func evaluateEffects(source effectsSource, short ShortEdit) ([]Effect, []string, error) {
@@ -524,17 +702,25 @@ func evaluateEffects(source effectsSource, short ShortEdit) ([]Effect, []string,
 	if err != nil {
 		return nil, nil, err
 	}
-	return evaluateCompiledEffects(proto, short)
+	return evaluateCompiledEffects(proto, short, effectsAssetRoot(source))
 }
 
-func evaluateCompiledEffects(proto *lua.FunctionProto, short ShortEdit) ([]Effect, []string, error) {
+func evaluateCompiledEffects(proto *lua.FunctionProto, short ShortEdit, assetRoot string) ([]Effect, []string, error) {
 	if proto == nil {
 		return nil, nil, nil
 	}
 	ctx := &effectEvalContext{
-		short: short,
+		short:     short,
+		assetRoot: assetRoot,
 	}
-	L := lua.NewState(lua.Options{SkipOpenLibs: true})
+	L := lua.NewState(lua.Options{
+		CallStackSize:       128,
+		RegistrySize:        effectsRegistrySize,
+		RegistryMaxSize:     effectsRegistryMax,
+		RegistryGrowStep:    512,
+		MinimizeStackMemory: true,
+		SkipOpenLibs:        true,
+	})
 	defer L.Close()
 	evalCtx, cancel := context.WithTimeout(context.Background(), effectsEvaluationTimeout)
 	defer cancel()
@@ -571,25 +757,46 @@ func evaluateCompiledEffects(proto *lua.FunctionProto, short ShortEdit) ([]Effec
 }
 
 func openEffectsLuaLibs(L *lua.LState) {
-	lua.OpenBase(L)
-	lua.OpenTable(L)
-	lua.OpenString(L)
 	lua.OpenMath(L)
-	for _, name := range []string{"dofile", "loadfile", "require", "collectgarbage", "print"} {
-		L.SetGlobal(name, lua.LNil)
-	}
+	stringLib := L.NewTable()
+	L.SetField(stringLib, "rep", L.NewFunction(boundedLuaStringRep))
+	L.SetField(stringLib, "len", L.NewFunction(func(L *lua.LState) int {
+		L.Push(lua.LNumber(len(L.CheckString(1))))
+		return 1
+	}))
+	L.SetField(stringLib, "lower", L.NewFunction(func(L *lua.LState) int {
+		L.Push(lua.LString(strings.ToLower(L.CheckString(1))))
+		return 1
+	}))
+	L.SetField(stringLib, "upper", L.NewFunction(func(L *lua.LState) int {
+		L.Push(lua.LString(strings.ToUpper(L.CheckString(1))))
+		return 1
+	}))
+	L.SetGlobal("string", stringLib)
 }
 
 func registerEffectsAPI(L *lua.LState, ctx *effectEvalContext) {
 	L.SetGlobal("on_segment", L.NewFunction(func(L *lua.LState) int {
+		if len(ctx.segmentCallbacks) >= maxEffectCallbacks {
+			L.RaiseError("segment callback limit %d exceeded", maxEffectCallbacks)
+			return 0
+		}
 		ctx.segmentCallbacks = append(ctx.segmentCallbacks, L.CheckFunction(1))
 		return 0
 	}))
 	L.SetGlobal("on_kill", L.NewFunction(func(L *lua.LState) int {
+		if len(ctx.killCallbacks) >= maxEffectCallbacks {
+			L.RaiseError("kill callback limit %d exceeded", maxEffectCallbacks)
+			return 0
+		}
 		ctx.killCallbacks = append(ctx.killCallbacks, L.CheckFunction(1))
 		return 0
 	}))
 	L.SetGlobal("on_smoke", L.NewFunction(func(L *lua.LState) int {
+		if len(ctx.smokeCallbacks) >= maxEffectCallbacks {
+			L.RaiseError("smoke callback limit %d exceeded", maxEffectCallbacks)
+			return 0
+		}
 		ctx.smokeCallbacks = append(ctx.smokeCallbacks, L.CheckFunction(1))
 		return 0
 	}))
@@ -622,6 +829,10 @@ func registerEffectsAPI(L *lua.LState, ctx *effectEvalContext) {
 func callCallbacks(L *lua.LState, callbacks []lua.LValue, arg lua.LValue, label string, ctx *effectEvalContext) error {
 	ctx.sourceName = label
 	for i, fn := range callbacks {
+		if ctx.callbackRuns >= maxCallbackExecutions {
+			return fmt.Errorf("callback execution limit %d exceeded", maxCallbackExecutions)
+		}
+		ctx.callbackRuns++
 		ctx.sourceIndex = i + 1
 		if err := L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}, arg); err != nil {
 			return fmt.Errorf("%s callback %d: %w", label, i+1, err)
@@ -631,6 +842,10 @@ func callCallbacks(L *lua.LState, callbacks []lua.LValue, arg lua.LValue, label 
 }
 
 func (ctx *effectEvalContext) addEffectFromTable(L *lua.LState, typ EffectType) {
+	if len(ctx.effects) >= maxEffectsPerShort {
+		L.RaiseError("effect limit %d exceeded", maxEffectsPerShort)
+		return
+	}
 	tb := L.CheckTable(1)
 	effect, err := ctx.effectFromTable(tb, typ)
 	if err != nil {
@@ -737,6 +952,10 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 			return e, fmt.Errorf("path is required")
 		}
 		var err error
+		e.Path, err = resolveEffectImagePath(ctx.assetRoot, e.Path)
+		if err != nil {
+			return e, err
+		}
 		if e.X, err = tablePositionValidated(tb, "x", "(W-w)/2"); err != nil {
 			return e, err
 		}
@@ -811,7 +1030,131 @@ func (ctx *effectEvalContext) effectFromTable(tb *lua.LTable, typ EffectType) (E
 	if e.EndSeconds <= e.StartSeconds {
 		return e, fmt.Errorf("end %.3f must be greater than start %.3f", e.EndSeconds, e.StartSeconds)
 	}
+	if err := validateEffectStringSizes(e); err != nil {
+		return e, err
+	}
 	return e, nil
+}
+
+func effectsAssetRoot(source effectsSource) string {
+	if strings.TrimSpace(source.Path) == "" {
+		return ""
+	}
+	return filepath.Dir(source.Path)
+}
+
+func boundedLuaStringRep(L *lua.LState) int {
+	value := L.CheckString(1)
+	count := L.CheckInt(2)
+	separator := L.OptString(3, "")
+	if count < 0 {
+		L.RaiseError("string.rep count must be non-negative")
+		return 0
+	}
+	if count == 0 {
+		L.Push(lua.LString(""))
+		return 1
+	}
+	if len(value) > maxEffectStringBytes/count {
+		L.RaiseError("string.rep result exceeds %d bytes", maxEffectStringBytes)
+		return 0
+	}
+	valueBytes := len(value) * count
+	if count > 1 {
+		if len(separator) > (maxEffectStringBytes-valueBytes)/(count-1) {
+			L.RaiseError("string.rep result exceeds %d bytes", maxEffectStringBytes)
+			return 0
+		}
+	}
+	L.Push(lua.LString(strings.Repeat(value+separator, count-1) + value))
+	return 1
+}
+
+func validateEffectStringSizes(effect Effect) error {
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{"color", effect.Color},
+		{"value", effect.Value},
+		{"path", effect.Path},
+		{"x", effect.X},
+		{"y", effect.Y},
+		{"fontfile", effect.FontFile},
+		{"font_color", effect.FontColor},
+		{"box_color", effect.BoxColor},
+		{"shadow_color", effect.ShadowColor},
+		{"border_color", effect.BorderColor},
+		{"source", effect.Source},
+	}
+	for _, field := range fields {
+		if len(field.value) > maxEffectStringBytes {
+			return fmt.Errorf("%s exceeds %d bytes", field.name, maxEffectStringBytes)
+		}
+	}
+	return nil
+}
+
+func resolveEffectImagePath(root, raw string) (string, error) {
+	root = strings.TrimSpace(root)
+	raw = strings.TrimSpace(raw)
+	if root == "" {
+		return "", fmt.Errorf("image effects require an external effects script")
+	}
+	if filepath.IsAbs(raw) || filepath.VolumeName(raw) != "" ||
+		strings.HasPrefix(raw, `\\`) || strings.HasPrefix(raw, "//") ||
+		strings.Contains(raw, "://") {
+		return "", fmt.Errorf("image path %q must be relative to the effects script", raw)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve effects asset root: %w", err)
+	}
+	resolvedRoot, err = filepath.Abs(resolvedRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve effects asset root: %w", err)
+	}
+	candidate, err := filepath.Abs(filepath.Join(resolvedRoot, raw))
+	if err != nil {
+		return "", fmt.Errorf("resolve image path: %w", err)
+	}
+	candidate, err = filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve image path %q: %w", raw, err)
+	}
+	inside, err := pathWithinEffectsRoot(resolvedRoot, candidate)
+	if err != nil {
+		return "", fmt.Errorf("validate image path %q: %w", raw, err)
+	}
+	if !inside {
+		return "", fmt.Errorf("image path %q escapes the effects script directory", raw)
+	}
+	info, err := os.Stat(candidate)
+	if err != nil {
+		return "", fmt.Errorf("stat image path %q: %w", raw, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("image path %q is not a regular file", raw)
+	}
+	return candidate, nil
+}
+
+func pathWithinEffectsRoot(root, candidate string) (bool, error) {
+	if runtime.GOOS == "windows" && !strings.EqualFold(filepath.VolumeName(root), filepath.VolumeName(candidate)) {
+		return false, nil
+	}
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return false, err
+	}
+	if relative == "." || filepath.IsAbs(relative) {
+		return false, nil
+	}
+	parent := ".." + string(filepath.Separator)
+	if relative == ".." || strings.HasPrefix(relative, parent) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func setEffectFades(tb *lua.LTable, e *Effect) error {

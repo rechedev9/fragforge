@@ -94,6 +94,7 @@ type Handlers struct {
 	discoverySecret  string
 	requireReadAuth  bool
 	rateLimiter      *rateLimiter
+	uploadLimiter    *uploadLimiter
 	streamProber     streamclips.Prober
 	musicDir         string
 	capabilities     Capabilities
@@ -116,7 +117,8 @@ type Handlers struct {
 
 type Option func(*Handlers)
 
-// WithMutationToken requires mutating requests to send X-FragForge-Token.
+// WithMutationToken configures the per-session capability used for authenticated
+// API reads and mutations.
 func WithMutationToken(token string) Option {
 	return func(h *Handlers) {
 		h.mutationToken = token
@@ -131,12 +133,20 @@ func WithDiscoverySecret(secret string) Option {
 	}
 }
 
-// WithRequireReadAuth also gates non-mutation /api reads behind the mutation
-// token. It is meant for exposed (non-loopback) binds and has no effect unless a
-// mutation token is configured. Loopback deployments leave this off.
+// WithRequireReadAuth gates API/workbench data reads behind the same session
+// capability as mutations. Production enables it for loopback too; leaving it
+// off is useful only for isolated handler tests.
 func WithRequireReadAuth(require bool) Option {
 	return func(h *Handlers) {
 		h.requireReadAuth = require
+	}
+}
+
+// WithUploadConcurrency bounds simultaneous multipart uploads. Values below
+// one disable the bound, which is useful only for isolated handler tests.
+func WithUploadConcurrency(limit int) Option {
+	return func(h *Handlers) {
+		h.uploadLimiter = newUploadLimiter(limit)
 	}
 }
 

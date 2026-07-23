@@ -214,21 +214,15 @@ func run() error {
 		recordWorker.UseGenerateIntentStore(generateIntents)
 		recordWorker.UseEnqueuer(queue)
 	}
-	// Defense-in-depth gating only kicks in on an exposed (non-loopback) bind;
-	// the loopback default stays unauthenticated and unthrottled for the local
-	// UI and e2e.
-	exposed := !httpapi.IsLoopbackAddr(cfg.HTTPAddr)
-	rateLimitRPS := 0.0
-	rateLimitBurst := 0
-	if exposed {
-		rateLimitRPS = 20
-		rateLimitBurst = 40
-	}
 	handlers := httpapi.NewHandlers(repo, store, queue,
 		httpapi.WithMutationToken(cfg.MutationToken),
 		httpapi.WithDiscoverySecret(cfg.DiscoverySecret),
-		httpapi.WithRequireReadAuth(exposed),
-		httpapi.WithRateLimit(rateLimitRPS, rateLimitBurst),
+		httpapi.WithRequireReadAuth(true),
+		// Remote binds are rejected. A per-IP limiter on loopback would give
+		// every local process the same 127.0.0.1 bucket and let unauthenticated
+		// traffic starve the authenticated desktop session.
+		httpapi.WithRateLimit(0, 0),
+		httpapi.WithUploadConcurrency(2),
 		httpapi.WithStreamRepository(streamRepo),
 		httpapi.WithStreamJobLocks(streamJobLocks),
 		httpapi.WithStreamProber(streamclips.FFprobeProber{Path: cfg.FFprobePath}),

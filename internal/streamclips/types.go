@@ -63,15 +63,18 @@ type Job struct {
 	FailureReason string    `json:"failure_reason,omitempty"`
 	SourcePath    string    `json:"source_path"`
 	SourceSHA256  string    `json:"source_sha256"`
-	// SourceURL is set when the job was created from POST /api/stream-jobs
-	// with a source_url instead of a multipart upload; the acquire worker
-	// reads it to know what to download. Empty for uploaded jobs.
-	SourceURL string          `json:"source_url,omitempty"`
-	Title     string          `json:"title,omitempty"`
-	Probe     SourceProbe     `json:"probe"`
-	EditPlan  json.RawMessage `json:"edit_plan,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	// SourceURL is the private, short-lived acquisition URL used by the worker.
+	// It may contain provider query material and is never serialized. Durable
+	// repositories clear it on acquisition success or terminal failure.
+	SourceURL string `json:"-"`
+	// PublicSourceURL is the credential-free provider URL returned by APIs and
+	// retained after the private acquisition URL has been cleared.
+	PublicSourceURL string          `json:"source_url,omitempty"`
+	Title           string          `json:"title,omitempty"`
+	Probe           SourceProbe     `json:"probe"`
+	EditPlan        json.RawMessage `json:"edit_plan,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 type SourceProbe struct {

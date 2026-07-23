@@ -9,8 +9,8 @@ test('parses only bounded assistant IPC requests', () => {
   assert.deepEqual(parseAssistantRequest({ action: 'clear' }), { action: 'clear' });
   assert.deepEqual(parseAssistantRequest({ action: 'login' }), { action: 'login' });
   assert.deepEqual(parseAssistantRequest({ action: 'logout' }), { action: 'logout' });
-  assert.deepEqual(parseAssistantRequest({ action: 'approve', actionId: 'action_123' }), {
-    action: 'approve',
+  assert.deepEqual(parseAssistantRequest({ action: 'request-approval', actionId: 'action_123' }), {
+    action: 'request-approval',
     actionId: 'action_123',
   });
   assert.deepEqual(parseAssistantRequest({
@@ -48,8 +48,8 @@ test('rejects injected, oversized, and malformed assistant IPC requests', () => 
     {},
     { action: 'shell', command: 'whoami' },
     { action: 'status', extra: true },
-    { action: 'approve', actionId: '../escape' },
-    { action: 'approve', actionId: 'x'.repeat(129) },
+    { action: 'request-approval', actionId: '../escape' },
+    { action: 'request-approval', actionId: 'x'.repeat(129) },
     { action: 'send', context: { pathname: '/matches' } },
     { action: 'send', context: { kind: 'none', label: 'Studio', pathname: 'https://example.com' }, message: 'hola' },
     { action: 'send', context: { kind: 'none', label: 'Studio', pathname: '/matches', ignored: true }, message: 'hola' },

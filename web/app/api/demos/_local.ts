@@ -29,7 +29,7 @@ const MAX_DEMO_REQUEST_BYTES = 601 * 1024 * 1024;
  * only the file under field name `demo`.
  */
 export async function localScan(request: Request): Promise<Response> {
-  const localError = localAPIRequestError(request.headers);
+  const localError = await localAPIRequestError(request.headers, request.method);
   if (localError !== undefined) return NextResponse.json({ error: localError }, { status: 403 });
 
   const contentType = request.headers.get('content-type') ?? '';
@@ -37,7 +37,7 @@ export async function localScan(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'multipart/form-data required' }, { status: 400 });
   }
 
-  const upload = prepareLocalUploadBody(request, MAX_DEMO_REQUEST_BYTES);
+  const upload = await prepareLocalUploadBody(request, MAX_DEMO_REQUEST_BYTES);
   if (!upload.ok) return NextResponse.json({ error: upload.error }, { status: upload.status });
 
   const headers: Record<string, string> = { 'Content-Type': contentType };
