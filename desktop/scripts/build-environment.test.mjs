@@ -30,8 +30,8 @@ test('desktop manifest exposes one credential-free distribution path', () => {
   assert.equal(scripts.assemble, 'node scripts/assemble.mjs');
   assert.equal(scripts.dist, 'node scripts/dist.mjs');
   assert.equal(manifest.build.forceCodeSigning, true);
-  assert.deepEqual(manifest.build.win.signingHashAlgorithms, ['sha256']);
-  assert.equal(typeof manifest.build.win.rfc3161TimeStampServer, 'string');
+  assert.deepEqual(manifest.build.win.signtoolOptions.signingHashAlgorithms, ['sha256']);
+  assert.equal(typeof manifest.build.win.signtoolOptions.rfc3161TimeStampServer, 'string');
   assert.equal(Object.keys(scripts).some((name) => name.includes('team')), false);
   assert.equal(
     resources.some((resource) => /(?:credential|xai-api-key)/i.test(`${resource.from} ${resource.to}`)),

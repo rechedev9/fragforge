@@ -1,4 +1,4 @@
-// Release evals for FragForge Studio 2.2.12. This launches the real Electron
+// Release evals for FragForge Studio 2.2.13. This launches the real Electron
 // application and drives the renderer with Playwright. Expensive/external
 // stream stages use controlled same-origin responses; the embedded Agent test
 // uses the real preload, IPC controller, Codex app-server, and orchestrator.
@@ -14,7 +14,7 @@ import { after, before, test } from 'node:test';
 const require = createRequire(import.meta.url);
 const { _electron } = require('playwright-core');
 const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const artifactsDir = join(desktopRoot, 'e2e', 'artifacts', 'release-2.2.12');
+const artifactsDir = join(desktopRoot, 'e2e', 'artifacts', 'release-2.2.13');
 const bootstrapPath = join(desktopRoot, 'e2e', 'isolated-userdata.cjs');
 const BOOT_DEADLINE_MS = 180_000;
 const AGENT_DEADLINE_MS = 180_000;
@@ -72,6 +72,17 @@ async function waitForAgentTurn(previousMessageCount) {
   throw new Error(`Agent turn did not finish: ${JSON.stringify(latest)}`);
 }
 
+async function waitForAgentReady() {
+  const deadline = Date.now() + AGENT_DEADLINE_MS;
+  let latest;
+  while (Date.now() < deadline) {
+    latest = await page.evaluate(() => window.fragforgeAssistant.status());
+    if (latest?.ok === true && latest.snapshot?.availability === 'ready') return latest;
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`Agent did not become ready: ${JSON.stringify(latest)}`);
+}
+
 test('installed release exposes Agent-only desktop settings and consistent navigation', async () => {
   await goto('/settings');
   await page.getByText('Versión instalada', { exact: true }).waitFor();
@@ -112,8 +123,8 @@ test('installed release exposes Agent-only desktop settings and consistent navig
     const values = await installedInfo.locator('dd').allInnerTexts();
     const versionIndex = labels.indexOf('Versión instalada');
     assert.notEqual(versionIndex, -1);
-    assert.equal(values[versionIndex], '2.2.12');
-    await installedPage.screenshot({ path: join(artifactsDir, 'installed-settings-2.2.12.png'), fullPage: true });
+    assert.equal(values[versionIndex], '2.2.13');
+    await installedPage.screenshot({ path: join(artifactsDir, 'installed-settings-2.2.13.png'), fullPage: true });
   } finally {
     await installedApp.close();
     rmSync(installedUserData, { force: true, recursive: true });
@@ -125,8 +136,10 @@ test('Agent receives route context and completes a real read-only Studio operati
   await page.getByRole('button', { name: 'Abrir asistente' }).click();
   const dialog = page.getByRole('dialog', { name: 'Agente de FragForge' });
   await dialog.getByText('Contexto · Noticias', { exact: true }).waitFor();
+  const activateAgent = dialog.getByRole('button', { name: 'Activar agente' });
+  if (await activateAgent.isVisible()) await activateAgent.click();
 
-  const initial = await page.evaluate(() => window.fragforgeAssistant.status());
+  const initial = await waitForAgentReady();
   assert.equal(initial.ok, true, initial.error);
   assert.equal(initial.snapshot.availability, 'ready');
   assert.equal(initial.snapshot.account.status, 'signed-in');

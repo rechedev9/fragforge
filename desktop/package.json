@@ -1,6 +1,6 @@
 {
   "name": "fragforge-studio",
-  "version": "2.2.12",
+  "version": "2.2.13",
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "description": "FragForge Studio - desktop Local Studio: web UI + local HLAE/CS2 capture in one app",
@@ -13,7 +13,7 @@
     "lint": "oxlint src",
     "test:unit": "node --no-warnings --test --test-reporter=dot \"src/**/*.test.ts\" \"scripts/**/*.test.mjs\"",
     "test:e2e:ui": "node --no-warnings --test e2e/studio-ui.e2e.test.mjs",
-    "test:e2e:release": "node --no-warnings --test e2e/studio-release-2.2.12.e2e.test.mjs",
+    "test:e2e:release": "node --no-warnings --test e2e/studio-release-2.2.13.e2e.test.mjs",
     "assemble": "node scripts/assemble.mjs",
     "start": "pnpm run build && electron .",
     "dist": "node scripts/dist.mjs",
@@ -66,10 +66,12 @@
         "nsis"
       ],
       "icon": "build/icon.ico",
-      "rfc3161TimeStampServer": "http://timestamp.digicert.com",
-      "signingHashAlgorithms": [
-        "sha256"
-      ]
+      "signtoolOptions": {
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com",
+        "signingHashAlgorithms": [
+          "sha256"
+        ]
+      }
     },
     "nsis": {
       "oneClick": false,
