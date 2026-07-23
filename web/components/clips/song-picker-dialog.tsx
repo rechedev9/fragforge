@@ -40,6 +40,7 @@ export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId 
   const [songs, setSongs] = useState<Song[] | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playRequestRef = useRef(0);
 
   useEffect(() => {
     if (!open) return;
@@ -61,17 +62,30 @@ export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId 
     }
   }, [open]);
 
-  function togglePlay(song: Song) {
+  async function togglePlay(song: Song): Promise<void> {
     const audio = audioRef.current;
     if (!audio) return;
+    const request = ++playRequestRef.current;
     if (playingId === song.id) {
       audio.pause();
       setPlayingId(null);
       return;
     }
+    if (!audio.paused) {
+      await new Promise<void>((resolve) => {
+        audio.addEventListener('pause', () => resolve(), { once: true });
+        audio.pause();
+      });
+      if (request !== playRequestRef.current) return;
+    }
     audio.src = song.previewUrl;
     audio.currentTime = 0;
-    void audio.play().then(() => setPlayingId(song.id)).catch(() => setPlayingId(null));
+    try {
+      await audio.play();
+      if (request === playRequestRef.current) setPlayingId(song.id);
+    } catch {
+      if (request === playRequestRef.current) setPlayingId(null);
+    }
   }
 
   let list: ReactNode;
@@ -92,7 +106,7 @@ export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId 
             song={song}
             playing={playingId === song.id}
             selected={selectedSongId === song.id}
-            onTogglePlay={() => togglePlay(song)}
+            onTogglePlay={() => void togglePlay(song)}
             onUse={() => onChoose(song.id, song.title)}
           />
         ))}
@@ -109,7 +123,13 @@ export function SongPickerDialog({ open, onOpenChange, onChoose, selectedSongId 
         </DialogHeader>
 
         {/* One shared element drives every row's preview. */}
-        <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
+        <audio
+          ref={audioRef}
+          preload="none"
+          onPause={() => setPlayingId(null)}
+          onEnded={() => setPlayingId(null)}
+          className="hidden"
+        />
 
         <div className="-mx-2 max-h-[22rem] overflow-y-auto px-2">{list}</div>
       </DialogContent>
@@ -174,8 +194,8 @@ function Equalizer() {
       {[0, 1, 2, 3].map((i) => (
         <span
           key={i}
-          className="w-0.5 rounded-full bg-primary"
-          style={{ height: '40%', animation: `ff-eq 0.9s ease-in-out ${i * 0.12}s infinite` }}
+          className="ff-equalizer-bar w-0.5 rounded-full bg-primary"
+          style={{ height: `${36 + (i % 3) * 18}%`, animationDelay: `${i * 0.12}s` }}
         />
       ))}
     </span>

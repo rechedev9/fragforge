@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('fragforgeSettings', {
  */
 contextBridge.exposeInMainWorld('fragforgeAssistant', {
   status: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'status' }),
+  wake: (): Promise<unknown> => ipcRenderer.invoke(ASSISTANT_CHANNEL, { action: 'wake' }),
   send: (request: unknown): Promise<unknown> => {
     if (typeof request !== 'object' || request === null || Array.isArray(request)) {
       return Promise.reject(new Error('invalid assistant send request'));

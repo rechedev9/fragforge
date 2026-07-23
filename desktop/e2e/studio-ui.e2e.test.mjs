@@ -12,6 +12,7 @@
 // Run: pnpm run test:e2e:ui
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -31,6 +32,39 @@ const bootstrapPath = join(desktopRoot, 'e2e', 'isolated-userdata.cjs');
 // userData, which can take minutes; a warm profile boots in seconds. The
 // deadline covers the cold case without hanging forever on a real failure.
 const BOOT_DEADLINE_MS = 180_000;
+
+function hasCodexDescendant(rootPid) {
+  const script = `
+    $rootProcessId = ${Number(rootPid)}
+    $all = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine)
+    $ids = [System.Collections.Generic.HashSet[int]]::new()
+    [void]$ids.Add($rootProcessId)
+    do {
+      $changed = $false
+      foreach ($process in $all) {
+        if ($ids.Contains([int]$process.ParentProcessId) -and $ids.Add([int]$process.ProcessId)) { $changed = $true }
+      }
+    } while ($changed)
+    if ($all | Where-Object { $ids.Contains([int]$_.ProcessId) -and (($_.Name -match '^codex') -or ($_.CommandLine -match 'codex app-server')) }) { 'true' } else { 'false' }
+  `;
+  return execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' }).trim() === 'true';
+}
+
+async function waitForCodexDescendant(rootPid) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (hasCodexDescendant(rootPid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+async function waitForNoCodexDescendant(rootPid) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (!hasCodexDescendant(rootPid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
 
 /** @type {import('playwright-core').ElectronApplication} */
 let app;
@@ -88,17 +122,61 @@ test('renders real shell content', async () => {
   );
 });
 
+test('suspends visual work when unfocused and survives native minimization', async () => {
+  try {
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+    await page.waitForFunction(() => document.documentElement.dataset.windowActivity === 'inactive');
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await page.waitForFunction(() => document.documentElement.dataset.windowActivity === 'active');
+
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.minimize();
+    });
+    const minimized = await app.evaluate(({ BrowserWindow }) => {
+      return BrowserWindow.getAllWindows()[0]?.isMinimized() ?? false;
+    });
+    assert.equal(minimized, true);
+  } finally {
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      win?.restore();
+      win?.show();
+      win?.focus();
+    });
+  }
+  await page.waitForFunction(() => document.documentElement.dataset.windowActivity === 'active');
+});
+
 test('shows the branded agent, OAuth connection surface, and operation promise', async () => {
+  assert.equal(hasCodexDescendant(app.process().pid), false, 'Codex started before explicit activation');
   const openAgent = page.getByRole('button', { name: 'Abrir asistente' });
   await openAgent.click();
   const dialog = page.getByRole('dialog', { name: 'Agente de FragForge' });
   await dialog.waitFor({ state: 'visible' });
-  await dialog.getByRole('button', { name: 'Nueva conversación' }).click();
+  assert.equal(await dialog.getByText('Agente en reposo', { exact: true }).isVisible(), true);
+  await dialog.getByRole('button', { name: 'Activar agente' }).click();
+  await dialog.getByRole('button', { name: 'Activar agente' }).waitFor({ state: 'hidden' });
+  assert.equal(await waitForCodexDescendant(app.process().pid), true, 'Codex did not start after explicit activation');
   assert.equal(await dialog.getByText('Agente FragForge', { exact: true }).isVisible(), true);
   assert.equal(await dialog.getByText('Soy tu agente de FragForge', { exact: true }).isVisible(), true);
   assert.equal(await dialog.getByText(/todas las operaciones de Studio/).isVisible(), true);
   assert.equal(await dialog.getByText(/cuenta personal de Codex/i).isVisible(), true);
   assert.equal(await dialog.getByRole('button', { name: /Conectar con Codex|Desconectar/ }).isVisible(), true);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.minimize());
+  assert.equal(await waitForNoCodexDescendant(app.process().pid), true, 'Codex stayed alive after background hibernation');
+  await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    win?.restore();
+    win?.show();
+    win?.focus();
+  });
+  await dialog.getByRole('button', { name: 'Activar agente' }).waitFor({ state: 'visible' });
+  assert.equal(await dialog.getByText('Soy tu agente de FragForge', { exact: true }).isVisible(), true);
   await dialog.getByRole('button', { name: 'Cerrar' }).click();
 });
 

@@ -22,6 +22,7 @@ export const ASSISTANT_ACTION = {
   reject: 'reject',
   send: 'send',
   status: 'status',
+  wake: 'wake',
 } as const;
 
 export type AssistantActionName = typeof ASSISTANT_ACTION[keyof typeof ASSISTANT_ACTION];
@@ -46,6 +47,7 @@ export interface AssistantSendRequest {
 
 export type AssistantRequest =
   | { action: typeof ASSISTANT_ACTION.status }
+  | { action: typeof ASSISTANT_ACTION.wake }
   | { action: typeof ASSISTANT_ACTION.cancel }
   | { action: typeof ASSISTANT_ACTION.clear }
   | { action: typeof ASSISTANT_ACTION.login }
@@ -55,7 +57,7 @@ export type AssistantRequest =
   | { action: typeof ASSISTANT_ACTION.reject; actionId: string }
   | AssistantSendRequest;
 
-export type AssistantAvailability = 'starting' | 'ready' | 'unavailable' | 'error';
+export type AssistantAvailability = 'sleeping' | 'starting' | 'ready' | 'unavailable' | 'error';
 export type AssistantAccountStatus = 'checking' | 'signed-out' | 'signing-in' | 'signed-in' | 'unsupported' | 'error';
 export type AssistantMessageRole = 'assistant' | 'system' | 'user';
 export type AssistantOperationRisk = 'costly' | 'destructive' | 'read' | 'write';
@@ -131,6 +133,7 @@ export function parseAssistantRequest(value: unknown): AssistantRequest {
   }
   const action = value.action;
   if (action === ASSISTANT_ACTION.status
+    || action === ASSISTANT_ACTION.wake
     || action === ASSISTANT_ACTION.cancel
     || action === ASSISTANT_ACTION.clear
     || action === ASSISTANT_ACTION.login

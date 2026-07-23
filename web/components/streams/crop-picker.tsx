@@ -1,18 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useId, useRef, type ReactNode } from 'react';
 import type { NormalizedRect } from '@/lib/api/streams';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { StreamFrameCanvas, useStreamFrame } from '@/components/streams/stream-frame-session';
 
 const DEFAULT_MIN_SIZE = 0.08;
 const MIN_NORMALIZED_SIZE = 0.001;
 const KEYBOARD_STEP = 0.005;
 const KEYBOARD_LARGE_STEP = 0.02;
 const SCRUBBER_STEP_SECONDS = 0.01;
-const SEEK_TOLERANCE_SECONDS = 0.005;
-const LAST_FRAME_MARGIN_SECONDS = 0.001;
-const HAVE_METADATA = 1;
 
 type CropPickerKind = 'facecam' | 'killfeed';
 type Drag = { kind: 'move' | 'resize'; startClientX: number; startClientY: number; startRect: NormalizedRect };
@@ -54,18 +52,6 @@ function clampRect(rect: NormalizedRect, minWidth: number, minHeight: number): N
   return { x, y, width, height };
 }
 
-function seekToFrame(video: HTMLVideoElement, seconds: number): void {
-  const requested = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
-  const lastFrame = Number.isFinite(video.duration) && video.duration > 0
-    ? Math.max(0, video.duration - LAST_FRAME_MARGIN_SECONDS)
-    : requested;
-  const target = Math.min(requested, lastFrame);
-  if (Math.abs(video.currentTime - target) > SEEK_TOLERANCE_SECONDS) {
-    video.currentTime = target;
-  }
-  video.pause();
-}
-
 function formatTimestamp(seconds: number): string {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
   const minutes = Math.floor(safeSeconds / 60);
@@ -79,7 +65,6 @@ function formatTimestamp(seconds: number): string {
  * pickers and the 9:16 preview share one absolute source timestamp.
  */
 export function CropPicker({
-  videoSrc,
   rect,
   onChange,
   kind,
@@ -91,7 +76,6 @@ export function CropPicker({
   minHeight = DEFAULT_MIN_SIZE,
   disabled = false,
 }: {
-  videoSrc: string;
   rect: NormalizedRect;
   onChange: (rect: NormalizedRect) => void;
   kind: CropPickerKind;
@@ -104,9 +88,11 @@ export function CropPicker({
   disabled?: boolean;
 }): ReactNode {
   const containerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const dragRef = useRef<Drag | null>(null);
-  const [sourceAspectRatio, setSourceAspectRatio] = useState<string | null>(null);
+  const frame = useStreamFrame();
+  const sourceAspectRatio = frame.sourceWidth > 0 && frame.sourceHeight > 0
+    ? `${frame.sourceWidth} / ${frame.sourceHeight}`
+    : null;
   const instructionsId = useId();
   const scrubberId = useId();
   const safeMinWidth = Number.isFinite(minWidth)
@@ -128,13 +114,6 @@ export function CropPicker({
     0,
     safeDuration,
   );
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video && video.readyState >= HAVE_METADATA) {
-      seekToFrame(video, frameSeconds);
-    }
-  }, [frameSeconds, videoSrc]);
 
   const normalizedDelta = useCallback((clientX: number, clientY: number, drag: Drag) => {
     const container = containerRef.current;
@@ -231,21 +210,8 @@ export function CropPicker({
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        <video
-          ref={videoRef}
-          src={videoSrc}
-          muted
-          playsInline
-          preload="auto"
-          data-stream-frame={`picker-${kind}`}
-          onLoadedMetadata={(event) => {
-            const video = event.currentTarget;
-            if (video.videoWidth > 0 && video.videoHeight > 0) {
-              setSourceAspectRatio(`${video.videoWidth} / ${video.videoHeight}`);
-            }
-            seekToFrame(video, frameSeconds);
-          }}
-          onSeeked={(event) => event.currentTarget.pause()}
+        <StreamFrameCanvas
+          mode="contain"
           className="pointer-events-none absolute inset-0 h-full w-full object-contain"
         />
         <button

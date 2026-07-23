@@ -80,6 +80,9 @@ async function controllerFixture(
   t: test.TestContext,
   controllerOptions: {
     interruptTimeoutMs?: number;
+    backgroundHibernateMs?: number;
+    foregroundHibernateMs?: number;
+    startAwake?: boolean;
     selectLocalMedia?: (kind: 'demo' | 'stream') => Promise<string | null>;
     stateWatchIntervalMs?: number;
     stateWatchTimeoutMs?: number;
@@ -163,6 +166,8 @@ async function controllerFixture(
     gateway,
     history: new AssistantHistoryStore(path.join(directory, 'history.json')),
     interruptTimeoutMs: controllerOptions.interruptTimeoutMs,
+    backgroundHibernateMs: controllerOptions.backgroundHibernateMs,
+    foregroundHibernateMs: controllerOptions.foregroundHibernateMs,
     openAuthURL: async (url) => {
       openedAuthURLs.push(url);
     },
@@ -172,6 +177,7 @@ async function controllerFixture(
     stateWatchTimeoutMs: controllerOptions.stateWatchTimeoutMs,
     turnTimeoutMs: controllerOptions.turnTimeoutMs,
   });
+  if (controllerOptions.startAwake !== false) await controller.wake();
   return {
     appServer,
     appServers,
@@ -292,6 +298,35 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   throw new Error('timed out waiting for test condition');
 }
 
+test('status stays asleep until an explicit wake and background idle hibernates safely', async (t) => {
+  const fixture = await controllerFixture(t, {
+    backgroundHibernateMs: 5,
+    foregroundHibernateMs: 60_000,
+    startAwake: false,
+  });
+
+  const sleeping = await fixture.controller.status();
+  assert.equal(sleeping.availability, 'sleeping');
+  assert.equal(fixture.appServers.length, 0);
+
+  await fixture.controller.wake();
+  assert.equal(fixture.controller.snapshot().availability, 'ready');
+  assert.equal(fixture.appServers.length, 1);
+  await fixture.controller.send('Conserva este mensaje.', {
+    kind: 'none',
+    label: 'Studio',
+    pathname: '/settings',
+  });
+  completeTurn(fixture.options(), 'Historial conservado.');
+  const messageCount = fixture.controller.snapshot().messages.length;
+
+  fixture.controller.setWindowActive(false);
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  await waitFor(() => fixture.controller.snapshot().availability === 'sleeping');
+  assert.equal(fixture.appServer.closed, true);
+  assert.equal(fixture.controller.snapshot().messages.length, messageCount);
+});
+
 test('starts Codex in the isolated safe profile and streams its reply', async (t) => {
   const fixture = await controllerFixture(t);
 
@@ -324,8 +359,9 @@ test('starts Codex in the isolated safe profile and streams its reply', async (t
 });
 
 test('requires and manages a personal Codex OAuth account before agent turns', async (t) => {
-  const fixture = await controllerFixture(t);
+  const fixture = await controllerFixture(t, { startAwake: false });
   fixture.appServer.account = { account: null, requiresOpenaiAuth: true };
+  await fixture.controller.wake();
 
   const signedOut = await fixture.controller.status();
   assert.equal(signedOut.availability, 'ready');
@@ -542,6 +578,7 @@ test('starts a fresh app-server when a new conversation follows a connection fai
   assert.equal(fixture.controller.snapshot().availability, 'error');
 
   await fixture.controller.newConversation();
+  await fixture.controller.wake();
 
   const snapshot = fixture.controller.snapshot();
   assert.equal(snapshot.availability, 'ready');

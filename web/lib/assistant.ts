@@ -6,6 +6,7 @@
  */
 
 export const ASSISTANT_AVAILABILITY = {
+  sleeping: 'sleeping',
   starting: 'starting',
   ready: 'ready',
   unavailable: 'unavailable',
@@ -192,6 +193,7 @@ export type AssistantEventListener = (event: AssistantEvent) => void;
 
 export interface FragforgeAssistantBridge {
   status(): Promise<AssistantCommandResult>;
+  wake(): Promise<AssistantCommandResult>;
   send(request: AssistantSendRequest): Promise<AssistantCommandResult>;
   cancel(): Promise<AssistantCommandResult>;
   approve(actionId: string): Promise<AssistantCommandResult>;
@@ -440,6 +442,7 @@ function replaceAction(actions: readonly AssistantAction[], next: AssistantActio
 function isFragforgeAssistantBridge(value: unknown): value is FragforgeAssistantBridge {
   if (!isRecord(value)) return false;
   return typeof value.status === 'function'
+    && typeof value.wake === 'function'
     && typeof value.send === 'function'
     && typeof value.cancel === 'function'
     && typeof value.approve === 'function'
@@ -463,7 +466,8 @@ function isAssistantAccount(value: unknown): value is AssistantAccount {
 }
 
 function isAssistantAvailability(value: unknown): value is AssistantAvailability {
-  return value === ASSISTANT_AVAILABILITY.starting
+  return value === ASSISTANT_AVAILABILITY.sleeping
+    || value === ASSISTANT_AVAILABILITY.starting
     || value === ASSISTANT_AVAILABILITY.ready
     || value === ASSISTANT_AVAILABILITY.unavailable
     || value === ASSISTANT_AVAILABILITY.error;

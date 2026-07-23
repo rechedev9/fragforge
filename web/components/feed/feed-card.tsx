@@ -33,7 +33,7 @@ export function FeedCard({ item }: FeedCardProps) {
   const initials = item.author.slice(0, 2).toUpperCase();
 
   return (
-    <figure className="studio-panel studio-panel-interactive group overflow-hidden">
+    <figure className="studio-panel studio-panel-interactive studio-defer-render group overflow-hidden">
       <div className="relative aspect-video overflow-hidden bg-muted">
         {/* eslint-disable-next-line @next/next/no-img-element -- remote seed thumbnail */}
         <img
@@ -106,6 +106,7 @@ export function FeedCard({ item }: FeedCardProps) {
             controls
             autoPlay
             playsInline
+            preload="metadata"
             className="mx-auto max-h-[72vh] w-auto rounded-lg bg-black"
           />
         </DialogContent>

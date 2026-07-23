@@ -1,3 +1,5 @@
+import { browserWindowActivity, type WindowActivity } from './window-activity.ts';
+
 // A self-rescheduling poll loop that survives a throwing tick.
 //
 // The library page polls the orchestrator on a timer that reschedules itself
@@ -18,6 +20,11 @@ export interface PollLoopOptions {
   tick: () => Promise<PollCadence>;
   fastMs: number;
   idleMs: number;
+  /**
+   * Activity source used to suspend polling. The browser window is the default;
+   * injection keeps the lifecycle deterministic in tests.
+   */
+  activity?: WindowActivity;
 }
 
 // startPollLoop runs the first tick immediately, then reschedules itself using
@@ -27,15 +34,23 @@ export interface PollLoopOptions {
 // current one settles.
 export function startPollLoop(opts: PollLoopOptions): () => void {
   let stopped = false;
+  let running = false;
+  let refreshPending = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const activity = opts.activity ?? browserWindowActivity;
 
   function schedule(delayMs: number): void {
-    if (stopped) return;
+    if (stopped || !activity.isActive()) return;
     timer = setTimeout(() => void run(), delayMs);
   }
 
   async function run(): Promise<void> {
-    if (stopped) return;
+    if (stopped || !activity.isActive()) return;
+    if (running) {
+      refreshPending = true;
+      return;
+    }
+    running = true;
     let cadence: PollCadence;
     try {
       cadence = await opts.tick();
@@ -43,17 +58,46 @@ export function startPollLoop(opts: PollLoopOptions): () => void {
       // A transient tick failure must never kill the loop; back off to idle and
       // try again on the next beat.
       cadence = 'idle';
+    } finally {
+      running = false;
     }
     // The loop may have been stopped while the tick was awaiting; do not
     // schedule another run past stop().
     if (stopped) return;
+    if (refreshPending && activity.isActive()) {
+      refreshPending = false;
+      void run();
+      return;
+    }
     schedule(cadence === 'fast' ? opts.fastMs : opts.idleMs);
   }
 
-  void run();
+  const unsubscribe = activity.subscribe(() => {
+    if (stopped) return;
+    if (!activity.isActive()) {
+      refreshPending = false;
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      return;
+    }
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (running) {
+      refreshPending = true;
+    } else {
+      void run();
+    }
+  });
+
+  if (activity.isActive()) void run();
 
   return function stop(): void {
     stopped = true;
+    unsubscribe();
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;

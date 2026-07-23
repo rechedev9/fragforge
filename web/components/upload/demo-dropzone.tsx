@@ -79,7 +79,11 @@ export function DemoDropzone({ onFiles }: DemoDropzoneProps) {
         />
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-x-[18%] top-0 h-32 bg-primary/[0.08] opacity-70 blur-[70px] transition-opacity duration-200 group-hover:opacity-100"
+          className="pointer-events-none absolute inset-x-[18%] top-0 h-32 opacity-70 transition-opacity duration-200 group-hover:opacity-100"
+          style={{
+            background:
+              'radial-gradient(ellipse at top, color-mix(in oklch, var(--primary) 8%, transparent), transparent 72%)',
+          }}
         />
 
         <span className="relative z-10 mb-5 inline-flex items-center gap-2 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.2em] text-primary/85">

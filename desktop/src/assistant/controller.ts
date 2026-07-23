@@ -39,6 +39,8 @@ const INTERRUPT_TIMEOUT_MS = 5_000;
 const TURN_TIMEOUT_MS = 5 * 60_000;
 const STATE_WATCH_INTERVAL_MS = 3_000;
 const STATE_WATCH_TIMEOUT_MS = 2 * 60 * 60_000;
+const FOREGROUND_HIBERNATE_MS = 120_000;
+const BACKGROUND_HIBERNATE_MS = 15_000;
 const MAX_ACTION_CARDS = 16;
 const MAX_STATE_WATCHES = 4;
 const MAX_MESSAGE_CONTENT_LENGTH = 12_000;
@@ -263,6 +265,8 @@ export interface AssistantControllerOptions {
   appServerOptions?: Omit<CodexAppServerClientOptions,
     'clientInfo' | 'cwd' | 'dynamicTools' | 'onAgentMessageDelta' | 'onDiagnostic' | 'onDynamicToolCall' | 'onError' | 'onNotification' | 'onStatus' | 'onTurnCompleted' | 'onTurnStarted'>;
   interruptTimeoutMs?: number;
+  foregroundHibernateMs?: number;
+  backgroundHibernateMs?: number;
   version?: string;
   turnTimeoutMs?: number;
 }
@@ -279,6 +283,8 @@ export class AssistantController {
   readonly #gateway: OperationGateway;
   readonly #history: AssistantHistoryStore;
   readonly #interruptTimeoutMs: number;
+  readonly #foregroundHibernateMs: number;
+  readonly #backgroundHibernateMs: number;
   readonly #log: ((message: string) => void) | undefined;
   readonly #onEvent: ((event: AssistantEvent) => void) | undefined;
   readonly #openAuthURL: (url: string) => Promise<void>;
@@ -296,7 +302,7 @@ export class AssistantController {
   readonly #stateWatches = new Map<string, PendingStateWatch>();
   #appServer: CodexAppServer | null = null;
   #account: AssistantSnapshot['account'] = { status: 'checking' };
-  #availability: AssistantSnapshot['availability'] = 'starting';
+  #availability: AssistantSnapshot['availability'] = 'sleeping';
   #busy = false;
   #closed = false;
   #error: string | undefined;
@@ -316,6 +322,8 @@ export class AssistantController {
   readonly #turnOutcomes = new Map<number, TurnOutcome>();
   #turnGeneration = 0;
   #turnTimeout: NodeJS.Timeout | null = null;
+  #hibernateTimer: NodeJS.Timeout | null = null;
+  #windowActive = true;
 
   constructor(options: AssistantControllerOptions) {
     this.#appServerOptions = options.appServerOptions;
@@ -324,6 +332,8 @@ export class AssistantController {
     this.#gateway = options.gateway;
     this.#history = options.history;
     this.#interruptTimeoutMs = positiveDuration(options.interruptTimeoutMs ?? INTERRUPT_TIMEOUT_MS, 'interruptTimeoutMs');
+    this.#foregroundHibernateMs = positiveDuration(options.foregroundHibernateMs ?? FOREGROUND_HIBERNATE_MS, 'foregroundHibernateMs');
+    this.#backgroundHibernateMs = positiveDuration(options.backgroundHibernateMs ?? BACKGROUND_HIBERNATE_MS, 'backgroundHibernateMs');
     this.#log = options.log;
     this.#onEvent = options.onEvent;
     this.#openAuthURL = options.openAuthURL ?? (() => Promise.reject(new Error('OAuth browser opener is unavailable')));
@@ -336,8 +346,17 @@ export class AssistantController {
   }
 
   async status(): Promise<AssistantSnapshot> {
-    await this.#ensureReady();
+    await this.#loadHistory();
     return this.snapshot();
+  }
+
+  async wake(): Promise<void> {
+    await this.#ensureReady();
+  }
+
+  setWindowActive(active: boolean): void {
+    this.#windowActive = active;
+    this.#scheduleHibernate();
   }
 
   snapshot(): AssistantSnapshot {
@@ -623,10 +642,6 @@ export class AssistantController {
     this.#clearActions();
     await this.#history.save({ messages: [] });
     this.#publish();
-    if (this.#availability !== 'ready' || this.#appServer === null) {
-      await this.#ensureReady();
-      if (this.#availability !== 'ready' || this.#appServer === null) throw new Error('FragForge Agent is not available');
-    }
   }
 
   async clearHistory(): Promise<void> {
@@ -698,6 +713,7 @@ export class AssistantController {
     this.#clearStateWatches();
     this.#clearActions();
     this.#clearTurnTimeout();
+    this.#clearHibernateTimer();
     this.#appServer?.close();
     this.#appServer = null;
   }
@@ -710,6 +726,7 @@ export class AssistantController {
     this.#publish();
     this.#initializing = this.#start().finally(() => {
       this.#initializing = null;
+      this.#scheduleHibernate();
     });
     return this.#initializing;
   }
@@ -1489,6 +1506,52 @@ export class AssistantController {
     } catch {
       // Renderer delivery cannot change whether an action is approved or run.
     }
+    this.#scheduleHibernate();
+  }
+
+  #scheduleHibernate(): void {
+    this.#clearHibernateTimer();
+    if (this.#closed
+      || this.#availability !== 'ready'
+      || this.#appServer === null
+      || this.#busy
+      || this.#initializing !== null
+      || this.#loginID !== null
+      || this.#account.status === 'signing-in'
+      || this.#pendingActions.size > 0
+      || this.#stateWatches.size > 0) return;
+    const delay = this.#windowActive ? this.#foregroundHibernateMs : this.#backgroundHibernateMs;
+    this.#hibernateTimer = setTimeout(() => this.#hibernate(), delay);
+    this.#hibernateTimer.unref();
+  }
+
+  #clearHibernateTimer(): void {
+    if (this.#hibernateTimer === null) return;
+    clearTimeout(this.#hibernateTimer);
+    this.#hibernateTimer = null;
+  }
+
+  #hibernate(): void {
+    this.#hibernateTimer = null;
+    if (this.#closed
+      || this.#availability !== 'ready'
+      || this.#appServer === null
+      || this.#busy
+      || this.#initializing !== null
+      || this.#loginID !== null
+      || this.#pendingActions.size > 0
+      || this.#stateWatches.size > 0) {
+      this.#scheduleHibernate();
+      return;
+    }
+    const appServer = this.#appServer;
+    this.#appServer = null;
+    this.#appServerGeneration += 1;
+    this.#threadAttached = false;
+    this.#availability = 'sleeping';
+    this.#error = undefined;
+    appServer.close();
+    this.#publish();
   }
 
   async #saveHistory(): Promise<void> {

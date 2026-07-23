@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Twitch } from 'lucide-react';
 import { streamsApi, type KillfeedKill, type NormalizedRect, type StreamClipRange, type StreamVariant } from '@/lib/api/streams';
 import { DEFAULT_OVERLAY_FONT_SIZE } from '@/lib/clip-edit';
+import { StreamFrameCanvas, useStreamFrame } from '@/components/streams/stream-frame-session';
 import {
   activeTextOverlays,
-  calculateCropCoverGeometry,
   clampStreamerBannerPosition,
   killfeedBaseTopPixels,
   killfeedKillsForCue,
@@ -25,9 +25,6 @@ const EMPTY_CLIPS: StreamClipRange[] = [];
 const PREVIEW_WIDTH = 1080;
 const PREVIEW_HEIGHT = 1920;
 const KILLFEED_WIDTH = 930;
-const LAST_FRAME_MARGIN_SECONDS = 0.001;
-const SEEK_TOLERANCE_SECONDS = 0.005;
-const HAVE_METADATA = 1;
 
 const PREVIEW_LAYOUTS: Record<
   StreamVariant,
@@ -46,82 +43,30 @@ const PREVIEW_LAYOUTS: Record<
   },
 };
 
-function seekToFrame(video: HTMLVideoElement, seconds: number): void {
-  const requested = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
-  const lastFrame = Number.isFinite(video.duration) && video.duration > 0
-    ? Math.max(0, video.duration - LAST_FRAME_MARGIN_SECONDS)
-    : requested;
-  const target = Math.min(requested, lastFrame);
-  if (Math.abs(video.currentTime - target) > SEEK_TOLERANCE_SECONDS) {
-    video.currentTime = target;
-  }
-  video.pause();
-}
-
-function useControlledVideoFrame(frameSeconds: number, videoSrc: string) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video && video.readyState >= HAVE_METADATA) {
-      seekToFrame(video, frameSeconds);
-    }
-  }, [frameSeconds, videoSrc]);
-  return videoRef;
-}
-
 /**
  * Renders one output band with the same geometry as FFmpeg: crop the source
  * rect, scale it proportionally until it covers the band, then center-crop the
  * excess. The video element itself always keeps the source aspect ratio.
  */
 function CroppedFrame({
-  videoSrc,
   rect,
   output,
   band,
-  frameSeconds,
   className,
-  onMediaError,
 }: {
-  videoSrc: string;
   rect: NormalizedRect;
   output: FrameSize;
   band: 'facecam' | 'gameplay';
-  frameSeconds: number;
   className?: string;
-  onMediaError?: () => void;
 }) {
-  const [source, setSource] = useState<FrameSize | null>(null);
-  const videoRef = useControlledVideoFrame(frameSeconds, videoSrc);
-  const geometry = source ? calculateCropCoverGeometry(rect, source, output) : null;
-
   return (
     <div className={className} style={{ overflow: 'hidden', position: 'relative' }} data-preview-band={band}>
-      <video
-        ref={videoRef}
-        src={videoSrc}
-        muted
-        playsInline
-        preload="auto"
-        aria-hidden="true"
-        data-stream-frame={`preview-${band}`}
-        onError={onMediaError}
-        onLoadedMetadata={(event) => {
-          const video = event.currentTarget;
-          if (video.videoWidth > 0 && video.videoHeight > 0) {
-            setSource({ width: video.videoWidth, height: video.videoHeight });
-          }
-          seekToFrame(video, frameSeconds);
-        }}
-        onSeeked={(event) => event.currentTarget.pause()}
-        style={{
-          position: 'absolute',
-          width: geometry ? `${geometry.widthPercent}%` : '100%',
-          height: geometry ? `${geometry.heightPercent}%` : '100%',
-          left: geometry ? `${geometry.leftPercent}%` : '0',
-          top: geometry ? `${geometry.topPercent}%` : '0',
-          maxWidth: 'none',
-        }}
+      <StreamFrameCanvas
+        mode="cover"
+        rect={rect}
+        outputWidth={output.width}
+        outputHeight={output.height}
+        className="absolute inset-0 h-full w-full"
       />
     </div>
   );
@@ -133,24 +78,52 @@ function CroppedFrame({
  * scaled to the backend's fixed 930-pixel width and proportional even height.
  */
 function KillfeedOverlayFrame({
-  videoSrc,
   rect,
-  frameSeconds,
+  sampleSeconds,
   topPixels,
   visible,
-  onMediaError,
 }: {
-  videoSrc: string;
   rect: NormalizedRect;
-  frameSeconds: number;
+  sampleSeconds: number;
   topPixels: number;
   visible: boolean;
-  onMediaError?: () => void;
 }) {
-  const [source, setSource] = useState<FrameSize | null>(null);
-  const videoRef = useControlledVideoFrame(frameSeconds, videoSrc);
+  const frame = useStreamFrame();
+  const requestSnapshot = frame.requestSnapshot;
+  const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
+  const bitmapRef = useRef<ImageBitmap | null>(null);
+  const source = frame.sourceWidth > 0 && frame.sourceHeight > 0
+    ? { width: frame.sourceWidth, height: frame.sourceHeight }
+    : null;
   const outputHeight = source ? proportionalEvenKillfeedHeight(rect, source) : null;
-  const hasValidCrop = rect.width > 0 && rect.height > 0;
+
+  useEffect(() => {
+    if (!visible || outputHeight === null) {
+      setBitmap((current) => {
+        current?.close();
+        bitmapRef.current = null;
+        return null;
+      });
+      return;
+    }
+    let cancelled = false;
+    void requestSnapshot(sampleSeconds, rect, KILLFEED_WIDTH, outputHeight).then((next) => {
+      if (cancelled) {
+        next?.close();
+        return;
+      }
+      setBitmap((current) => {
+        current?.close();
+        bitmapRef.current = next;
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [outputHeight, rect, requestSnapshot, sampleSeconds, visible]);
+
+  useEffect(() => () => bitmapRef.current?.close(), []);
 
   return (
     <div
@@ -165,34 +138,21 @@ function KillfeedOverlayFrame({
         top: `${(topPixels * 100) / PREVIEW_HEIGHT}%`,
       }}
     >
-      <video
-        ref={videoRef}
-        src={videoSrc}
-        muted
-        playsInline
-        preload="auto"
-        aria-hidden="true"
-        data-stream-frame="preview-killfeed"
-        onError={onMediaError}
-        onLoadedMetadata={(event) => {
-          const video = event.currentTarget;
-          if (video.videoWidth > 0 && video.videoHeight > 0) {
-            setSource({ width: video.videoWidth, height: video.videoHeight });
-          }
-          seekToFrame(video, frameSeconds);
-        }}
-        onSeeked={(event) => event.currentTarget.pause()}
-        style={{
-          position: 'absolute',
-          width: hasValidCrop ? `${100 / rect.width}%` : '100%',
-          height: hasValidCrop ? `${100 / rect.height}%` : '100%',
-          left: hasValidCrop ? `${(-rect.x * 100) / rect.width}%` : '0',
-          top: hasValidCrop ? `${(-rect.y * 100) / rect.height}%` : '0',
-          maxWidth: 'none',
-        }}
-      />
+      {bitmap ? <FrozenFrameCanvas bitmap={bitmap} /> : null}
     </div>
   );
+}
+
+function FrozenFrameCanvas({ bitmap }: { bitmap: ImageBitmap }): ReactNode {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext('2d', { alpha: false })?.drawImage(bitmap, 0, 0);
+  }, [bitmap]);
+  return <canvas ref={canvasRef} aria-hidden className="absolute inset-0 h-full w-full" />;
 }
 
 /**
@@ -299,7 +259,6 @@ function SyntheticKillfeedNotices({
  * render variant registry in internal/streamclips.
  */
 export function StreamPreview({
-  videoSrc,
   variant,
   faceCrop,
   gameplayCrop,
@@ -311,9 +270,7 @@ export function StreamPreview({
   streamerSlideEnabled = false,
   onStreamerPositionChange,
   disabled = false,
-  onMediaError,
 }: {
-  videoSrc: string;
   variant: StreamVariant;
   faceCrop?: NormalizedRect;
   gameplayCrop?: NormalizedRect;
@@ -325,7 +282,6 @@ export function StreamPreview({
   streamerSlideEnabled?: boolean;
   onStreamerPositionChange?: (position: number) => void;
   disabled?: boolean;
-  onMediaError?: () => void;
 }): ReactNode {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startClientY: number; startPosition: number } | null>(null);
@@ -385,25 +341,19 @@ export function StreamPreview({
         {faceLayout ? (
           <div style={{ height: `${facePct}%` }} className="w-full">
             <CroppedFrame
-              videoSrc={videoSrc}
               rect={faceCrop ?? FULL_FRAME}
               output={faceLayout}
               band="facecam"
-              frameSeconds={frameSeconds}
               className="h-full w-full"
-              onMediaError={onMediaError}
             />
           </div>
         ) : null}
         <div style={{ height: faceLayout ? `${100 - facePct}%` : '100%' }} className="w-full">
           <CroppedFrame
-            videoSrc={videoSrc}
             rect={gameplay}
             output={layout.gameplay}
             band="gameplay"
-            frameSeconds={frameSeconds}
             className="h-full w-full"
-            onMediaError={onMediaError}
           />
         </div>
       </div>
@@ -412,12 +362,10 @@ export function StreamPreview({
       ) : null}
       {killfeedCrop && activeKills.length === 0 ? (
         <KillfeedOverlayFrame
-          videoSrc={videoSrc}
           rect={killfeedCrop}
-          frameSeconds={activeKillfeedCue === null ? frameSeconds : killfeedSampleFrameSeconds(clips, activeKillfeedCue)}
+          sampleSeconds={activeKillfeedCue === null ? frameSeconds : killfeedSampleFrameSeconds(clips, activeKillfeedCue)}
           topPixels={killfeedTop}
           visible={activeKillfeedCue !== null}
-          onMediaError={onMediaError}
         />
       ) : null}
       {activeOverlays.map((overlay, i) => (
@@ -465,7 +413,7 @@ export function StreamPreview({
       ) : null}
       <style>{`
         .streamer-banner-slide-preview {
-          animation: streamer-banner-slide-preview 2.8s ease-in-out infinite;
+          animation: streamer-banner-slide-preview 2.8s ease-in-out 1;
         }
 
         @keyframes streamer-banner-slide-preview {

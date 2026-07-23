@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { Chakra_Petch, Share_Tech_Mono } from 'next/font/google';
 import { Toaster } from '@/components/ui/sonner';
 import { ServiceWorkerCleanup } from '@/components/shell/service-worker-cleanup';
+import { WindowActivityPolicy } from '@/components/shell/window-activity-policy';
 
 const chakraPetch = Chakra_Petch({
   subsets: ['latin'],
@@ -29,9 +30,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // --font-sans/--font-mono/--font-display tokens in globals.css resolve at
     // :root (declared on <body> they would compute to guaranteed-invalid at
     // :root and the whole app would silently fall back to system fonts).
-    <html lang="es" className={`dark ${fontVars}`}>
+    <html lang="es" className={`dark ${fontVars}`} data-window-activity="active">
       <body className="neon-grid bg-background text-foreground antialiased">
         <ServiceWorkerCleanup />
+        <WindowActivityPolicy />
         {children}
         <Toaster />
       </body>

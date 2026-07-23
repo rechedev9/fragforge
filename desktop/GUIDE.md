@@ -162,6 +162,23 @@ pnpm run assemble        # builds the web + stages build-resources/
 pnpm start
 ```
 
+## Measure desktop efficiency
+
+After Studio is open, capture a 1 Hz process-tree sample without persisting
+command lines or environment data:
+
+```powershell
+.\scripts\measure-desktop-efficiency.ps1 -RootPid <electron-main-pid> -Scenario foreground-idle
+.\scripts\measure-desktop-efficiency.ps1 -RootPid <electron-main-pid> -Scenario background-idle
+.\scripts\measure-desktop-efficiency.ps1 -RootPid <electron-main-pid> -Scenario stream-static
+.\scripts\measure-desktop-efficiency.ps1 -RootPid <electron-main-pid> -Scenario stream-playback
+```
+
+Each run writes schema-versioned JSON under `desktop/e2e/artifacts/` with CPU,
+working/private memory, GPU utilization, GPU process memory, and aggregate
+roles. Use the same machine, source MP4, editor state, and 15-second duration
+when comparing builds.
+
 ## How it works
 
 `src/main.ts` (Electron main process, compiled to `dist/main.js`):

@@ -53,6 +53,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { CropPicker } from '@/components/streams/crop-picker';
+import { StreamFrameSession } from '@/components/streams/stream-frame-session';
 import { StreamPreview } from '@/components/streams/stream-preview';
 import { KillfeedKillsEditor } from '@/components/streams/killfeed-kills-editor';
 import {
@@ -999,7 +1000,7 @@ function StreamEditor({
       if (!cursor) return;
       const sourceSeconds = audio && !audio.paused
         ? audio.currentTime
-        : previewSecondsRef.current + 0.1 * cursor.playbackRate;
+        : previewSecondsRef.current + 0.125 * cursor.playbackRate;
       const next = advanceMontagePlayback(plan.clips, cursor.clipIndex, sourceSeconds);
       if (!next) {
         const restart = startMontagePlayback(plan.clips, Number.NaN);
@@ -1013,7 +1014,7 @@ function StreamEditor({
       }
       cursor = next;
       setPreviewSeconds(next.sourceSeconds);
-    }, 100);
+    }, 125);
     return () => {
       clearInterval(timer);
       audio?.pause();
@@ -1508,7 +1509,16 @@ function StreamEditor({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
+    <StreamFrameSession
+      key={previewReload}
+      videoSrc={videoSrc}
+      frameSeconds={previewSeconds}
+      onMediaError={() => {
+        setPreviewPlaying(false);
+        setPreviewError('No se pudo decodificar o leer el MP4 de origen. Comprueba que el archivo siga disponible y reintenta la vista previa.');
+      }}
+    >
+      <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
       <div className="flex flex-col gap-[18px]">
         <div className="studio-panel flex flex-wrap items-center justify-between gap-3 p-4">
           <div className="min-w-0">
@@ -1575,7 +1585,6 @@ function StreamEditor({
                   Recorte de facecam: arrastra para mover o usa las flechas; ajusta la esquina para redimensionar
                 </Label>
                 <CropPicker
-                  videoSrc={videoSrc}
                   rect={plan.face_crop ?? DEFAULT_FACE_CROP}
                   onChange={setFaceCrop}
                   kind="facecam"
@@ -1709,7 +1718,6 @@ function StreamEditor({
                     </p>
                   ) : null}
                   <CropPicker
-                    videoSrc={videoSrc}
                     rect={plan.killfeed_crop ?? DEFAULT_KILLFEED_CROP}
                     onChange={setKillfeedCrop}
                     kind="killfeed"
@@ -2042,8 +2050,6 @@ function StreamEditor({
           PREVIEW · 9:16
         </span>
         <StreamPreview
-          key={previewReload}
-          videoSrc={videoSrc}
           variant={plan.variant}
           faceCrop={plan.face_crop}
           gameplayCrop={plan.gameplay_crop}
@@ -2055,15 +2061,18 @@ function StreamEditor({
           streamerSlideEnabled={plan.streamer_banner?.slide_enabled}
           onStreamerPositionChange={setStreamerPosition}
           disabled={busy}
-          onMediaError={() => {
+        />
+        <audio
+          key={previewReload}
+          ref={previewAudioRef}
+          src={videoSrc}
+          preload="metadata"
+          onPause={() => setPreviewPlaying(false)}
+          onError={() => {
             setPreviewPlaying(false);
-            setPreviewError('No se pudo decodificar o leer el MP4 de origen. Comprueba que el archivo siga disponible y reintenta la vista previa.');
+            setPreviewError('No se pudo decodificar la pista de audio de la preview. Revisa el MP4 y reintenta.');
           }}
         />
-        <audio key={previewReload} ref={previewAudioRef} src={videoSrc} preload="metadata" onError={() => {
-          setPreviewPlaying(false);
-          setPreviewError('No se pudo decodificar la pista de audio de la preview. Revisa el MP4 y reintenta.');
-        }} />
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -2097,7 +2106,8 @@ function StreamEditor({
           La preview replica el encuadre vertical. En cada marca: con kills confirmadas superpone la killfeed sintética nítida; sin kills congela el recorte del MP4.
         </p>
       </div>
-    </div>
+      </div>
+    </StreamFrameSession>
   );
 }
 
@@ -2731,7 +2741,12 @@ function RenderResults({
               return (
                 <div key={v.clip_id} className="flex flex-col gap-2">
                   {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video src={url} controls className="aspect-[9/16] w-full bg-black object-contain" />
+                  <video
+                    src={url}
+                    controls
+                    preload="metadata"
+                    className="aspect-[9/16] w-full bg-black object-contain"
+                  />
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm text-foreground">{v.title || v.clip_id}</span>
                     {stale ? (

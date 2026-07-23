@@ -101,7 +101,7 @@ export function RenderingCard({ video }: { video: Video }) {
   return (
     <div
       className={cn(
-        'studio-panel studio-panel-interactive flex h-full flex-col',
+        'studio-panel studio-panel-interactive studio-defer-render flex h-full flex-col',
         accentClass,
       )}
     >

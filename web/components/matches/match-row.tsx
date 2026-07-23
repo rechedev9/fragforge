@@ -43,7 +43,7 @@ export function MatchRow({ match, featured = false, onDelete, onDeleted }: Match
   return (
     <article
       className={cn(
-        'flex items-stretch gap-4 px-4 py-4 transition-colors sm:gap-5 sm:px-5',
+        'studio-defer-render flex items-stretch gap-4 px-4 py-4 transition-colors sm:gap-5 sm:px-5',
         featured
           ? 'studio-panel studio-panel-raised'
           : 'studio-panel studio-panel-interactive bg-card/80',

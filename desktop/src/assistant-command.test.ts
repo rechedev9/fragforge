@@ -48,6 +48,7 @@ test('returns the current snapshot when a controller command fails', async () =>
     },
     snapshot: () => snapshot,
     status: async () => snapshot,
+    wake: async () => {},
   }));
 
   assert.deepEqual(result, {
@@ -69,6 +70,7 @@ test('wraps status in the same terminal command result as every mutation', async
     send: async () => {},
     snapshot: () => snapshot,
     status: async () => snapshot,
+    wake: async () => {},
   }));
 
   assert.deepEqual(result, { ok: true, snapshot });
@@ -94,6 +96,7 @@ test('still returns a terminal failure when taking the fallback snapshot also fa
       throw new Error('snapshot failed');
     },
     status: async () => snapshot,
+    wake: async () => {},
   }));
 
   assert.deepEqual(result, {

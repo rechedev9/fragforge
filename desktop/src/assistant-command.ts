@@ -17,6 +17,7 @@ export interface AssistantCommandController {
   send(message: string, context: AssistantContext): Promise<void>;
   snapshot(): AssistantSnapshot;
   status(): Promise<AssistantSnapshot>;
+  wake(): Promise<void>;
 }
 
 export function assistantCommandFailure(error: string, snapshot?: AssistantSnapshot): AssistantIPCResponse {
@@ -46,6 +47,9 @@ export async function dispatchAssistantRequest(
     switch (request.action) {
       case ASSISTANT_ACTION.status:
         return { ok: true, snapshot: await controller.status() };
+      case ASSISTANT_ACTION.wake:
+        await controller.wake();
+        break;
       case ASSISTANT_ACTION.send:
         await controller.send(request.message, request.context);
         break;

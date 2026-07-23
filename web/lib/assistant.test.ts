@@ -51,6 +51,7 @@ function bridge(): FragforgeAssistantBridge {
     reject: command,
     send: command,
     status: command,
+    wake: command,
     subscribe: () => () => {},
   };
 }

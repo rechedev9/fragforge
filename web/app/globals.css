@@ -316,6 +316,14 @@
     transform: translateY(-1px);
   }
 
+  /* Large libraries can contain dozens of rich cards. Let Chromium skip
+   * layout/paint for cards outside the viewport while preserving their scroll
+   * footprint and the accessibility tree. */
+  .studio-defer-render {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 360px;
+  }
+
   @media (forced-colors: active) {
     .studio-panel,
     .studio-panel-raised {
@@ -336,7 +344,13 @@
 }
 
 .neon-pulse {
-  animation: neon-pulse 1.4s ease-in-out infinite;
+  /*
+   * Draw attention when a live state first appears, then settle to a static
+   * indicator. An infinite opacity animation keeps Chromium's compositor
+   * producing frames at the monitor refresh rate (notably expensive at 240Hz)
+   * even though no useful content changed.
+   */
+  animation: neon-pulse 1.4s steps(2, end) 3;
 }
 
 /* .neon-shimmer — barrido de progreso de las cards en render. */
@@ -357,7 +371,35 @@
     color-mix(in oklch, var(--primary) 6%, transparent),
     transparent
   );
-  animation: neon-shimmer 1.8s ease-in-out infinite;
+  animation: neon-shimmer 1.8s ease-in-out 3;
+}
+
+/* Stop every compositor-driven effect when Studio is not the active window.
+ * This also covers Tailwind/Radix animations and component-local keyframes. */
+html[data-window-activity="inactive"] *,
+html[data-window-activity="inactive"] *::before,
+html[data-window-activity="inactive"] *::after {
+  animation-play-state: paused !important;
+  transition-duration: 0s !important;
+}
+
+html[data-runtime="desktop"][data-performance-profile="efficiency"] [class*="backdrop-blur"] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-runtime="desktop"][data-performance-profile="efficiency"] .studio-panel,
+html[data-runtime="desktop"][data-performance-profile="efficiency"] .studio-panel-raised,
+html[data-runtime="desktop"][data-performance-profile="efficiency"] .neon-glow {
+  box-shadow: none !important;
+}
+
+.ff-equalizer-bar {
+  animation: ff-eq 0.9s ease-in-out infinite;
+}
+
+html[data-runtime="desktop"][data-performance-profile="efficiency"] .ff-equalizer-bar {
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

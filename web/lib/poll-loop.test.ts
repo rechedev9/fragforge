@@ -2,12 +2,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startPollLoop, type PollCadence } from './poll-loop.ts';
+import type { WindowActivity } from './window-activity.ts';
 
 // flushMicrotasks lets the pending tick promise (and its .then/catch chain)
 // settle before we advance the fake clock again.
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function activityHarness(initiallyActive: boolean): WindowActivity & { setActive(active: boolean): void } {
+  let active = initiallyActive;
+  const listeners = new Set<() => void>();
+  return {
+    isActive: () => active,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    setActive(next) {
+      active = next;
+      for (const listener of listeners) listener();
+    },
+  };
 }
 
 test('a throwing tick still schedules the next tick (the freeze bug)', async (t) => {
@@ -123,4 +140,69 @@ test('cadence selects fast vs idle delay', async (t) => {
   t.mock.timers.tick(4000);
   await flushMicrotasks();
   assert.equal(calls, 3);
+});
+
+test('inactive windows do not poll and resume immediately when activated', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const activity = activityHarness(false);
+  let calls = 0;
+  const stop = startPollLoop({
+    activity,
+    tick: async () => {
+      calls += 1;
+      return 'fast';
+    },
+    fastMs: 1000,
+    idleMs: 5000,
+  });
+  t.after(stop);
+
+  t.mock.timers.tick(10_000);
+  await flushMicrotasks();
+  assert.equal(calls, 0, 'an initially inactive window must not start polling');
+
+  activity.setActive(true);
+  await flushMicrotasks();
+  assert.equal(calls, 1, 'reactivation must refresh immediately');
+
+  activity.setActive(false);
+  t.mock.timers.tick(10_000);
+  await flushMicrotasks();
+  assert.equal(calls, 1, 'pending polls must be cancelled while inactive');
+
+  activity.setActive(true);
+  await flushMicrotasks();
+  assert.equal(calls, 2, 'each reactivation gets one immediate refresh');
+});
+
+test('reactivation during a running tick queues one immediate non-overlapping refresh', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const activity = activityHarness(true);
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const stop = startPollLoop({
+    activity,
+    tick: async () => {
+      calls += 1;
+      if (calls === 1) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return 'fast';
+    },
+    fastMs: 1_000,
+    idleMs: 5_000,
+  });
+  t.after(stop);
+
+  await flushMicrotasks();
+  activity.setActive(false);
+  activity.setActive(true);
+  assert.equal(calls, 1, 'the active tick must not overlap');
+
+  release?.();
+  await flushMicrotasks();
+  assert.equal(calls, 2, 'reactivation must run immediately after the active tick settles');
 });

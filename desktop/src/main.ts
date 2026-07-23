@@ -307,6 +307,10 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#0a0a0a',
     title: 'FragForge Studio',
     webPreferences: {
+      // Keep Chromium's timer and compositor throttling enabled whenever the
+      // window is hidden or occluded. This is explicit because disabling it on
+      // any future webContents would keep the GPU awake in the background.
+      backgroundThrottling: true,
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'),
@@ -325,6 +329,10 @@ function createWindow(): BrowserWindow {
   win.removeMenu();
   if (isMaximized) win.maximize();
   win.on('close', saveWindowBounds);
+  win.on('focus', () => assistantController?.setWindowActive(true));
+  win.on('restore', () => assistantController?.setWindowActive(true));
+  win.on('blur', () => assistantController?.setWindowActive(false));
+  win.on('minimize', () => assistantController?.setWindowActive(false));
   // The window can be destroyed (user closes it, or Chromium tears it down
   // after a fatal render-process crash) while boot() or a post-boot watcher
   // is mid-await; clearing the reference lets aliveWindow() catch every one
@@ -627,6 +635,7 @@ async function runBootAttempt(attempt: BootAttempt): Promise<void> {
     PORT: String(webPort),
     HOSTNAME: LOOPBACK_HOST,
     ORCHESTRATOR_URL: orchestratorUrl,
+    NODE_OPTIONS: '--max-old-space-size=256 --max-semi-space-size=8',
     // ProcessSession normally inherits the desktop environment. Explicitly
     // remove this server-irrelevant secret from the Next child.
     XAI_API_KEY: undefined,

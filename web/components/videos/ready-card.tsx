@@ -75,7 +75,7 @@ export function ReadyCard({
     <>
       <article
         data-slot="card"
-        className="studio-panel studio-panel-raised studio-panel-interactive flex h-full flex-col"
+        className="studio-panel studio-panel-raised studio-panel-interactive studio-defer-render flex h-full flex-col"
       >
         <div className="group relative aspect-video w-full overflow-hidden border-b border-border bg-muted">
           {video.thumbnailUrl ? (
@@ -175,6 +175,7 @@ export function ReadyCard({
               controls
               autoPlay
               playsInline
+              preload="metadata"
               className="mx-auto max-h-[72vh] w-auto rounded-lg bg-black"
             />
           ) : null}

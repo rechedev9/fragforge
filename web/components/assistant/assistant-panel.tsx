@@ -21,6 +21,7 @@ import {
   LogOut,
   MessageCircle,
   Plus,
+  Power,
   Send,
   ShieldAlert,
   Square,
@@ -101,6 +102,17 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
   const isReady = snapshot.availability === ASSISTANT_AVAILABILITY.ready && accountConnected;
   const isBusy = snapshot.busy || commandPendingCount > 0;
   const canSend = isReady && !isBusy && bridge !== null && draft.trim().length > 0;
+  const canWake = snapshot.availability === ASSISTANT_AVAILABILITY.sleeping
+    || snapshot.availability === ASSISTANT_AVAILABILITY.error
+    || snapshot.availability === ASSISTANT_AVAILABILITY.unavailable;
+
+  const wakeAgent = useCallback(async (): Promise<void> => {
+    if (bridge === null || isBusy || !canWake) return;
+    await runCommand(
+      (activeBridge) => activeBridge.wake(),
+      'No se pudo activar el agente.',
+    );
+  }, [bridge, canWake, isBusy, runCommand]);
 
   const sendMessage = useCallback(async (): Promise<void> => {
     const message = draft.trim();
@@ -248,6 +260,18 @@ export function AssistantPanel({ className }: AssistantPanelProps): ReactElement
             <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] text-muted-foreground/65">HILO ACTIVO</span>
           ) : null}
         </div>
+
+        {canWake ? (
+          <Button
+            type="button"
+            className="mt-3 w-full"
+            onClick={() => void wakeAgent()}
+            disabled={bridge === null || isBusy}
+          >
+            <Power aria-hidden />
+            Activar agente
+          </Button>
+        ) : null}
 
         <AccountConnection
           account={snapshot.account}
@@ -548,6 +572,9 @@ function AvailabilityDot({ account, availability }: { account: AssistantAccount;
   if (availability === ASSISTANT_AVAILABILITY.starting || account.status === ASSISTANT_ACCOUNT_STATUSES.signingIn) {
     return <LoaderCircle className="size-3.5 animate-spin text-primary" aria-hidden />;
   }
+  if (availability === ASSISTANT_AVAILABILITY.sleeping) {
+    return <Power className="size-3.5 text-muted-foreground" aria-hidden />;
+  }
   return <TriangleAlert className="size-3.5 text-warning" aria-hidden />;
 }
 
@@ -559,6 +586,8 @@ function availabilityLabel(availability: AssistantAvailability, account: Assista
     return 'Cuenta de Codex necesaria';
   }
   switch (availability) {
+    case ASSISTANT_AVAILABILITY.sleeping:
+      return 'Agente en reposo';
     case ASSISTANT_AVAILABILITY.starting:
       return 'Preparando agente';
     case ASSISTANT_AVAILABILITY.unavailable:
@@ -570,6 +599,7 @@ function availabilityLabel(availability: AssistantAvailability, account: Assista
 
 function composerPlaceholder(availability: AssistantAvailability, account: AssistantAccount, busy: boolean): string {
   if (busy) return 'El agente está respondiendo…';
+  if (availability === ASSISTANT_AVAILABILITY.sleeping) return 'Activa el agente para continuar.';
   if (account.status !== ASSISTANT_ACCOUNT_STATUSES.signedIn) return 'Conecta tu cuenta de Codex para empezar.';
   if (availability === ASSISTANT_AVAILABILITY.ready) return 'Dile al agente qué quieres crear…';
   if (availability === ASSISTANT_AVAILABILITY.starting) return 'Preparando agente…';

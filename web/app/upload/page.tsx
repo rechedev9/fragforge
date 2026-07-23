@@ -367,9 +367,20 @@ export default function UploadPage() {
           the Studio shell without competing with the working surface. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-52 left-1/2 h-[40rem] w-[48rem] -translate-x-1/2 rounded-full bg-primary/[0.09] blur-[180px]"
+        className="pointer-events-none absolute -top-52 left-1/2 h-[40rem] w-[48rem] -translate-x-1/2"
+        style={{
+          background:
+            'radial-gradient(ellipse at center, color-mix(in oklch, var(--primary) 9%, transparent), transparent 70%)',
+        }}
       />
-      <div aria-hidden className="pointer-events-none absolute top-[38rem] -right-40 size-[28rem] rounded-full bg-stream/[0.035] blur-[150px]" />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute top-[38rem] -right-40 size-[28rem]"
+        style={{
+          background:
+            'radial-gradient(circle at center, color-mix(in oklch, var(--stream) 3.5%, transparent), transparent 70%)',
+        }}
+      />
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-[960px] flex-col px-4 sm:px-6 lg:px-8">
         <header className="flex min-h-16 items-center justify-between border-b border-border/60 py-3">
