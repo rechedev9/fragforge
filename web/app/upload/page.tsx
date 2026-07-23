@@ -404,7 +404,7 @@ export default function UploadPage() {
             <Wordmark />
           </Link>
           <div
-            aria-current="step"
+            aria-hidden
             className="absolute inset-y-0 left-1/2 hidden -translate-x-1/2 items-center border-b-2 border-primary px-5 font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.18em] text-primary md:flex"
           >
             <CloudUpload className="mr-3 size-4" />
@@ -436,7 +436,7 @@ export default function UploadPage() {
                     return (
                       <li
                         key={step.n}
-                        className="studio-panel studio-panel-interactive relative flex min-h-[150px] items-start gap-4 p-5 sm:p-6"
+                        className="studio-panel relative flex min-h-[150px] items-start gap-4 p-5 sm:p-6"
                       >
                         <span
                           className={`grid size-12 shrink-0 place-items-center border font-[family-name:var(--font-mono)] text-base ${step.accent} ${step.badge}`}
