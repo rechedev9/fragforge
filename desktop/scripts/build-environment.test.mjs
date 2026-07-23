@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { environmentWithoutXAIAPIKey } from './build-environment.mjs';
+import {
+  environmentWithoutCodeSigningCredentials,
+  environmentWithoutXAIAPIKey,
+} from './build-environment.mjs';
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -22,6 +25,26 @@ test('removes every casing of XAI_API_KEY without mutating the build environment
   assert.equal(original[credentialName], 'uppercase');
 });
 
+test('disables code-signing discovery and strips every signing credential casing', () => {
+  const certificateName = ['CSC', 'LINK'].join('_');
+  const passwordName = ['CSC', 'KEY', 'PASSWORD'].join('_');
+  const windowsCertificateName = ['WIN', 'CSC', 'LINK'].join('_');
+  const windowsPasswordName = ['WIN', 'CSC', 'KEY', 'PASSWORD'].join('_');
+  const original = {
+    [certificateName]: 'certificate-input',
+    KEEP_ME: 'yes',
+    [passwordName.toLowerCase()]: 'password-input',
+    [windowsCertificateName]: 'windows-certificate-input',
+    [windowsPasswordName.toLowerCase()]: 'windows-password-input',
+  };
+
+  assert.deepEqual(environmentWithoutCodeSigningCredentials(original), {
+    CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+    KEEP_ME: 'yes',
+  });
+  assert.equal(original[certificateName], 'certificate-input');
+});
+
 test('desktop manifest exposes one credential-free distribution path', () => {
   const manifest = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8'));
   const scripts = manifest.scripts;
@@ -29,9 +52,6 @@ test('desktop manifest exposes one credential-free distribution path', () => {
 
   assert.equal(scripts.assemble, 'node scripts/assemble.mjs');
   assert.equal(scripts.dist, 'node scripts/dist.mjs');
-  assert.equal(manifest.build.forceCodeSigning, true);
-  assert.deepEqual(manifest.build.win.signtoolOptions.signingHashAlgorithms, ['sha256']);
-  assert.equal(typeof manifest.build.win.signtoolOptions.rfc3161TimeStampServer, 'string');
   assert.equal(Object.keys(scripts).some((name) => name.includes('team')), false);
   assert.equal(
     resources.some((resource) => /(?:credential|xai-api-key)/i.test(`${resource.from} ${resource.to}`)),

@@ -118,16 +118,6 @@ subprocesses.
 
 Prerequisites: Go 1.26+, Node.js + pnpm, and the web deps installed.
 
-Release packaging additionally requires Authenticode material supplied by the
-release environment, never by the repository:
-
-- `WIN_CSC_LINK` or `CSC_LINK`: protected certificate/PFX input understood by
-  electron-builder.
-- `WIN_CSC_KEY_PASSWORD` or `CSC_KEY_PASSWORD`: its secret supplied by the
-  authorized release secret store.
-- `FRAGFORGE_AUTHENTICODE_SUBJECT`: the exact public subject expected on the
-  produced installer.
-
 ```powershell
 # 1. From the repo root: build the Go binaries.
 .\scripts\build.ps1
@@ -147,10 +137,7 @@ standalone server into `build-resources/`), then `electron-builder` produces the
 installer under `dist-installer/` (`FragForge Studio Setup <version>.exe`,
 where `<version>` is the `version` field in `desktop/package.json`). The
 distribution command verifies the packaged HLAE archive, installer, blockmap,
-and checksums before returning success. It also fails before building when the
-signing configuration is absent, requires SHA-256 Authenticode signing with an
-RFC 3161 timestamp, verifies the installer's Windows trust result and exact
-publisher, and writes `AUTHENTICODE_PUBLISHER.json` beside the artifacts.
+and checksums before returning success.
 The app icon lives at `build/icon.ico`, which electron-builder picks up
 automatically;
 `assemble.mjs` fails fast if it's missing. `zv-orchestrator.exe`,
@@ -165,11 +152,14 @@ stage or declare a credential resource. Users configure credentials after
 installation through `/settings`, where Windows DPAPI protects them per user.
 
 The distribution command also creates `dist-installer/SHA256SUMS.txt` for the
-installer, its blockmap, and `AUTHENTICODE_PUBLISHER.json`, then verifies all
-three before returning success. `pnpm run verify:dist-integrity` repeats both
-the Authenticode/publisher verification and checksum verification in a fresh
-Node process; it needs only the public `FRAGFORGE_AUTHENTICODE_SUBJECT`, never
-the signing credential. Publish all four files together in GitHub Releases.
+installer and its blockmap, then verifies both before returning success.
+`pnpm run verify:dist-integrity` repeats checksum verification in a fresh Node
+process. Publish all three files together in GitHub Releases.
+
+The current installer is unsigned, so Windows SmartScreen can show an
+"unknown publisher" prompt on first run. Choose "More info" and then "Run
+anyway". Public code signing remains a tracked release-hardening task and must
+not block the established versioned installer flow.
 
 ## Run without packaging (dev)
 

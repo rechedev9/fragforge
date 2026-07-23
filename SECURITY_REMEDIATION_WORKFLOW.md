@@ -20,7 +20,7 @@ flowchart TD
     B1 --> C3[HTTP resource bounds]
 
     B2 --> D1[Main-owned native approval]
-    B2 --> D2[Authenticode-required release path]
+    B2 --> D2[Checksummed installer release path]
     B2 --> D3[Runtime executable digest checks]
 
     B3 --> E1[Redirect-safe orchestrator client]
@@ -82,7 +82,7 @@ Only the assigned owner edits a surface during wave 1. The coordinator resolves 
 - Persisted/public stream DTOs never contain URL userinfo or secret query material.
 - External effects scripts cannot access arbitrary files, URLs, UNC/device paths, or unbounded memory/output.
 - External commands use fixed executables and argv, never a shell-expanded string.
-- Release artifacts are rejected unless Authenticode signing is configured and the produced installer verifies.
+- Release artifacts require verified SHA-256 checksums; Authenticode remains an open hardening item.
 - Downloaded inputs are hash-verified before atomic promotion.
 
 ## Completion rule
@@ -95,7 +95,9 @@ A finding is complete only when:
 4. `SECURITY_AUDIT.md` records the fix and proof;
 5. independent review finds no actionable regression.
 
-Missing external credentials do not justify a fake success. For Authenticode, completion means the repository enforces signing and verification when producing a release; producing an actually signed installer still requires the authorized certificate/HSM at release time.
+Missing external credentials do not justify a fake success. FF-SEC-009 remains
+open until a publicly trusted signing identity is available; it does not block
+the established checksummed unsigned installer release flow.
 
 ## Execution result
 
@@ -109,7 +111,8 @@ reviewers. Reviewers found and drove corrections for:
 - HTMX upload concurrency omission;
 - post-resolution listener and shared-loopback limiter risks;
 - cross-process capability leakage in standalone and Electron launchers;
-- Authenticode credentials being scoped too broadly in CI.
+- release-signing configuration being introduced before a public signing
+  identity was available.
 
 All required local and GitHub code gates in the graph are green. The tracked
 workflow is live, administrator enforcement is enabled, Dependabot has zero
@@ -129,8 +132,8 @@ flowchart LR
 ```
 
 The remediation was committed and pushed directly to `main`, CI passed, and the
-landing was deployed automatically. No signed-installer publication was
-performed because no authorized signing identity is configured. The immutable
+landing was deployed automatically. Installer releases continue with verified
+SHA-256 checksums while FF-SEC-009 remains open. The immutable
 FFmpeg runtime archive was uploaded to the existing v2.2.12 release because the
 upstream rotating autobuild URL had already expired; its source and
 extracted-tree SHA-256 values are pinned in the desktop runtime.

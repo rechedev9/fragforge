@@ -30,7 +30,6 @@
   },
   "build": {
     "appId": "com.fragforge.studio",
-    "forceCodeSigning": true,
     "productName": "FragForge Studio",
     "directories": {
       "output": "dist-installer"
@@ -65,13 +64,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.ico",
-      "signtoolOptions": {
-        "rfc3161TimeStampServer": "http://timestamp.digicert.com",
-        "signingHashAlgorithms": [
-          "sha256"
-        ]
-      }
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

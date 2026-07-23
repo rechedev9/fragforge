@@ -3,50 +3,37 @@ import { rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { environmentWithoutXAIAPIKey } from './build-environment.mjs';
+import {
+  environmentWithoutCodeSigningCredentials,
+  environmentWithoutXAIAPIKey,
+} from './build-environment.mjs';
 import { readPinnedHLAETool, verifyBundledHLAE } from './hlae-bundle.mjs';
 import { releasePaths, verifyReleaseChecksums, writeReleaseChecksums } from './release-integrity.mjs';
-import {
-  environmentWithoutAuthenticodeCredentials,
-  requireAuthenticodeSigningConfiguration,
-  verifyAuthenticodeSignature,
-  writePublisherIdentity,
-} from './release-authenticity.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = join(here, '..');
-const {
-  artifacts: installerPaths,
-  checksum: checksumPath,
-  publisher: publisherPath,
-} = releasePaths(desktop);
+const { artifacts: installerPaths, checksum: checksumPath } = releasePaths(desktop);
 
 if (process.argv.length > 2) {
   console.error('[dist] unsupported build argument');
   process.exit(1);
 }
-const sanitizedEnvironment = environmentWithoutXAIAPIKey();
-const nonSigningEnvironment = environmentWithoutAuthenticodeCredentials(sanitizedEnvironment);
-let signing;
-try {
-  signing = requireAuthenticodeSigningConfiguration(sanitizedEnvironment);
-} catch (err) {
-  console.error(err instanceof Error ? err.message : '[dist] Authenticode configuration is invalid');
-  process.exit(1);
-}
+const sanitizedEnvironment = environmentWithoutCodeSigningCredentials(
+  environmentWithoutXAIAPIKey(),
+);
 
 // Remove stale release-shaped outputs before building the same version again.
-for (const filePath of [...installerPaths, checksumPath, publisherPath]) rmSync(filePath, { force: true });
+for (const filePath of [...installerPaths, checksumPath]) rmSync(filePath, { force: true });
 // electron-builder can otherwise retain files removed from extraFiles between
 // releases (notably the retired external assistant launcher).
 rmSync(join(desktop, 'dist-installer', 'win-unpacked'), { recursive: true, force: true });
 
 let failed = false;
 try {
-  execSync('pnpm run build', { cwd: desktop, env: nonSigningEnvironment, stdio: 'inherit' });
+  execSync('pnpm run build', { cwd: desktop, env: sanitizedEnvironment, stdio: 'inherit' });
   execSync('node scripts/assemble.mjs', {
     cwd: desktop,
-    env: nonSigningEnvironment,
+    env: sanitizedEnvironment,
     stdio: 'inherit',
   });
   execSync('electron-builder --win nsis', {
@@ -61,11 +48,8 @@ try {
   );
   await requireNonEmptyFile(installerPaths[0], 'installer');
   await requireNonEmptyFile(installerPaths[1], 'installer blockmap');
-  const signature = await verifyAuthenticodeSignature(installerPaths[0], signing.expectedSubject);
-  writePublisherIdentity(publisherPath, signature);
-  const verifiedReleaseArtifacts = [...installerPaths, publisherPath];
-  await writeReleaseChecksums(verifiedReleaseArtifacts, checksumPath);
-  await verifyReleaseChecksums(verifiedReleaseArtifacts, checksumPath);
+  await writeReleaseChecksums(installerPaths, checksumPath);
+  await verifyReleaseChecksums(installerPaths, checksumPath);
 } catch (err) {
   failed = true;
   console.error(err instanceof Error && err.message.startsWith('[dist]')
@@ -73,7 +57,7 @@ try {
     : '[dist] build or verification failed');
 } finally {
   if (failed) {
-    for (const filePath of [...installerPaths, checksumPath, publisherPath]) rmSync(filePath, { force: true });
+    for (const filePath of [...installerPaths, checksumPath]) rmSync(filePath, { force: true });
   }
 }
 

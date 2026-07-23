@@ -192,9 +192,9 @@ jobs:
   installer-windows:
     name: desktop installer (windows-latest)
     needs: changes
-    # Pull requests and pushes exercise lint/typecheck/unit/build above. Signed
-    # packaging is an explicit release operation: a trusted manual run supplies
-    # the protected signing identity, and dist fails closed if any part is absent.
+    # Pull requests and pushes exercise lint/typecheck/unit/build above.
+    # Packaging is an explicit release operation because it downloads and stages
+    # the pinned Windows runtime bundle.
     if: needs.changes.outputs.installer_changed == 'true' && github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 30
@@ -248,14 +248,8 @@ jobs:
 
       - name: Build and verify Windows installer
         working-directory: desktop
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          FRAGFORGE_AUTHENTICODE_SUBJECT: ${{ vars.FRAGFORGE_AUTHENTICODE_SUBJECT }}
         run: pnpm run dist
 
       - name: Verify installer checksums in a fresh process
         working-directory: desktop
-        env:
-          FRAGFORGE_AUTHENTICODE_SUBJECT: ${{ vars.FRAGFORGE_AUTHENTICODE_SUBJECT }}
         run: pnpm run verify:dist-integrity
