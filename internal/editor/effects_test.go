@@ -491,8 +491,19 @@ end)
 		t.Fatalf("effects len = %d, want 1: %#v", len(effects), effects)
 	}
 	effect := effects[0]
-	if effect.Type != EffectImage || effect.Path != imagePath || effect.Width != 720 {
+	if effect.Type != EffectImage || effect.Width != 720 {
 		t.Fatalf("image effect = %#v", effect)
+	}
+	wantInfo, err := os.Stat(imagePath)
+	if err != nil {
+		t.Fatalf("Stat expected image: %v", err)
+	}
+	gotInfo, err := os.Stat(effect.Path)
+	if err != nil {
+		t.Fatalf("Stat resolved image: %v", err)
+	}
+	if !os.SameFile(wantInfo, gotInfo) {
+		t.Fatalf("resolved image %q is not the source image %q", effect.Path, imagePath)
 	}
 	if effect.StartSeconds != 0 || effect.EndSeconds != 6 {
 		t.Fatalf("image window = %.3f-%.3f", effect.StartSeconds, effect.EndSeconds)
