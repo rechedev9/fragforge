@@ -3,7 +3,20 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, ArrowLeft, CheckCircle2, FileVideo, Loader2, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle2,
+  CloudUpload,
+  Cog,
+  FileVideo,
+  Info,
+  Loader2,
+  LockKeyhole,
+  Monitor,
+  Play,
+  X,
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import { SERVICE_UNAVAILABLE_CODE } from '@/lib/api/types';
 import type { DemoPlayer, RosterMatch } from '@/lib/api/types';
@@ -62,6 +75,7 @@ function rowLabel(row: Extract<ScanRow, { status: 'scanned' }>): string {
 const PIPELINE_STEPS = [
   {
     n: '01',
+    icon: Cog,
     accent: 'text-primary',
     badge: 'border-primary/35 bg-primary/10',
     title: 'ANÁLISIS AUTOMÁTICO',
@@ -69,6 +83,7 @@ const PIPELINE_STEPS = [
   },
   {
     n: '02',
+    icon: Play,
     accent: 'text-primary',
     badge: 'border-primary/35 bg-primary/10',
     title: 'ELIGES LAS JUGADAS',
@@ -76,6 +91,7 @@ const PIPELINE_STEPS = [
   },
   {
     n: '03',
+    icon: Monitor,
     accent: 'text-primary',
     badge: 'border-primary/35 bg-primary/10',
     title: 'RENDER EN TU RIG',
@@ -382,11 +398,18 @@ export default function UploadPage() {
         }}
       />
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[960px] flex-col px-4 sm:px-6 lg:px-8">
-        <header className="flex min-h-16 items-center justify-between border-b border-border/60 py-3">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[1536px] flex-col px-4 sm:px-6 lg:px-12">
+        <header className="relative flex min-h-[68px] items-center justify-between border-b border-border/60 py-3">
           <Link href={homeHref} aria-label="Inicio de FragForge">
             <Wordmark />
           </Link>
+          <div
+            aria-hidden
+            className="absolute inset-y-0 left-1/2 hidden -translate-x-1/2 items-center border-b-2 border-primary px-5 font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.18em] text-primary md:flex"
+          >
+            <CloudUpload className="mr-3 size-4" />
+            {NAV.number} — {NAV.label}
+          </div>
           <Button variant="ghost" size="sm" asChild className="text-muted-foreground hover:text-foreground">
             <Link href={homeHref}>
               <ArrowLeft className="size-4" />
@@ -395,7 +418,7 @@ export default function UploadPage() {
           </Button>
         </header>
 
-        <div className="flex flex-1 flex-col py-8 sm:py-10">
+        <div className="flex flex-1 flex-col py-8 sm:py-10 lg:py-9">
           <StudioPageHeader number={Number(NAV.number)} label={headerLabel} title={headerTitle} description={headerDescription} />
 
           <div className="mt-7 sm:mt-8">
@@ -407,22 +430,37 @@ export default function UploadPage() {
                     {error}
                   </p>
                 ) : null}
-                <ol aria-label="Cómo funciona" className="mt-2 grid gap-3 md:grid-cols-3">
-                  {PIPELINE_STEPS.map((step) => (
-                    <li key={step.n} className="studio-panel flex min-h-[132px] items-start gap-3.5 p-4 sm:p-5">
-                      <span
-                        className={`grid size-9 shrink-0 place-items-center border font-[family-name:var(--font-mono)] text-sm ${step.accent} ${step.badge}`}
+                <ol aria-label="Cómo funciona" className="mt-2 grid gap-4 lg:grid-cols-3">
+                  {PIPELINE_STEPS.map((step, index) => {
+                    const StepIcon = step.icon;
+                    return (
+                      <li
+                        key={step.n}
+                        className="studio-panel relative flex min-h-[150px] items-start gap-4 p-5 sm:p-6"
                       >
-                        {step.n}
-                      </span>
-                      <div className="min-w-0">
-                        <h2 className="font-[family-name:var(--font-display)] text-sm font-bold leading-5 text-foreground">
-                          {step.title}
-                        </h2>
-                        <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">{step.copy}</p>
-                      </div>
-                    </li>
-                  ))}
+                        <span
+                          className={`grid size-12 shrink-0 place-items-center border font-[family-name:var(--font-mono)] text-base ${step.accent} ${step.badge}`}
+                        >
+                          {step.n}
+                        </span>
+                        <div className="min-w-0">
+                          <h2 className="flex items-center gap-2.5 font-[family-name:var(--font-display)] text-base font-bold leading-6 text-foreground">
+                            <StepIcon className="size-5 text-primary" strokeWidth={1.7} />
+                            {step.title}
+                          </h2>
+                          <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.copy}</p>
+                        </div>
+                        {index < PIPELINE_STEPS.length - 1 ? (
+                          <span
+                            aria-hidden
+                            className="absolute -right-[17px] top-1/2 z-10 hidden -translate-y-1/2 bg-background px-1 font-[family-name:var(--font-mono)] text-primary xl:block"
+                          >
+                            →
+                          </span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ol>
               </div>
             ) : (
@@ -449,8 +487,19 @@ export default function UploadPage() {
           </div>
         </div>
 
-        <footer className="flex min-h-16 items-center border-t border-border/60 py-4 font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.18em] text-muted-foreground/80">
-          TÚ PONES EL PC Y LA GPU · NOSOTROS EL RESTO
+        <footer className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-t border-border/60 py-4 font-[family-name:var(--font-mono)] text-xs uppercase tracking-[0.14em] text-muted-foreground">
+          <span className="inline-flex items-center gap-3">
+            <LockKeyhole className="size-4 text-primary" />
+            <strong className="font-normal text-primary">Procesamiento local y privado</strong>
+            <span className="hidden text-border sm:inline">|</span>
+            <span className="hidden sm:inline">Tus archivos, tu equipo, tu control.</span>
+          </span>
+          <span className="inline-flex items-center gap-3">
+            <Info className="size-4" />
+            Formato: .dem
+            <span className="text-border">|</span>
+            Máx. 10 demos
+          </span>
         </footer>
       </div>
     </main>
