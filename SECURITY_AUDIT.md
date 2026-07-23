@@ -231,12 +231,12 @@ actionable code findings were corrected before the final gates.
 | FF-SEC-011 | Closed in code and verified | Source/AST/callback/execution/effect/string/stack/registry/time limits are enforced. Loops, named/nested functions, dynamic loaders, Base/Table libraries, and unbounded string helpers are unavailable. Adversarial tests and the full editor suite pass. |
 | FF-SEC-012 | Closed in code and verified | Image inputs must be regular files canonically contained below the external script directory; absolute, drive, URL, UNC/device, parent, and symlink escapes are rejected. |
 | FF-SEC-013 | Closed in code and verified | Bash and PowerShell launchers revalidate cache hashes, discard unpinned entries, download to same-directory temporaries, verify before media probing, and promote atomically. Shell/PowerShell syntax checks pass. |
-| FF-SEC-014 | Code/settings applied; publication pending | CI includes PR gates, audits, govulncheck, gosec, and gitleaks. GitHub now has Dependabot alerts/security updates, secret scanning/push protection, strict required checks, linear history, and force-push/delete disabled. The new workflow is not live until commit/push; admin enforcement remains off until its new check contexts exist. |
+| FF-SEC-014 | Closed and verified | CI is live with blocking Go, Desktop, Web, Landing, vulnerability, and secret gates. Run `30026064620` passed on `main`. Dependabot has zero open alerts; alerts/security updates, secret scanning/push protection, strict required checks, admin enforcement, linear history, and force-push/delete protection are enabled. |
 | FF-SEC-015 | Closed in code and verified | Root and landing ignore environment-secret files. |
 | FF-SEC-016 | Closed in code and verified | Limiter implementation has TTL, a 4096-bucket cap, oldest eviction, and IPv6 `/64` aggregation. Production is loopback-only and does not enable the shared loopback bucket, avoiding unauthenticated starvation. |
 | FF-SEC-017 | Closed in code and verified | HTTP read/control deadlines and two-slot multipart concurrency cover API, HTMX `/ui/jobs`, stream, and voice-profile uploads; media responses remain client-paced. Full Go and race gates pass. |
 | FF-SEC-018 | Closed in code and verified | Cache reuse is rooted in code-pinned archive and canonical extracted-tree SHA-256 values, not the writable marker. A forged executable plus matching marker is rejected. HLAE and the immutable FragForge FFmpeg release asset were independently extracted and matched their pinned tree digests; desktop tests pass. |
-| FF-SEC-019 | Implemented and built; hosted deployment pending | Web and landing configurations emit CSP, nosniff, frame, referrer, permissions, and powered-by protections. Local production builds pass; the currently hosted landing still lacks these headers until the tracked change is published and deployed. |
+| FF-SEC-019 | Closed and verified | Web and landing emit CSP, nosniff, frame, referrer, permissions, and powered-by protections. Vercel deployed `main`; a live `https://fragforge.gravityroom.app/` probe returned the expected CSP, HSTS, `nosniff`, `DENY`, referrer, and permissions headers. |
 
 ### Post-remediation verification
 
@@ -251,10 +251,11 @@ actionable code findings were corrected before the final gates.
 | `scripts/ci-check.sh` / actionlint | Passed. |
 | Bash parse for `fetch-music.sh` and `run-local.sh`; PowerShell AST parse for `local-studio.ps1` | Passed. |
 | `gitleaks` v8.30.0 against a clean source-only snapshot of the current worktree | Passed: 969 tracked/non-ignored source files were copied without generated/ignored artifacts; 6.54 MB were scanned with redaction and no leaks were found. The earlier 17.12 GB whole-workspace scan was discarded as artifact noise. |
-| GitHub repository controls | Dependabot/security updates, secret scanning/push protection, and `main` protection are enabled; new check contexts await workflow publication. |
+| GitHub repository controls | Dependabot/security updates, secret scanning/push protection, strict required checks including administrators, linear history, and force-push/delete protection are enabled. CI run `30026064620` passed all required contexts. |
 | Stable FFmpeg runtime asset | Uploaded to the v2.2.12 release; source SHA-256 and extracted-tree SHA-256 match the code pins. |
 
-No capture or render was launched. No commit or push was performed. Operational
-closure of FF-SEC-009, FF-SEC-014, and FF-SEC-019 requires, respectively, an
-authorized signing identity and explicit authorization to publish the tracked
-workflow/application changes and deploy the landing.
+No capture or render was launched. The remediation, dependency patches, and
+Windows CI regression fix were committed and pushed directly to `main`; Vercel
+deployed the landing automatically. FF-SEC-009 is the only remaining operational
+item: replacing the existing unsigned installer requires an authorized
+Authenticode certificate/HSM and its exact expected subject.

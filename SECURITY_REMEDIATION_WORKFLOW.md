@@ -111,22 +111,26 @@ reviewers. Reviewers found and drove corrections for:
 - cross-process capability leakage in standalone and Electron launchers;
 - Authenticode credentials being scoped too broadly in CI.
 
-All code gates in the graph are now green. The implementation state and proof
-for every finding are recorded in `SECURITY_AUDIT.md`.
+All required local and GitHub code gates in the graph are green. The tracked
+workflow is live, administrator enforcement is enabled, Dependabot has zero
+open alerts, and Vercel serves the landing security headers. The implementation
+state and proof for every finding are recorded in `SECURITY_AUDIT.md`.
 
-Three operational nodes remain outside the uncommitted worktree:
+One operational node remains outside the repository:
 
 ```mermaid
 flowchart LR
-    C[Tracked fixes verified] --> P[Explicit commit/push authorization]
-    P --> W[New CI contexts execute on GitHub]
-    W --> A[Enable admin enforcement]
-    P --> L[Deploy landing security headers]
+    C[Tracked fixes verified] --> P[Published to main]
+    P --> W[Required CI contexts passed]
+    W --> A[Admin enforcement enabled]
+    P --> L[Landing headers deployed and probed]
     S[Authorized Authenticode certificate/HSM] --> I[Build and verify signed installer]
     I --> R[Replace unsigned public installer]
 ```
 
-No commit, push, landing deployment, or signed-installer publication was
-performed. The immutable FFmpeg runtime archive was uploaded to the existing
-v2.2.12 release because the upstream rotating autobuild URL had already expired;
-its source and extracted-tree SHA-256 values are pinned in the desktop runtime.
+The remediation was committed and pushed directly to `main`, CI passed, and the
+landing was deployed automatically. No signed-installer publication was
+performed because no authorized signing identity is configured. The immutable
+FFmpeg runtime archive was uploaded to the existing v2.2.12 release because the
+upstream rotating autobuild URL had already expired; its source and
+extracted-tree SHA-256 values are pinned in the desktop runtime.
