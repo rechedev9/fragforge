@@ -181,7 +181,7 @@ The immediate containment work is therefore to authenticate every loopback API r
 - Direct Lua `os`/`io`/`package`/`debug` escape: the VM uses `SkipOpenLibs`, opens a narrow library set, and removes `dofile`, `loadfile`, and `require`.
 - Archive extraction/Zip Slip: no user archive extraction path exists in the audited media pipeline; pinned HLAE extraction is hash-gated.
 - Electron generic IPC, navigation, and permissions: sandbox/context isolation are enabled, popups/navigation are denied or constrained, and IPC payloads/senders are checked.
-- Desktop build-only `brace-expansion`/`fast-uri` advisories: no attacker-controlled build input was demonstrated and `pnpm audit --prod` is clean; update the build toolchain, but do not classify these as a shipped runtime exploit.
+- Desktop build-only `brace-expansion`/`fast-uri` advisories: no attacker-controlled build input was demonstrated, but the transitive resolutions were nevertheless updated to their patched versions before publication.
 - Current Next/sharp CVE-specific exploit paths: the vulnerable feature prerequisites were not found, so FF-SEC-008 is patch debt rather than proof of compromise.
 
 ## Initial verification record (pre-remediation)
@@ -245,7 +245,7 @@ actionable code findings were corrected before the final gates.
 | `scripts/go-gate.sh --no-format --build --race --security` | Passed tests, vet, `zv check`, staticcheck, builds, and full race suite. |
 | `govulncheck@v1.4.0 ./...` | No vulnerabilities found. |
 | `gosec@v2.28.0` with the CI-documented false-positive families excluded | 221 files, 57,768 lines, zero issues. |
-| Desktop lint, typecheck, full unit suite, and build | Passed. |
+| Desktop lint, typecheck, full unit suite, build, and full dependency audit | Passed; no known production or development dependency vulnerabilities. |
 | Web lint, typecheck, full unit suite, build, and production audit | Passed; no known vulnerabilities. |
 | Landing build and production audit | Passed; no known vulnerabilities. |
 | `scripts/ci-check.sh` / actionlint | Passed. |

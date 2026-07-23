@@ -192,10 +192,10 @@ jobs:
   installer-windows:
     name: desktop installer (windows-latest)
     needs: changes
-    # Pull requests exercise lint/typecheck/unit/build in the desktop job.
-    # Signed packaging runs only on trusted pushes/manual runs where repository
-    # signing secrets are available; dist itself fails closed if any are absent.
-    if: needs.changes.outputs.installer_changed == 'true' && github.event_name != 'pull_request'
+    # Pull requests and pushes exercise lint/typecheck/unit/build above. Signed
+    # packaging is an explicit release operation: a trusted manual run supplies
+    # the protected signing identity, and dist fails closed if any part is absent.
+    if: needs.changes.outputs.installer_changed == 'true' && github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
